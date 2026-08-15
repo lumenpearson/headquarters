@@ -1,0 +1,87 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { operationsStore } from './operationsStore';
+
+describe('operationsStore', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+    operationsStore.setState((state) => ({
+      production: { ...state.production, snapshots: [] },
+    }));
+  });
+
+  it('keeps entity selections and alerts in one shared world', () => {
+    const store = operationsStore.getState();
+    store.selectObject('K-22');
+    store.selectCamera('CAM-04');
+    store.selectCase('CASE-08');
+    store.acknowledgeAlert('AL-101');
+
+    const next = operationsStore.getState();
+    expect(next.ui.selectedObjectId).toBe('K-22');
+    expect(next.ui.selectedCameraId).toBe('CAM-04');
+    expect(next.ui.selectedCaseId).toBe('CASE-08');
+    expect(next.alerts['AL-101']?.lifecycle).toBe('ACKNOWLEDGED');
+    expect(next.audit[0]?.entityId).toBe('AL-101');
+  });
+
+  it('persists tactical layer and camera controls in the shared UI state', () => {
+    const store = operationsStore.getState();
+    const sensorsInitiallyVisible = store.ui.mapLayers.sensors;
+    store.toggleMapLayer('sensors');
+    store.setMapView([34, 67], 2.4);
+    store.adjustPtz('pan', 12);
+    store.adjustPtz('zoom', 0.5);
+
+    const next = operationsStore.getState();
+    expect(next.ui.mapLayers.sensors).toBe(!sensorsInitiallyVisible);
+    expect(next.ui.mapCenter).toEqual([34, 67]);
+    expect(next.ui.mapZoom).toBe(2.4);
+    expect(next.ui.ptz.pan).toBe(12);
+    expect(next.ui.ptz.zoom).toBe(1.5);
+  });
+
+  it('applies production presets and restores continuity snapshots', () => {
+    const store = operationsStore.getState();
+    store.setRoute('map');
+    store.selectObject('K-17');
+    store.setMapView([61, 43], 1.9);
+    store.applyPreset('CRITICAL');
+    store.saveSnapshot('КРИТИЧЕСКИЙ КАДР');
+
+    const snapshot = operationsStore.getState().production.snapshots[0];
+    expect(snapshot).toBeDefined();
+    operationsStore.getState().setRoute('overview');
+    operationsStore.getState().setMapView([50, 50], 1);
+    operationsStore.getState().applyPreset('NORMAL');
+    operationsStore.getState().restoreSnapshot(snapshot?.id ?? 'missing');
+
+    const restored = operationsStore.getState();
+    expect(restored.ui.route).toBe('map');
+    expect(restored.ui.mapCenter).toEqual([61, 43]);
+    expect(restored.ui.mapZoom).toBe(1.9);
+    expect(restored.production.preset).toBe('CRITICAL');
+  });
+
+  it('advances deterministically and freezes when simulation is paused', () => {
+    const before = operationsStore.getState();
+    before.simulationTick();
+    const afterTick = operationsStore.getState();
+    expect(afterTick.metrics.simulationStep).toBe(1);
+    expect(afterTick.objects['K-17']?.lastSeenAt).not.toBe(before.objects['K-17']?.lastSeenAt);
+
+    afterTick.setProductionOption('paused', true);
+    operationsStore.getState().simulationTick();
+    expect(operationsStore.getState().metrics.simulationStep).toBe(1);
+  });
+
+  it('completes linked tasks without mutating the seed contract', () => {
+    const task = Object.values(operationsStore.getState().tasks).find(
+      (candidate) => candidate.status !== 'completed',
+    );
+    expect(task).toBeDefined();
+    operationsStore.getState().completeTask(task?.id ?? 'missing');
+    expect(operationsStore.getState().tasks[task?.id ?? '']?.status).toBe('completed');
+    expect(operationsStore.getState().tasks[task?.id ?? '']?.progress).toBe(100);
+  });
+});

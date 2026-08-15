@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal capabilities for control and managed display windows",
+  "windows": ["control", "screen-*", "wall-*", "scene-*"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "fs:read-files",
+    "fs:read-dirs",
+    "fs:allow-watch",
+    "fs:allow-unwatch"
+  ]
+}

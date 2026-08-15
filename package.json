@@ -1,0 +1,48 @@
+{
+  "name": "gremuchaya-hq",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.3",
+  "engines": {
+    "node": ">=24.3.0",
+    "pnpm": ">=10.12.3"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:hq": "pnpm --filter @gremuchaya/hq dev",
+    "dev:full": "turbo run dev --parallel --filter=@gremuchaya/hq --filter=@gremuchaya/file-bridge",
+    "bridge": "pnpm --filter @gremuchaya/file-bridge start",
+    "build": "turbo run build",
+    "build:web": "cross-env HQ_TARGET=web turbo run build --filter=@gremuchaya/hq",
+    "build:desktop:web": "cross-env HQ_TARGET=desktop turbo run build --filter=@gremuchaya/hq",
+    "build:offline": "pnpm build:desktop:web",
+    "preview": "pnpm --filter @gremuchaya/hq start",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:ui": "pnpm --filter @gremuchaya/hq test:ui",
+    "check:ui-boundary": "node scripts/check-ui-boundary.mjs",
+    "test:cargo": "cargo test --manifest-path apps/hq/src-tauri/Cargo.toml",
+    "check": "pnpm check:ui-boundary && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check:release": "pnpm check && pnpm test:ui && pnpm build:offline && pnpm test:cargo",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "clean:build": "turbo run build --force",
+    "tauri": "pnpm --filter @gremuchaya/hq tauri",
+    "tauri:dev": "pnpm --filter @gremuchaya/hq tauri dev",
+    "tauri:build": "pnpm --filter @gremuchaya/hq tauri build"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.2.0",
+    "cross-env": "10.1.0",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.1",
+    "prettier": "3.9.6",
+    "turbo": "2.10.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.10"
+  }
+}

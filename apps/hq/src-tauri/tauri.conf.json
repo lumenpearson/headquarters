@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Гремучая смесь — Оперативный штаб",
+  "version": "0.5.0",
+  "identifier": "ru.gremuchaya.hq",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://127.0.0.1:3000",
+    "beforeBuildCommand": "pnpm build:desktop",
+    "frontendDist": "../out"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "control",
+        "title": "Гремучая смесь — Оперативный штаб",
+        "url": "/",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1280,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' https://api-maps.yandex.ru https://yastatic.net; img-src 'self' asset: http://asset.localhost blob: data: https://api-maps.yandex.ru https://yastatic.net https://*.maps.yandex.net https://*.maps.yandex.com; media-src 'self' asset: http://asset.localhost blob:; font-src 'self' data: https://yastatic.net; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:4177 https://api-maps.yandex.ru https://yastatic.net https://yandex.ru https://*.maps.yandex.net https://*.maps.yandex.com; worker-src 'self' blob:; frame-src https://api-maps.yandex.ru https://yandex.ru; object-src 'none'; frame-ancestors 'none'; style-src 'self' 'unsafe-inline' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "category": "Productivity",
+    "shortDescription": "Offline operational monitor system",
+    "longDescription": "Local-first multi-screen production system for Gremuchaya Smes"
+  }
+}

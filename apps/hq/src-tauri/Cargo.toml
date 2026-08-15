@@ -1,0 +1,22 @@
+[package]
+name = "gremuchaya-hq"
+version = "0.5.0"
+description = "Native production shell for Gremuchaya HQ"
+authors = ["Gremuchaya HQ Production"]
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "gremuchaya_hq_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+notify = "8.2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tauri = { version = "2.11.5", features = [] }
+tauri-plugin-fs = { version = "2.5.1", features = ["watch"] }
+thiserror = "2.0.20"

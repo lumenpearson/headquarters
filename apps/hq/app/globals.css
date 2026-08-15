@@ -1,0 +1,97 @@
+@import '../src/styles/hq.css';
+@import '../src/styles/terminal.css';
+@import '../src/styles/operations.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  background: #030303;
+}
+
+body {
+  color: var(--text-0);
+  font-family: var(--font-sans);
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+.bootstrap-shell {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  padding: 32px;
+  place-content: center;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - 320px),
+      #1d1d1d calc(50% - 320px) calc(50% - 319px),
+      transparent calc(50% - 319px) calc(50% + 319px),
+      #1d1d1d calc(50% + 319px) calc(50% + 320px),
+      transparent calc(50% + 320px)
+    ),
+    #030303;
+  text-align: center;
+}
+
+.bootstrap-shell::before {
+  position: absolute;
+  inset: 20% 0 auto;
+  color: rgb(255 255 255 / 4%);
+  content: '010101 / MESH::INITIALIZE / 0x7F2A /\\/\\/\\ SIGNAL / 010101';
+  font: 12px/1.5 var(--font-mono);
+  letter-spacing: 0.35em;
+  white-space: nowrap;
+}
+
+.bootstrap-shell p,
+.bootstrap-shell span {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+}
+
+.bootstrap-shell h1 {
+  margin: 12px 0 8px;
+  color: #f2f2ef;
+  font-size: clamp(24px, 4vw, 52px);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.bootstrap-shell h1::before,
+.bootstrap-shell h1::after {
+  color: #ff3d00;
+}
+
+.bootstrap-shell h1::before {
+  content: '[ ';
+}
+
+.bootstrap-shell h1::after {
+  content: ' ]';
+}
+
+.bootstrap-shell button {
+  min-height: 42px;
+  margin-top: 18px;
+  border: 1px solid #ff3d00;
+  background: rgb(255 61 0 / 9%);
+  color: #ff5a24;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}

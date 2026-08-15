@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "projectName": "Гремучая смесь — Оперативный штаб",
+  "buildId": "hq-v3-local",
+  "runtimeMode": "rehearsal",
+  "developerAccessCode": "314159",
+  "defaultSceneId": "s02-44",
+  "defaultWallPreset": "hq-standard",
+  "fixedClock": "14:32:17",
+  "bridgeUrl": "http://127.0.0.1:4177",
+  "bridgeTransport": "grpc-web",
+  "screenWindows": [
+    { "screenId": "hwan-main", "monitorIndex": 0, "fullscreen": true },
+    { "screenId": "hwan-map", "monitorIndex": 1, "fullscreen": true },
+    { "screenId": "hwan-comms", "monitorIndex": 2, "fullscreen": true },
+    { "screenId": "wall-center", "monitorIndex": 3, "fullscreen": true },
+    { "screenId": "wall-left", "monitorIndex": 4, "fullscreen": true },
+    { "screenId": "wall-right", "monitorIndex": 5, "fullscreen": true },
+    { "screenId": "kirillov-desk", "monitorIndex": 6, "fullscreen": true },
+    { "screenId": "interrogation-video", "monitorIndex": 7, "fullscreen": true },
+    { "screenId": "interrogation-audio", "monitorIndex": 8, "fullscreen": true }
+  ],
+  "virtualMountRules": [
+    { "sourceId": "emulated", "sourcePath": "/", "virtualPath": "/", "priority": 10 },
+    {
+      "sourceId": "browser-directory",
+      "sourcePath": "/",
+      "virtualPath": "/ПОДКЛЮЧЕННЫЕ МАТЕРИАЛЫ",
+      "priority": 20
+    },
+    { "sourceId": "file-bridge", "sourcePath": "/", "virtualPath": "/ВХОДЯЩИЕ", "priority": 30 },
+    { "sourceId": "tauri", "sourcePath": "/", "virtualPath": "/ЛОКАЛЬНЫЙ ДИСК", "priority": 40 }
+  ],
+  "fileDisplayOverrides": [],
+  "freezeActiveMediaOnSourceChange": true,
+  "maxTextPreviewBytes": 1048576
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@gremuchaya/file-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "dev": "tsx watch src/server.ts",
+    "start": "node --enable-source-maps dist/server.js"
+  },
+  "dependencies": {
+    "@connectrpc/connect": "2.1.2",
+    "@connectrpc/connect-node": "2.1.2",
+    "@gremuchaya/config": "workspace:*",
+    "@gremuchaya/domain": "workspace:*",
+    "@gremuchaya/protocol": "workspace:*",
+    "chokidar": "5.0.0"
+  },
+  "devDependencies": {
+    "@connectrpc/connect-web": "2.1.2",
+    "@types/node": "26.2.0",
+    "tsx": "4.23.12",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

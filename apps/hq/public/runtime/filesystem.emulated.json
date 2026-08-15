@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "roots": [
+    {
+      "kind": "directory",
+      "name": "ДЕЛА",
+      "path": "/ДЕЛА",
+      "iconHint": "case",
+      "presentationProfileId": "evidence",
+      "children": [
+        {
+          "kind": "directory",
+          "name": "ЛИПАТОВ",
+          "path": "/ДЕЛА/ЛИПАТОВ",
+          "children": [
+            {
+              "kind": "file",
+              "name": "КАРТОЧКА ЛИПАТОВА",
+              "path": "/ДЕЛА/ЛИПАТОВ/КАРТОЧКА ЛИПАТОВА.dossier",
+              "mimeType": "application/x-hq-person",
+              "size": 18432,
+              "modifiedAt": "2026-09-13T10:21:00.000Z",
+              "iconHint": "document",
+              "tags": ["объект", "приоритет"],
+              "content": { "renderer": "person-dossier", "entityId": "lipatov" }
+            },
+            {
+              "kind": "file",
+              "name": "МАРШРУТ НА ШУШАРЫ",
+              "path": "/ДЕЛА/ЛИПАТОВ/МАРШРУТ НА ШУШАРЫ.map",
+              "mimeType": "application/x-hq-map",
+              "size": 52110,
+              "modifiedAt": "2026-09-13T10:24:00.000Z",
+              "iconHint": "map",
+              "tags": ["маршрут"],
+              "content": { "renderer": "map", "presetId": "lipatov-shushary" }
+            }
+          ]
+        },
+        {
+          "kind": "directory",
+          "name": "SILVER-94",
+          "path": "/ДЕЛА/SILVER-94",
+          "children": [
+            {
+              "kind": "file",
+              "name": "ПОЛЕВОЕ ФОТО 01",
+              "path": "/ДЕЛА/SILVER-94/ПОЛЕВОЕ ФОТО 01.jpg",
+              "mimeType": "image/jpeg",
+              "size": 2481200,
+              "modifiedAt": "2026-09-16T07:14:00.000Z",
+              "iconHint": "photo",
+              "tags": ["каска", "фонарь"],
+              "content": { "renderer": "image", "assetId": "photo-silver94-miner" }
+            },
+            {
+              "kind": "file",
+              "name": "СВЯЗИ ОБЪЕКТА",
+              "path": "/ДЕЛА/SILVER-94/СВЯЗИ ОБЪЕКТА.graph",
+              "mimeType": "application/x-hq-graph",
+              "size": 12084,
+              "modifiedAt": "2026-09-16T07:18:00.000Z",
+              "iconHint": "graph",
+              "tags": ["связи"],
+              "content": { "renderer": "graph", "graphId": "silver94-connections" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "directory",
+      "name": "МЕДИА",
+      "path": "/МЕДИА",
+      "iconHint": "folder",
+      "presentationProfileId": "media",
+      "children": [
+        {
+          "kind": "file",
+          "name": "АВТОЗАК / КАМЕРА 0417",
+          "path": "/МЕДИА/АВТОЗАК КАМЕРА 0417.mp4",
+          "mimeType": "video/mp4",
+          "size": 48211904,
+          "modifiedAt": "2026-09-09T09:02:00.000Z",
+          "iconHint": "video",
+          "tags": ["CCTV", "архив"],
+          "content": { "renderer": "video", "assetId": "cctv-autozak" }
+        },
+        {
+          "kind": "file",
+          "name": "ОПЕРАТИВНАЯ СВОДКА",
+          "path": "/МЕДИА/ОПЕРАТИВНАЯ СВОДКА.txt",
+          "mimeType": "text/plain",
+          "size": 3096,
+          "modifiedAt": "2026-09-19T06:11:00.000Z",
+          "iconHint": "document",
+          "tags": ["сводка"],
+          "content": {
+            "renderer": "text",
+            "body": "КАНАЛЫ ПРОВЕРЕНЫ. СИСТЕМА ГОТОВА К ОПЕРАТИВНОЙ РАБОТЕ."
+          }
+        }
+      ]
+    },
+    {
+      "kind": "directory",
+      "name": "КАРТЫ",
+      "path": "/КАРТЫ",
+      "iconHint": "map",
+      "presentationProfileId": "files",
+      "children": [
+        {
+          "kind": "file",
+          "name": "САНКТ-ПЕТЕРБУРГ / КАД",
+          "path": "/КАРТЫ/САНКТ-ПЕТЕРБУРГ КАД.map",
+          "mimeType": "application/x-hq-map",
+          "size": 88211,
+          "modifiedAt": "2026-09-13T08:00:00.000Z",
+          "iconHint": "map",
+          "tags": ["СПБ", "КАД"],
+          "content": { "renderer": "map", "presetId": "spb-kad" }
+        }
+      ]
+    }
+  ]
+}

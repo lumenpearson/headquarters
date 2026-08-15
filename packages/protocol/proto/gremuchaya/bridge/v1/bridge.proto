@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package gremuchaya.bridge.v1;
+
+enum EntryKind {
+  ENTRY_KIND_UNSPECIFIED = 0;
+  ENTRY_KIND_FILE = 1;
+  ENTRY_KIND_DIRECTORY = 2;
+}
+
+enum FileEventKind {
+  FILE_EVENT_KIND_UNSPECIFIED = 0;
+  FILE_EVENT_KIND_ADDED = 1;
+  FILE_EVENT_KIND_CHANGED = 2;
+  FILE_EVENT_KIND_REMOVED = 3;
+  FILE_EVENT_KIND_DIRECTORY_CHANGED = 4;
+  FILE_EVENT_KIND_READY = 5;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string service = 1;
+  uint32 protocol_version = 2;
+  string status = 3;
+  string started_at = 4;
+  string transport = 5;
+}
+
+message ListRequest {
+  string mount_id = 1;
+  string path = 2;
+}
+
+message BridgeEntry {
+  string name = 1;
+  string path = 2;
+  EntryKind kind = 3;
+  string mime_type = 4;
+  uint64 byte_size = 5;
+  string modified_at = 6;
+}
+
+message ListResponse {
+  repeated BridgeEntry entries = 1;
+}
+
+message ReadFileRequest {
+  string mount_id = 1;
+  string path = 2;
+}
+
+message FileChunk {
+  bytes data = 1;
+  string name = 2;
+  string mime_type = 3;
+  uint64 total_size = 4;
+  uint32 sequence = 5;
+}
+
+message WatchRequest {
+  repeated string mount_ids = 1;
+}
+
+message FileEvent {
+  FileEventKind kind = 1;
+  string mount_id = 2;
+  string path = 3;
+  uint64 issued_at_ms = 4;
+}
+
+service FileBridgeService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc ReadFile(ReadFileRequest) returns (stream FileChunk);
+  rpc Watch(WatchRequest) returns (stream FileEvent);
+}

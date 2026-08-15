@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/domain" },
+    { "path": "./packages/config" },
+    { "path": "./packages/protocol" },
+    { "path": "./packages/ui" },
+    { "path": "./packages/test-fixtures" },
+    { "path": "./apps/file-bridge" }
+  ]
+}

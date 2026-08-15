@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "transport": "grpc-web",
+  "port": 4177,
+  "readOnly": true,
+  "allowedOrigins": ["http://127.0.0.1:3000", "http://localhost:3000", "tauri://localhost"],
+  "mounts": [
+    { "id": "incoming", "label": "ВХОДЯЩИЕ", "root": "D:/HQ/INCOMING", "virtualPath": "/ВХОДЯЩИЕ" }
+  ],
+  "stableFile": { "probeIntervalMs": 250, "timeoutMs": 30000 },
+  "watchDebounceMs": 100
+}
