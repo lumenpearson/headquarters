@@ -11,6 +11,10 @@ message ClientHello {
   gremuchaya.common.v1.ResourceId device_id = 2;
   uint64 after_sequence = 3;
   bytes document_state_vector = 4;
+  // Browser WebSocket APIs cannot reliably send Authorization headers. The
+  // short-lived opaque bearer travels only in this TLS-protected binary hello
+  // frame and must never be placed in a URL, query string, or diagnostic log.
+  string access_token = 5;
 }
 
 message ClientAck {

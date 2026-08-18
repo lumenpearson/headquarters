@@ -174,6 +174,7 @@ describe('versioned Protobuf contracts', () => {
           deviceId: { value: 'device-01' },
           afterSequence: 42n,
           documentStateVector: new Uint8Array([1, 2, 3]),
+          accessToken: 'hq_access_opaque-binary-only',
         },
       },
     });
