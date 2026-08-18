@@ -130,6 +130,33 @@ describe('versioned Protobuf contracts', () => {
     expect(SyncService.method.refreshDeviceSession.output).toBe(
       syncV1.RefreshDeviceSessionResponseSchema,
     );
+    expect(SyncService.method.pairDevice.input).toBe(syncV1.PairDeviceRequestSchema);
+
+    const pairRequest = create(syncV1.PairDeviceRequestSchema, {
+      pairingCode: 'pair-code',
+      deviceName: 'Secondary workstation',
+      publicKey: 'ed25519:secondary',
+      platform: 'windows',
+      applicationVersion: '0.1.0',
+      context: { requestId: 'pair-request-01', correlationId: 'corr-01' },
+    });
+    const refreshRequest = create(syncV1.RefreshDeviceSessionRequestSchema, {
+      refreshToken: 'opaque-refresh-token',
+      context: { requestId: 'refresh-request-01', correlationId: 'corr-02' },
+    });
+
+    expect(
+      fromBinary(
+        syncV1.PairDeviceRequestSchema,
+        toBinary(syncV1.PairDeviceRequestSchema, pairRequest),
+      ),
+    ).toEqual(pairRequest);
+    expect(
+      fromBinary(
+        syncV1.RefreshDeviceSessionRequestSchema,
+        toBinary(syncV1.RefreshDeviceSessionRequestSchema, refreshRequest),
+      ),
+    ).toEqual(refreshRequest);
   });
   it('marks realtime watchers as server-streaming RPCs', () => {
     expect(MaterialService.method.watchMaterialEvents.methodKind).toBe('server_streaming');

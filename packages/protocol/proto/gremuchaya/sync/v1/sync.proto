@@ -113,6 +113,9 @@ message PairDeviceRequest {
   string public_key = 3;
   string platform = 4;
   string application_version = 5;
+  // Permits a client to safely identify a retry without placing credentials in
+  // a URL. The server persists only an idempotency receipt fingerprint.
+  gremuchaya.common.v1.MutationContext context = 6;
 }
 
 message PairDeviceResponse {
@@ -126,6 +129,9 @@ message PairDeviceResponse {
 
 message RefreshDeviceSessionRequest {
   string refresh_token = 1;
+  // Refresh rotation is destructive for the previous token, so retries need a
+  // request identifier once durable receipts are enabled.
+  gremuchaya.common.v1.MutationContext context = 2;
 }
 
 message RefreshDeviceSessionResponse {
