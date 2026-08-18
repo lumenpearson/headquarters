@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { startControlPlane } from '../server.js';
 
 import { PairedDeviceRuntime } from './runtime.js';
-import { createPairedDeviceSyncService } from './service.js';
+import { createBootstrapSecretVerifier, createPairedDeviceSyncService } from './service.js';
 
 const bootstrapSecret = 'test-bootstrap-secret-with-at-least-thirty-two-characters';
 
@@ -30,7 +30,10 @@ describe('authenticated paired-device SyncService', () => {
         allowedOrigins: ['http://127.0.0.1:3000'],
       },
       {
-        syncService: createPairedDeviceSyncService({ runtime, bootstrapSecret }),
+        syncService: createPairedDeviceSyncService({
+          runtime,
+          verifyBootstrapSecret: createBootstrapSecretVerifier(bootstrapSecret),
+        }),
       },
     );
     closeControlPlane = running.close;

@@ -43,6 +43,7 @@ describe('paired-device lifecycle runtime', () => {
     });
 
     expect(joined.device.role).toBe('EDITOR');
+    expect(joined.group.revision).toBe(owner.group.revision + 1n);
     expectRuntimeError(
       () =>
         runtime.pairDevice({
@@ -61,7 +62,7 @@ describe('paired-device lifecycle runtime', () => {
     );
   });
 
-  it('rotates refresh credentials and invalidates revoked device sessions', () => {
+  it('rotates one session family, rejects replay, and reports group-scoped revocation', () => {
     const runtime = createRuntime();
     const owner = runtime.createGroup({
       name: 'Red terminal group',
@@ -75,16 +76,21 @@ describe('paired-device lifecycle runtime', () => {
 
     const refreshed = runtime.refreshDeviceSession(paired.session.refreshToken);
     expect(refreshed.refreshToken).not.toBe(paired.session.refreshToken);
+    expect(runtime.authenticateAccessToken(refreshed.accessToken)).toMatchObject({
+      sessionId: expect.any(String),
+      device: { id: paired.device.id },
+    });
     expectRuntimeError(
       () => runtime.refreshDeviceSession(paired.session.refreshToken),
       'UNAUTHENTICATED',
     );
-
-    runtime.revokeDevice(ownerContext, owner.group.id, paired.device.id);
     expectRuntimeError(
       () => runtime.authenticateAccessToken(refreshed.accessToken),
       'UNAUTHENTICATED',
     );
+
+    const revoked = runtime.revokeDevice(ownerContext, owner.group.id, paired.device.id);
+    expect(revoked.device.status).toBe('REVOKED');
   });
 
   it('enforces group membership, actor identity, page bounds, and the final-admin guard', () => {

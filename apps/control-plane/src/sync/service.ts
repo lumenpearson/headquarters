@@ -13,16 +13,16 @@ import {
   type PairedDeviceSession,
   type PairedGroup,
 } from './runtime.js';
-import type { PairedDeviceRuntime } from './runtime.js';
+import type { Awaitable, PairedDeviceLifecycle } from './lifecycle.js';
 
 export interface PairedDeviceServiceOptions {
-  readonly runtime: PairedDeviceRuntime;
+  readonly runtime: PairedDeviceLifecycle;
   /**
-   * An operator-controlled deployment secret. It gates unauthenticated initial
-   * group creation; raw values are compared in constant time and are never
-   * added to responses, telemetry, or error messages.
+   * A configuration-owned verifier for the operator bootstrap secret. The raw
+   * deployment value remains in a configuration closure and is never added to
+   * the service object, responses, telemetry, or error text.
    */
-  readonly bootstrapSecret: string;
+  readonly verifyBootstrapSecret: (candidate: string) => boolean;
 }
 
 /**
@@ -33,13 +33,13 @@ export interface PairedDeviceServiceOptions {
 export function createPairedDeviceSyncService(
   options: PairedDeviceServiceOptions,
 ): Partial<ServiceImpl<typeof SyncService>> {
-  const bootstrapSecret = requireBootstrapSecret(options.bootstrapSecret);
+  const verifyBootstrapSecret = requireBootstrapVerifier(options.verifyBootstrapSecret);
 
   return {
-    createGroup(request, context) {
-      return withRuntimeErrors(() => {
-        requireBootstrapAuthorization(context, bootstrapSecret);
-        const created = options.runtime.createGroup({
+    async createGroup(request, context) {
+      return withRuntimeErrors(async () => {
+        requireBootstrapAuthorization(context, verifyBootstrapSecret);
+        const created = await options.runtime.createGroup({
           name: request.name,
           initialDevice: {
             name: request.initialDevice?.name ?? '',
@@ -56,11 +56,11 @@ export function createPairedDeviceSyncService(
       });
     },
 
-    createPairingCode(request, context) {
-      return withRuntimeErrors(() => {
-        const authenticated = authenticateRequest(options.runtime, context);
-        options.runtime.assertContextActor(authenticated, request.context?.actorDeviceId?.value);
-        const grant = options.runtime.createPairingCode(
+    async createPairingCode(request, context) {
+      return withRuntimeErrors(async () => {
+        const authenticated = await authenticateRequest(options.runtime, context);
+        assertContextActor(authenticated, request.context?.actorDeviceId?.value);
+        const grant = await options.runtime.createPairingCode(
           authenticated,
           requireResourceId(request.groupId?.value, 'group_id'),
           toPairingRole(request.role),
@@ -76,9 +76,9 @@ export function createPairedDeviceSyncService(
       });
     },
 
-    pairDevice(request) {
-      return withRuntimeErrors(() => {
-        const paired = options.runtime.pairDevice({
+    async pairDevice(request) {
+      return withRuntimeErrors(async () => {
+        const paired = await options.runtime.pairDevice({
           pairingCode: request.pairingCode,
           name: request.deviceName,
           publicKey: request.publicKey,
@@ -95,16 +95,16 @@ export function createPairedDeviceSyncService(
       });
     },
 
-    refreshDeviceSession(request) {
-      return withRuntimeErrors(() => ({
-        session: toSession(options.runtime.refreshDeviceSession(request.refreshToken)),
+    async refreshDeviceSession(request) {
+      return withRuntimeErrors(async () => ({
+        session: toSession(await options.runtime.refreshDeviceSession(request.refreshToken)),
       }));
     },
 
-    listDevices(request, context) {
-      return withRuntimeErrors(() => {
-        const authenticated = authenticateRequest(options.runtime, context);
-        const page = options.runtime.listDevices(
+    async listDevices(request, context) {
+      return withRuntimeErrors(async () => {
+        const authenticated = await authenticateRequest(options.runtime, context);
+        const page = await options.runtime.listDevices(
           authenticated,
           requireResourceId(request.groupId?.value, 'group_id'),
           request.page?.pageSize ?? 0,
@@ -122,11 +122,11 @@ export function createPairedDeviceSyncService(
       });
     },
 
-    revokeDevice(request, context) {
-      return withRuntimeErrors(() => {
-        const authenticated = authenticateRequest(options.runtime, context);
-        options.runtime.assertContextActor(authenticated, request.context?.actorDeviceId?.value);
-        const revoked = options.runtime.revokeDevice(
+    async revokeDevice(request, context) {
+      return withRuntimeErrors(async () => {
+        const authenticated = await authenticateRequest(options.runtime, context);
+        assertContextActor(authenticated, request.context?.actorDeviceId?.value);
+        const revoked = await options.runtime.revokeDevice(
           authenticated,
           requireResourceId(request.groupId?.value, 'group_id'),
           requireResourceId(request.deviceId?.value, 'device_id'),
@@ -144,15 +144,30 @@ export function createPairedDeviceSyncService(
 }
 
 function authenticateRequest(
-  runtime: PairedDeviceRuntime,
+  runtime: PairedDeviceLifecycle,
   context: HandlerContext,
-): AuthenticatedDevice {
+): Awaitable<AuthenticatedDevice> {
   return runtime.authenticateAccessToken(readBearerToken(context));
 }
 
-function requireBootstrapAuthorization(context: HandlerContext, expected: string): void {
+function assertContextActor(
+  authenticated: AuthenticatedDevice,
+  actorDeviceId: string | undefined,
+): void {
+  if (actorDeviceId === undefined || actorDeviceId.length === 0) return;
+  if (actorDeviceId !== authenticated.device.id) {
+    throw new PairedDeviceRuntimeError(
+      'PERMISSION_DENIED',
+      'The mutation context actor does not match the authenticated device.',
+    );
+  }
+}
+function requireBootstrapAuthorization(
+  context: HandlerContext,
+  verifyBootstrapSecret: (candidate: string) => boolean,
+): void {
   const supplied = context.requestHeader.get('x-hq-bootstrap-secret');
-  if (supplied === null || !constantTimeEqual(supplied, expected)) {
+  if (supplied === null || !verifyBootstrapSecret(supplied)) {
     throw new ConnectError('Bootstrap authorization is required.', Code.Unauthenticated);
   }
 }
@@ -166,12 +181,19 @@ function readBearerToken(context: HandlerContext): string {
   return match[1];
 }
 
-function requireBootstrapSecret(value: string): string {
+export function createBootstrapSecretVerifier(value: string): (candidate: string) => boolean {
   const normalized = value.trim();
   if (normalized.length < 32) {
     throw new Error('bootstrapSecret must contain at least 32 non-whitespace characters');
   }
-  return normalized;
+  return (candidate) => constantTimeEqual(candidate, normalized);
+}
+
+function requireBootstrapVerifier(
+  value: ((candidate: string) => boolean) | undefined,
+): (candidate: string) => boolean {
+  if (value === undefined) throw new Error('verifyBootstrapSecret is required');
+  return value;
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -209,7 +231,7 @@ function toDevice(device: PairedDevice) {
     name: device.name,
     publicKey: device.publicKey,
     role: toProtocolRole(device.role),
-    status: device.status === 'ONLINE' ? syncV1.DeviceStatus.ONLINE : syncV1.DeviceStatus.REVOKED,
+    status: toProtocolDeviceStatus(device.status),
     platform: device.platform,
     applicationVersion: device.applicationVersion,
     lastSeenAt: timestampFromDate(device.lastSeenAt),
@@ -226,6 +248,12 @@ function toSession(session: PairedDeviceSession) {
     groupId: { value: session.groupId },
     role: toProtocolRole(session.role),
   };
+}
+
+function toProtocolDeviceStatus(status: PairedDevice['status']): syncV1.DeviceStatus {
+  if (status === 'OFFLINE') return syncV1.DeviceStatus.OFFLINE;
+  if (status === 'ONLINE') return syncV1.DeviceStatus.ONLINE;
+  return syncV1.DeviceStatus.REVOKED;
 }
 
 function toPairingRole(role: syncV1.DeviceRole): Exclude<DeviceRole, 'ADMIN'> {
@@ -250,9 +278,9 @@ function requireResourceId(value: string | undefined, field: string): string {
   return value.trim();
 }
 
-function withRuntimeErrors<T>(operation: () => T): T {
+async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
   try {
-    return operation();
+    return await operation();
   } catch (error: unknown) {
     if (error instanceof ConnectError) throw error;
     if (error instanceof PairedDeviceRuntimeError) {
@@ -263,6 +291,7 @@ function withRuntimeErrors<T>(operation: () => T): T {
 }
 
 function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
+  if (code === 'ABORTED') return Code.Aborted;
   if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
   if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
   if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;

@@ -1,7 +1,7 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
 export type DeviceRole = 'VIEWER' | 'EDITOR' | 'ADMIN';
-export type DeviceStatus = 'ONLINE' | 'REVOKED';
+export type DeviceStatus = 'OFFLINE' | 'ONLINE' | 'REVOKED';
 export type AuthorityMode = 'LEADER' | 'MULTI_AUTHORITY';
 
 export interface PairedGroup {
@@ -90,6 +90,7 @@ export interface PairedDeviceRuntimeOptions {
 }
 
 export type PairedDeviceErrorCode =
+  | 'ABORTED'
   | 'ALREADY_EXISTS'
   | 'FAILED_PRECONDITION'
   | 'INVALID_ARGUMENT'
@@ -133,18 +134,29 @@ interface PairingCodeRecord {
   readonly expiresAt: Date;
   readonly createdByDeviceId: string;
   consumedAt?: Date;
+  revokedAt?: Date;
 }
 
 interface SessionRecord {
   readonly id: string;
   readonly groupId: string;
   readonly deviceId: string;
-  readonly accessTokenHash: string;
-  readonly refreshTokenHash: string;
-  readonly accessTokenExpiresAt: Date;
-  readonly refreshTokenExpiresAt: Date;
-  readonly issuedAt: Date;
+  accessTokenHash: string;
+  refreshTokenHash: string;
+  accessTokenExpiresAt: Date;
+  refreshTokenExpiresAt: Date;
+  issuedAt: Date;
   revokedAt?: Date;
+}
+
+/**
+ * A refresh credential remains addressable after rotation so a late duplicate
+ * request can revoke the same session family rather than merely failing after
+ * a replacement session was already issued.
+ */
+interface RefreshTokenReference {
+  readonly session: SessionRecord;
+  readonly expiresAt: Date;
 }
 
 const defaultAccessTokenLifetimeMs = 15 * 60 * 1000;
@@ -166,7 +178,7 @@ export class PairedDeviceRuntime {
   readonly #memberships = new Map<string, MembershipRecord>();
   readonly #pairingCodesByHash = new Map<string, PairingCodeRecord>();
   readonly #sessionsByAccessHash = new Map<string, SessionRecord>();
-  readonly #sessionsByRefreshHash = new Map<string, SessionRecord>();
+  readonly #sessionsByRefreshHash = new Map<string, RefreshTokenReference>();
   readonly #now: () => Date;
   readonly #randomBytes: (size: number) => Uint8Array;
   readonly #accessTokenLifetimeMs: number;
@@ -277,6 +289,7 @@ export class PairedDeviceRuntime {
     if (
       grant === undefined ||
       grant.consumedAt !== undefined ||
+      grant.revokedAt !== undefined ||
       grant.expiresAt.getTime() <= now.getTime()
     ) {
       throw new PairedDeviceRuntimeError(
@@ -285,6 +298,21 @@ export class PairedDeviceRuntime {
       );
     }
     const group = this.requireGroup(grant.groupId);
+    const creatorMembership = this.#memberships.get(
+      membershipKey(group.id, grant.createdByDeviceId),
+    );
+    const creatorDevice = this.#devicesById.get(grant.createdByDeviceId);
+    if (
+      creatorMembership === undefined ||
+      creatorMembership.revokedAt !== undefined ||
+      creatorDevice === undefined ||
+      creatorDevice.status === 'REVOKED'
+    ) {
+      throw new PairedDeviceRuntimeError(
+        'UNAUTHENTICATED',
+        'The pairing code is invalid, expired, or has already been consumed.',
+      );
+    }
     const deviceId = this.createId();
     const device: DeviceRecord = {
       id: deviceId,
@@ -303,19 +331,39 @@ export class PairedDeviceRuntime {
     this.#devicesById.set(deviceId, device);
     this.#deviceIdByPublicKey.set(device.publicKey, deviceId);
     this.#memberships.set(membershipKey(group.id, deviceId), membership);
-    const session = this.issueSession(group, device, membership, now);
-    return { group: copyGroup(group), device: this.toPairedDevice(device, membership), session };
+    const updatedGroup: PairedGroup = {
+      ...group,
+      revision: group.revision + 1n,
+      updatedAt: now,
+    };
+    this.#groups.set(updatedGroup.id, updatedGroup);
+    const session = this.issueSession(updatedGroup, device, membership, now);
+    return {
+      group: copyGroup(updatedGroup),
+      device: this.toPairedDevice(device, membership),
+      session,
+    };
   }
 
   refreshDeviceSession(refreshToken: string): PairedDeviceSession {
     const token = requireText(refreshToken, 'refresh_token');
-    const session = this.#sessionsByRefreshHash.get(this.hashToken('refresh', token));
+    const refreshTokenHash = this.hashToken('refresh', token);
+    const reference = this.#sessionsByRefreshHash.get(refreshTokenHash);
     const now = this.currentTime();
     if (
-      session === undefined ||
-      session.revokedAt !== undefined ||
-      session.refreshTokenExpiresAt.getTime() <= now.getTime()
+      reference === undefined ||
+      reference.expiresAt.getTime() <= now.getTime() ||
+      reference.session.revokedAt !== undefined ||
+      reference.session.refreshTokenExpiresAt.getTime() <= now.getTime()
     ) {
+      throw new PairedDeviceRuntimeError(
+        'UNAUTHENTICATED',
+        'The refresh token is invalid or expired.',
+      );
+    }
+    const session = reference.session;
+    if (session.refreshTokenHash !== refreshTokenHash) {
+      this.revokeSession(session, now);
       throw new PairedDeviceRuntimeError(
         'UNAUTHENTICATED',
         'The refresh token is invalid or expired.',
@@ -324,8 +372,27 @@ export class PairedDeviceRuntime {
     const group = this.requireGroup(session.groupId);
     const device = this.requireDevice(session.deviceId);
     const membership = this.requireActiveMembership(group.id, device.id);
-    session.revokedAt = now;
-    return this.issueSession(group, device, membership, now);
+    const nextAccessToken = this.createToken('access');
+    const nextRefreshToken = this.createToken('refresh');
+    const nextAccessTokenHash = this.hashToken('access', nextAccessToken);
+    const nextRefreshTokenHash = this.hashToken('refresh', nextRefreshToken);
+    const previousRefreshExpiresAt = copyDate(session.refreshTokenExpiresAt);
+    this.#sessionsByAccessHash.delete(session.accessTokenHash);
+    session.accessTokenHash = nextAccessTokenHash;
+    session.refreshTokenHash = nextRefreshTokenHash;
+    session.accessTokenExpiresAt = new Date(now.getTime() + this.#accessTokenLifetimeMs);
+    session.refreshTokenExpiresAt = new Date(now.getTime() + this.#refreshTokenLifetimeMs);
+    session.issuedAt = now;
+    this.#sessionsByAccessHash.set(session.accessTokenHash, session);
+    this.#sessionsByRefreshHash.set(refreshTokenHash, {
+      session,
+      expiresAt: previousRefreshExpiresAt,
+    });
+    this.#sessionsByRefreshHash.set(session.refreshTokenHash, {
+      session,
+      expiresAt: copyDate(session.refreshTokenExpiresAt),
+    });
+    return this.toSessionEnvelope(session, membership, nextAccessToken, nextRefreshToken);
   }
 
   authenticateAccessToken(accessToken: string): AuthenticatedDevice {
@@ -412,6 +479,12 @@ export class PairedDeviceRuntime {
         membership.role === 'ADMIN' &&
         membership.revokedAt === undefined,
     );
+    if (group.authorityMode === 'LEADER' && group.leaderDeviceId === targetDevice.id) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'Transfer group leadership before revoking the current leader.',
+      );
+    }
     if (targetMembership.role === 'ADMIN' && activeAdmins.length === 1) {
       throw new PairedDeviceRuntimeError(
         'FAILED_PRECONDITION',
@@ -420,11 +493,19 @@ export class PairedDeviceRuntime {
     }
     const now = this.currentTime();
     targetMembership.revokedAt = now;
-    targetDevice.status = 'REVOKED';
-    targetDevice.lastSeenAt = now;
+    for (const pairingCode of this.#pairingCodesByHash.values()) {
+      if (
+        pairingCode.groupId === group.id &&
+        pairingCode.createdByDeviceId === targetDevice.id &&
+        pairingCode.consumedAt === undefined
+      ) {
+        pairingCode.revokedAt = now;
+      }
+    }
     for (const session of this.#sessionsByAccessHash.values()) {
-      if (session.groupId === group.id && session.deviceId === targetDevice.id)
-        session.revokedAt = now;
+      if (session.groupId === group.id && session.deviceId === targetDevice.id) {
+        this.revokeSession(session, now);
+      }
     }
     const updatedGroup: PairedGroup = {
       ...group,
@@ -434,7 +515,9 @@ export class PairedDeviceRuntime {
     this.#groups.set(group.id, updatedGroup);
     return {
       group: copyGroup(updatedGroup),
-      device: this.toPairedDevice(targetDevice, targetMembership),
+      // A device can remain globally online in another group. This result is
+      // scoped to the membership just revoked, so expose its lifecycle state.
+      device: { ...this.toPairedDevice(targetDevice, targetMembership), status: 'REVOKED' },
     };
   }
 
@@ -467,16 +550,33 @@ export class PairedDeviceRuntime {
       refreshTokenExpiresAt: new Date(now.getTime() + this.#refreshTokenLifetimeMs),
     };
     this.#sessionsByAccessHash.set(session.accessTokenHash, session);
-    this.#sessionsByRefreshHash.set(session.refreshTokenHash, session);
+    this.#sessionsByRefreshHash.set(session.refreshTokenHash, {
+      session,
+      expiresAt: copyDate(session.refreshTokenExpiresAt),
+    });
+    return this.toSessionEnvelope(session, membership, accessToken, refreshToken);
+  }
+
+  private toSessionEnvelope(
+    session: SessionRecord,
+    membership: MembershipRecord,
+    accessToken: string,
+    refreshToken: string,
+  ): PairedDeviceSession {
     return {
       accessToken,
       refreshToken,
       accessTokenExpiresAt: copyDate(session.accessTokenExpiresAt),
       refreshTokenExpiresAt: copyDate(session.refreshTokenExpiresAt),
-      deviceId: device.id,
-      groupId: group.id,
+      deviceId: session.deviceId,
+      groupId: session.groupId,
       role: membership.role,
     };
+  }
+
+  private revokeSession(session: SessionRecord, now: Date): void {
+    session.revokedAt ??= now;
+    this.#sessionsByAccessHash.delete(session.accessTokenHash);
   }
 
   private requireGroup(groupId: string): PairedGroup {
