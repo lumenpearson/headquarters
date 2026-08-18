@@ -761,7 +761,8 @@ export class DurablePairedDeviceRuntime {
             AND membership.revoked_at IS NULL
            JOIN devices ON devices.id = session.device_id
            JOIN groups ON groups.id = session.group_id
-           WHERE access_token.token_hash = $1
+           WHERE access_token.session_id = session.id
+             AND access_token.token_hash = $1
              AND access_token.hash_version = $2
              AND access_token.revoked_at IS NULL
              AND access_token.expires_at > $3

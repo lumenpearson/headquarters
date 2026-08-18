@@ -214,6 +214,36 @@ describe('durable paired-device lifecycle adapter', () => {
     expect(database.transactions).toHaveLength(0);
   });
 
+  it('binds an access token to its own active session before deriving a group identity', async () => {
+    const database = new ScriptedSqlClient([[lifecycleRow()]]);
+    const runtime = createRuntime(database);
+
+    await runtime.authenticateAccessToken('cross-group-session-regression-token');
+
+    const statement = database.queries[0];
+    expect(statement).toBeDefined();
+    if (statement === undefined) throw new Error('Expected an access-token authentication query.');
+
+    // `device_access_tokens` is the update target. This predicate is the
+    // tenant boundary: without it PostgreSQL can pair the token row with any
+    // active session returned by the FROM clause and return another group's
+    // device identity.
+    expect(statement.text).toMatch(
+      /WHERE\s+access_token\.session_id = session\.id\s+AND\s+access_token\.token_hash = \$1/u,
+    );
+    expect(statement.text).toContain('membership.group_id = session.group_id');
+    expect(statement.text).toContain('membership.device_id = session.device_id');
+    expect(statement.text).toContain('groups.id = session.group_id');
+    expect(statement.text).toContain('devices.id = session.device_id');
+
+    // Revoking either the bearer token, its session, or its exact membership
+    // must remove the row before it can produce an authenticated identity.
+    expect(statement.text).toContain('access_token.revoked_at IS NULL');
+    expect(statement.text).toContain('access_token.expires_at > $3');
+    expect(statement.text).toContain('session.revoked_at IS NULL');
+    expect(statement.text).toContain('session.expires_at > $3');
+    expect(statement.text).toContain('membership.revoked_at IS NULL');
+  });
   it('maps PostgreSQL deadlocks and serialization failures to retryable lifecycle errors', async () => {
     for (const code of ['40P01', '40001']) {
       const runtime = createRuntime(new RejectingSqlClient({ code }));
