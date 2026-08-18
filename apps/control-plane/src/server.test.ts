@@ -175,6 +175,20 @@ describe('gRPC-Web control-plane foundation', () => {
       }),
     ).rejects.toThrow('cannot enable unauthenticated realtime transport');
   });
+
+  it('forwards bounded realtime revalidation configuration through durable startup', async () => {
+    const database = new RecordingSqlClient();
+    const migrationRunner = vi.fn(async (): Promise<MigrationRunResult> => emptyMigrationResult());
+
+    await expect(
+      startControlPlane(authenticatedConfig(), {
+        realtime: { revalidationIntervalMs: 9 },
+        pairedDeviceLifecycle: { database, migrationRunner },
+      }),
+    ).rejects.toThrow('revalidationIntervalMs must be an integer between 10 and 60000');
+
+    expect(migrationRunner).toHaveBeenCalledExactlyOnceWith(database);
+  });
 });
 
 function authenticatedConfig(overrides: Partial<ControlPlaneAuthConfig> = {}): ControlPlaneConfig {

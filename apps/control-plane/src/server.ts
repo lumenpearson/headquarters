@@ -154,8 +154,11 @@ async function resolveControlPlaneCollaborators(
   return {
     syncService: lifecycle.syncService,
     realtime: {
-      ...(options.realtime?.hub === undefined ? {} : { hub: options.realtime.hub }),
       ...lifecycle.realtime,
+      ...(options.realtime?.hub === undefined ? {} : { hub: options.realtime.hub }),
+      ...(options.realtime?.revalidationIntervalMs === undefined
+        ? {}
+        : { revalidationIntervalMs: options.realtime.revalidationIntervalMs }),
     },
   };
 }

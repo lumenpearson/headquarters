@@ -13,22 +13,43 @@ import { RealtimeHub, type GroupEventPublication } from './hub.js';
 const realtimePath = '/realtime';
 const maxRealtimeFrameBytes = 64 * 1024;
 const policyViolationCloseCode = 1008;
+const minimumRevalidationIntervalMs = 10;
+const maximumRevalidationIntervalMs = 60_000;
+
+/**
+ * A short idle check bounds the period for which an otherwise inactive socket
+ * can retain a credential that was revoked or expired after ClientHello.
+ */
+export const defaultRealtimeRevalidationIntervalMs = 15_000;
+
+export interface RealtimeAdmissionInput {
+  readonly accessToken: string;
+  readonly groupId: string;
+  readonly deviceId: string;
+}
 
 export interface RealtimeAdmission {
   /**
    * Confirms that an opaque bearer token belongs to the exact group/device
    * pair in a binary ClientHello. Implementations must not log raw tokens.
    */
-  admit(input: {
-    readonly accessToken: string;
-    readonly groupId: string;
-    readonly deviceId: string;
-  }): boolean | Promise<boolean>;
+  admit(input: RealtimeAdmissionInput): boolean | Promise<boolean>;
+  /**
+   * Re-checks an admitted connection before protected inbound and outbound
+   * work. It is optional for compatibility: the transport falls back to
+   * `admit` when it is not supplied, which preserves fail-closed behavior.
+   */
+  revalidate?(input: RealtimeAdmissionInput): boolean | Promise<boolean>;
 }
 
 export interface RealtimeTransportOptions {
   readonly hub?: RealtimeHub;
   readonly admission?: RealtimeAdmission;
+  /**
+   * Bounded idle authorization re-check interval. Values from 10 ms through
+   * 60 s are accepted; the production-safe default is 15 s.
+   */
+  readonly revalidationIntervalMs?: number;
   /**
    * Test/local-development escape hatch. Production callers must provide an
    * admission implementation instead; the default is to expose no realtime
@@ -55,6 +76,7 @@ export function attachRealtimeTransport(
   options: RealtimeTransportOptions = {},
 ): RealtimeTransport {
   const hub = options.hub ?? new RealtimeHub();
+  const revalidationIntervalMs = normalizeRevalidationIntervalMs(options.revalidationIntervalMs);
   const websocketServer = new WebSocketServer({
     noServer: true,
     maxPayload: maxRealtimeFrameBytes,
@@ -77,45 +99,88 @@ export function attachRealtimeTransport(
     let subscribedGroupId: string | undefined;
     let helloPending = false;
     let admitted = false;
+    let admissionInput: RealtimeAdmissionInput | undefined;
+    let revalidationTimer: ReturnType<typeof setInterval> | undefined;
+    let periodicRevalidationPending = false;
+    const enqueue = createSerializedWorkQueue();
 
-    const dispose = () => {
+    const clearAdmission = () => {
       unsubscribe?.();
       unsubscribe = undefined;
       subscribedGroupId = undefined;
       helloPending = false;
       admitted = false;
+      // Raw bearer material never escapes this connection-local closure.
+      admissionInput = undefined;
+      periodicRevalidationPending = false;
+      if (revalidationTimer !== undefined) {
+        clearInterval(revalidationTimer);
+        revalidationTimer = undefined;
+      }
     };
 
-    websocket.on('message', (raw, isBinary) => {
-      void handleRealtimeMessage({
-        raw,
-        isBinary,
-        websocket,
-        hub,
-        admission: options.admission,
-        allowUnauthenticatedDevelopment: options.allowUnauthenticatedDevelopment === true,
-        getState: () => ({ subscribedGroupId, helloPending, admitted }),
-        setState: (state) => {
-          subscribedGroupId = state.subscribedGroupId;
-          helloPending = state.helloPending;
-          admitted = state.admitted;
-        },
-        subscribe: (groupId, afterSequence) => {
-          subscribedGroupId = groupId;
-          unsubscribe = hub.subscribe({
-            groupId,
-            afterSequence,
-            send: (serverFrame) => sendFrame(websocket, serverFrame),
-          });
-        },
-      }).catch(() => {
+    const enqueueSafely = (operation: RealtimeOperation) => {
+      void enqueue(operation).catch(() => {
+        clearAdmission();
         sendError(websocket, 'realtime.internal', 'Realtime admission failed.');
         closeForPolicyViolation(websocket);
       });
+    };
+
+    const startPeriodicRevalidation = () => {
+      if (options.admission === undefined || revalidationTimer !== undefined) return;
+      revalidationTimer = setInterval(() => {
+        if (periodicRevalidationPending || !admitted) return;
+        periodicRevalidationPending = true;
+        enqueueSafely(async () => {
+          try {
+            await revalidateAdmittedConnection(connectionContext);
+          } finally {
+            periodicRevalidationPending = false;
+          }
+        });
+      }, revalidationIntervalMs);
+      revalidationTimer.unref?.();
+    };
+
+    const connectionContext: RealtimeConnectionContext = {
+      websocket,
+      admission: options.admission,
+      allowUnauthenticatedDevelopment: options.allowUnauthenticatedDevelopment === true,
+      getState: () => ({ subscribedGroupId, helloPending, admitted }),
+      setState: (state) => {
+        subscribedGroupId = state.subscribedGroupId;
+        helloPending = state.helloPending;
+        admitted = state.admitted;
+      },
+      getAdmissionInput: () => admissionInput,
+      setAdmissionInput: (input) => {
+        admissionInput = input;
+      },
+      invalidateAdmission: clearAdmission,
+      startPeriodicRevalidation,
+      subscribe: (groupId, afterSequence) => {
+        unsubscribe = hub.subscribe({
+          groupId,
+          afterSequence,
+          send: (serverFrame) =>
+            enqueueSafely(() => deliverAuthorizedFrame(connectionContext, serverFrame)),
+        });
+      },
+    };
+
+    websocket.on('message', (raw, isBinary) => {
+      enqueueSafely(() =>
+        handleRealtimeMessage({
+          ...connectionContext,
+          raw,
+          isBinary,
+        }),
+      );
     });
 
-    websocket.once('close', dispose);
-    websocket.once('error', dispose);
+    websocket.once('close', clearAdmission);
+    websocket.once('error', clearAdmission);
   });
 
   return {
@@ -124,16 +189,25 @@ export function attachRealtimeTransport(
   };
 }
 
-interface RealtimeMessageContext {
-  readonly raw: RawData;
-  readonly isBinary: boolean;
+type RealtimeOperation = () => void | Promise<void>;
+
+interface RealtimeConnectionContext {
   readonly websocket: WebSocket;
-  readonly hub: RealtimeHub;
   readonly admission: RealtimeAdmission | undefined;
   readonly allowUnauthenticatedDevelopment: boolean;
   readonly getState: () => RealtimeConnectionState;
   readonly setState: (state: RealtimeConnectionState) => void;
+  /** Connection-local bearer material; never log or serialize this value. */
+  readonly getAdmissionInput: () => RealtimeAdmissionInput | undefined;
+  readonly setAdmissionInput: (input: RealtimeAdmissionInput | undefined) => void;
+  readonly invalidateAdmission: () => void;
+  readonly startPeriodicRevalidation: () => void;
   readonly subscribe: (groupId: string, afterSequence: bigint) => void;
+}
+
+interface RealtimeMessageContext extends RealtimeConnectionContext {
+  readonly raw: RawData;
+  readonly isBinary: boolean;
 }
 
 interface RealtimeConnectionState {
@@ -171,7 +245,8 @@ async function handleRealtimeMessage(context: RealtimeMessageContext): Promise<v
       rejectBeforeAdmission(context.websocket);
       return;
     }
-    if (frame.payload.value.groupId?.value !== state.subscribedGroupId) {
+    if (!(await revalidateAdmittedConnection(context))) return;
+    if (frame.payload.value.groupId?.value !== context.getState().subscribedGroupId) {
       sendError(
         context.websocket,
         'realtime.invalid_ack',
@@ -187,6 +262,7 @@ async function handleRealtimeMessage(context: RealtimeMessageContext): Promise<v
       rejectBeforeAdmission(context.websocket);
       return;
     }
+    if (!(await revalidateAdmittedConnection(context))) return;
     sendFrame(
       context.websocket,
       create(realtimeV1.RealtimeServerFrameSchema, {
@@ -235,14 +311,15 @@ async function handleHello(
     return;
   }
 
+  const admissionInput: RealtimeAdmissionInput = {
+    accessToken: hello.accessToken,
+    groupId,
+    deviceId,
+  };
   context.setState({ ...state, helloPending: true });
   try {
     if (context.admission !== undefined) {
-      const admitted = await context.admission.admit({
-        accessToken: hello.accessToken,
-        groupId,
-        deviceId,
-      });
+      const admitted = await context.admission.admit(admissionInput);
       if (!admitted) {
         sendError(
           context.websocket,
@@ -263,12 +340,99 @@ async function handleHello(
     }
 
     if (context.websocket.readyState !== WebSocket.OPEN) return;
-    context.subscribe(groupId, hello.afterSequence);
+    // Store raw token material only after ClientHello succeeds, in the socket
+    // closure that owns it. It is never exposed through the hub or logs.
+    context.setAdmissionInput(context.admission === undefined ? undefined : admissionInput);
     context.setState({ subscribedGroupId: groupId, helloPending: false, admitted: true });
+    context.subscribe(groupId, hello.afterSequence);
+    context.startPeriodicRevalidation();
   } finally {
     const after = context.getState();
     if (after.helloPending && !after.admitted) context.setState({ ...after, helloPending: false });
   }
+}
+
+/**
+ * The hub is synchronous, while authorization may require I/O. Each delivery
+ * is therefore queued per connection: a later frame cannot overtake its
+ * revalidation, and a denial removes the subscription before any group event
+ * is handed to the WebSocket.
+ */
+async function deliverAuthorizedFrame(
+  context: RealtimeConnectionContext,
+  frame: realtimeV1.RealtimeServerFrame,
+): Promise<void> {
+  if (!(await revalidateAdmittedConnection(context))) return;
+  sendFrame(context.websocket, frame);
+}
+
+/**
+ * Revalidates the exact authenticated triple before every protected operation.
+ * A legacy admission implementation that only supplies `admit` stays secure:
+ * `admit` is reused rather than treating the lack of `revalidate` as a pass.
+ */
+async function revalidateAdmittedConnection(context: RealtimeConnectionContext): Promise<boolean> {
+  const state = context.getState();
+  if (!state.admitted || state.subscribedGroupId === undefined) return false;
+  if (context.admission === undefined) return true;
+
+  const input = context.getAdmissionInput();
+  if (input === undefined || input.groupId !== state.subscribedGroupId) {
+    rejectAfterAdmission(context);
+    return false;
+  }
+
+  let admitted = false;
+  try {
+    const validate = context.admission.revalidate ?? context.admission.admit;
+    admitted = await validate(input);
+  } catch {
+    // Authorization provider errors fail closed and disclose no credential
+    // details to the remote peer.
+    admitted = false;
+  }
+  if (admitted) return true;
+
+  rejectAfterAdmission(context);
+  return false;
+}
+
+function rejectAfterAdmission(context: RealtimeConnectionContext): void {
+  if (!context.getState().admitted) return;
+  // Remove the hub listener before emitting a generic control frame. This is
+  // the ordering guarantee that prevents a denied revalidation from leaking a
+  // queued group event.
+  context.invalidateAdmission();
+  sendError(
+    context.websocket,
+    'realtime.reauthentication_required',
+    'Realtime credentials are no longer valid. Reauthenticate and reconnect.',
+  );
+  closeForPolicyViolation(context.websocket);
+}
+
+function createSerializedWorkQueue(): (operation: RealtimeOperation) => Promise<void> {
+  let tail = Promise.resolve();
+  return (operation) => {
+    const run = () => Promise.resolve(operation());
+    const next = tail.then(run, run);
+    tail = next.catch(() => undefined);
+    return next;
+  };
+}
+
+function normalizeRevalidationIntervalMs(value: number | undefined): number {
+  if (value === undefined) return defaultRealtimeRevalidationIntervalMs;
+  if (
+    !Number.isSafeInteger(value) ||
+    value < minimumRevalidationIntervalMs ||
+    value > maximumRevalidationIntervalMs
+  ) {
+    throw new Error(
+      `revalidationIntervalMs must be an integer between ${minimumRevalidationIntervalMs} and ${maximumRevalidationIntervalMs}`,
+    );
+  }
+  return value;
 }
 
 function rejectBeforeAdmission(websocket: WebSocket): void {

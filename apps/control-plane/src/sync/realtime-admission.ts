@@ -10,14 +10,29 @@ import type { PairedDeviceLifecycle } from './lifecycle.js';
 export function createPairedDeviceRealtimeAdmission(
   runtime: PairedDeviceLifecycle,
 ): RealtimeAdmission {
+  const validate = async ({
+    accessToken,
+    groupId,
+    deviceId,
+  }: {
+    readonly accessToken: string;
+    readonly groupId: string;
+    readonly deviceId: string;
+  }): Promise<boolean> => {
+    try {
+      const authenticated = await runtime.authenticateAccessToken(accessToken);
+      return authenticated.group.id === groupId && authenticated.device.id === deviceId;
+    } catch {
+      return false;
+    }
+  };
+
   return {
-    async admit({ accessToken, groupId, deviceId }) {
-      try {
-        const authenticated = await runtime.authenticateAccessToken(accessToken);
-        return authenticated.group.id === groupId && authenticated.device.id === deviceId;
-      } catch {
-        return false;
-      }
-    },
+    admit: validate,
+    // Keep this explicit rather than relying on the transport fallback. The
+    // paired-device runtime is the authorization source of truth, so every
+    // protected realtime operation re-checks the same token/group/device
+    // triple that was admitted during ClientHello.
+    revalidate: validate,
   };
 }
