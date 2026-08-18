@@ -926,7 +926,7 @@ Status vocabulary:
 | 0 — baseline and plan                        | **partial**               | Repository/toolchain inventory, hashes, baseline build results, plan and post-migration visual contract snapshots exist.                                                                                                                                                                                                   | A trustworthy pre-migration component/screen snapshot set cannot be reconstructed from this checkout. Keep the documented historical-evidence exception; do not fabricate a `before` baseline. Closure requires explicit maintainer acceptance of that exception.                                                                                                 |
 | 1 — Base UI foundation                       | **closed (modern scope)** | Exact Base UI package, terminal adapters for Button/Dialog/Menu/ContextMenu/Tooltip/Toast, portal/toast layer, import boundary and semantic/keyboard/state coverage.                                                                                                                                                       | WebView2 109 validation is deliberately outside this modern checkpoint and belongs to Phase 8 legacy hardening.                                                                                                                                                                                                                                                   |
 | 2 — primitive migration                      | **closed (modern scope)** | Terminal wrappers cover the complete listed primitive catalog; feature code has no direct Base UI import or direct interactive JSX control outside `packages/ui`; modern accessibility and visual gates pass.                                                                                                              | Record per-primitive WebView2 109 results during Phase 8; do not reopen this phase unless a modern regression breaks the public wrapper contract.                                                                                                                                                                                                                 |
-| 3 — protocol and control-plane               | **partial**               | Versioned Protobuf surface, generated TypeScript/Rust bindings, binary Connect/gRPC-Web `Health` and `GetCapabilities`, Neon/Upstash foundations, an injected paired-device lifecycle (bootstrap/pair/refresh/list/revoke), append-only auth schema `0002`, and binary realtime admission bound to the exact group/device. | Durable Neon CTE repository and configuration-driven activation, idempotency receipts, persistent group/history data, all remaining service handlers, cross-instance Redis fanout, production deployment and end-to-end control-plane SLOs.                                                                                                                       |
+| 3 — protocol and control-plane               | **partial**               | Versioned Protobuf surface, generated TypeScript/Rust bindings, binary Connect/gRPC-Web `Health` and `GetCapabilities`, Neon/Upstash foundations, immutable auth migrations `0002`/`0003`, a durable paired-device lifecycle with parameterized locked CTEs, configuration composition, session-bound access-token authentication, and automatic fail-closed server activation of `SyncService` plus realtime admission. | P0/release-blocking realtime post-admission invalidation/revalidation, real PostgreSQL concurrency/integration proof, idempotency receipts, persistent group/history data, all remaining service handlers, cross-instance Redis fanout, production deployment and end-to-end control-plane SLOs.                                                                                                                       |
 | 4 — layout and settings                      | **partial**               | Bounded tile resolver; 32 schema-bound settings categories; local drafts, resets, import/export, safe visual preview and local reversible history.                                                                                                                                                                         | Complete tile registry, all-screen responsive recomposition, full viewport/DPI matrix, no document scroll on every route, no unfilled layout defects, and remote/group SettingsService history.                                                                                                                                                                   |
 | 5 — materials and viewers                    | **partial**               | Opt-in local binary gRPC-Web import, BLAKE3 addressing/deduplication/quarantine, safe bounded previews and revocable Range playback for large local video.                                                                                                                                                                 | Rust persistent index/write layer, cloud MaterialService, Blob, versions, trash/restore/retention, conversion jobs, viewer registry and authenticated cross-client mirror.                                                                                                                                                                                        |
 | 6 — video and map                            | **partial — not closed**  | Terminal Vidstack foundation; demo/material/webcam registry; paged camera grid; local material assignment; revocable Range playback; Yandex Maps JavaScript API v3 adapter/fallback; browser-local ordered epoch/sequence playback sync.                                                                                   | Quality/subtitle/track UX, complete HLS/LL-HLS material pipeline, marker/annotation and clip-export lifecycle, cloud material grants, authenticated group SyncService transport, time synchronization, presence/authority and LAN/Internet playback SLO verification. Real IP cameras are out of main scope; RTSP remains disabled-by-default compatibility only. |
@@ -944,37 +944,64 @@ The following commits advance **L1 only**. They are deliberately smaller than a
 claim of Phase 3 closure and preserve the closed modern Base UI surface and the
 already-working local material/video checkpoints:
 
-| Commit    | Narrow, verified effect                                                                                                      | Evidence retained                                                               | Still deliberately not claimed                          |
+| Commit    | Narrow, verified effect                                                                                                      | Evidence retained                                                               | Not claimed at that checkpoint / still open now         |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `c8a0dec` | Adds versioned application contracts and deterministic generation guard.                                                     | Protocol lint/typecheck/test and generated-source check.                        | Any service implementation.                             |
 | `132b61f` | Adds health-only Connect/gRPC-Web control-plane and local realtime foundation.                                               | Control-plane lint/typecheck/build/test.                                        | Authentication or durable group state.                  |
 | `e9a171f` | Adds canonical opaque `DeviceSession` and refresh lifecycle contract.                                                        | Protobuf binary round-trip coverage.                                            | Runtime credential storage.                             |
 | `0996ea8` | Adds `MutationContext` to pairing and refresh requests for later durable retry receipts.                                     | Generated descriptor and binary request round trips.                            | Receipt persistence/idempotent response replay.         |
 | `93ca235` | Implements deterministic, injectable paired-device domain lifecycle with UUIDv7 IDs and purpose-separated HMAC token hashes. | 23 control-plane tests at that checkpoint.                                      | Production startup or durable database storage.         |
-| `0be3716` | Exposes the six lifecycle RPCs through binary gRPC-Web with bootstrap/bearer gates and health-only fallback.                 | End-to-end ConnectRPC lifecycle test, CORS and typed-error assertions.          | Configuration-driven production activation.             |
+| `0be3716` | Exposes the six lifecycle RPCs through binary gRPC-Web with bootstrap/bearer gates and health-only fallback.                 | End-to-end ConnectRPC lifecycle test, CORS and typed-error assertions.          | Activation later completed by `b89539b`; durable service coverage remains. |
 | `1d90fb4` | Appends immutable auth schema migration `0002`.                                                                              | Ordered migration/checksum/raw-credential tests.                                | A Neon CTE repository consuming the schema.             |
 | `d960fe3` | Carries an opaque short-lived credential only in binary realtime `ClientHello`.                                              | Deterministic generated binding and round trip.                                 | WebSocket admission by itself.                          |
 | `24af428` | Requires injected group/device admission for realtime, with an explicit test-only development escape hatch.                  | 27 control-plane tests, including authenticated WebSocket admission and replay. | Redis fanout, durable event replay and deployment SLOs. |
+| `dff5976` | Validates the all-or-nothing auth configuration, token lifetimes and credential-hash closure before durable composition.      | Configuration unit tests reject incomplete or unsafe auth setup.                | Creating or activating a durable runtime.               |
+| `c8faf10` | Adds immutable migration `0003` for refresh-replay detection and group-membership integrity.                                 | Migration ordering, checksum and raw-credential regression coverage.            | A runtime that consumes the new integrity fields.        |
+| `1777f51` | Adds the durable paired-device adapter: bootstrap, pairing, refresh/replay, auth, list and membership-scoped revoke use parameterized locked CTEs. | Eight durable-adapter tests plus the five domain-lifecycle parity tests. | Server activation later completed by `b89539b`; real PostgreSQL concurrency and idempotency receipts. |
+| `3622bbd` | Adds an all-or-nothing configuration composition factory; it runs immutable migrations before returning the durable runtime, authenticated `SyncService` and realtime admission. | Five factory tests prove health-only isolation, ordering, closure propagation and failure containment. | Automatic use later completed by `b89539b`; P0 post-admission revalidation remains. |
+| `6a8cf84` | Binds each access-token row to its owning session before deriving group, device, role or session identity, closing a cross-group join path. | Focused token/session join plus revoke and expiry predicate regression coverage. | Post-admission socket invalidation/revalidation and live PostgreSQL proof. |
+| `b89539b` | Activates the durable lifecycle automatically before server listen when auth is configured; health-only startup remains isolated and volatile overrides fail closed. | Running-server tests cover isolation, migration-before-capabilities and rejected overrides. | P0 post-admission revalidation/invalidation, real PostgreSQL concurrency and idempotency. |
 
 Current verified L1 gate:
 
-- `pnpm --filter @gremuchaya/protocol lint`, `typecheck` and `test` pass
-  (**5 protocol tests**); `pnpm check:protocol-generation` passes.
-- `pnpm --filter @gremuchaya/control-plane lint`, `typecheck` and `test` pass
-  (**27 control-plane tests**), including binary gRPC-Web and WebSocket paths.
-- Realtime is now disabled by default. It opens only when an authenticated
-  admission adapter is injected, or when a caller explicitly selects the
-  local-development escape hatch; the latter is never a production capability.
-- Raw pairing/access/refresh values are not placed in URL/query state or in
-  migration columns. The current runtime is intentionally in-memory and must
-  not be wired as a production fallback.
+- The retained Protocol gate remains `pnpm --filter @gremuchaya/protocol lint`,
+  `typecheck` and `test` (**5 protocol tests**) plus
+  `pnpm check:protocol-generation`.
+- The focused durable lifecycle and startup gate passes: `runtime.test.ts`,
+  `durable-runtime.test.ts`, `configured-lifecycle.test.ts` and `server.test.ts`
+  contain **22 passing tests**. The control-plane strict `typecheck` and `lint`
+  also pass for that checkpoint.
+- The durable adapter keeps raw pairing/access/refresh values out of URL/query
+  state and migration columns, binds every access token to its owning session,
+  preserves same-family refresh replay revocation, and maps PostgreSQL
+  deadlock/serialization failures to retryable lifecycle errors. These are
+  adapter-level tests, not yet proof against a live PostgreSQL instance under
+  contention.
+- `b89539b` calls the configured lifecycle from `startControlPlane` before the
+  HTTP server is created. Auth-configured startup therefore awaits migrations,
+  exposes the durable `SyncService` plus authenticated realtime admission as one
+  unit, and rejects volatile lifecycle/admission/unauthenticated-policy
+  overrides. Health-only startup still performs no database or migration work.
+- Realtime remains disabled by default. It opens only when an authenticated
+  admission adapter is supplied, or when a caller explicitly selects the local
+  development escape hatch; the latter is never a production capability.
 
-The **next non-skippable L1 subwave** is a durable Neon-backed CTE repository
-and configuration factory: bootstrap/pepper configuration is all-or-nothing,
-`0002` is applied before activation, lifecycle mutations become transactional,
-and the handler uses idempotency receipts rather than the injected in-memory
-runtime. Only after that can Redis fanout, `WatchGroup`, persistent history and
-player-group ordering be implemented truthfully. The existing
+The **immediate non-skippable L1 subwave** is the **P0/release-blocking realtime
+post-admission invalidation/revalidation** path. A credential is currently
+validated at `ClientHello`; the connection must also be revalidated or closed
+when its access token, session or membership expires, is revoked, or is changed
+by a refresh-replay safety action. The implementation must prevent a previously
+admitted socket from receiving or publishing new group data after that state
+change, with deterministic tests for expiry, revoke, replay and races. This
+checkpoint is intentionally open and blocks any claim that realtime revocation
+is release-safe.
+
+After that P0 checkpoint, the remaining L1 gates are a real isolated PostgreSQL
+integration/concurrency suite (simultaneous pairing, refresh replay and revoke),
+durable idempotency receipts with response replay, persistent group/history
+events, remaining service handlers, Redis cross-instance fanout and deployment
+SLO proof. Only after these pass can `WatchGroup`, player-group ordering and
+distributed behavior be claimed truthfully. The existing
 `apps/control-plane` lockfile closure must be committed only with the final
 workspace lockfile reconciliation after the already-pending layout/settings/
 materials/video package manifests are committed; historical commit `132b61f`
@@ -1002,6 +1029,14 @@ closed until all listed exit conditions pass.
 
 #### L1 — close Phase 3 before claiming distributed behavior
 
+- Close the P0/release-blocking realtime post-admission invalidation/
+  revalidation path before another distributed or release claim. A socket
+  admitted at `ClientHello` must stop publishing and receiving group data after
+  its token/session/membership expires or is revoked, including refresh-replay
+  revocation; cover expiry, revoke, replay and admission-race behavior.
+- Prove the durable lifecycle against an isolated PostgreSQL instance under
+  pairing/refresh/revoke contention, then add durable idempotency receipts and
+  response replay before relying on `MutationContext` for retries.
 - Implement authenticated `MaterialService`, `SettingsService`, `SyncService`,
   `TelemetryService` and `IntegrationService` handlers behind the existing
   Protobuf contracts.
@@ -1237,3 +1272,9 @@ complete feature-by-feature application of every option.
 | 2026-08-18 | Local settings history and reversible draft checkpoints added          | bounded before/after ledger supports undo, redo, filtered pagination and safe load-to-draft without rewriting published history   |
 | 2026-08-18 | Actual phase-state audit and linear closure route added                | Phases 1–2 are closed for the modern target; Phase 0 and Phases 3–7 remain partial; Phase 8 is not started                        |
 | 2026-08-18 | Phase 3 L1 paired-device/realtime checkpoint recorded                  | `c8a0dec`…`24af428`: generated contracts, injected lifecycle, auth schema and admission; 5 protocol + 27 control-plane tests pass |
+| 2026-08-18 | Phase 3 durable auth configuration validated                           | `dff5976`: incomplete auth configuration is rejected; hash closure and lifetime inputs are explicitly bounded                     |
+| 2026-08-18 | Phase 3 replay and membership integrity migration appended             | `c8faf10`: immutable `0003` records prior refresh hashes and deferred group-membership foreign-key integrity                       |
+| 2026-08-18 | Phase 3 durable paired-device adapter added                            | `1777f51`: parameterized locked CTE lifecycle covers bootstrap, pairing, refresh/replay, auth, listing and scoped revocation      |
+| 2026-08-18 | Phase 3 durable configuration composition added                        | `3622bbd`: migrations precede construction of durable SyncService/realtime collaborators; automatic activation follows in `b89539b` |
+| 2026-08-18 | Phase 3 access-token/session binding corrected                         | `6a8cf84`: authenticated identity now requires the token row to match its owning session, closing a cross-group SQL-join path     |
+| 2026-08-18 | Phase 3 fail-closed durable server activation added                    | `b89539b`: configured startup awaits migrations before listen/capabilities and rejects volatile auth/realtime overrides          |
