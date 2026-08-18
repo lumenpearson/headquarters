@@ -1,8 +1,8 @@
 import type { AddressInfo } from 'node:net';
 
-import { createClient } from '@connectrpc/connect';
+import { Code, createClient } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
-import { ControlPlaneService, controlV1 } from '@gremuchaya/protocol';
+import { ControlPlaneService, SyncService, controlV1 } from '@gremuchaya/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startControlPlane } from './server.js';
@@ -52,6 +52,22 @@ describe('gRPC-Web control-plane foundation', () => {
       version: 'v1',
       enabled: false,
     });
+
+    const unauthenticatedSync = createClient(
+      SyncService,
+      createGrpcWebTransport({ baseUrl, useBinaryFormat: true }),
+    );
+    await expect(
+      unauthenticatedSync.createGroup({
+        name: 'No implicit auth runtime',
+        initialDevice: {
+          name: 'No implicit auth device',
+          publicKey: 'ed25519:no-implicit-runtime',
+          platform: 'windows',
+          applicationVersion: '0.1.0',
+        },
+      }),
+    ).rejects.toMatchObject({ code: Code.Unimplemented });
 
     const preflight = await fetch(`${baseUrl}/gremuchaya.control.v1.ControlPlaneService/Health`, {
       method: 'OPTIONS',

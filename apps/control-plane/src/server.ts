@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { timestampNow } from '@bufbuild/protobuf/wkt';
-import { cors, type ConnectRouter } from '@connectrpc/connect';
+import { cors, type ConnectRouter, type ServiceImpl } from '@connectrpc/connect';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
-import { ControlPlaneService, controlV1 } from '@gremuchaya/protocol';
+import { ControlPlaneService, SyncService, controlV1 } from '@gremuchaya/protocol';
 
 import { loadControlPlaneConfig, type ControlPlaneConfig } from './config.js';
 import { attachRealtimeTransport } from './realtime/server.js';
@@ -12,13 +12,25 @@ import type { GroupEventPublication } from './realtime/server.js';
 const serviceVersion = '0.1.0';
 const protocolVersion = 'gremuchaya.v1';
 
-export async function startControlPlane(config: ControlPlaneConfig) {
+export interface ControlPlaneStartOptions {
+  /**
+   * The paired-device implementation is injected until the durable Neon
+   * repository is wired. Health-only startup never falls back to volatile auth
+   * state, so it remains safe for local development and diagnostics.
+   */
+  readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
+}
+
+export async function startControlPlane(
+  config: ControlPlaneConfig,
+  options: ControlPlaneStartOptions = {},
+) {
   const startedAt = timestampNow();
   const rpcHandler = connectNodeAdapter({
     connect: true,
     grpc: false,
     grpcWeb: true,
-    routes: (router) => registerControlPlaneRoutes(router, startedAt),
+    routes: (router) => registerControlPlaneRoutes(router, startedAt, options),
   });
   const server = createServer((request, response) => {
     if (!prepareRpcResponse(request, response, config)) return;
@@ -46,7 +58,9 @@ export async function startControlPlane(config: ControlPlaneConfig) {
 function registerControlPlaneRoutes(
   router: ConnectRouter,
   startedAt: ReturnType<typeof timestampNow>,
+  options: ControlPlaneStartOptions,
 ): void {
+  const pairedDeviceLifecycleEnabled = options.syncService !== undefined;
   router.service(ControlPlaneService, {
     health() {
       return {
@@ -67,6 +81,13 @@ function registerControlPlaneRoutes(
           { name: 'transport.grpc-web', version: 'v1', enabled: true },
           { name: 'materials', version: 'v1', enabled: false },
           { name: 'settings', version: 'v1', enabled: false },
+          {
+            name: 'sync.device-lifecycle',
+            version: 'v1',
+            enabled: pairedDeviceLifecycleEnabled,
+          },
+          // The complete CRDT/event/presence synchronization surface is still
+          // intentionally unavailable even when device lifecycle is injected.
           { name: 'sync', version: 'v1', enabled: false },
           { name: 'telemetry', version: 'v1', enabled: false },
           { name: 'integration', version: 'v1', enabled: false },
@@ -74,6 +95,7 @@ function registerControlPlaneRoutes(
       };
     },
   });
+  if (options.syncService !== undefined) router.service(SyncService, options.syncService);
 }
 
 function prepareRpcResponse(
@@ -99,7 +121,10 @@ function prepareRpcResponse(
   if (request.method === 'OPTIONS') {
     response.statusCode = 204;
     response.setHeader('Access-Control-Allow-Methods', cors.allowedMethods.join(','));
-    response.setHeader('Access-Control-Allow-Headers', cors.allowedHeaders.join(','));
+    response.setHeader(
+      'Access-Control-Allow-Headers',
+      [...new Set([...cors.allowedHeaders, 'authorization', 'x-hq-bootstrap-secret'])].join(','),
+    );
     response.setHeader('Access-Control-Max-Age', '7200');
     response.end();
     return false;
