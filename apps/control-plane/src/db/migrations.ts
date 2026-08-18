@@ -396,7 +396,55 @@ const pairedDeviceAuthentication: Migration = {
   ],
 };
 
-export const migrations: readonly Migration[] = [initialFoundation, pairedDeviceAuthentication];
+/**
+ * Refresh-token rotation keeps the immediately previous hash on the same
+ * session row. Under PostgreSQL READ COMMITTED, this lets a request that
+ * waited behind a concurrent rotation detect the old credential as a replay
+ * instead of missing a newly-inserted history row in its original snapshot.
+ *
+ * The composite foreign keys make explicit the group/device relation already
+ * assumed by lifecycle CTEs. They are deferrable because a bootstrap statement
+ * creates the group, membership and session together.
+ */
+const pairedDeviceReplayAndIntegrity: Migration = {
+  id: '0003_paired_device_replay_and_group_integrity',
+  statements: [
+    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_token_hash text'),
+    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_hash_version text'),
+    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_expires_at timestamptz'),
+    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_retired_at timestamptz'),
+    sql(`ALTER TABLE device_sessions
+      ADD CONSTRAINT device_sessions_group_membership_fk
+      FOREIGN KEY (group_id, device_id)
+      REFERENCES group_memberships(group_id, device_id)
+      DEFERRABLE INITIALLY DEFERRED NOT VALID`),
+    sql(`ALTER TABLE pairing_codes
+      ADD CONSTRAINT pairing_codes_creator_membership_fk
+      FOREIGN KEY (group_id, created_by_device_id)
+      REFERENCES group_memberships(group_id, device_id)
+      DEFERRABLE INITIALLY DEFERRED NOT VALID`),
+    sql(`ALTER TABLE groups
+      ADD CONSTRAINT groups_leader_membership_fk
+      FOREIGN KEY (id, leader_device_id)
+      REFERENCES group_memberships(group_id, device_id)
+      DEFERRABLE INITIALLY DEFERRED NOT VALID`),
+    sql('ALTER TABLE device_sessions VALIDATE CONSTRAINT device_sessions_group_membership_fk'),
+    sql('ALTER TABLE pairing_codes VALIDATE CONSTRAINT pairing_codes_creator_membership_fk'),
+    sql('ALTER TABLE groups VALIDATE CONSTRAINT groups_leader_membership_fk'),
+    sql(
+      'CREATE UNIQUE INDEX IF NOT EXISTS device_sessions_previous_refresh_hash_unique ON device_sessions (refresh_previous_token_hash) WHERE refresh_previous_token_hash IS NOT NULL AND revoked_at IS NULL',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS device_sessions_previous_refresh_expiry_idx ON device_sessions (refresh_previous_expires_at) WHERE refresh_previous_token_hash IS NOT NULL AND revoked_at IS NULL',
+    ),
+  ],
+};
+
+export const migrations: readonly Migration[] = [
+  initialFoundation,
+  pairedDeviceAuthentication,
+  pairedDeviceReplayAndIntegrity,
+];
 
 export async function runMigrations(database: SqlClient): Promise<MigrationRunResult> {
   await database.transaction([

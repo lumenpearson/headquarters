@@ -14,15 +14,21 @@ describe('control-plane migrations', () => {
     };
 
     await expect(runMigrations(database)).resolves.toEqual({
-      applied: ['0001_control_plane_foundation', '0002_paired_device_authentication'],
+      applied: [
+        '0001_control_plane_foundation',
+        '0002_paired_device_authentication',
+        '0003_paired_device_replay_and_group_integrity',
+      ],
       skipped: [],
     });
 
-    expect(transactions).toHaveLength(3);
+    expect(transactions).toHaveLength(4);
     const foundation = transactions[1].map((statement) => statement.text).join('\n');
     const authentication = transactions[2].map((statement) => statement.text).join('\n');
+    const replayAndIntegrity = transactions[3].map((statement) => statement.text).join('\n');
     expect(transactions[1][0]).toMatchObject({ text: 'SELECT pg_advisory_xact_lock($1)' });
     expect(transactions[2][0]).toMatchObject({ text: 'SELECT pg_advisory_xact_lock($1)' });
+    expect(transactions[3][0]).toMatchObject({ text: 'SELECT pg_advisory_xact_lock($1)' });
     for (const table of [
       'groups',
       'devices',
@@ -45,12 +51,33 @@ describe('control-plane migrations', () => {
     expect(authentication).toContain('pairing_codes_active_group_expiry_idx');
     expect(authentication).toContain('device_sessions_active_device_group_idx');
     expect(authentication).toContain('INSERT INTO hq_schema_migrations');
+    for (const column of [
+      'refresh_previous_token_hash',
+      'refresh_previous_hash_version',
+      'refresh_previous_expires_at',
+      'refresh_previous_retired_at',
+    ]) {
+      expect(replayAndIntegrity).toContain(`ADD COLUMN IF NOT EXISTS ${column}`);
+    }
+    for (const constraint of [
+      'device_sessions_group_membership_fk',
+      'pairing_codes_creator_membership_fk',
+      'groups_leader_membership_fk',
+    ]) {
+      expect(replayAndIntegrity).toContain(`ADD CONSTRAINT ${constraint}`);
+      expect(replayAndIntegrity).toContain(`VALIDATE CONSTRAINT ${constraint}`);
+    }
+    expect(replayAndIntegrity).toContain('DEFERRABLE INITIALLY DEFERRED NOT VALID');
+    expect(replayAndIntegrity).toContain('device_sessions_previous_refresh_hash_unique');
+    expect(replayAndIntegrity).toContain('device_sessions_previous_refresh_expiry_idx');
+    expect(replayAndIntegrity).toContain('INSERT INTO hq_schema_migrations');
   });
 
   it('appends auth state without persisting raw credentials or changing foundation checksum content', async () => {
     expect(migrations.map((migration) => migration.id)).toEqual([
       '0001_control_plane_foundation',
       '0002_paired_device_authentication',
+      '0003_paired_device_replay_and_group_integrity',
     ]);
     const authenticationSql = migrations[1].statements
       .map((statement) => statement.text)
@@ -74,10 +101,13 @@ describe('control-plane migrations', () => {
     };
 
     await expect(runMigrations(database)).resolves.toEqual({
-      applied: ['0002_paired_device_authentication'],
+      applied: [
+        '0002_paired_device_authentication',
+        '0003_paired_device_replay_and_group_integrity',
+      ],
       skipped: ['0001_control_plane_foundation'],
     });
-    expect(transactions).toHaveLength(2);
+    expect(transactions).toHaveLength(3);
   });
 
   it('rejects changed migration content after its checksum has been recorded', async () => {
