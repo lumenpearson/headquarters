@@ -28,7 +28,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['packages/**/*.{ts,tsx}', 'apps/file-bridge/**/*.ts'],
+    files: ['packages/**/*.{ts,tsx}', 'apps/file-bridge/**/*.ts', 'apps/control-plane/**/*.ts'],
     rules: {
       '@next/next/no-html-link-for-pages': 'off',
     },
