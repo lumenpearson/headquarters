@@ -54,6 +54,12 @@ Non-negotiable constraints:
 Current implementation version: `@base-ui/react@1.7.0`, pinned exactly in
 `packages/ui`. This does not alter the immutable baseline table above.
 
+The protocol foundation now also pins `prost@0.14.4`, `prost-build@0.14.4`,
+`prost-types@0.14.4` and `protoc-bin-vendored@3.2.0` in the Tauri shell. The
+Rust generator runs from `apps/hq/src-tauri/build.rs` and deliberately emits
+only to Cargo's `OUT_DIR`: generated Rust is rebuilt from repository-owned
+`.proto` sources and is never hand-edited or checked into source control.
+
 ### 2.2 Baseline hashes
 
 | File                                | SHA-256                                                            |
@@ -90,7 +96,9 @@ running. The checks were then executed individually with a sufficient timeout:
   provider SDK, or business transport before replacement.
 - Same-browser synchronization currently uses `BroadcastChannel`.
 - Persistent operations state currently uses local storage.
-- The existing file bridge is gRPC-Web and read-only.
+- The existing file bridge is gRPC-Web and read-only by default; its local
+  material-import capability is enabled only by an explicit non-read-only
+  configuration.
 - A Yandex tactical map component and surveillance assets already exist.
 - The Tauri native filesystem implementation is read-only.
 
@@ -105,7 +113,7 @@ running. The checks were then executed individually with a sufficient timeout:
 | RQ-MAT-002    | Cloud plus `shared/materials` mirror                       | storage/agent              | two-client mirror E2E                 |
 | RQ-MAT-003    | Replace, trash, restore, purge, versions, quotas           | material service           | lifecycle integration suite           |
 | RQ-MEDIA-001  | Custom terminal surveillance player                        | media package/video screen | player E2E and visual baseline        |
-| RQ-MAP-001    | Yandex Maps API 2.1                                        | map adapter                | provider and fallback tests           |
+| RQ-MAP-001    | Yandex Maps JavaScript API v3                              | map adapter                | provider and fallback tests           |
 | RQ-LAYOUT-001 | No page scroll and no avoidable empty grid area            | layout engine              | viewport occupancy suite              |
 | RQ-EDIT-001   | Safe interactive editor with snapping dock                 | edit system                | DnD, validation, history E2E          |
 | RQ-SET-001    | Extensive settings and category/global reset               | settings schema            | schema/reset tests                    |
@@ -292,13 +300,14 @@ explicit live-edit mode.
 
 - Vidstack remains the media engine; Base UI wraps settings, menus, tooltips,
   dialogs and notifications.
-- Support MP4/WebM, HLS/LL-HLS, recordings, Blob sources and RTSP through a
-  local FFmpeg gateway.
+- Support bundled MP4/WebM demo loops, assigned local/Blob materials and an
+  explicitly approved local webcam. The existing RTSP/FFmpeg gateway is an
+  opt-in compatibility adapter, not a production camera requirement.
 - Camera page contains the primary player, metadata rail, timeline, camera grid,
   storage, signal, active channel, network, logs, map, intercepts, recognition
   and telemetry panels.
 - Hidden cameras do not decode.
-- Yandex Maps API 2.1 is loaded lazily in a client-only adapter.
+- Yandex Maps JavaScript API v3 is loaded lazily in a client-only adapter.
 - Missing key/network renders a useful coordinate/object status tile and causes
   layout redistribution rather than a blank panel.
 - Yandex, Vercel and GitHub authentication is interactive; browser credentials
@@ -380,12 +389,53 @@ WebView2 109 remains governed by the separate legacy compatibility phase.
 
 ### Phase 3 — protocol and control-plane
 
-- [ ] Expand Protobuf services.
-- [ ] Add generated TypeScript/Rust code.
-- [ ] Create Node control-plane.
-- [ ] Add Neon schema/migrations and lazy connection initialization.
-- [ ] Add Upstash-backed presence, coordination and rate limits.
-- [ ] Add Vercel WebSocket reconnect/resubscribe behavior.
+- [x] Expand Protobuf services.
+- [x] Add generated TypeScript code.
+- [x] Add generated Rust code.
+- [x] Create Node control-plane foundation with typed health and capability discovery.
+- [x] Add Neon schema/migrations and lazy connection initialization.
+- [x] Add Upstash-backed presence, coordination and rate limits.
+- [x] Add binary WebSocket reconnect/resubscribe behavior (Vercel deployment
+      verification remains a production-hardening task).
+
+Checkpoint: `gremuchaya.common.v1` now defines resource IDs, revisions,
+mutation context, typed settings values, cursor pagination, filters, sorting and
+machine-readable errors. Versioned Control, Material, Settings, Sync, Telemetry
+and Integration services expose every RPC named in the target contract, with
+server-streaming envelopes for watch/telemetry methods. Buf STANDARD lint passes,
+TypeScript code is generated with Protobuf-ES 2.14, and contract tests lock the
+RPC method sets and binary round trips. A hash-before/generate/hash-after CI gate
+rejects stale checked-in TypeScript bindings. `apps/control-plane` serves typed
+`Health` and `GetCapabilities` over binary gRPC-Web/Connect with an origin
+allow-list and no REST health endpoint. Infrastructure capabilities remain
+disabled until their real adapters are implemented. The Tauri native shell now
+generates the same eight packages through `prost-build` with a vendored
+`protoc`, avoiding a machine-wide compiler dependency. The generated public
+module is `gremuchaya_hq_lib::protocol::v1::gremuchaya`; its regression test
+proves binary round-trip compatibility across the common and material package
+boundary. `cargo test --manifest-path apps/hq/src-tauri/Cargo.toml` passes.
+The control-plane also has a lazy Neon HTTP adapter and a production schema
+migration `0001_control_plane_foundation`: the 26 product tables from the
+target data model plus a checksum ledger are created in advisory-locked,
+idempotent transactions. No database connection is created by a health-only
+control-plane start; the explicit `pnpm --filter @gremuchaya/control-plane
+migrate` command requires `HQ_CONTROL_PLANE_DATABASE_URL` and is the only
+operation that touches the configured Neon project.
+The lazy Upstash coordination adapter requires an HTTPS REST URL and a paired
+server-only token. It namespaces per-group presence records and their TTL index,
+uses compare-and-expire/delete scripts for leader leases, provides monotonic
+stream sequences, and uses the upstream sliding-window primitive for mutation
+rate limiting. Redis is explicitly non-authoritative: the persisted PostgreSQL
+documents remain the recovery source after cache eviction or restart.
+The control-plane now also exposes the binary Protobuf endpoint `/realtime` on
+the same HTTP server. Its explicit `ClientHello` cursor replays retained group
+events after reconnect, continues live delivery, and produces `resync_required`
+instead of a partial replay when the bounded retained range has expired. Text
+or malformed frames return typed error envelopes; WebSocket upgrades use the
+same Origin allow-list as gRPC-Web. The hub is intentionally single-process and
+in-memory at this stage: durable history, device/pairing authorization and
+cross-instance Redis fanout remain SyncService implementation work, while
+actual Vercel deployment validation remains part of production hardening.
 
 ### Phase 4 — layout and settings
 
@@ -394,26 +444,457 @@ WebView2 109 remains governed by the separate legacy compatibility phase.
 - [ ] Add settings schemas, drafts, reset, import/export and history.
 - [ ] Recompose all screens against responsive layouts.
 
+Current implementation checkpoint: the isolated `@gremuchaya/layout-engine`
+package now resolves a bounded, stable priority-first grid. It selects the
+richest variant that fits, compacts positions, stretches declared safe gaps,
+and uses an explicit relocation/hide policy instead of silently expanding the
+document. Its three unit tests cover determinism, compact/relocate/hide policy
+and required-tile failure. The complete screen registry and all-screen CSS
+integration are intentionally still pending.
+
+`@gremuchaya/settings-schema` now defines 32 schema-bound personalization
+categories and safe factory defaults. Its draft operations provide typed patch,
+category reset, full reset, discard/publish, JSON export/import parsing and
+append-only local history. Every definition now also derives safe editor
+metadata from the same validator that accepts mutations: boolean, enum, bounded
+number or comma-delimited string-list. The Settings screen consumes that
+metadata through Terminal/Base UI wrappers, so it exposes all 32 categories in
+one selectable catalogue without inventing an unvalidated free-form control.
+Each selected category has its own reset, while draft discard, full reset,
+atomic publish, browser export and schema-validated file import remain global
+operations. At 1280×720 only the settings pane scrolls; document and workspace
+overflow stay locked and the grid uses dense placement to reuse free cells.
+
+The immediate preview currently applies theme, density, bounded type/size
+scale, accent family, style mode, background, focus pattern and
+reduced-motion-safe animation state. Image/video background selections stay on
+a deterministic terminal fallback until they can be bound to a validated
+material, rather than accepting arbitrary filesystem paths or URLs.
+Feature-specific settings (player, map, materials, groups and telemetry) are
+represented and validated but await their corresponding service/screen phases;
+cloud/group settings history will arrive with SettingsService implementation.
+Existing screen layout is likewise not yet fully re-composed around the new
+resolver.
+
 ### Phase 5 — materials and viewers
 
+- [~] Add bounded local material import foundation in the file bridge.
 - [ ] Add Rust local storage index and write support.
 - [ ] Add upload/version/trash/mirror RPC.
 - [ ] Add private Blob integration.
-- [ ] Add viewer registry and conversion jobs.
+- [~] Add safe bounded local viewer paths (image/PDF/text/audio/video).
+- [ ] Add viewer registry, conversion jobs and large-media streaming adapters.
+
+### Phase 5 local material bridge checkpoint — 2026-08-16
+
+`apps/file-bridge` now has a deliberately limited local material-import
+vertical slice behind two local configuration gates: `readOnly: false` and
+`materialImport.enabled: true`. Its generated binary gRPC-Web contract exposes
+begin, ordered chunk upload, status, completion, cancellation, cursor-paged
+listing and server-streamed material reads. Import data is written to
+`shared/materials/.hq/upload-cache`, hashed by BLAKE3 as a stream, atomically
+renamed into `.hq/objects/blake3/<prefix>/<hash>`, and indexed through separate
+JSON material records. The importer enforces a configured maximum up to 5 GiB,
+64 KiB--16 MiB chunk bounds, safe filenames, sequential offsets and expected
+hash verification. Equal content is deduplicated while receiving a separate
+material record; hash mismatches are quarantined.
+
+The ordinary bridge explorer hides `.hq` completely, rejects direct requests
+for it as permission-denied and verifies canonical paths before streaming an
+imported object, so a locally introduced symlink cannot escape the configured
+mirror root. Configuration normalization happens at the executable boundary,
+which keeps older read-only configuration files safely read-only after the new
+property is introduced.
+
+The first checkpoint is covered by eight file-bridge unit/integration tests
+(including a real binary gRPC-Web upload/read round-trip), configuration tests,
+TypeScript typecheck/lint and deterministic `check:protocol-generation`.
+The web client now adds an opt-in hidden local-import dialog on the Files screen
+through `Ctrl+Shift+Alt+S`. Before an upload starts, a browser module worker
+computes BLAKE3 incrementally from `File.stream()` and supplies the result as an
+expected hash; the bridge still recomputes the authoritative digest while it
+commits the object. A stream-based in-context fallback is retained for the
+legacy shell if a module worker is unavailable. The transport adapter then
+streams browser `File` data in bridge-provided bounded chunks, reports hash and
+transfer progress, supports cancellation and lists local records through the
+cursor contract; entries are projected into the Files registry as `LOCAL MIRROR
+/ GRPC-WEB`. A browser regression locks the dialog, terminal wrapper contract
+and 720p page-scroll invariant.
+
+It is not a claim of the full material requirement: no `MaterialService` cloud
+handler, Vercel Blob, authenticated group grant, persistent resume after a
+bridge restart, MIME sniffing/conversion, version lifecycle, trash retention or
+cross-client mirror synchronization exists yet.
 
 ### Phase 6 — video and map
 
-- [ ] Add custom Vidstack terminal player.
-- [ ] Add camera registry/grid and RTSP gateway.
-- [ ] Add Yandex Maps API 2.1 adapter and fallback.
-- [ ] Add synchronized playback.
+- [~] Add custom Vidstack terminal player.
+- [~] Add demo/material/webcam registry and bounded camera-style grid; retain
+  RTSP only as a disabled-by-default compatibility adapter.
+- [x] Add gRPC-issued, revocable loopback HTTP Range grants for large local
+      material video without renderer buffering or path disclosure.
+- [x] Add Yandex Maps JavaScript API v3 adapter and fallback.
+- [~] Add synchronized playback; browser-local epoch/sequence transport is
+  complete, while the authenticated control-plane adapter remains pending.
+
+### Phase 6 Vidstack checkpoint — 2026-08-16
+
+The primary surveillance feed now uses the exact React-19-compatible
+`@vidstack/react@1.15.6` engine rather than a feature-owned `<video>` element.
+The application retains its existing terminal transport rail and Base UI
+buttons/sliders/selects; no Vidstack default CSS or layout is imported. Its
+player instance now owns source loading, duration/current-time state,
+play/pause, seeking, volume, rate, fullscreen and picture-in-picture. The
+existing screenshot operation deliberately obtains the native video only via
+Vidstack's typed video provider, not through an uncontrolled DOM query.
+
+This is a player-foundation checkpoint, not a claim of the full media phase:
+local material video/audio up to the explicit 32 MiB bounded-preview limit can
+already use the same custom Vidstack control surface, but larger material media
+requires a dedicated streaming source adapter. Quality/subtitle menus,
+HLS/LL-HLS and RTSP/FFmpeg gateway, marker/annotation storage and synchronized
+playback remain pending. The custom terminal CSS contract and existing
+surveillance controls were preserved; 24 Playwright operator flows still pass
+at 720p after the migration.
+
+### Phase 6 Yandex Maps JavaScript API v3 checkpoint — 2026-08-16
+
+The tactical map adapter now loads the official v3 endpoint lazily only on the
+map route and waits for `ymaps3.ready` before creating `YMap` vector layers.
+The terminal visual contract remains owned by application CSS: the provider
+only renders the basemap, while the application renders terminal DOM markers,
+routes, restricted polygons, alerts and sensors through v3 entities. A narrow
+provider boundary is explicit about the coordinate conversion from the
+operational `[latitude, longitude]` model to the v3 `[longitude, latitude]`
+model, preventing a silent axis swap.
+
+The adapter accepts a build-time `NEXT_PUBLIC_YANDEX_MAPS_API_KEY` or an
+explicit device-local v3 key. It deliberately does not reuse a legacy v2 local
+key. Missing keys, provider load failures and vector-layer failures retain a
+non-empty coordinate/object fallback tile rather than a blank or synthetic map.
+The user must create and restrict the v3 key interactively in Yandex Developer
+Dashboard; no browser profile or credential is read. A browser regression
+intercepts the v3 endpoint, verifies the exact SDK URL and proves that the
+fallback remains usable when the provider is unavailable.
+
+The completed local gate is `pnpm --filter @gremuchaya/hq typecheck`, lint,
+22 unit tests, an optimized 147-route Next.js build and the full 25-scenario
+Chromium suite, including the provider-URL and no-provider map flows. The
+obsolete `@types/yandex-maps` 2.1 package was removed rather than retained as
+a misleading v2 type dependency.
+
+This is not a key-provisioning or full tactical-map completion claim: a real
+production key, origin allowlist, optional clusterer plugin, offline tile cache,
+group-synchronized viewport and provider availability monitoring remain
+deployment/integration work.
+
+### Phase 6 camera registry checkpoint — 2026-08-17
+
+The surveillance screen now projects all 16 domain cameras through one typed
+browser registry rather than hard-coding the first 12 tiles. The terminal grid
+uses a bounded 12-channel page, exposes deterministic filtering and sorting,
+and keeps the remaining four channels reachable on page two. Sparse filtered
+pages receive an operational query-summary surface instead of leaving an empty
+grid rectangle. Only the selected main feed is attached to Vidstack; thumbnail
+tiles remain static and therefore do not allocate hidden media decoders.
+
+Each registry entry contains an opaque stream ID, browser-safe source, bounded
+local fallback and thumbnail reference. When
+`NEXT_PUBLIC_HQ_RTSP_GATEWAY_ORIGIN` is configured, the browser requests
+`/v1/streams/<opaque-stream-id>/index.m3u8` over HTTP(S). Credential-bearing,
+query-bearing, fragment-bearing and non-HTTP(S) origins are rejected. Neither
+RTSP URLs nor camera credentials are represented in client state. A provider
+failure is scoped to the selected camera and deterministically falls back to
+the bundled WebM source.
+
+The checkpoint is covered by registry unit tests for paging, filtering,
+signal-order sorting, origin validation, thumbnail wrapping and secret-free
+gateway URLs, plus a 1280×720 browser flow for the 12+4 page transition,
+signal-loss filtering, channel selection and document overflow invariants.
+
+The completed local gate includes formatting, strict TypeScript, ESLint, 26
+unit tests, the Base UI import/native-control boundary check, an optimized
+147-route Next.js build and the complete 26-scenario Chromium suite.
+
+This camera-registry checkpoint partially completed the grid task. At that
+point it did not yet claim an implemented Rust/FFmpeg RTSP ingestion service,
+signed HLS grants, gateway
+health/reconnect policy, multi-quality HLS ladder or cross-client playback
+synchronization. Those server and realtime portions remain pending, so the
+phase item intentionally remains `[~]` rather than `[x]`.
+
+### Phase 6 native RTSP→HLS gateway foundation — 2026-08-17
+
+The Tauri shell now owns a bounded loopback media gateway instead of requiring
+the webview to know an RTSP endpoint. Native configuration is read from an
+explicit regular, non-symlink JSON file capped at 1 MiB. Camera URLs and
+credentials remain native-side and are never serialized through an invoke
+response, browser store or application log. FFmpeg receives the RTSP URL as a
+direct argv value without shell interpolation; a same-user process inspector
+may still observe it. Eliminating that exposure requires a future Credential
+Manager plus native libav or protected credential-handoff adapter. The webview
+sends only a validated camera ID and per-component consumer ID.
+
+The gateway binds exclusively to `127.0.0.1` on an ephemeral port. FFmpeg is
+spawned directly without a command shell, with stdin/stdout/stderr detached,
+`kill_on_drop` enabled and a ten-second manifest readiness gate. The default
+copy profile minimizes CPU usage for browser-compatible H.264 sources; an
+explicit per-camera transcode profile uses low-latency H.264/AAC. HLS output is
+bounded to six two-second entries, uses `delete_segments`, and is removed when
+the last consumer releases its lease. Global worker capacity defaults to four
+and is hard-bounded to 16.
+
+Each active worker receives a cryptographically random 256-bit hexadecimal
+grant embedded in the URL path. Axum serves only the active worker's exact
+playlist and whitelisted segment filenames; it exposes no directory listing
+and rejects traversal-shaped IDs and assets. CORS is limited to known Next dev
+and Tauri origins, while the Tauri CSP permits loopback media/connect traffic
+without opening a remote host. Closing the control window drains workers and
+requests graceful HTTP shutdown.
+
+The React client validates every native descriptor again before handing it to
+Vidstack: HTTP only, hostname exactly `127.0.0.1`, no credentials/query/hash,
+opaque stream syntax, 64-hex grant and `index.m3u8`. Native startup failure,
+manifest timeout or playback failure retains the bounded local WebM fallback.
+The ordinary web build never invokes the native gateway and remains compatible
+with the external browser-safe gateway origin.
+
+This is a functional local ingestion foundation, not the completion of the
+production media phase. Windows Credential Manager integration, protection
+from local process-argument inspection, expiring or rotating grants, automatic
+restart/backoff, GPU encoder selection, multi-quality and LL-HLS ladders,
+recording retention, authenticated group authorization, metrics and
+synchronized playback remain pending. The parent Phase 6 item therefore
+remains `[~]`.
+
+The completed gate includes `cargo fmt --check`, `cargo check --all-targets`,
+nine Rust tests, Clippy with warnings denied, strict TypeScript, ESLint, 28
+frontend unit tests, the Base UI/native-control boundary, optimized web and
+desktop static builds with 147 routes each, and the complete 26-scenario
+Chromium regression suite.
+
+### Phase 6 RTSP worker supervisor checkpoint — 2026-08-17
+
+The native gateway now owns a continuously running worker supervisor rather
+than deleting an active camera after the first FFmpeg failure. The supervisor
+polls at a bounded 500 ms interval, detects exited processes and ten-second
+manifest startup failures, terminates the failed child, and schedules a fresh
+direct FFmpeg spawn. The retry policy uses deterministic per-camera jitter and
+exponential backoff starting at 500 ms and capped at 30 seconds, so concurrent
+camera failures do not immediately create a restart storm.
+
+Worker identity is intentionally stable across restarts: `stream_id`, 256-bit
+grant, generation, output directory and manifest URL do not rotate. The
+selected Vidstack source can therefore recover at the same URL without sending
+an RTSP address or a replacement grant through the webview. A successful
+manifest probe moves the worker from `starting` to `ready`; a failed attempt
+moves it through `reconnecting`, and five consecutive failures expose a
+`degraded` state. Thirty seconds of stable execution resets only the
+consecutive-failure backoff counter, not the lifetime restart counter.
+
+The trusted Tauri status contract now includes deterministic per-stream health:
+camera and opaque stream IDs, state, consumer count, consecutive failures,
+lifetime restarts and last-manifest age. The loopback HTTP health route remains
+aggregate-only and reports active, reconnecting and failed counts, avoiding a
+camera inventory disclosure through the browser-facing endpoint.
+
+The React client adds a cancellation-safe native startup retry sequence of 500
+ms, 1 s, 2 s, 4 s and a repeated 8 s ceiling. Changing cameras clears the
+pending timer and releases the previous consumer lease. A regular web client
+still receives `null` from the native adapter and performs no retry, preserving
+the static/exported browser contract and hydration output. If Vidstack
+temporarily switches to the bounded local fallback after a native playback
+error, a second lease-safe recovery loop waits for the same worker to become
+ready, clears the fallback override and reloads the original stable HLS URL.
+
+The regression layer now covers bounded deterministic backoff, worker failure
+transition, stable grant/path/generation across a restart, degraded health
+aggregation and client retry ceilings. Real RTSP camera acceptance,
+manifest-stall detection, camera credential provisioning and recording
+retention are no longer production requirements; the adapter is preserved only
+for opt-in compatibility. Multi-quality material playback and synchronized
+group playback still keep Phase 6 at `[~]`.
+
+The completed gate includes `cargo fmt --check`, `cargo check --all-targets`, 12
+Rust tests, Clippy with warnings denied, strict TypeScript, ESLint, 29 frontend
+unit tests, the Base UI/native-control boundary, optimized web and desktop
+static builds with 147 routes each, and the complete 26-scenario Chromium
+regression suite.
+
+### Phase 6 source-model correction — 2026-08-17
+
+The user clarified that the product will not connect to real surveillance
+cameras. The normative source model is now `DEMO_VIDEO`, `LOCAL_MATERIAL` and
+an explicitly initiated local `WEBCAM`; all camera-like rows, thumbnails,
+signal states and PTZ data are simulated presentation fixtures. UI labels must
+identify demo loops and material playback instead of presenting them as real
+live recording.
+
+The webcam is a browser-local `MediaStream` acquired only from a button or
+keyboard action. It is never requested on mount, persisted, uploaded, placed
+in Zustand/group documents or transmitted to the bridge/control-plane. Track
+cleanup is mandatory on stop, channel switch, request cancellation and screen
+unmount. Permission denial and unavailable or busy hardware are recoverable UI
+states, followed by the bundled demo fallback.
+
+The Rust RTSP→HLS work remains preserved as an isolated compatibility adapter
+behind explicit environment/configuration opt-in. Its committed example has no
+camera URLs and starts no FFmpeg workers. A real RTSP fixture, camera credential
+provisioning, recording retention and camera-fleet hardening are removed from
+the Definition of Done rather than left as blocking Phase 6 work. The remaining
+media work is material streaming beyond the bounded preview limit, richer
+Vidstack menus and annotations, plus synchronized playback.
+
+The corrected source-model gate passes formatting, strict TypeScript, ESLint,
+31 frontend unit tests, the Base UI/native-control boundary, both optimized
+147-route web and desktop builds, 12 Rust tests, `cargo check`, rustfmt, Clippy
+with warnings denied and all 27 Chromium scenarios. The browser suite includes
+a hardware-independent canvas `MediaStream` fixture proving explicit webcam
+start, local playback, stop and deterministic return to `DEMO_VIDEO`.
+
+### Phase 6 local material-to-channel checkpoint — 2026-08-18
+
+The selected simulated channel on `/video` can now be bound to an imported
+video material from the existing local mirror. The selector reads the bounded,
+cursor-paged local catalogue through `BridgeMaterialClient`; it only offers
+video MIME types that satisfy the current 32 MiB preview limit. This keeps
+large-file streaming an explicit later phase instead of silently buffering a
+large video in the renderer.
+
+The persistent contract is deliberately narrow: local storage contains only a
+validated `cameraId → materialId` UUID mapping. It never contains a material
+path, a `file:` URI, raw bytes or a runtime `blob:` URL. When the active
+channel needs that material, the screen performs the existing bounded binary
+gRPC-Web read, makes one temporary object URL and revokes it when the material,
+channel or screen changes. Missing or unreadable material falls back to the
+demo loop while preserving a visible terminal status. No real camera, IP
+camera discovery, RTSP configuration or automatic webcam permission is
+introduced by this feature.
+
+The source selector is a terminal Base UI wrapper, so its keyboard and focus
+semantics stay consistent with the rest of the application. Browser-only
+storage and object-URL work are deferred to client-side asynchronous effects;
+the static export and SSR boundary do not read `window`, `localStorage` or
+`URL.createObjectURL` during render. The browser regression covers restoration
+of a persisted material assignment and clearing it back to `DEMO_VIDEO`, while
+asserting that no runtime URL persists.
+
+The completed gate passes `check:ui-boundary`, strict TypeScript, ESLint, 34
+frontend unit tests, all 28 Chromium scenarios, and optimized web plus desktop
+static exports with 147 routes each. The older native/Rust verification remains
+valid because this increment changes only the React client and plan documents.
+
+### Phase 6 large local-video range streaming checkpoint — 2026-08-18
+
+The 32 MiB bounded-read ceiling remains mandatory for images, documents, text
+and small audio/video previews, but it no longer prevents a large imported
+video from becoming the source of a simulated channel. A large video is never
+buffered into the renderer. `BridgeService.GetMaterialPlaybackGrant` first
+issues a short-lived capability and Vidstack then uses a loopback HTTP byte
+data plane with native `Range` seeking. `BridgeService.RevokeMaterialPlaybackGrant`
+explicitly closes the capability when the source, channel or screen changes.
+This exception transports media bytes only; all discovery, authorization,
+metadata and lifecycle operations remain generated Protobuf over gRPC-Web.
+
+The grant registry is in-memory and bounded to 256 active capabilities. A
+grant has a five-minute sliding idle TTL, is limited to registered audio/video
+materials, binds to `127.0.0.1`, and stores only a SHA-256 digest of its random
+256-bit token. Its opaque URL contains a UUID and token but no material path,
+query, credentials or fragment. The browser independently validates the exact
+loopback origin and path shape before accepting the grant. The server checks
+the exact application Origin, implements `GET`, `HEAD` and one RFC 7233 range,
+returns `206`/`Content-Range` for valid seeking, `416` for invalid or multiple
+ranges, and `404` after revoke, expiry or bridge shutdown. The streamed file
+is piped from disk with backpressure; its size does not determine renderer or
+bridge memory consumption.
+
+The same lifecycle is used by the standalone material preview and by an
+assigned simulated camera channel. Materials at or below 32 MiB retain the
+simpler bounded gRPC-Web Blob path. A channel stores only the material UUID;
+neither a grant token nor runtime URL is persisted or synchronized. Real/IP
+cameras remain outside the product scope, automatic webcam permission remains
+forbidden, and the disabled RTSP adapter is not reintroduced into the default
+source model.
+
+Verification covers registry issuance, wrong-token rejection, sliding expiry,
+explicit revoke, unsafe MIME/origin denial, exact partial bytes, invalid range
+handling, browser URL validation and cleanup on source change. The refreshed
+final gate completed protocol generation/type validation plus 4 protocol tests,
+file-bridge typecheck plus 12 tests, HQ unit/type/lint validation (39 tests),
+the full 30-scenario Playwright run, the UI-boundary and repository-wide
+formatting gates, and root typecheck/lint for all ten packages. Both web and
+desktop-web production builds generated all 147 static routes successfully.
+Richer Vidstack menus and annotations remain Phase 6 work; group-authorized
+playback synchronization remains the deliberately separate Phase 7 task.
+
+### Phase 6 browser-local playback synchronization checkpoint — 2026-08-18
+
+The video screen now uses `PlaybackSyncCoordinator` rather than the generic
+world-state broadcast for timing-sensitive media. Its commands deliberately
+mirror the durable `SyncService.SessionCommand` shape: `epoch`, per-device
+`sequence`, action, safe source target, position, rate, execution timestamp
+and issuing device ID. A `BroadcastChannel` transport plus storage-event
+fallback carries the command between windows of the same browser profile; a
+transport interface keeps the Vidstack/UI surface independent from the future
+authenticated WebSocket/Protobuf group transport.
+
+Only `DEMO_VIDEO` and `LOCAL_MATERIAL` identities are valid targets. The
+coordinator never serializes a filesystem path, Blob URL, loopback grant URL,
+capability token or webcam `MediaStream`. Webcams, RTSP compatibility streams
+and an unrecognized source stay strictly local. Each action is scheduled 40 ms
+ahead, duplicated or stale per-device sequences are rejected, newer commands
+supersede pending commands for the same source, and leader mode accepts only
+the configured leader device. The player marks a material/source mismatch
+instead of applying a command to different content.
+
+The generic operations snapshot transport now omits `videoPlaying`,
+`videoLive` and `videoPosition` when it applies a remote snapshot. This is a
+necessary isolation rule: otherwise the ordinary Zustand broadcast could apply
+a transient state before the ordered playback command and defeat scheduling.
+The browser-local coordinator is covered by deterministic unit tests for
+ordering, delayed execution, duplicate suppression, leader enforcement and
+the absence of local media URLs, plus a two-page browser test that verifies
+real demo-playback propagation without copying a local media capability. Its
+dedicated cloud transport, time-sync offset estimation, group
+membership/presence and cross-device SLO are deferred to the Phase 7
+synchronization/control-plane completion work.
 
 ### Phase 7 — editor, sync, localization and telemetry
 
 - [ ] Add edit descriptor registry and dock.
-- [ ] Add Yjs/Yrs collaboration and history.
+- [~] Add local settings history with reversible draft checkpoints; group
+  collaboration, CRDT history and server-side retention remain pending.
 - [ ] Add Russian/English catalogs and GitHub workflows.
 - [ ] Add real Rust telemetry and deterministic simulation editor.
+
+### Phase 7 local settings history checkpoint — 2026-08-18
+
+The safe settings schema now exposes immutable, schema-validated draft
+checkpoints. The browser-local SettingsHistoryLedger retains a bounded
+before/after checkpoint for each patch, category reset, global reset, import,
+discard, publish, restore, undo and redo action. A historical state is never
+written directly into a published revision: selecting it loads the safe values
+into the local draft, after which the existing publish action creates a new
+revision.
+
+The settings screen now has terminal-styled undo/redo actions and a dedicated
+history pane. It provides local pagination, operation/category/setting/date
+filters, newest/oldest sort order and a per-event load-to-draft command. The
+history pane owns its overflow, so it does not introduce document scroll.
+Stored v4 settings state is accepted and initialized with an empty ledger;
+subsequent snapshots persist as v5.
+
+This is intentionally not the group history promised by the final product:
+there is no CRDT document, server event journal, cross-device authority or
+group revert yet. Those capabilities remain coupled to the authenticated
+SyncService work.
+
+Verification for this increment: settings-schema has five passing unit tests,
+HQ has thirteen passing unit files with forty-two tests, and the full Chromium
+suite has thirty-one passing scenarios, including the visible history
+filter/undo/redo flow and the existing 720p no-page-scroll assertion. Root
+typecheck, Base UI import/control-boundary validation, Prettier and the
+147-route production web build also pass.
 
 ### Phase 8 — native and release hardening
 
@@ -422,6 +903,185 @@ WebView2 109 remains governed by the separate legacy compatibility phase.
 - [ ] Provision Vercel resources after interactive sign-in.
 - [ ] Run full Windows, security, load, accessibility and recovery suites.
 - [ ] Release `v1.0.0` only after all gates pass.
+
+### 13.1 Actual phase state — 2026-08-18
+
+This is an additive, evidence-based status audit. It does **not** rewrite the
+requirements or retroactively convert a completed checkpoint into a closed
+phase. A phase is closed only when every delivery item and its declared gate
+pass. In particular, a green UI test suite proves the covered implementation
+slice, not unrelated cloud, security, legacy-Windows or release requirements.
+
+Status vocabulary:
+
+- **closed (modern scope)** — all deliverables and gates stated for the modern
+  web/desktop target pass; a separately declared legacy gate is not implied.
+- **partial** — one or more useful, tested vertical slices exist, but one or
+  more phase deliverables or final gates remain open.
+- **not started** — the phase has no closure-grade delivery yet, even if a
+  preceding phase created reusable prerequisites.
+
+| Phase                                        | Actual status             | Completed checkpoints retained as evidence                                                                                                                                                                                                                                                                                 | Conditions still required before phase closure                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — baseline and plan                        | **partial**               | Repository/toolchain inventory, hashes, baseline build results, plan and post-migration visual contract snapshots exist.                                                                                                                                                                                                   | A trustworthy pre-migration component/screen snapshot set cannot be reconstructed from this checkout. Keep the documented historical-evidence exception; do not fabricate a `before` baseline. Closure requires explicit maintainer acceptance of that exception.                                                                                                 |
+| 1 — Base UI foundation                       | **closed (modern scope)** | Exact Base UI package, terminal adapters for Button/Dialog/Menu/ContextMenu/Tooltip/Toast, portal/toast layer, import boundary and semantic/keyboard/state coverage.                                                                                                                                                       | WebView2 109 validation is deliberately outside this modern checkpoint and belongs to Phase 8 legacy hardening.                                                                                                                                                                                                                                                   |
+| 2 — primitive migration                      | **closed (modern scope)** | Terminal wrappers cover the complete listed primitive catalog; feature code has no direct Base UI import or direct interactive JSX control outside `packages/ui`; modern accessibility and visual gates pass.                                                                                                              | Record per-primitive WebView2 109 results during Phase 8; do not reopen this phase unless a modern regression breaks the public wrapper contract.                                                                                                                                                                                                                 |
+| 3 — protocol and control-plane               | **partial**               | Versioned Protobuf surface, generated TypeScript/Rust bindings, binary Connect/gRPC-Web `Health` and `GetCapabilities`, Neon/Upstash foundations, an injected paired-device lifecycle (bootstrap/pair/refresh/list/revoke), append-only auth schema `0002`, and binary realtime admission bound to the exact group/device. | Durable Neon CTE repository and configuration-driven activation, idempotency receipts, persistent group/history data, all remaining service handlers, cross-instance Redis fanout, production deployment and end-to-end control-plane SLOs.                                                                                                                       |
+| 4 — layout and settings                      | **partial**               | Bounded tile resolver; 32 schema-bound settings categories; local drafts, resets, import/export, safe visual preview and local reversible history.                                                                                                                                                                         | Complete tile registry, all-screen responsive recomposition, full viewport/DPI matrix, no document scroll on every route, no unfilled layout defects, and remote/group SettingsService history.                                                                                                                                                                   |
+| 5 — materials and viewers                    | **partial**               | Opt-in local binary gRPC-Web import, BLAKE3 addressing/deduplication/quarantine, safe bounded previews and revocable Range playback for large local video.                                                                                                                                                                 | Rust persistent index/write layer, cloud MaterialService, Blob, versions, trash/restore/retention, conversion jobs, viewer registry and authenticated cross-client mirror.                                                                                                                                                                                        |
+| 6 — video and map                            | **partial — not closed**  | Terminal Vidstack foundation; demo/material/webcam registry; paged camera grid; local material assignment; revocable Range playback; Yandex Maps JavaScript API v3 adapter/fallback; browser-local ordered epoch/sequence playback sync.                                                                                   | Quality/subtitle/track UX, complete HLS/LL-HLS material pipeline, marker/annotation and clip-export lifecycle, cloud material grants, authenticated group SyncService transport, time synchronization, presence/authority and LAN/Internet playback SLO verification. Real IP cameras are out of main scope; RTSP remains disabled-by-default compatibility only. |
+| 7 — editor, sync, localization and telemetry | **partial**               | Schema-validated local settings history, undo/redo, filtered/paged local history and safe load-to-draft behavior.                                                                                                                                                                                                          | Edit descriptor registry/dock/DnD, CRDT and group history, ru/en catalogs, translation/GitHub workflows, Rust collectors and deterministic telemetry curve editor.                                                                                                                                                                                                |
+| 8 — native and release hardening             | **not started**           | Tauri/file-bridge prerequisites from earlier phases are reusable but are not release closure.                                                                                                                                                                                                                              | Native Windows titlebar/integration, legacy shell and WebView2 matrix, Vercel provisioning, security/load/recovery/VM validation, installers and final `v1.0.0` release.                                                                                                                                                                                          |
+
+The Phase 6 wording is intentionally explicit: `Phase 6 validation refreshed`
+means that the implemented local video/map slice was tested. It must never be
+read as `Phase 6 closed`. The current phase checklist retains two completed
+items and three partial items for exactly this reason.
+
+### 13.1.1 Active L1 paired-device and realtime checkpoint — 2026-08-18
+
+The following commits advance **L1 only**. They are deliberately smaller than a
+claim of Phase 3 closure and preserve the closed modern Base UI surface and the
+already-working local material/video checkpoints:
+
+| Commit    | Narrow, verified effect                                                                                                      | Evidence retained                                                               | Still deliberately not claimed                          |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `c8a0dec` | Adds versioned application contracts and deterministic generation guard.                                                     | Protocol lint/typecheck/test and generated-source check.                        | Any service implementation.                             |
+| `132b61f` | Adds health-only Connect/gRPC-Web control-plane and local realtime foundation.                                               | Control-plane lint/typecheck/build/test.                                        | Authentication or durable group state.                  |
+| `e9a171f` | Adds canonical opaque `DeviceSession` and refresh lifecycle contract.                                                        | Protobuf binary round-trip coverage.                                            | Runtime credential storage.                             |
+| `0996ea8` | Adds `MutationContext` to pairing and refresh requests for later durable retry receipts.                                     | Generated descriptor and binary request round trips.                            | Receipt persistence/idempotent response replay.         |
+| `93ca235` | Implements deterministic, injectable paired-device domain lifecycle with UUIDv7 IDs and purpose-separated HMAC token hashes. | 23 control-plane tests at that checkpoint.                                      | Production startup or durable database storage.         |
+| `0be3716` | Exposes the six lifecycle RPCs through binary gRPC-Web with bootstrap/bearer gates and health-only fallback.                 | End-to-end ConnectRPC lifecycle test, CORS and typed-error assertions.          | Configuration-driven production activation.             |
+| `1d90fb4` | Appends immutable auth schema migration `0002`.                                                                              | Ordered migration/checksum/raw-credential tests.                                | A Neon CTE repository consuming the schema.             |
+| `d960fe3` | Carries an opaque short-lived credential only in binary realtime `ClientHello`.                                              | Deterministic generated binding and round trip.                                 | WebSocket admission by itself.                          |
+| `24af428` | Requires injected group/device admission for realtime, with an explicit test-only development escape hatch.                  | 27 control-plane tests, including authenticated WebSocket admission and replay. | Redis fanout, durable event replay and deployment SLOs. |
+
+Current verified L1 gate:
+
+- `pnpm --filter @gremuchaya/protocol lint`, `typecheck` and `test` pass
+  (**5 protocol tests**); `pnpm check:protocol-generation` passes.
+- `pnpm --filter @gremuchaya/control-plane lint`, `typecheck` and `test` pass
+  (**27 control-plane tests**), including binary gRPC-Web and WebSocket paths.
+- Realtime is now disabled by default. It opens only when an authenticated
+  admission adapter is injected, or when a caller explicitly selects the
+  local-development escape hatch; the latter is never a production capability.
+- Raw pairing/access/refresh values are not placed in URL/query state or in
+  migration columns. The current runtime is intentionally in-memory and must
+  not be wired as a production fallback.
+
+The **next non-skippable L1 subwave** is a durable Neon-backed CTE repository
+and configuration factory: bootstrap/pepper configuration is all-or-nothing,
+`0002` is applied before activation, lifecycle mutations become transactional,
+and the handler uses idempotency receipts rather than the injected in-memory
+runtime. Only after that can Redis fanout, `WatchGroup`, persistent history and
+player-group ordering be implemented truthfully. The existing
+`apps/control-plane` lockfile closure must be committed only with the final
+workspace lockfile reconciliation after the already-pending layout/settings/
+materials/video package manifests are committed; historical commit `132b61f`
+therefore remains source-verified but is not independently frozen-install
+reproducible.
+
+### 13.2 Linear route to phase closure
+
+This route is deliberately linear and additive. It carries completed
+checkpoints forward as regression contracts rather than repeating their work or
+rewriting the preceding sections. A later line may not mark its target phase
+closed until all listed exit conditions pass.
+
+#### L0 — lock the evidence baseline and preserve closed modern UI work
+
+- Retain the Phase 0 historical-snapshot limitation as an explicit exception;
+  preserve current visual contracts, hashes and change-log evidence instead of
+  inventing pre-migration screenshots.
+- Treat Phases 1 and 2 as completed modern-target checkpoints. Do not replace
+  Base UI adapters, terminal tokens or public `Terminal*` APIs during later
+  work; run their visual/accessibility/boundary regressions when affected.
+- Exit: the status table remains accurate, the exception is accepted by the
+  maintainer, and no new direct Base UI or raw interactive-control imports are
+  introduced.
+
+#### L1 — close Phase 3 before claiming distributed behavior
+
+- Implement authenticated `MaterialService`, `SettingsService`, `SyncService`,
+  `TelemetryService` and `IntegrationService` handlers behind the existing
+  Protobuf contracts.
+- Add device identity, pairing, roles, group membership, durable PostgreSQL
+  history, Redis cross-instance fanout, idempotency and production-safe errors.
+- Deploy a preview control-plane only after interactive provider sign-in; prove
+  binary gRPC-Web/Connect and realtime behavior against it.
+- Exit: a paired device can authenticate, join a group, publish/receive a
+  durable authorized event after reconnect, and service integration/security
+  tests pass.
+
+#### L2 — close Phase 4 across every operational screen
+
+- Register every tile/screen with min/max sizes, priorities, compact/minimal
+  presentations and relocation policy.
+- Apply the resolver and document-overflow lock to all routes, not only the
+  settings and video checkpoints.
+- Complete remote/group settings history only after L1 provides the durable
+  SettingsService path.
+- Exit: the complete viewport/DPI/locale/theme matrix has no page scroll,
+  overlap, inaccessible tile or unexplained empty grid area; each allowed local
+  scroll remains inside its owning panel.
+
+#### L3 — close Phase 5 with an authenticated materials lifecycle
+
+- Keep the existing BLAKE3 local import and Range reader as the local-first
+  transport; do not regress to whole-file renderer buffering.
+- Add persistent Rust indexing, cloud upload/download grants, private Blob,
+  resumable multipart transfer, versions, trash/restore/retention and mirror
+  reconciliation.
+- Add safe MIME verification, preview/conversion queues, viewer registry and
+  clear local/cloud/mirror conflict states.
+- Exit: an authorized material can be uploaded, resumed, viewed from another
+  paired client, versioned, moved to trash, restored and audited without a path
+  or capability leak.
+
+#### L4 — close Phase 6 as a media and map product slice
+
+- Keep the approved source scope: demo media, stored material and explicitly
+  permitted webcam. Do not make real IP cameras a release dependency; leave
+  RTSP/FFmpeg behind the disabled compatibility switch.
+- Build the remaining custom-player capabilities: production material source
+  selection, tracks/subtitles/quality where available, HLS/LL-HLS handling,
+  markers, annotations, clip export and bounded inactive-feed decoding.
+- Replace browser-local `BroadcastChannel`/storage synchronization with the
+  authenticated L1 `SyncService` transport, group authority, time offset
+  estimation, reconnect and SLO instrumentation.
+- Provision the user-created, origin-restricted Yandex Maps JavaScript API v3
+  key through local/deployment environment configuration; retain the no-key
+  fallback and never extract credentials from a browser profile.
+- Exit: two authorized devices synchronize a permitted media item within the
+  declared LAN/Internet SLOs; all player/map failure modes fall back safely;
+  production map provisioning and observability are verified.
+
+#### L5 — close Phase 7 on top of the finished group services
+
+- Implement safe edit descriptors, floating dock, layout drag-and-drop,
+  resize/animation controls, undo/redo and issue-draft composition without
+  allowing arbitrary HTML, JavaScript or CSS.
+- Add Yjs/Yrs only for approved collaborative documents; keep roles, purge,
+  quotas and leader ordering server-authoritative.
+- Deliver ru/en catalogs, locale expansion tests and confirmed GitHub App
+  issue/translation draft-PR workflows.
+- Deliver real Rust telemetry collectors and an explicitly labelled deterministic
+  simulator with a bounded curve editor.
+- Exit: local and group histories are durable, filterable, reversible and
+  authorized; edit, localization and telemetry tests demonstrate their complete
+  supported contracts.
+
+#### L6 — close Phase 8 and create the only public release
+
+- Implement and test Windows 10/11 native titlebar, drag/resize/hit-test,
+  DPI, Snap/Alt+Space, picker, notifications and recovery behavior.
+- Build and validate the Windows 7–8.1 legacy shell separately, including the
+  documented Base UI compatibility matrix and reduced-effects fallbacks.
+- Provision production Vercel resources after user authentication, execute
+  security/load/accessibility/recovery and clean-machine installer tests, and
+  verify monitoring/diagnostics redaction.
+- Exit: all final matrix gates pass, rollback paths are exercised, installers
+  pass clean-machine smoke tests, and a single `v1.0.0` release is approved.
 
 ## 14. Verification matrix
 
@@ -472,8 +1132,54 @@ Base UI visual acceptance:
 
 This checkpoint closes the modern Phase 2 control migration only. It does not
 claim the WebView2 109 legacy compatibility gate, Vidstack media engine,
-Yandex key provisioning, Protobuf control-plane expansion, material storage,
-group synchronization, interactive editor or release hardening phases.
+Yandex key provisioning, material storage, group
+synchronization, interactive editor or release hardening phases.
+
+### Phase 3 protocol foundation checkpoint — 2026-08-15
+
+- Buf STANDARD lint passes for bridge, common, control, material, settings,
+  sync, telemetry, integration and realtime packages.
+- Protobuf-ES 2.14 generates nine current TypeScript modules; the root
+  `check:protocol-generation` command proves deterministic regeneration by
+  comparing SHA-256 snapshots before and after Buf runs.
+- Protocol contract tests pass as exactly one source test file with four tests:
+  typed binary round trips, exact RPC descriptor sets, server-streaming method
+  semantics and the realtime oneof envelope. Test sources are excluded from
+  `dist`.
+- The existing file bridge retains four passing security/gRPC integration tests
+  after regenerating its stream response types.
+- The Node control-plane has seven test files and eighteen passing tests covering
+  environment validation, typed health/capability discovery, allowed-origin
+  preflight, denied-origin behavior, absence of `/api/health` REST fallback,
+  lazy Neon/Upstash adapters, bounded resume history and binary WebSocket
+  reconnect/replay behavior.
+- `pnpm check` passes across eight workspace packages and still generates 147
+  Next.js pages. `pnpm format:check` also passes.
+
+This checkpoint completes the application Protobuf surface, deterministic
+TypeScript and Rust generation, and a runnable control-plane bootstrap.
+Authentication, Blob access and durable cross-instance sync remain separate
+unfinished Phase 3 gates. The single-process binary reconnect transport is
+implemented, but it is not yet a Vercel production deployment or an
+authenticated pairing endpoint.
+
+### Phase 4 safe personalization checkpoint — 2026-08-15
+
+- `@gremuchaya/settings-schema` exposes render metadata from each setting's
+  existing validator, with unit coverage for enum, bounded-number and category
+  queries. The UI never receives an arbitrary CSS, HTML or JavaScript editor.
+- The terminal Settings screen renders all 32 categories using public Base UI
+  wrappers only. Changing a category instantly swaps to its schema-safe
+  controls; resetting it affects only that category.
+- Exported JSON can be selected through the terminal import action and is
+  rejected if it fails the schema. The file round trip is covered by Playwright.
+- The latest verification passes `settings-schema` unit tests, HQ typecheck and
+  lint, plus 23/23 Chromium scenarios. One 720p scenario locks document and
+  workspace overflow while allowing the settings content pane to scroll.
+
+This is a local draft/catalogue checkpoint, not the final remote
+SettingsService, synchronized history, arbitrary dashboard layout editor or
+complete feature-by-feature application of every option.
 
 ## 15. Rollback policy
 
@@ -487,20 +1193,47 @@ group synchronization, interactive editor or release hardening phases.
 
 ## 16. Change log
 
-| Date       | Change                                                                 | Evidence                                                                                                    |
-| ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 2026-08-15 | Phase 0 baseline captured; plan created before source changes          | baseline hashes and `pnpm` gates above                                                                      |
-| 2026-08-15 | Base UI foundation installed without introducing a second visual theme | exact `@base-ui/react@1.7.0`, `packages/ui/src/primitives`, token-driven `primitives.css`                   |
-| 2026-08-15 | Public terminal wrapper catalog and portal/toast provider completed    | 25 public wrapper modules, client-only entry point and shared provider                                      |
-| 2026-08-15 | Feature import boundary enforced                                       | ESLint restricted imports and `pnpm check:ui-boundary` pass                                                 |
-| 2026-08-15 | First real screen migration completed                                  | `SettingsScreen` controls and `OpsUi` tooltip/drawer use `@gremuchaya/ui/primitives`                        |
-| 2026-08-15 | Hydration mismatch in progress value formatting detected and fixed     | deterministic server/client locale plus browser-console regression test                                     |
-| 2026-08-15 | Modern Base UI visual and behavior contract established                | 14/14 Playwright tests and three 0.5% threshold component snapshots                                         |
-| 2026-08-15 | Aggregate modern-target verification completed                         | `pnpm check`, static desktop export and Cargo tests pass; 147 Next.js routes generated                      |
-| 2026-08-15 | Registry screen migration completed                                    | Files, objects and cases use typed Terminal inputs, selects and buttons with registry E2E coverage          |
-| 2026-08-15 | Global and compatibility shell migration completed                     | titlebar, navigation, windows, scenes, developer gate, explorer and production controls use public wrappers |
-| 2026-08-15 | Native developer prompt removed                                        | Base UI snapshot dialog, focus/inert behavior and portal layering regression test                           |
-| 2026-08-15 | Dialog stacking contract corrected                                     | `--z-dialog` keeps modal portals above feature and developer overlays                                       |
-| 2026-08-15 | Operational screens and surveillance controls migrated                 | overview, map layers, communications, video transport, camera grid and PTZ use Terminal wrappers            |
-| 2026-08-15 | Phase 2 direct-control migration closed                                | zero direct interactive JSX controls outside `packages/ui`; enforced by `check:ui-boundary`                 |
-| 2026-08-15 | Modern Phase 2 verification checkpoint completed                       | 19/19 Playwright, 147-route web/desktop builds, Prettier, rustfmt, Clippy and Cargo tests pass              |
+| Date       | Change                                                                 | Evidence                                                                                                                          |
+| ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-15 | Phase 0 baseline captured; plan created before source changes          | baseline hashes and `pnpm` gates above                                                                                            |
+| 2026-08-15 | Base UI foundation installed without introducing a second visual theme | exact `@base-ui/react@1.7.0`, `packages/ui/src/primitives`, token-driven `primitives.css`                                         |
+| 2026-08-15 | Public terminal wrapper catalog and portal/toast provider completed    | 25 public wrapper modules, client-only entry point and shared provider                                                            |
+| 2026-08-15 | Feature import boundary enforced                                       | ESLint restricted imports and `pnpm check:ui-boundary` pass                                                                       |
+| 2026-08-15 | First real screen migration completed                                  | `SettingsScreen` controls and `OpsUi` tooltip/drawer use `@gremuchaya/ui/primitives`                                              |
+| 2026-08-15 | Hydration mismatch in progress value formatting detected and fixed     | deterministic server/client locale plus browser-console regression test                                                           |
+| 2026-08-15 | Modern Base UI visual and behavior contract established                | 14/14 Playwright tests and three 0.5% threshold component snapshots                                                               |
+| 2026-08-15 | Aggregate modern-target verification completed                         | `pnpm check`, static desktop export and Cargo tests pass; 147 Next.js routes generated                                            |
+| 2026-08-15 | Registry screen migration completed                                    | Files, objects and cases use typed Terminal inputs, selects and buttons with registry E2E coverage                                |
+| 2026-08-15 | Global and compatibility shell migration completed                     | titlebar, navigation, windows, scenes, developer gate, explorer and production controls use public wrappers                       |
+| 2026-08-15 | Native developer prompt removed                                        | Base UI snapshot dialog, focus/inert behavior and portal layering regression test                                                 |
+| 2026-08-15 | Dialog stacking contract corrected                                     | `--z-dialog` keeps modal portals above feature and developer overlays                                                             |
+| 2026-08-15 | Operational screens and surveillance controls migrated                 | overview, map layers, communications, video transport, camera grid and PTZ use Terminal wrappers                                  |
+| 2026-08-15 | Phase 2 direct-control migration closed                                | zero direct interactive JSX controls outside `packages/ui`; enforced by `check:ui-boundary`                                       |
+| 2026-08-15 | Modern Phase 2 verification checkpoint completed                       | 19/19 Playwright, 147-route web/desktop builds, Prettier, rustfmt, Clippy and Cargo tests pass                                    |
+| 2026-08-15 | Versioned application Protobuf surface completed                       | common/control/material/settings/sync/telemetry/integration packages pass Buf STANDARD lint and generation                        |
+| 2026-08-15 | TypeScript protocol contract gate added                                | binary round trips, exact RPC descriptor sets and server-streaming semantics are covered by Vitest                                |
+| 2026-08-15 | Deterministic protocol generation gate added                           | hash-before/generate/hash-after check rejects stale or missing checked-in Protobuf-ES bindings                                    |
+| 2026-08-15 | Node control-plane foundation added                                    | typed health/capabilities, Connect plus binary gRPC-Web, CORS denial and no-REST integration tests pass                           |
+| 2026-08-15 | Rust Protobuf binding generation completed                             | vendored `protoc`, `prost` 0.14.4 and native cross-package binary round-trip test pass                                            |
+| 2026-08-15 | Neon storage foundation and migration ledger added                     | lazy `@neondatabase/serverless` adapter, advisory-locked `0001` schema, checksum-drift and no-network tests                       |
+| 2026-08-15 | Upstash coordination foundation added                                  | lazy presence, lease, sequence and `@upstash/ratelimit` adapters pass deterministic no-network tests                              |
+| 2026-08-15 | Binary realtime reconnect transport added                              | `/realtime` uses generated Protobuf envelopes for hello/resume/replay/resync and passes WebSocket integration tests               |
+| 2026-08-15 | Safe personalization catalogue added                                   | 32 categories render from validator-derived editor metadata; import/export and category reset are browser-tested                  |
+| 2026-08-15 | Phase 4 layout and settings foundations added                          | bounded tile resolver plus schema-validated local personalization draft, resets, publish and JSON export pass unit/build checks   |
+| 2026-08-16 | Opt-in local material-import foundation added                          | bounded binary gRPC-Web import, BLAKE3 content addressing, atomic mirror records, quarantine, dedupe and private `.hq` boundary   |
+| 2026-08-16 | Hidden terminal import UI attached to local bridge                     | Ctrl+Shift+Alt+S dialog streams browser Files, supports cancellation and cursor-paged local registry without page scroll          |
+| 2026-08-16 | Client-side BLAKE3 prehash checkpoint completed                        | module-worker streaming digest plus legacy fallback supplies an expected hash; the bridge independently verifies before commit    |
+| 2026-08-16 | Bounded local material preview checkpoint completed                    | image, PDF, text and ≤32 MiB local audio/video use explicit bounded gRPC-Web reads; unsupported or oversized content is inert     |
+| 2026-08-16 | Vidstack player foundation completed                                   | custom terminal surveillance controls now drive the exact 1.15.6 React media engine without importing its default visual layer    |
+| 2026-08-16 | Yandex Maps JavaScript API v3 adapter added                            | client-only vector `YMap` loader, provider-agnostic terminal overlay, coordinate-safe fallback and a v3 endpoint regression test  |
+| 2026-08-17 | Typed camera registry and bounded grid checkpoint added                | all 16 channels are filterable/sortable and paged 12+4; only the selected feed decodes and gateway URLs remain credential-free    |
+| 2026-08-17 | Native RTSP→HLS gateway foundation added                               | Tauri owns bounded FFmpeg workers, loopback HLS grants, consumer leases and a browser-validated native descriptor boundary        |
+| 2026-08-17 | RTSP worker supervisor and client retry checkpoint added               | stable HLS identity survives FFmpeg exit; bounded jittered backoff, detailed health and cancellation-safe startup retry pass      |
+| 2026-08-17 | Camera source model corrected to demo/material/webcam                  | real cameras are out of scope; webcam is explicit and local-only, while RTSP is a disabled compatibility adapter                  |
+| 2026-08-18 | Local video material assignment added                                  | a channel persists only a validated material UUID; bounded gRPC-Web preview Blob URLs are temporary and safely revoked            |
+| 2026-08-18 | Large local-video Range streaming added                                | gRPC-issued loopback capabilities provide revocable partial-byte playback without path disclosure or full-file buffering          |
+| 2026-08-18 | Browser-local playback synchronization added                           | ordered 40 ms epoch/sequence commands synchronize demo/material playback without serializing local media capabilities             |
+| 2026-08-18 | Current Phase 6 slice validation refreshed (not phase closure)         | root typecheck/lint, 30 Playwright scenarios, all format/boundary gates, and both 147-route web exports now pass                  |
+| 2026-08-18 | Local settings history and reversible draft checkpoints added          | bounded before/after ledger supports undo, redo, filtered pagination and safe load-to-draft without rewriting published history   |
+| 2026-08-18 | Actual phase-state audit and linear closure route added                | Phases 1–2 are closed for the modern target; Phase 0 and Phases 3–7 remain partial; Phase 8 is not started                        |
+| 2026-08-18 | Phase 3 L1 paired-device/realtime checkpoint recorded                  | `c8a0dec`…`24af428`: generated contracts, injected lifecycle, auth schema and admission; 5 protocol + 27 control-plane tests pass |
