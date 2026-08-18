@@ -8,16 +8,30 @@ import { ControlPlaneService, SyncService, controlV1 } from '@gremuchaya/protoco
 import { loadControlPlaneConfig, type ControlPlaneConfig } from './config.js';
 import { attachRealtimeTransport } from './realtime/server.js';
 import type { GroupEventPublication, RealtimeTransportOptions } from './realtime/server.js';
+import {
+  createConfiguredPairedDeviceLifecycle,
+  type ConfiguredPairedDeviceLifecycleOptions,
+} from './sync/configured-lifecycle.js';
 
 const serviceVersion = '0.1.0';
 const protocolVersion = 'gremuchaya.v1';
 
 export interface ControlPlaneStartOptions {
   /**
-   * The paired-device implementation is injected until the durable Neon
-   * repository is wired. Health-only startup never falls back to volatile auth
-   * state, so it remains safe for local development and diagnostics.
+   * Explicit SyncService injection is reserved for health-only/test startup.
+   * Auth-configured startup always constructs the durable lifecycle instead so
+   * it cannot accidentally advertise an in-memory or mismatched auth runtime.
    */
+  readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
+  readonly realtime?: RealtimeTransportOptions;
+  /**
+   * Composition-root seam for deterministic startup tests. It has no effect
+   * unless the complete auth configuration is enabled.
+   */
+  readonly pairedDeviceLifecycle?: ConfiguredPairedDeviceLifecycleOptions;
+}
+
+interface ResolvedControlPlaneCollaborators {
   readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
   readonly realtime?: RealtimeTransportOptions;
 }
@@ -26,18 +40,19 @@ export async function startControlPlane(
   config: ControlPlaneConfig,
   options: ControlPlaneStartOptions = {},
 ) {
+  const collaborators = await resolveControlPlaneCollaborators(config, options);
   const startedAt = timestampNow();
   const rpcHandler = connectNodeAdapter({
     connect: true,
     grpc: false,
     grpcWeb: true,
-    routes: (router) => registerControlPlaneRoutes(router, startedAt, options),
+    routes: (router) => registerControlPlaneRoutes(router, startedAt, collaborators),
   });
   const server = createServer((request, response) => {
     if (!prepareRpcResponse(request, response, config)) return;
     void rpcHandler(request, response);
   });
-  const realtime = attachRealtimeTransport(server, config, options.realtime);
+  const realtime = attachRealtimeTransport(server, config, collaborators.realtime);
 
   await new Promise<void>((resolveListening, rejectListening) => {
     server.once('error', rejectListening);
@@ -59,10 +74,10 @@ export async function startControlPlane(
 function registerControlPlaneRoutes(
   router: ConnectRouter,
   startedAt: ReturnType<typeof timestampNow>,
-  options: ControlPlaneStartOptions,
+  collaborators: ResolvedControlPlaneCollaborators,
 ): void {
-  const pairedDeviceLifecycleEnabled = options.syncService !== undefined;
-  const authenticatedRealtimeEnabled = options.realtime?.admission !== undefined;
+  const pairedDeviceLifecycleEnabled = collaborators.syncService !== undefined;
+  const authenticatedRealtimeEnabled = collaborators.realtime?.admission !== undefined;
   router.service(ControlPlaneService, {
     health() {
       return {
@@ -98,7 +113,51 @@ function registerControlPlaneRoutes(
       };
     },
   });
-  if (options.syncService !== undefined) router.service(SyncService, options.syncService);
+  if (collaborators.syncService !== undefined)
+    router.service(SyncService, collaborators.syncService);
+}
+
+async function resolveControlPlaneCollaborators(
+  config: ControlPlaneConfig,
+  options: ControlPlaneStartOptions,
+): Promise<ResolvedControlPlaneCollaborators> {
+  if (config.auth === undefined) {
+    return {
+      ...(options.syncService === undefined ? {} : { syncService: options.syncService }),
+      ...(options.realtime === undefined ? {} : { realtime: options.realtime }),
+    };
+  }
+  if (options.syncService !== undefined) {
+    throw new Error(
+      'Auth-configured control-plane startup cannot override the durable SyncService lifecycle',
+    );
+  }
+  if (options.realtime?.admission !== undefined) {
+    throw new Error(
+      'Auth-configured control-plane startup cannot override durable realtime admission',
+    );
+  }
+  if (options.realtime?.allowUnauthenticatedDevelopment === true) {
+    throw new Error(
+      'Auth-configured control-plane startup cannot enable unauthenticated realtime transport',
+    );
+  }
+
+  const lifecycle = await createConfiguredPairedDeviceLifecycle(
+    config,
+    options.pairedDeviceLifecycle,
+  );
+  if (lifecycle === undefined) {
+    throw new Error('Auth-configured control-plane startup did not produce a durable lifecycle');
+  }
+
+  return {
+    syncService: lifecycle.syncService,
+    realtime: {
+      ...(options.realtime?.hub === undefined ? {} : { hub: options.realtime.hub }),
+      ...lifecycle.realtime,
+    },
+  };
 }
 
 function prepareRpcResponse(
