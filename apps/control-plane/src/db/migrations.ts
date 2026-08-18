@@ -328,7 +328,75 @@ const initialFoundation: Migration = {
   ],
 };
 
-export const migrations: readonly Migration[] = [initialFoundation];
+/**
+ * Authentication is additive to the immutable 0001 foundation. Every
+ * credential-bearing column stores only a purpose-separated HMAC hash; the
+ * server never persists raw pairing, access, or refresh values.
+ */
+const pairedDeviceAuthentication: Migration = {
+  id: '0002_paired_device_authentication',
+  statements: [
+    sql(
+      'ALTER TABLE pairing_codes ADD COLUMN IF NOT EXISTS consumed_by_device_id uuid REFERENCES devices(id) ON DELETE SET NULL',
+    ),
+    sql('ALTER TABLE pairing_codes ADD COLUMN IF NOT EXISTS revoked_at timestamptz'),
+    sql(
+      "ALTER TABLE pairing_codes ADD COLUMN IF NOT EXISTS hash_version text NOT NULL DEFAULT 'v1'",
+    ),
+    sql(
+      "ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_hash_version text NOT NULL DEFAULT 'v1'",
+    ),
+    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_rotated_at timestamptz'),
+    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS revoked_reason text'),
+    sql(`CREATE TABLE IF NOT EXISTS device_access_tokens (
+      id uuid PRIMARY KEY,
+      session_id uuid NOT NULL REFERENCES device_sessions(id) ON DELETE CASCADE,
+      token_hash text NOT NULL UNIQUE,
+      hash_version text NOT NULL,
+      issued_at timestamptz NOT NULL DEFAULT now(),
+      expires_at timestamptz NOT NULL,
+      last_seen_at timestamptz,
+      revoked_at timestamptz,
+      revoked_reason text,
+      CHECK (expires_at > issued_at)
+    )`),
+    sql(`CREATE TABLE IF NOT EXISTS device_refresh_token_history (
+      token_hash text PRIMARY KEY,
+      session_id uuid NOT NULL REFERENCES device_sessions(id) ON DELETE CASCADE,
+      hash_version text NOT NULL,
+      issued_at timestamptz NOT NULL,
+      expires_at timestamptz NOT NULL,
+      retired_at timestamptz NOT NULL DEFAULT now(),
+      retired_reason text NOT NULL
+        CHECK (retired_reason IN ('ROTATED', 'REVOKED', 'EXPIRED')),
+      replay_detected_at timestamptz,
+      CHECK (expires_at > issued_at)
+    )`),
+    sql(
+      'CREATE INDEX IF NOT EXISTS pairing_codes_active_group_expiry_idx ON pairing_codes (group_id, expires_at) WHERE consumed_at IS NULL AND revoked_at IS NULL',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS device_sessions_active_device_group_idx ON device_sessions (device_id, group_id, expires_at) WHERE revoked_at IS NULL',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS device_access_tokens_active_session_idx ON device_access_tokens (session_id, expires_at) WHERE revoked_at IS NULL',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS device_access_tokens_expiry_idx ON device_access_tokens (expires_at) WHERE revoked_at IS NULL',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS device_refresh_token_history_session_idx ON device_refresh_token_history (session_id, expires_at DESC)',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS group_memberships_active_device_group_idx ON group_memberships (device_id, group_id) WHERE revoked_at IS NULL',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS group_memberships_active_group_role_idx ON group_memberships (group_id, role, device_id) WHERE revoked_at IS NULL',
+    ),
+  ],
+};
+
+export const migrations: readonly Migration[] = [initialFoundation, pairedDeviceAuthentication];
 
 export async function runMigrations(database: SqlClient): Promise<MigrationRunResult> {
   await database.transaction([
