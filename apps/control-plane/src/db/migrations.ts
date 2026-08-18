@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { SqlClient, SqlParameter, SqlStatement } from './database.js';
+import type { SqlClient, SqlParameter, SqlStatement, SqlTransactionResults } from './database.js';
 
 export interface Migration {
   readonly id: string;
@@ -411,8 +411,12 @@ const pairedDeviceReplayAndIntegrity: Migration = {
   statements: [
     sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_token_hash text'),
     sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_hash_version text'),
-    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_expires_at timestamptz'),
-    sql('ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_retired_at timestamptz'),
+    sql(
+      'ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_expires_at timestamptz',
+    ),
+    sql(
+      'ALTER TABLE device_sessions ADD COLUMN IF NOT EXISTS refresh_previous_retired_at timestamptz',
+    ),
     sql(`ALTER TABLE device_sessions
       ADD CONSTRAINT device_sessions_group_membership_fk
       FOREIGN KEY (group_id, device_id)
@@ -446,45 +450,144 @@ export const migrations: readonly Migration[] = [
   pairedDeviceReplayAndIntegrity,
 ];
 
+const migrationOutcomeTable = 'hq_migration_run_outcomes';
+
+/**
+ * Runs the whole immutable migration sequence as one non-interactive
+ * PostgreSQL transaction. The advisory lock deliberately precedes both ledger
+ * creation and every ledger lookup: a process that waits for another startup
+ * must inspect the committed ledger again after it owns the lock, rather than
+ * acting on a stale pre-lock snapshot.
+ *
+ * A transaction-local outcome table gives the existing `applied`/`skipped`
+ * result API precise per-run semantics without a second, unlocked state read.
+ */
 export async function runMigrations(database: SqlClient): Promise<MigrationRunResult> {
-  await database.transaction([
+  const statements = [
+    sql('SELECT pg_advisory_xact_lock($1)', [migrationLockKey]),
     sql(`CREATE TABLE IF NOT EXISTS ${migrationTable} (
       id text PRIMARY KEY,
       checksum text NOT NULL,
       applied_at timestamptz NOT NULL DEFAULT now()
     )`),
-  ]);
+    sql(`CREATE TEMPORARY TABLE ${migrationOutcomeTable} (
+      ordinal integer PRIMARY KEY,
+      id text NOT NULL UNIQUE,
+      applied boolean NOT NULL
+    ) ON COMMIT DROP`),
+    ...migrations.map((migration, ordinal) => lockedMigrationStatement(migration, ordinal)),
+    sql(`SELECT id, applied FROM ${migrationOutcomeTable} ORDER BY ordinal`),
+  ];
 
-  const appliedRows = await database.query<{ id: string; checksum: string }>(
-    sql(`SELECT id, checksum FROM ${migrationTable} ORDER BY id`),
-  );
-  const appliedById = new Map(appliedRows.map((row) => [row.id, row.checksum]));
-  const applied: string[] = [];
-  const skipped: string[] = [];
-
-  for (const migration of migrations) {
-    const checksum = checksumFor(migration);
-    const previousChecksum = appliedById.get(migration.id);
-    if (previousChecksum !== undefined) {
-      if (previousChecksum !== checksum) {
-        throw new Error(`Migration checksum drift detected for ${migration.id}`);
-      }
-      skipped.push(migration.id);
-      continue;
-    }
-
-    await database.transaction([
-      sql('SELECT pg_advisory_xact_lock($1)', [migrationLockKey]),
-      ...migration.statements,
-      sql(
-        `INSERT INTO ${migrationTable} (id, checksum) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
-        [migration.id, checksum],
-      ),
-    ]);
-    applied.push(migration.id);
+  const transactionResults = await database.transaction(statements);
+  const outcomes = readMigrationOutcomes(transactionResults, statements.length - 1);
+  const outcomeById = new Map(outcomes.map((outcome) => [outcome.id, outcome.applied]));
+  if (
+    outcomeById.size !== migrations.length ||
+    migrations.some((migration) => outcomeById.has(migration.id) === false)
+  ) {
+    throw new Error('Migration transaction returned an incomplete outcome set');
   }
 
-  return { applied, skipped };
+  return {
+    applied: migrations
+      .filter((migration) => outcomeById.get(migration.id) === true)
+      .map((migration) => migration.id),
+    skipped: migrations
+      .filter((migration) => outcomeById.get(migration.id) === false)
+      .map((migration) => migration.id),
+  };
+}
+
+/**
+ * PostgreSQL cannot parameterize a sequence of DDL statements inside the
+ * non-interactive Neon transaction API. The migration source is repository
+ * owned and has no parameters, so it is safely inlined into a PL/pgSQL block;
+ * migration metadata remains quoted as SQL literals. The block reads and
+ * writes the ledger only after the surrounding transaction owns the advisory
+ * lock.
+ */
+function lockedMigrationStatement(migration: Migration, ordinal: number): SqlStatement {
+  const checksum = checksumFor(migration);
+  const body = migration.statements.map(inlineMigrationStatement).join('\n');
+  const id = quoteSqlLiteral(migration.id);
+  const expectedChecksum = quoteSqlLiteral(checksum);
+  const driftMessage = quoteSqlLiteral(`Migration checksum drift detected for ${migration.id}`);
+
+  return sql(`DO $hq_migration$
+DECLARE
+  recorded_checksum text;
+BEGIN
+  SELECT checksum
+  INTO recorded_checksum
+  FROM ${migrationTable}
+  WHERE id = ${id};
+
+  IF FOUND THEN
+    IF recorded_checksum <> ${expectedChecksum} THEN
+      RAISE EXCEPTION ${driftMessage};
+    END IF;
+
+    INSERT INTO ${migrationOutcomeTable} (ordinal, id, applied)
+    VALUES (${ordinal}, ${id}, false);
+  ELSE
+${indentSql(body, 4)}
+    INSERT INTO ${migrationTable} (id, checksum) VALUES (${id}, ${expectedChecksum});
+    INSERT INTO ${migrationOutcomeTable} (ordinal, id, applied)
+    VALUES (${ordinal}, ${id}, true);
+  END IF;
+END;
+$hq_migration$;`);
+}
+
+function inlineMigrationStatement(statement: SqlStatement): string {
+  if (statement.values !== undefined && statement.values.length > 0) {
+    throw new Error('Immutable migrations must not contain bound SQL parameters');
+  }
+
+  const text = statement.text.trim();
+  return text.endsWith(';') ? text : `${text};`;
+}
+
+function readMigrationOutcomes(
+  transactionResults: SqlTransactionResults | void,
+  outcomeStatementIndex: number,
+): readonly MigrationOutcome[] {
+  if (transactionResults === undefined) {
+    throw new Error(
+      'Migration runner requires SQL transaction results; update the database adapter to forward them',
+    );
+  }
+
+  const rows = transactionResults[outcomeStatementIndex];
+  if (rows === undefined) {
+    throw new Error('Migration transaction did not return its outcome query result');
+  }
+
+  return rows.map((row) => {
+    if (typeof row.id !== 'string' || typeof row.applied !== 'boolean') {
+      throw new Error('Migration transaction returned an invalid outcome row');
+    }
+
+    return { id: row.id, applied: row.applied };
+  });
+}
+
+interface MigrationOutcome {
+  readonly id: string;
+  readonly applied: boolean;
+}
+
+function indentSql(value: string, spaces: number): string {
+  const prefix = ' '.repeat(spaces);
+  return value
+    .split('\n')
+    .map((line) => (line.length === 0 ? line : `${prefix}${line}`))
+    .join('\n');
+}
+
+function quoteSqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 export function checksumFor(migration: Migration): string {

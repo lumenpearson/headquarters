@@ -7,11 +7,22 @@ export interface SqlStatement {
   readonly values?: readonly SqlParameter[];
 }
 
+/**
+ * Rows returned by a non-interactive SQL transaction, in the same order as
+ * the statements supplied to {@link SqlClient.transaction}.
+ *
+ * `void` remains part of the transaction return contract because adapters
+ * written before result forwarding are still valid for fire-and-forget
+ * callers. Callers that need a transaction-scoped query result must reject a
+ * `void` response explicitly instead of falling back to a separate query.
+ */
+export type SqlTransactionResults = readonly (readonly Record<string, unknown>[])[];
+
 export interface SqlClient {
   query<Row extends Record<string, unknown> = Record<string, unknown>>(
     statement: SqlStatement,
   ): Promise<readonly Row[]>;
-  transaction(statements: readonly SqlStatement[]): Promise<void>;
+  transaction(statements: readonly SqlStatement[]): Promise<SqlTransactionResults | void>;
 }
 
 export type SqlClientFactory = (connectionUrl: string) => SqlClient;
@@ -50,7 +61,7 @@ export class NeonDatabase {
     return this.getClient().query<Row>(statement);
   }
 
-  transaction(statements: readonly SqlStatement[]): Promise<void> {
+  transaction(statements: readonly SqlStatement[]): Promise<SqlTransactionResults | void> {
     return this.getClient().transaction(statements);
   }
 
@@ -75,10 +86,10 @@ function createNeonSqlClient(connectionUrl: string): SqlClient {
     async query<Row extends Record<string, unknown>>({ text, values = [] }: SqlStatement) {
       return (await sql.query(text, [...values])) as readonly Row[];
     },
-    async transaction(statements: readonly SqlStatement[]) {
-      await sql.transaction(
+    async transaction(statements: readonly SqlStatement[]): Promise<SqlTransactionResults> {
+      return (await sql.transaction(
         statements.map(({ text, values = [] }) => sql.query(text, [...values])),
-      );
+      )) as SqlTransactionResults;
     },
   };
 }
