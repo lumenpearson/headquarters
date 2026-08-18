@@ -1,0 +1,226 @@
+syntax = "proto3";
+
+package gremuchaya.telemetry.v1;
+
+import "google/protobuf/timestamp.proto";
+import "gremuchaya/common/v1/common.proto";
+
+enum DataSourceKind {
+  DATA_SOURCE_KIND_UNSPECIFIED = 0;
+  DATA_SOURCE_KIND_CPU = 1;
+  DATA_SOURCE_KIND_MEMORY = 2;
+  DATA_SOURCE_KIND_STORAGE = 3;
+  DATA_SOURCE_KIND_NETWORK = 4;
+  DATA_SOURCE_KIND_GPU = 5;
+  DATA_SOURCE_KIND_TEMPERATURE = 6;
+  DATA_SOURCE_KIND_POWER = 7;
+  DATA_SOURCE_KIND_PROCESS = 8;
+  DATA_SOURCE_KIND_QUEUE = 9;
+  DATA_SOURCE_KIND_SIMULATED = 10;
+}
+
+message DataSource {
+  gremuchaya.common.v1.ResourceId id = 1;
+  string name = 2;
+  DataSourceKind kind = 3;
+  string unit = 4;
+  bool simulated = 5;
+  double warning_threshold = 6;
+  double critical_threshold = 7;
+  map<string, string> labels = 8;
+}
+
+enum TelemetrySeverity {
+  TELEMETRY_SEVERITY_UNSPECIFIED = 0;
+  TELEMETRY_SEVERITY_NORMAL = 1;
+  TELEMETRY_SEVERITY_ELEVATED = 2;
+  TELEMETRY_SEVERITY_DEGRADED = 3;
+  TELEMETRY_SEVERITY_CRITICAL = 4;
+}
+
+message TelemetrySample {
+  gremuchaya.common.v1.ResourceId source_id = 1;
+  double value = 2;
+  string unit = 3;
+  TelemetrySeverity severity = 4;
+  google.protobuf.Timestamp observed_at = 5;
+  map<string, string> labels = 6;
+}
+
+message TelemetrySnapshot {
+  gremuchaya.common.v1.ResourceId device_id = 1;
+  uint64 sequence = 2;
+  repeated TelemetrySample samples = 3;
+  google.protobuf.Timestamp captured_at = 4;
+  bool simulated = 5;
+}
+
+message CurvePoint {
+  double time = 1;
+  double value = 2;
+  double in_tangent = 3;
+  double out_tangent = 4;
+}
+
+enum CurveInterpolation {
+  CURVE_INTERPOLATION_UNSPECIFIED = 0;
+  CURVE_INTERPOLATION_LINEAR = 1;
+  CURVE_INTERPOLATION_BEZIER = 2;
+  CURVE_INTERPOLATION_HERMITE = 3;
+  CURVE_INTERPOLATION_STEP = 4;
+}
+
+message SimulationCurve {
+  repeated CurvePoint points = 1;
+  CurveInterpolation interpolation = 2;
+  bool loop = 3;
+}
+
+message SimulationChannel {
+  gremuchaya.common.v1.ResourceId source_id = 1;
+  double minimum = 2;
+  double maximum = 3;
+  SimulationCurve value_curve = 4;
+  SimulationCurve criticality_curve = 5;
+  double noise = 6;
+  double smoothing = 7;
+  uint64 seed = 8;
+}
+
+enum SimulationPresetKind {
+  SIMULATION_PRESET_KIND_UNSPECIFIED = 0;
+  SIMULATION_PRESET_KIND_NORMAL = 1;
+  SIMULATION_PRESET_KIND_ELEVATED = 2;
+  SIMULATION_PRESET_KIND_DEGRADED = 3;
+  SIMULATION_PRESET_KIND_CRITICAL = 4;
+  SIMULATION_PRESET_KIND_INCIDENT = 5;
+  SIMULATION_PRESET_KIND_RECOVERY = 6;
+  SIMULATION_PRESET_KIND_NETWORK_ATTACK = 7;
+  SIMULATION_PRESET_KIND_STORAGE_EXHAUSTION = 8;
+  SIMULATION_PRESET_KIND_CPU_OVERLOAD = 9;
+  SIMULATION_PRESET_KIND_CUSTOM = 10;
+}
+
+message SimulationProfile {
+  gremuchaya.common.v1.ResourceId id = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  string name = 3;
+  SimulationPresetKind preset_kind = 4;
+  repeated SimulationChannel channels = 5;
+  uint32 period_seconds = 6;
+  uint32 update_interval_ms = 7;
+  double time_scale = 8;
+  gremuchaya.common.v1.Revision revision = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message ListDataSourcesRequest {
+  gremuchaya.common.v1.ResourceId device_id = 1;
+  gremuchaya.common.v1.PageRequest page = 2;
+}
+
+message ListDataSourcesResponse {
+  repeated DataSource sources = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
+message GetTelemetrySnapshotRequest {
+  gremuchaya.common.v1.ResourceId device_id = 1;
+  repeated gremuchaya.common.v1.ResourceId source_ids = 2;
+}
+
+message GetTelemetrySnapshotResponse {
+  TelemetrySnapshot snapshot = 1;
+}
+
+message StreamTelemetryRequest {
+  gremuchaya.common.v1.ResourceId device_id = 1;
+  repeated gremuchaya.common.v1.ResourceId source_ids = 2;
+  uint32 interval_ms = 3;
+  uint64 after_sequence = 4;
+}
+
+message StreamTelemetryResponse {
+  TelemetrySnapshot snapshot = 1;
+}
+
+message ListSimulationProfilesRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  gremuchaya.common.v1.PageRequest page = 2;
+}
+
+message ListSimulationProfilesResponse {
+  repeated SimulationProfile profiles = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
+message CreateSimulationProfileRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SimulationProfile profile = 2;
+}
+
+message CreateSimulationProfileResponse {
+  SimulationProfile profile = 1;
+}
+
+message UpdateSimulationProfileRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SimulationProfile profile = 2;
+}
+
+message UpdateSimulationProfileResponse {
+  SimulationProfile profile = 1;
+}
+
+message DeleteSimulationProfileRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId profile_id = 2;
+}
+
+message DeleteSimulationProfileResponse {
+  gremuchaya.common.v1.OperationResult result = 1;
+}
+
+message ApplySimulationPresetRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  SimulationPresetKind preset = 3;
+}
+
+message ApplySimulationPresetResponse {
+  SimulationProfile profile = 1;
+}
+
+message SetSimulationClockRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId profile_id = 2;
+  bool running = 3;
+  double time_scale = 4;
+  double phase = 5;
+}
+
+message SetSimulationClockResponse {
+  SimulationProfile profile = 1;
+}
+
+message PreviewSimulationProfileRequest {
+  SimulationProfile profile = 1;
+  uint32 sample_count = 2;
+}
+
+message PreviewSimulationProfileResponse {
+  repeated TelemetrySnapshot snapshots = 1;
+}
+
+service TelemetryService {
+  rpc ListDataSources(ListDataSourcesRequest) returns (ListDataSourcesResponse);
+  rpc GetTelemetrySnapshot(GetTelemetrySnapshotRequest) returns (GetTelemetrySnapshotResponse);
+  rpc StreamTelemetry(StreamTelemetryRequest) returns (stream StreamTelemetryResponse);
+  rpc ListSimulationProfiles(ListSimulationProfilesRequest) returns (ListSimulationProfilesResponse);
+  rpc CreateSimulationProfile(CreateSimulationProfileRequest) returns (CreateSimulationProfileResponse);
+  rpc UpdateSimulationProfile(UpdateSimulationProfileRequest) returns (UpdateSimulationProfileResponse);
+  rpc DeleteSimulationProfile(DeleteSimulationProfileRequest) returns (DeleteSimulationProfileResponse);
+  rpc ApplySimulationPreset(ApplySimulationPresetRequest) returns (ApplySimulationPresetResponse);
+  rpc SetSimulationClock(SetSimulationClockRequest) returns (SetSimulationClockResponse);
+  rpc PreviewSimulationProfile(PreviewSimulationProfileRequest) returns (PreviewSimulationProfileResponse);
+}

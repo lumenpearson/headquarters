@@ -13,11 +13,11 @@
     }
   },
   "scripts": {
-    "generate": "buf generate",
+    "generate": "buf generate && node ./scripts/normalize-generated.mjs",
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src && buf lint",
+    "test": "vitest run"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.14.0"

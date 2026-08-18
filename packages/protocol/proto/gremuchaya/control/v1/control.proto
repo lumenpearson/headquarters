@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package gremuchaya.control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message HealthRequest {}
+
+enum ServingStatus {
+  SERVING_STATUS_UNSPECIFIED = 0;
+  SERVING_STATUS_SERVING = 1;
+  SERVING_STATUS_DEGRADED = 2;
+  SERVING_STATUS_NOT_SERVING = 3;
+}
+
+message DependencyHealth {
+  string name = 1;
+  ServingStatus status = 2;
+  uint32 latency_ms = 3;
+  string detail = 4;
+}
+
+message HealthResponse {
+  string service = 1;
+  string version = 2;
+  string protocol_version = 3;
+  ServingStatus status = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp checked_at = 6;
+  repeated DependencyHealth dependencies = 7;
+}
+
+message GetCapabilitiesRequest {}
+
+message Capability {
+  string name = 1;
+  string version = 2;
+  bool enabled = 3;
+}
+
+message GetCapabilitiesResponse {
+  repeated Capability capabilities = 1;
+}
+
+service ControlPlaneService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}

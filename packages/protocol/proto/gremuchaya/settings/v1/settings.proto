@@ -1,0 +1,247 @@
+syntax = "proto3";
+
+package gremuchaya.settings.v1;
+
+import "google/protobuf/timestamp.proto";
+import "gremuchaya/common/v1/common.proto";
+
+enum SettingsScopeType {
+  SETTINGS_SCOPE_TYPE_UNSPECIFIED = 0;
+  SETTINGS_SCOPE_TYPE_FACTORY = 1;
+  SETTINGS_SCOPE_TYPE_THEME = 2;
+  SETTINGS_SCOPE_TYPE_GROUP = 3;
+  SETTINGS_SCOPE_TYPE_DEVICE = 4;
+  SETTINGS_SCOPE_TYPE_LOCAL_DRAFT = 5;
+  SETTINGS_SCOPE_TYPE_SESSION_PREVIEW = 6;
+}
+
+message SettingsScope {
+  SettingsScopeType type = 1;
+  gremuchaya.common.v1.ResourceId resource_id = 2;
+}
+
+enum SettingValueType {
+  SETTING_VALUE_TYPE_UNSPECIFIED = 0;
+  SETTING_VALUE_TYPE_STRING = 1;
+  SETTING_VALUE_TYPE_INTEGER = 2;
+  SETTING_VALUE_TYPE_NUMBER = 3;
+  SETTING_VALUE_TYPE_BOOLEAN = 4;
+  SETTING_VALUE_TYPE_BINARY = 5;
+  SETTING_VALUE_TYPE_STRING_LIST = 6;
+}
+
+message SettingConstraint {
+  double minimum = 1;
+  double maximum = 2;
+  double step = 3;
+  uint32 maximum_length = 4;
+  repeated string allowed_values = 5;
+}
+
+message SettingDescriptor {
+  string path = 1;
+  string category = 2;
+  string localization_key = 3;
+  SettingValueType value_type = 4;
+  gremuchaya.common.v1.SettingValue default_value = 5;
+  SettingConstraint constraint = 6;
+  bool group_sync_allowed = 7;
+  bool requires_restart = 8;
+}
+
+message SettingsSchema {
+  string version = 1;
+  repeated SettingDescriptor settings = 2;
+  repeated string categories = 3;
+}
+
+message SettingsDocument {
+  gremuchaya.common.v1.ResourceId id = 1;
+  SettingsScope scope = 2;
+  map<string, gremuchaya.common.v1.SettingValue> values = 3;
+  gremuchaya.common.v1.Revision revision = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+message SettingsPatchOperation {
+  string path = 1;
+  gremuchaya.common.v1.SettingValue value = 2;
+  bool remove = 3;
+}
+
+message SettingsHistoryEntry {
+  gremuchaya.common.v1.ResourceId id = 1;
+  SettingsScope scope = 2;
+  string category = 3;
+  string element_id = 4;
+  string operation = 5;
+  repeated SettingsPatchOperation patch = 6;
+  gremuchaya.common.v1.Revision revision = 7;
+  gremuchaya.common.v1.ResourceId actor_device_id = 8;
+  google.protobuf.Timestamp occurred_at = 9;
+  string correlation_id = 10;
+}
+
+message GetEffectiveSettingsRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  gremuchaya.common.v1.ResourceId device_id = 2;
+  bool include_draft = 3;
+}
+
+message GetEffectiveSettingsResponse {
+  SettingsDocument document = 1;
+  repeated SettingsScope contributing_scopes = 2;
+}
+
+message GetSettingsSchemaRequest {
+  string version = 1;
+}
+
+message GetSettingsSchemaResponse {
+  SettingsSchema schema = 1;
+}
+
+message ApplyDraftPatchRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+  repeated SettingsPatchOperation operations = 3;
+}
+
+message ApplyDraftPatchResponse {
+  SettingsDocument draft = 1;
+}
+
+message DiscardDraftRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+}
+
+message DiscardDraftResponse {
+  SettingsDocument effective = 1;
+}
+
+message PublishDraftRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+}
+
+message PublishDraftResponse {
+  SettingsDocument published = 1;
+}
+
+message ResetCategoryRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+  string category = 3;
+}
+
+message ResetCategoryResponse {
+  SettingsDocument document = 1;
+}
+
+message ResetElementRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+  string element_id = 3;
+}
+
+message ResetElementResponse {
+  SettingsDocument document = 1;
+}
+
+message ResetAllRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+  string confirmation = 3;
+}
+
+message ResetAllResponse {
+  SettingsDocument document = 1;
+}
+
+message ExportSettingsRequest {
+  SettingsScope scope = 1;
+}
+
+message ExportSettingsResponse {
+  bytes payload = 1;
+  string media_type = 2;
+  string schema_version = 3;
+  string checksum = 4;
+}
+
+message ImportSettingsRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+  bytes payload = 3;
+  string media_type = 4;
+  bool dry_run = 5;
+}
+
+message ImportSettingsResponse {
+  SettingsDocument document = 1;
+  repeated gremuchaya.common.v1.FieldViolation violations = 2;
+}
+
+message RevertSettingsVersionRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+  gremuchaya.common.v1.Revision target_revision = 3;
+}
+
+message RevertSettingsVersionResponse {
+  SettingsDocument document = 1;
+}
+
+message ListSettingsHistoryRequest {
+  SettingsScope scope = 1;
+  gremuchaya.common.v1.PageRequest page = 2;
+}
+
+message ListSettingsHistoryResponse {
+  repeated SettingsHistoryEntry entries = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
+message WatchSettingsRequest {
+  SettingsScope scope = 1;
+  uint64 after_revision = 2;
+}
+
+enum SettingsEventKind {
+  SETTINGS_EVENT_KIND_UNSPECIFIED = 0;
+  SETTINGS_EVENT_KIND_DRAFT_UPDATED = 1;
+  SETTINGS_EVENT_KIND_DRAFT_DISCARDED = 2;
+  SETTINGS_EVENT_KIND_PUBLISHED = 3;
+  SETTINGS_EVENT_KIND_RESET = 4;
+  SETTINGS_EVENT_KIND_REVERTED = 5;
+}
+
+message SettingsEvent {
+  uint64 sequence = 1;
+  SettingsEventKind kind = 2;
+  SettingsScope scope = 3;
+  SettingsDocument document = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+  string correlation_id = 6;
+}
+
+message WatchSettingsResponse {
+  SettingsEvent event = 1;
+}
+
+service SettingsService {
+  rpc GetEffectiveSettings(GetEffectiveSettingsRequest) returns (GetEffectiveSettingsResponse);
+  rpc GetSettingsSchema(GetSettingsSchemaRequest) returns (GetSettingsSchemaResponse);
+  rpc ApplyDraftPatch(ApplyDraftPatchRequest) returns (ApplyDraftPatchResponse);
+  rpc DiscardDraft(DiscardDraftRequest) returns (DiscardDraftResponse);
+  rpc PublishDraft(PublishDraftRequest) returns (PublishDraftResponse);
+  rpc ResetCategory(ResetCategoryRequest) returns (ResetCategoryResponse);
+  rpc ResetElement(ResetElementRequest) returns (ResetElementResponse);
+  rpc ResetAll(ResetAllRequest) returns (ResetAllResponse);
+  rpc ExportSettings(ExportSettingsRequest) returns (ExportSettingsResponse);
+  rpc ImportSettings(ImportSettingsRequest) returns (ImportSettingsResponse);
+  rpc RevertSettingsVersion(RevertSettingsVersionRequest) returns (RevertSettingsVersionResponse);
+  rpc ListSettingsHistory(ListSettingsHistoryRequest) returns (ListSettingsHistoryResponse);
+  rpc WatchSettings(WatchSettingsRequest) returns (stream WatchSettingsResponse);
+}

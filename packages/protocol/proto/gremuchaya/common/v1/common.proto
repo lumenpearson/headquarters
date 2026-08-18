@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package gremuchaya.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message ResourceId {
+  string value = 1;
+}
+
+message Revision {
+  uint64 number = 1;
+  string etag = 2;
+}
+
+message MutationContext {
+  string request_id = 1;
+  string correlation_id = 2;
+  ResourceId actor_device_id = 3;
+  Revision expected_revision = 4;
+  google.protobuf.Timestamp issued_at = 5;
+}
+
+enum SortDirection {
+  SORT_DIRECTION_UNSPECIFIED = 0;
+  SORT_DIRECTION_ASCENDING = 1;
+  SORT_DIRECTION_DESCENDING = 2;
+}
+
+message SortRule {
+  string field = 1;
+  SortDirection direction = 2;
+}
+
+enum FilterOperator {
+  FILTER_OPERATOR_UNSPECIFIED = 0;
+  FILTER_OPERATOR_EQUAL = 1;
+  FILTER_OPERATOR_NOT_EQUAL = 2;
+  FILTER_OPERATOR_CONTAINS = 3;
+  FILTER_OPERATOR_PREFIX = 4;
+  FILTER_OPERATOR_IN = 5;
+  FILTER_OPERATOR_GREATER_THAN = 6;
+  FILTER_OPERATOR_GREATER_THAN_OR_EQUAL = 7;
+  FILTER_OPERATOR_LESS_THAN = 8;
+  FILTER_OPERATOR_LESS_THAN_OR_EQUAL = 9;
+  FILTER_OPERATOR_EXISTS = 10;
+}
+
+enum FilterConjunction {
+  FILTER_CONJUNCTION_UNSPECIFIED = 0;
+  FILTER_CONJUNCTION_ALL = 1;
+  FILTER_CONJUNCTION_ANY = 2;
+}
+
+message FilterPredicate {
+  string field = 1;
+  FilterOperator operator = 2;
+  repeated string values = 3;
+}
+
+message FilterExpression {
+  FilterConjunction conjunction = 1;
+  repeated FilterPredicate predicates = 2;
+}
+
+message PageRequest {
+  uint32 page_size = 1;
+  string cursor = 2;
+  repeated SortRule sort = 3;
+  FilterExpression filter = 4;
+}
+
+message PageInfo {
+  string next_cursor = 1;
+  string previous_cursor = 2;
+  bool has_more = 3;
+  uint64 approximate_total = 4;
+}
+
+message StringList {
+  repeated string values = 1;
+}
+
+message SettingValue {
+  oneof kind {
+    string string_value = 1;
+    sint64 integer_value = 2;
+    double number_value = 3;
+    bool boolean_value = 4;
+    bytes binary_value = 5;
+    StringList string_list = 6;
+  }
+}
+
+message FieldViolation {
+  string field = 1;
+  string reason = 2;
+}
+
+message ErrorDetail {
+  string code = 1;
+  string message = 2;
+  repeated FieldViolation violations = 3;
+  bool retryable = 4;
+  string correlation_id = 5;
+}
+
+message OperationResult {
+  ResourceId resource_id = 1;
+  Revision revision = 2;
+  string correlation_id = 3;
+}
+
+message Empty {}

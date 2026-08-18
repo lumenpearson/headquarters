@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package gremuchaya.realtime.v1;
+
+import "google/protobuf/timestamp.proto";
+import "gremuchaya/common/v1/common.proto";
+import "gremuchaya/sync/v1/sync.proto";
+
+message ClientHello {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  gremuchaya.common.v1.ResourceId device_id = 2;
+  uint64 after_sequence = 3;
+  bytes document_state_vector = 4;
+}
+
+message ClientAck {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  uint64 sequence = 2;
+}
+
+message ClientPing {
+  uint64 client_monotonic_ms = 1;
+}
+
+message RealtimeClientFrame {
+  oneof payload {
+    ClientHello hello = 1;
+    ClientAck ack = 2;
+    ClientPing ping = 3;
+  }
+}
+
+message ServerReady {
+  string connection_id = 1;
+  uint64 resumed_from_sequence = 2;
+  google.protobuf.Timestamp server_time = 3;
+  string protocol_version = 4;
+}
+
+message ResyncRequired {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  uint64 requested_after_sequence = 2;
+  uint64 earliest_available_sequence = 3;
+  string reason = 4;
+}
+
+message ServerPong {
+  uint64 client_monotonic_ms = 1;
+  google.protobuf.Timestamp server_time = 2;
+}
+
+message RealtimeServerFrame {
+  oneof payload {
+    ServerReady ready = 1;
+    gremuchaya.sync.v1.WatchGroupResponse group_event = 2;
+    ResyncRequired resync_required = 3;
+    ServerPong pong = 4;
+    gremuchaya.common.v1.ErrorDetail error = 5;
+  }
+}

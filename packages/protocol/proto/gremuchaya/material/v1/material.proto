@@ -1,0 +1,325 @@
+syntax = "proto3";
+
+package gremuchaya.material.v1;
+
+import "google/protobuf/timestamp.proto";
+import "gremuchaya/common/v1/common.proto";
+
+enum MaterialCategory {
+  MATERIAL_CATEGORY_UNSPECIFIED = 0;
+  MATERIAL_CATEGORY_VIDEO = 1;
+  MATERIAL_CATEGORY_CAMERA = 2;
+  MATERIAL_CATEGORY_IMAGE = 3;
+  MATERIAL_CATEGORY_AUDIO = 4;
+  MATERIAL_CATEGORY_DOCUMENT = 5;
+  MATERIAL_CATEGORY_MAP = 6;
+  MATERIAL_CATEGORY_INTERCEPT = 7;
+  MATERIAL_CATEGORY_DOSSIER = 8;
+  MATERIAL_CATEGORY_REPORT = 9;
+  MATERIAL_CATEGORY_ARCHIVE = 10;
+  MATERIAL_CATEGORY_TECHNICAL = 11;
+  MATERIAL_CATEGORY_OTHER = 12;
+}
+
+enum MaterialStatus {
+  MATERIAL_STATUS_UNSPECIFIED = 0;
+  MATERIAL_STATUS_UPLOADING = 1;
+  MATERIAL_STATUS_PROCESSING = 2;
+  MATERIAL_STATUS_READY = 3;
+  MATERIAL_STATUS_FAILED = 4;
+  MATERIAL_STATUS_TRASHED = 5;
+  MATERIAL_STATUS_QUARANTINED = 6;
+}
+
+message Material {
+  gremuchaya.common.v1.ResourceId id = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  string display_name = 3;
+  MaterialCategory category = 4;
+  string mime_type = 5;
+  uint64 byte_size = 6;
+  string content_hash = 7;
+  MaterialStatus status = 8;
+  gremuchaya.common.v1.ResourceId current_version_id = 9;
+  map<string, string> metadata = 10;
+  repeated string tags = 11;
+  gremuchaya.common.v1.Revision revision = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+  google.protobuf.Timestamp trashed_at = 15;
+}
+
+message MaterialVersion {
+  gremuchaya.common.v1.ResourceId id = 1;
+  gremuchaya.common.v1.ResourceId material_id = 2;
+  uint64 sequence = 3;
+  string content_hash = 4;
+  string mime_type = 5;
+  uint64 byte_size = 6;
+  string original_file_name = 7;
+  google.protobuf.Timestamp created_at = 8;
+  gremuchaya.common.v1.ResourceId created_by_device_id = 9;
+}
+
+enum UploadState {
+  UPLOAD_STATE_UNSPECIFIED = 0;
+  UPLOAD_STATE_PENDING = 1;
+  UPLOAD_STATE_UPLOADING = 2;
+  UPLOAD_STATE_VERIFYING = 3;
+  UPLOAD_STATE_COMPLETED = 4;
+  UPLOAD_STATE_CANCELLED = 5;
+  UPLOAD_STATE_FAILED = 6;
+}
+
+message UploadSession {
+  gremuchaya.common.v1.ResourceId id = 1;
+  gremuchaya.common.v1.ResourceId material_id = 2;
+  gremuchaya.common.v1.ResourceId version_id = 3;
+  UploadState state = 4;
+  uint64 total_size = 5;
+  uint64 received_size = 6;
+  uint32 chunk_size = 7;
+  uint32 max_concurrency = 8;
+  google.protobuf.Timestamp expires_at = 9;
+}
+
+message UploadPartGrant {
+  uint32 part_number = 1;
+  uint64 offset = 2;
+  uint64 length = 3;
+  string upload_url = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  map<string, string> required_headers = 6;
+}
+
+message CompletedUploadPart {
+  uint32 part_number = 1;
+  string etag = 2;
+  string checksum = 3;
+}
+
+message DownloadGrant {
+  string url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  map<string, string> required_headers = 3;
+  string content_hash = 4;
+  uint64 byte_size = 5;
+}
+
+message PreviewGrant {
+  string url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  string mime_type = 3;
+  uint32 width = 4;
+  uint32 height = 5;
+}
+
+message ListMaterialsRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  gremuchaya.common.v1.PageRequest page = 2;
+}
+
+message ListMaterialsResponse {
+  repeated Material materials = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
+message GetMaterialRequest {
+  gremuchaya.common.v1.ResourceId material_id = 1;
+}
+
+message GetMaterialResponse {
+  Material material = 1;
+  MaterialVersion current_version = 2;
+}
+
+message BeginUploadRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  gremuchaya.common.v1.ResourceId material_id = 3;
+  string display_name = 4;
+  string original_file_name = 5;
+  MaterialCategory category = 6;
+  string mime_type = 7;
+  uint64 total_size = 8;
+  string content_hash = 9;
+  map<string, string> metadata = 10;
+}
+
+message BeginUploadResponse {
+  UploadSession session = 1;
+  repeated UploadPartGrant parts = 2;
+  bool deduplicated = 3;
+}
+
+message GetUploadStatusRequest {
+  gremuchaya.common.v1.ResourceId upload_id = 1;
+}
+
+message GetUploadStatusResponse {
+  UploadSession session = 1;
+  repeated uint32 completed_parts = 2;
+}
+
+message CompleteUploadRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId upload_id = 2;
+  repeated CompletedUploadPart parts = 3;
+  string content_hash = 4;
+}
+
+message CompleteUploadResponse {
+  Material material = 1;
+  MaterialVersion version = 2;
+}
+
+message CancelUploadRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId upload_id = 2;
+}
+
+message CancelUploadResponse {
+  gremuchaya.common.v1.OperationResult result = 1;
+}
+
+message CreateMaterialVersionRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId material_id = 2;
+  string original_file_name = 3;
+  string mime_type = 4;
+  uint64 total_size = 5;
+  string content_hash = 6;
+}
+
+message CreateMaterialVersionResponse {
+  UploadSession session = 1;
+  repeated UploadPartGrant parts = 2;
+}
+
+message UpdateMaterialMetadataRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId material_id = 2;
+  string display_name = 3;
+  MaterialCategory category = 4;
+  map<string, string> metadata = 5;
+  repeated string tags = 6;
+}
+
+message UpdateMaterialMetadataResponse {
+  Material material = 1;
+}
+
+message MoveToTrashRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId material_id = 2;
+}
+
+message MoveToTrashResponse {
+  Material material = 1;
+}
+
+message RestoreMaterialRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId material_id = 2;
+}
+
+message RestoreMaterialResponse {
+  Material material = 1;
+}
+
+message PurgeMaterialRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId material_id = 2;
+  string confirmation = 3;
+}
+
+message PurgeMaterialResponse {
+  gremuchaya.common.v1.OperationResult result = 1;
+}
+
+message GetDownloadGrantRequest {
+  gremuchaya.common.v1.ResourceId material_id = 1;
+  gremuchaya.common.v1.ResourceId version_id = 2;
+}
+
+message GetDownloadGrantResponse {
+  DownloadGrant grant = 1;
+}
+
+message GetPreviewGrantRequest {
+  gremuchaya.common.v1.ResourceId material_id = 1;
+  gremuchaya.common.v1.ResourceId version_id = 2;
+  string variant = 3;
+}
+
+message GetPreviewGrantResponse {
+  PreviewGrant grant = 1;
+}
+
+message ListVersionsRequest {
+  gremuchaya.common.v1.ResourceId material_id = 1;
+  gremuchaya.common.v1.PageRequest page = 2;
+}
+
+message ListVersionsResponse {
+  repeated MaterialVersion versions = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
+message ListTrashRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  gremuchaya.common.v1.PageRequest page = 2;
+}
+
+message ListTrashResponse {
+  repeated Material materials = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
+enum MaterialEventKind {
+  MATERIAL_EVENT_KIND_UNSPECIFIED = 0;
+  MATERIAL_EVENT_KIND_CREATED = 1;
+  MATERIAL_EVENT_KIND_UPDATED = 2;
+  MATERIAL_EVENT_KIND_VERSION_ADDED = 3;
+  MATERIAL_EVENT_KIND_TRASHED = 4;
+  MATERIAL_EVENT_KIND_RESTORED = 5;
+  MATERIAL_EVENT_KIND_PURGED = 6;
+  MATERIAL_EVENT_KIND_CONVERSION_UPDATED = 7;
+}
+
+message WatchMaterialEventsRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  uint64 after_sequence = 2;
+}
+
+message MaterialEvent {
+  uint64 sequence = 1;
+  MaterialEventKind kind = 2;
+  gremuchaya.common.v1.ResourceId material_id = 3;
+  gremuchaya.common.v1.Revision revision = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+  string correlation_id = 6;
+}
+
+message WatchMaterialEventsResponse {
+  MaterialEvent event = 1;
+}
+
+service MaterialService {
+  rpc ListMaterials(ListMaterialsRequest) returns (ListMaterialsResponse);
+  rpc GetMaterial(GetMaterialRequest) returns (GetMaterialResponse);
+  rpc BeginUpload(BeginUploadRequest) returns (BeginUploadResponse);
+  rpc GetUploadStatus(GetUploadStatusRequest) returns (GetUploadStatusResponse);
+  rpc CompleteUpload(CompleteUploadRequest) returns (CompleteUploadResponse);
+  rpc CancelUpload(CancelUploadRequest) returns (CancelUploadResponse);
+  rpc CreateMaterialVersion(CreateMaterialVersionRequest) returns (CreateMaterialVersionResponse);
+  rpc UpdateMaterialMetadata(UpdateMaterialMetadataRequest) returns (UpdateMaterialMetadataResponse);
+  rpc MoveToTrash(MoveToTrashRequest) returns (MoveToTrashResponse);
+  rpc RestoreMaterial(RestoreMaterialRequest) returns (RestoreMaterialResponse);
+  rpc PurgeMaterial(PurgeMaterialRequest) returns (PurgeMaterialResponse);
+  rpc GetDownloadGrant(GetDownloadGrantRequest) returns (GetDownloadGrantResponse);
+  rpc GetPreviewGrant(GetPreviewGrantRequest) returns (GetPreviewGrantResponse);
+  rpc ListVersions(ListVersionsRequest) returns (ListVersionsResponse);
+  rpc ListTrash(ListTrashRequest) returns (ListTrashResponse);
+  rpc WatchMaterialEvents(WatchMaterialEventsRequest) returns (stream WatchMaterialEventsResponse);
+}
