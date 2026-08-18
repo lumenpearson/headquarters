@@ -7,7 +7,7 @@ import { ControlPlaneService, SyncService, controlV1 } from '@gremuchaya/protoco
 
 import { loadControlPlaneConfig, type ControlPlaneConfig } from './config.js';
 import { attachRealtimeTransport } from './realtime/server.js';
-import type { GroupEventPublication } from './realtime/server.js';
+import type { GroupEventPublication, RealtimeTransportOptions } from './realtime/server.js';
 
 const serviceVersion = '0.1.0';
 const protocolVersion = 'gremuchaya.v1';
@@ -19,6 +19,7 @@ export interface ControlPlaneStartOptions {
    * state, so it remains safe for local development and diagnostics.
    */
   readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
+  readonly realtime?: RealtimeTransportOptions;
 }
 
 export async function startControlPlane(
@@ -36,7 +37,7 @@ export async function startControlPlane(
     if (!prepareRpcResponse(request, response, config)) return;
     void rpcHandler(request, response);
   });
-  const realtime = attachRealtimeTransport(server, config);
+  const realtime = attachRealtimeTransport(server, config, options.realtime);
 
   await new Promise<void>((resolveListening, rejectListening) => {
     server.once('error', rejectListening);
@@ -61,6 +62,7 @@ function registerControlPlaneRoutes(
   options: ControlPlaneStartOptions,
 ): void {
   const pairedDeviceLifecycleEnabled = options.syncService !== undefined;
+  const authenticatedRealtimeEnabled = options.realtime?.admission !== undefined;
   router.service(ControlPlaneService, {
     health() {
       return {
@@ -86,6 +88,7 @@ function registerControlPlaneRoutes(
             version: 'v1',
             enabled: pairedDeviceLifecycleEnabled,
           },
+          { name: 'sync.realtime-admission', version: 'v1', enabled: authenticatedRealtimeEnabled },
           // The complete CRDT/event/presence synchronization surface is still
           // intentionally unavailable even when device lifecycle is injected.
           { name: 'sync', version: 'v1', enabled: false },
