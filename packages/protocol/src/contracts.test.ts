@@ -11,6 +11,7 @@ import {
   SyncService,
   TelemetryService,
   realtimeV1,
+  syncV1,
 } from './index.js';
 
 describe('versioned Protobuf contracts', () => {
@@ -76,6 +77,7 @@ describe('versioned Protobuf contracts', () => {
       'PairDevice',
       'PublishDocumentDelta',
       'PublishSessionCommand',
+      'RefreshDeviceSession',
       'RevokeDevice',
       'SetAuthorityMode',
       'SetDeviceRole',
@@ -107,6 +109,28 @@ describe('versioned Protobuf contracts', () => {
     ]);
   });
 
+  it('keeps opaque device sessions inside bootstrap, pairing and refresh contracts', () => {
+    const session = create(syncV1.DeviceSessionSchema, {
+      accessToken: 'opaque-access-token',
+      refreshToken: 'opaque-refresh-token',
+      deviceId: { value: 'dev_01jbxn3r8vqf12tkr6g7ndz9wq' },
+      groupId: { value: 'grp_01jbxn3r8vqf12tkr6g7ndz9wq' },
+      role: syncV1.DeviceRole.EDITOR,
+    });
+
+    const roundTripped = fromBinary(
+      syncV1.DeviceSessionSchema,
+      toBinary(syncV1.DeviceSessionSchema, session),
+    );
+
+    expect(roundTripped).toEqual(session);
+    expect(SyncService.method.refreshDeviceSession.input).toBe(
+      syncV1.RefreshDeviceSessionRequestSchema,
+    );
+    expect(SyncService.method.refreshDeviceSession.output).toBe(
+      syncV1.RefreshDeviceSessionResponseSchema,
+    );
+  });
   it('marks realtime watchers as server-streaming RPCs', () => {
     expect(MaterialService.method.watchMaterialEvents.methodKind).toBe('server_streaming');
     expect(SettingsService.method.watchSettings.methodKind).toBe('server_streaming');

@@ -46,6 +46,18 @@ message Device {
   google.protobuf.Timestamp last_seen_at = 8;
 }
 
+// Opaque credentials are intentionally returned only by bootstrap, pairing and
+// refresh responses. They must never be persisted in UI state, URLs or logs.
+message DeviceSession {
+  string access_token = 1;
+  string refresh_token = 2;
+  google.protobuf.Timestamp access_token_expires_at = 3;
+  google.protobuf.Timestamp refresh_token_expires_at = 4;
+  gremuchaya.common.v1.ResourceId device_id = 5;
+  gremuchaya.common.v1.ResourceId group_id = 6;
+  DeviceRole role = 7;
+}
+
 message PairingCode {
   string code = 1;
   gremuchaya.common.v1.ResourceId group_id = 2;
@@ -72,6 +84,7 @@ message CreateGroupRequest {
 message CreateGroupResponse {
   Group group = 1;
   Device device = 2;
+  DeviceSession session = 3;
 }
 
 message UpdateGroupRequest {
@@ -105,9 +118,18 @@ message PairDeviceRequest {
 message PairDeviceResponse {
   Group group = 1;
   Device device = 2;
-  string access_token = 3;
-  string refresh_token = 4;
-  google.protobuf.Timestamp access_token_expires_at = 5;
+  string access_token = 3 [deprecated = true];
+  string refresh_token = 4 [deprecated = true];
+  google.protobuf.Timestamp access_token_expires_at = 5 [deprecated = true];
+  DeviceSession session = 6;
+}
+
+message RefreshDeviceSessionRequest {
+  string refresh_token = 1;
+}
+
+message RefreshDeviceSessionResponse {
+  DeviceSession session = 1;
 }
 
 message ListDevicesRequest {
@@ -292,6 +314,7 @@ service SyncService {
   rpc UpdateGroup(UpdateGroupRequest) returns (UpdateGroupResponse);
   rpc CreatePairingCode(CreatePairingCodeRequest) returns (CreatePairingCodeResponse);
   rpc PairDevice(PairDeviceRequest) returns (PairDeviceResponse);
+  rpc RefreshDeviceSession(RefreshDeviceSessionRequest) returns (RefreshDeviceSessionResponse);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
   rpc RevokeDevice(RevokeDeviceRequest) returns (RevokeDeviceResponse);
   rpc JoinGroup(JoinGroupRequest) returns (JoinGroupResponse);
