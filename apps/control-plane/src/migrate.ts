@@ -1,6 +1,6 @@
-import { loadControlPlaneConfig } from './config.js'
-import { createNeonDatabase } from './db/database.js'
-import { runMigrations } from './db/migrations.js'
+import { loadControlPlaneConfig } from './config.js';
+import { createNeonDatabase } from './db/database.js';
+import { runMigrations } from './db/migrations.js';
 
 const config = loadControlPlaneConfig();
 const database = createNeonDatabase(config.databaseUrl);

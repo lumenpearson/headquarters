@@ -1,11 +1,11 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createNeonDatabase, type SqlClient } from './db/database.js'
-import { migrations, runMigrations } from './db/migrations.js'
-import { DurablePairedDeviceRuntime } from './sync/durable-runtime.js'
-import type { AuthenticatedDevice } from './sync/runtime.js'
+import { createNeonDatabase, type SqlClient } from './db/database.js';
+import { migrations, runMigrations } from './db/migrations.js';
+import { DurablePairedDeviceRuntime } from './sync/durable-runtime.js';
+import type { AuthenticatedDevice } from './sync/runtime.js';
 
 /**
  * Real PostgreSQL proof for the durable paired-device lifecycle.

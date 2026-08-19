@@ -1,3 +1,4 @@
+# --- Dependencies and build output ---
 node_modules/
 .next/
 out/
@@ -12,14 +13,53 @@ apps/hq/src-tauri/gen/
 apps/hq/src-tauri/.cargo/
 *.pdb
 *.log
+
+# --- Operating system ---
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# --- Secrets and per-machine configuration ---
+# Never commit a real environment file. Only *.example files are tracked, so a
+# stray `.env` cannot leak deployment credentials.
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Local runtime overrides: these carry real shoot-machine mount paths and keys.
 apps/hq/public/config/project.override.json
 apps/hq/public/config/bridge.local.json
 apps/hq/public/runtime/project.override.json
 apps/hq/src-tauri/media-gateway.config.local.json
+apps/file-bridge/bridge.config.json
+*.local.json
+!*.example.json
+
+# Production material mirror stays local to the machine.
 shared/materials/*
 !shared/materials/.gitkeep
-.env*.local
-!.env.example
-!**/.env.example
+
+# --- Tooling and editors ---
+.husky/_/
+.vercel/
+.idea/
+*.swp
+*.swo
+
+# Keep shared editor recommendations, ignore personal workspace state.
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+
+# --- Agent and assistant local state ---
+.claude/settings.local.json
+.codex/
+.aider*
+
+# --- Scratch files ---
+.tmp-*
+*.tmp
+*.bak
+*.orig
+*.rej
