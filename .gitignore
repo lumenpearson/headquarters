@@ -47,10 +47,12 @@ shared/materials/*
 *.swp
 *.swo
 
-# Keep shared editor recommendations, ignore personal workspace state.
+# Keep the shared workspace configuration, ignore personal editor state.
+# settings.json is tracked on purpose: it overrides user-level formatting that
+# would otherwise rewrite files against the committed Prettier config.
 .vscode/*
 !.vscode/extensions.json
-!.vscode/settings.shared.json
+!.vscode/settings.json
 
 # --- Agent and assistant local state ---
 .claude/settings.local.json
