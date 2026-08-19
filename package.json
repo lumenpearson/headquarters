@@ -33,7 +33,20 @@
     "clean:build": "turbo run build --force",
     "tauri": "pnpm --filter @gremuchaya/hq tauri",
     "tauri:dev": "pnpm --filter @gremuchaya/hq tauri dev",
-    "tauri:build": "pnpm --filter @gremuchaya/hq tauri build"
+    "tauri:build": "pnpm --filter @gremuchaya/hq tauri build",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mts,cts}": [
+      "prettier --write",
+      "eslint --fix --max-warnings=0"
+    ],
+    "*.{js,jsx,mjs,cjs,json,jsonc,css,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.rs": [
+      "rustfmt --edition 2021"
+    ]
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",
@@ -41,6 +54,8 @@
     "cross-env": "10.1.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.1",
+    "husky": "9.1.7",
+    "lint-staged": "17.3.0",
     "prettier": "3.9.6",
     "turbo": "2.10.10",
     "typescript": "6.0.3",
