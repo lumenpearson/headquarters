@@ -1,0 +1,120 @@
+name: Отчёт об ошибке
+description: Сообщить о некорректном поведении приложения, моста или control-plane
+title: 'fix: '
+labels: ['bug', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт. Пожалуйста, **не публикуйте** реальные пути к файлам съёмочных
+        машин, ключи API, токены и строки подключения — замените их на `<redacted>`.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Перед отправкой
+      options:
+        - label: Я проверил, что похожий issue ещё не заведён
+          required: true
+        - label: Я убедился, что в отчёте нет секретов, ключей и реальных путей
+          required: true
+        - label: Я проверил `docs/release/known-limitations.md` — это не известное ограничение
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Подсистема
+      description: Где воспроизводится проблема
+      options:
+        - apps/hq — интерфейс оператора
+        - apps/hq/src-tauri — нативный слой Tauri
+        - apps/file-bridge — локальный файловый мост
+        - apps/control-plane — сетевой control-plane
+        - packages/ui — терминальные примитивы
+        - packages/layout-engine — раскладка плиток
+        - packages/settings-schema — настройки
+        - packages/protocol — Protobuf-контракты
+        - Другое / не знаю
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Сборка
+      options:
+        - Web (`pnpm dev:hq`)
+        - Desktop Tauri (dev)
+        - Desktop Tauri (NSIS-установщик)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло
+      description: Фактическое поведение
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что ожидалось
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: route
+    attributes:
+      label: Маршрут
+      description: Например `/video/`, `/screen/wall-center/`, `/scene/s02-58/`
+      placeholder: /overview/
+
+  - type: input
+    id: viewport
+    attributes:
+      label: Разрешение и масштаб
+      description: Раскладка детерминирована, поэтому это важно
+      placeholder: 1920x1080, масштаб 100%
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Окружение
+      description: Вывод `node -v`, `pnpm -v`, версия ОС; для Rust — `cargo -V`
+      render: text
+      placeholder: |
+        node: v24.3.0
+        pnpm: 10.12.3
+        OS: Windows 11 Pro 23H2
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи и вывод проверок
+      description: Консоль браузера, вывод моста/control-plane или упавшая команда. Секреты замените на `<redacted>`.
+      render: shell
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Это регрессия?
+      options:
+        - Не знаю
+        - Да, раньше работало
+        - Нет, не работало никогда

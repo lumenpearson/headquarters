@@ -1,0 +1,27 @@
+# Владельцы кода назначаются рецензентами автоматически.
+# Синтаксис: https://docs.github.com/articles/about-code-owners
+
+* @lumenpearson
+
+# Контракты и границы: изменения здесь ломают сразу несколько пакетов.
+/packages/protocol/          @lumenpearson
+/packages/ui/                @lumenpearson
+/scripts/                    @lumenpearson
+
+# Слои с моделью безопасности.
+/apps/control-plane/         @lumenpearson
+/apps/file-bridge/           @lumenpearson
+/apps/hq/src-tauri/          @lumenpearson
+
+# Архитектурные решения, план и релизные процедуры.
+/docs/adr/                   @lumenpearson
+/docs/plans/                 @lumenpearson
+/docs/release/               @lumenpearson
+
+# Настройки репозитория и автоматизация.
+/.github/                    @lumenpearson
+/.husky/                     @lumenpearson
+/.agents/                    @lumenpearson
+/.gitattributes              @lumenpearson
+/CODE_OF_CONDUCT.md          @lumenpearson
+/CONTRIBUTING.md             @lumenpearson
