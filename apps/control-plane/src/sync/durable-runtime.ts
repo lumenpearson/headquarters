@@ -77,6 +77,7 @@ type LifecycleRow = Record<string, unknown> & {
   readonly device_last_seen_at?: unknown;
   readonly role?: unknown;
   readonly session_id?: unknown;
+  readonly access_token_id?: unknown;
   readonly access_token_expires_at?: unknown;
   readonly refresh_token_expires_at?: unknown;
   readonly pairing_group_id?: unknown;
@@ -260,6 +261,14 @@ export class DurablePairedDeviceRuntime {
     return this.toCreatedLifecycle(row, session);
   }
 
+  /**
+   * A pairing code is bound to the exact session and access token that
+   * requested it, not only to the issuing device: `authorized_actor` locks
+   * and re-validates that live session/access-token pair before the insert,
+   * and `pairDevice` repeats the same check at redemption. This keeps a code
+   * from outliving the credential that created it, matching the in-memory
+   * `PairedDeviceRuntime.requireActivePairingIssuer` contract.
+   */
   async createPairingCode(
     authenticated: AuthenticatedDevice,
     groupId: string,
@@ -296,17 +305,29 @@ export class DurablePairedDeviceRuntime {
            FROM group_memberships AS membership
            JOIN devices AS device ON device.id = membership.device_id
            JOIN locked_group ON locked_group.id = membership.group_id
+           JOIN device_sessions AS issuer_session
+             ON issuer_session.id = $8
+            AND issuer_session.device_id = membership.device_id
+            AND issuer_session.group_id = membership.group_id
+            AND issuer_session.revoked_at IS NULL
+            AND issuer_session.expires_at > $6
+           JOIN device_access_tokens AS issuer_access_token
+             ON issuer_access_token.id = $9
+            AND issuer_access_token.session_id = issuer_session.id
+            AND issuer_access_token.revoked_at IS NULL
+            AND issuer_access_token.expires_at > $6
            WHERE membership.device_id = $5
              AND membership.revoked_at IS NULL
              AND device.status <> 'REVOKED'
              AND membership.role = 'ADMIN'
-           FOR UPDATE OF membership, device
+           FOR UPDATE OF membership, device, issuer_session, issuer_access_token
          ),
          issued_pairing_code AS (
            INSERT INTO pairing_codes (
-             code_hash, group_id, role, expires_at, created_by_device_id, created_at, hash_version
+             code_hash, group_id, role, expires_at, created_by_device_id, created_at, hash_version,
+             created_by_session_id, created_by_access_token_id
            )
-           SELECT $1, $2, $3, $4, $5, $6, $7
+           SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
            WHERE EXISTS (SELECT 1 FROM authorized_actor)
            RETURNING group_id, role, expires_at
          )
@@ -323,6 +344,8 @@ export class DurablePairedDeviceRuntime {
           authenticated.device.id,
           now,
           this.#tokenHashVersion,
+          authenticated.sessionId,
+          authenticated.accessTokenId,
         ],
       ),
     );
@@ -374,7 +397,9 @@ export class DurablePairedDeviceRuntime {
              pairing_code.code_hash,
              pairing_code.group_id,
              pairing_code.role,
-             pairing_code.created_by_device_id
+             pairing_code.created_by_device_id,
+             pairing_code.created_by_session_id,
+             pairing_code.created_by_access_token_id
            FROM pairing_codes AS pairing_code
            JOIN locked_group ON locked_group.id = pairing_code.group_id
            WHERE pairing_code.code_hash = $1
@@ -391,10 +416,27 @@ export class DurablePairedDeviceRuntime {
            JOIN locked_pairing_code
              ON locked_pairing_code.group_id = membership.group_id
             AND locked_pairing_code.created_by_device_id = membership.device_id
+           -- The issuer's session and access token must still be the live
+           -- credential that created this code: a NULL binding (legacy row)
+           -- or a retired one (rotated, replayed, or revoked) never matches,
+           -- so redemption fails closed instead of trusting device membership
+           -- alone.
+           JOIN device_sessions AS issuer_session
+             ON issuer_session.id = locked_pairing_code.created_by_session_id
+            AND issuer_session.device_id = membership.device_id
+            AND issuer_session.group_id = membership.group_id
+            AND issuer_session.revoked_at IS NULL
+            AND issuer_session.expires_at > $3
+           JOIN device_access_tokens AS issuer_access_token
+             ON issuer_access_token.id = locked_pairing_code.created_by_access_token_id
+            AND issuer_access_token.session_id = issuer_session.id
+            AND issuer_access_token.revoked_at IS NULL
+            AND issuer_access_token.expires_at > $3
            WHERE membership.revoked_at IS NULL
              AND creator_device.status <> 'REVOKED'
-           FOR UPDATE OF membership, creator_device
-         ),         valid_pairing_code AS (
+           FOR UPDATE OF membership, creator_device, issuer_session, issuer_access_token
+         ),
+         valid_pairing_code AS (
            SELECT
              locked_pairing_code.code_hash,
              locked_pairing_code.group_id,
@@ -786,7 +828,8 @@ export class DurablePairedDeviceRuntime {
              devices.created_at AS device_created_at,
              $3 AS device_last_seen_at,
              membership.role AS role,
-             session.id AS session_id
+             session.id AS session_id,
+             access_token.id AS access_token_id
          )
          SELECT * FROM authenticated_access_token`,
         [this.hashToken('access', token), this.#tokenHashVersion, now],
@@ -804,6 +847,7 @@ export class DurablePairedDeviceRuntime {
       device: toDevice(row),
       role: readRole(row.role),
       sessionId: readText(row.session_id, 'session_id'),
+      accessTokenId: readText(row.access_token_id, 'access_token_id'),
     };
   }
 

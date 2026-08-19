@@ -73,10 +73,31 @@ describe('durable paired-device lifecycle adapter', () => {
     const redeemStatement = database.queries[1];
     expect(issueStatement.text).toContain('WITH locked_group AS MATERIALIZED');
     expect(issueStatement.text).toContain('authorized_actor AS MATERIALIZED');
+    // Issuance locks and re-validates the exact live session/access-token
+    // pair that authenticated the caller, not merely the device.
+    expect(issueStatement.text).toContain('JOIN device_sessions AS issuer_session');
+    expect(issueStatement.text).toContain('JOIN device_access_tokens AS issuer_access_token');
+    expect(issueStatement.text).toContain('created_by_session_id, created_by_access_token_id');
+    expect(issueStatement.values).toContain(authenticatedAdmin().sessionId);
+    expect(issueStatement.values).toContain(authenticatedAdmin().accessTokenId);
     expect(redeemStatement.text).toContain('pairing_candidate AS MATERIALIZED');
     expect(redeemStatement.text).toContain('locked_group AS MATERIALIZED');
     expect(redeemStatement.text).toContain('locked_pairing_code AS MATERIALIZED');
     expect(redeemStatement.text).toContain('active_code_creator AS MATERIALIZED');
+    // Redemption fails closed unless the issuer's session and access token are
+    // still the exact, unrevoked credential that created the code: refresh
+    // rotation, replay revocation, or a NULL legacy binding all remove the
+    // match instead of falling back to device-only authority.
+    expect(redeemStatement.text).toContain('JOIN device_sessions AS issuer_session');
+    expect(redeemStatement.text).toContain('JOIN device_access_tokens AS issuer_access_token');
+    expect(redeemStatement.text).toContain(
+      'issuer_session.id = locked_pairing_code.created_by_session_id',
+    );
+    expect(redeemStatement.text).toContain(
+      'issuer_access_token.id = locked_pairing_code.created_by_access_token_id',
+    );
+    expect(redeemStatement.text).toContain('issuer_session.revoked_at IS NULL');
+    expect(redeemStatement.text).toContain('issuer_access_token.revoked_at IS NULL');
     expect(redeemStatement.text).toContain('FOR UPDATE');
     expect(redeemStatement.text).toContain('consumed_by_device_id');
     expect(redeemStatement.text).toContain('INSERT INTO group_memberships');
@@ -84,6 +105,39 @@ describe('durable paired-device lifecycle adapter', () => {
     expect(redeemStatement.text).toContain('SET revision = groups.revision + 1');
     expectCredentialIsNeverPersisted(issueStatement, grant.code);
     expectCredentialIsNeverPersisted(redeemStatement, grant.code);
+  });
+
+  it('does not issue a pairing code when the authenticated session or access token has gone stale', async () => {
+    const database = new ScriptedSqlClient([[]]);
+    const runtime = createRuntime(database);
+
+    await expect(
+      runtime.createPairingCode(authenticatedAdmin(), groupId, 'EDITOR'),
+    ).rejects.toMatchObject({
+      name: 'PairedDeviceRuntimeError',
+      code: 'PERMISSION_DENIED',
+    });
+
+    expect(database.queries).toHaveLength(1);
+    expect(database.queries[0].text).toContain('WHERE EXISTS (SELECT 1 FROM authorized_actor)');
+  });
+
+  it('rejects redemption when the pairing code exists but its issuer session/access-token binding is absent', async () => {
+    const database = new ScriptedSqlClient([[]]);
+    const runtime = createRuntime(database);
+
+    await expect(
+      runtime.pairDevice({
+        pairingCode: 'hq_pair_stale-or-legacy-code',
+        ...deviceInput('HQ analyst', 'ed25519:analyst'),
+      }),
+    ).rejects.toMatchObject({
+      name: 'PairedDeviceRuntimeError',
+      code: 'UNAUTHENTICATED',
+      message: expect.stringContaining('pairing code is invalid'),
+    });
+
+    expect(database.queries).toHaveLength(1);
   });
 
   it('rotates refresh credentials with same-row replay detection and shared revocation locks', async () => {
@@ -365,6 +419,7 @@ function authenticatedAdmin(): AuthenticatedDevice {
     ),
     role: 'ADMIN',
     sessionId: '018b2a02-0000-7000-8000-000000000010',
+    accessTokenId: '018b2a02-0000-7000-8000-000000000011',
   };
 }
 
@@ -373,6 +428,7 @@ function lifecycleRow(overrides: Record<string, unknown> = {}): Record<string, u
     ...groupRow(),
     ...deviceRow({ device_id: ownerDeviceId, device_name: 'HQ primary', role: 'ADMIN' }),
     session_id: '018b2a02-0000-7000-8000-000000000010',
+    access_token_id: '018b2a02-0000-7000-8000-000000000011',
     access_token_expires_at: new Date('2026-08-18T09:15:00.000Z'),
     refresh_token_expires_at: new Date('2026-09-17T09:00:00.000Z'),
     ...overrides,

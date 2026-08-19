@@ -77,6 +77,7 @@ describe('configured paired-device lifecycle', () => {
         device: created.device,
         role: created.device.role,
         sessionId: '018b2a02-0000-7000-8000-000000000003',
+        accessTokenId: '018b2a02-0000-7000-8000-000000000004',
       },
       created.group.id,
       'EDITOR',

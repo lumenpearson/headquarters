@@ -38,6 +38,7 @@ describe('control-plane migrations', () => {
         '0001_control_plane_foundation',
         '0002_paired_device_authentication',
         '0003_paired_device_replay_and_group_integrity',
+        '0004_paired_device_pairing_issuer_binding',
       ],
       skipped: [],
     });
@@ -47,6 +48,7 @@ describe('control-plane migrations', () => {
     const foundation = transaction[3].text;
     const authentication = transaction[4].text;
     const replayAndIntegrity = transaction[5].text;
+    const pairingIssuerBinding = transaction[6].text;
 
     expect(transaction[0]).toMatchObject({ text: 'SELECT pg_advisory_xact_lock($1)' });
     expect(transaction[1].text).toContain('CREATE TABLE IF NOT EXISTS hq_schema_migrations');
@@ -56,7 +58,12 @@ describe('control-plane migrations', () => {
     );
     expect(query).not.toHaveBeenCalled();
 
-    for (const lockedMigration of [foundation, authentication, replayAndIntegrity]) {
+    for (const lockedMigration of [
+      foundation,
+      authentication,
+      replayAndIntegrity,
+      pairingIssuerBinding,
+    ]) {
       expect(lockedMigration).toMatch(/^DO \$hq_migration\$/u);
       expect(lockedMigration).toContain('SELECT checksum\n  INTO recorded_checksum');
       expect(lockedMigration).toContain('FROM hq_schema_migrations');
@@ -108,6 +115,14 @@ describe('control-plane migrations', () => {
     expect(replayAndIntegrity).toContain('device_sessions_previous_refresh_hash_unique');
     expect(replayAndIntegrity).toContain('device_sessions_previous_refresh_expiry_idx');
     expect(replayAndIntegrity).toContain('INSERT INTO hq_schema_migrations');
+    expect(pairingIssuerBinding).toContain(
+      'ADD COLUMN IF NOT EXISTS created_by_session_id uuid REFERENCES device_sessions(id)',
+    );
+    expect(pairingIssuerBinding).toContain(
+      'ADD COLUMN IF NOT EXISTS created_by_access_token_id uuid REFERENCES device_access_tokens(id)',
+    );
+    expect(pairingIssuerBinding).toContain('pairing_codes_issuer_access_token_idx');
+    expect(pairingIssuerBinding).toContain('INSERT INTO hq_schema_migrations');
   });
 
   it('returns precise applied and skipped IDs from the locked transaction outcome query', async () => {
@@ -115,6 +130,7 @@ describe('control-plane migrations', () => {
       '0001_control_plane_foundation',
       '0002_paired_device_authentication',
       '0003_paired_device_replay_and_group_integrity',
+      '0004_paired_device_pairing_issuer_binding',
     ]);
     const authenticationSql = migrations[1].statements
       .map((statement) => statement.text)
@@ -140,6 +156,7 @@ describe('control-plane migrations', () => {
           { id: migrations[0].id, applied: false },
           { id: migrations[1].id, applied: true },
           { id: migrations[2].id, applied: true },
+          { id: migrations[3].id, applied: true },
         ]);
       },
     };
@@ -148,6 +165,7 @@ describe('control-plane migrations', () => {
       applied: [
         '0002_paired_device_authentication',
         '0003_paired_device_replay_and_group_integrity',
+        '0004_paired_device_pairing_issuer_binding',
       ],
       skipped: ['0001_control_plane_foundation'],
     });

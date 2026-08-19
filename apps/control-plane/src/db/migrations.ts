@@ -444,10 +444,36 @@ const pairedDeviceReplayAndIntegrity: Migration = {
   ],
 };
 
+/**
+ * A pairing code is a delegated capability of the exact session and access
+ * token that created it, not merely of the issuing device. Recording that
+ * credential identity lets redemption fail closed the instant either one is
+ * retired by refresh rotation, replay revocation, or explicit device revoke,
+ * instead of trusting continued device membership alone. Both columns stay
+ * nullable so a code issued before this migration has no matching session or
+ * access-token row and is therefore rejected by the redemption join rather
+ * than being granted an inferred, device-only authority.
+ */
+const pairedDevicePairingIssuerBinding: Migration = {
+  id: '0004_paired_device_pairing_issuer_binding',
+  statements: [
+    sql(
+      'ALTER TABLE pairing_codes ADD COLUMN IF NOT EXISTS created_by_session_id uuid REFERENCES device_sessions(id)',
+    ),
+    sql(
+      'ALTER TABLE pairing_codes ADD COLUMN IF NOT EXISTS created_by_access_token_id uuid REFERENCES device_access_tokens(id)',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS pairing_codes_issuer_access_token_idx ON pairing_codes (created_by_access_token_id) WHERE consumed_at IS NULL AND revoked_at IS NULL',
+    ),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
   pairedDeviceReplayAndIntegrity,
+  pairedDevicePairingIssuerBinding,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';
