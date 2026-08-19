@@ -1,0 +1,629 @@
+<title>HQ Status</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap">
+<style>
+  :root {
+    --ground: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #f0f1f4;
+    --border: #e4e6ea;
+    --border-strong: #d3d6dc;
+    --text: #16171a;
+    --text-muted: #6a6f78;
+    --text-faint: #9aa0a9;
+    --accent: #5e6ad2;
+    --accent-soft: rgba(94, 106, 210, 0.12);
+    --done: #3f9e6f;
+    --done-soft: rgba(63, 158, 111, 0.13);
+    --partial: #c98726;
+    --partial-soft: rgba(201, 135, 38, 0.13);
+    --idle: #8a8f98;
+    --idle-soft: rgba(138, 143, 152, 0.13);
+    --glow: rgba(94, 106, 210, 0.10);
+    --shadow: 0 1px 2px rgba(20, 22, 28, 0.04), 0 4px 16px rgba(20, 22, 28, 0.05);
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --ground: #08090a;
+      --surface: #0e0f11;
+      --surface-2: #141517;
+      --border: #212226;
+      --border-strong: #2c2e33;
+      --text: #f7f8f8;
+      --text-muted: #8a8f98;
+      --text-faint: #62666d;
+      --accent: #828df0;
+      --accent-soft: rgba(130, 141, 240, 0.14);
+      --done: #4cb782;
+      --done-soft: rgba(76, 183, 130, 0.15);
+      --partial: #e5a94e;
+      --partial-soft: rgba(229, 169, 78, 0.15);
+      --idle: #8a8f98;
+      --idle-soft: rgba(138, 143, 152, 0.13);
+      --glow: rgba(94, 106, 210, 0.22);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 30px rgba(0, 0, 0, 0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #08090a;
+    --surface: #0e0f11;
+    --surface-2: #141517;
+    --border: #212226;
+    --border-strong: #2c2e33;
+    --text: #f7f8f8;
+    --text-muted: #8a8f98;
+    --text-faint: #62666d;
+    --accent: #828df0;
+    --accent-soft: rgba(130, 141, 240, 0.14);
+    --done: #4cb782;
+    --done-soft: rgba(76, 183, 130, 0.15);
+    --partial: #e5a94e;
+    --partial-soft: rgba(229, 169, 78, 0.15);
+    --idle: #8a8f98;
+    --idle-soft: rgba(138, 143, 152, 0.13);
+    --glow: rgba(94, 106, 210, 0.22);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 30px rgba(0, 0, 0, 0.3);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--ground);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+  }
+
+  .wrap {
+    max-width: 540px;
+    margin: 0 auto;
+    padding: 0 18px calc(48px + env(safe-area-inset-bottom));
+  }
+
+  /* ---- header ---- */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--ground) 82%, transparent);
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid var(--border);
+  }
+  .header-inner {
+    max-width: 540px;
+    margin: 0 auto;
+    padding: 12px 18px calc(12px + env(safe-area-inset-top)) 18px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .mark {
+    width: 26px; height: 26px;
+    border-radius: 7px;
+    background: linear-gradient(150deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000));
+    display: grid; place-items: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700; font-size: 13px; color: #fff;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 4px 12px var(--glow);
+    flex-shrink: 0;
+  }
+  .header-titles { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+  .header-titles b { font-size: 14px; font-weight: 600; letter-spacing: -0.02em; }
+  .header-titles span { font-size: 11px; color: var(--text-faint); font-family: 'JetBrains Mono', monospace; }
+  .theme-btn {
+    margin-left: auto;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    border-radius: 9px;
+    display: grid; place-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color .15s, border-color .15s;
+  }
+  .theme-btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .theme-btn svg { width: 16px; height: 16px; }
+  .theme-btn .sun { display: none; }
+  :root[data-theme="dark"] .theme-btn .sun { display: block; }
+  :root[data-theme="dark"] .theme-btn .moon { display: none; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .theme-btn .sun { display: block; }
+    :root:not([data-theme="light"]) .theme-btn .moon { display: none; }
+  }
+
+  /* ---- hero ---- */
+  .hero {
+    position: relative;
+    padding: 34px 0 8px;
+    text-align: center;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    top: -120px; left: 50%;
+    width: 320px; height: 320px;
+    transform: translateX(-50%);
+    background: radial-gradient(circle, var(--glow) 0%, transparent 66%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 20px;
+    position: relative; z-index: 1;
+  }
+  .ring { position: relative; width: 190px; height: 190px; margin: 0 auto; z-index: 1; }
+  .ring svg { transform: rotate(-90deg); display: block; }
+  .ring-track { fill: none; stroke: var(--border); stroke-width: 9; }
+  .ring-fill {
+    fill: none; stroke: url(#grad); stroke-width: 9; stroke-linecap: round;
+    stroke-dasharray: var(--circ);
+    stroke-dashoffset: var(--circ);
+    transition: stroke-dashoffset 1.4s cubic-bezier(.16,1,.3,1);
+  }
+  .ring-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .ring-center .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 46px; font-weight: 700; letter-spacing: -0.03em;
+    line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .ring-center .num small { font-size: 22px; color: var(--text-muted); font-weight: 500; }
+  .ring-center .cap {
+    font-size: 11px; color: var(--text-faint); margin-top: 7px;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .hero-sub {
+    position: relative; z-index: 1;
+    margin: 22px auto 0;
+    max-width: 400px;
+    font-size: 14.5px;
+    color: var(--text-muted);
+    text-wrap: pretty;
+  }
+  .hero-sub b { color: var(--text); font-weight: 600; }
+
+  /* ---- section ---- */
+  section { margin-top: 34px; }
+  .sec-head {
+    display: flex; align-items: baseline; gap: 9px;
+    margin-bottom: 14px;
+    padding: 0 2px;
+  }
+  .sec-head h2 {
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .sec-head .line { flex: 1; height: 1px; background: var(--border); }
+
+  /* ---- metric grid ---- */
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .metric {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 15px 15px 14px;
+    box-shadow: var(--shadow);
+  }
+  .metric .v {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 25px; font-weight: 700; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .metric .v small { font-size: 13px; color: var(--text-faint); font-weight: 500; }
+  .metric .k { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+
+  /* ---- phase list ---- */
+  .phases { display: flex; flex-direction: column; gap: 9px; }
+  .phase {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 14px 15px;
+    box-shadow: var(--shadow);
+  }
+  .phase-top { display: flex; align-items: center; gap: 11px; }
+  .phase-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 600;
+    color: var(--text-faint);
+    width: 20px; flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .phase-name { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; flex: 1; min-width: 0; }
+  .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 3px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+    flex-shrink: 0;
+  }
+  .pill::before { content:""; width:6px; height:6px; border-radius:50%; background: currentColor; }
+  .pill.done { color: var(--done); background: var(--done-soft); }
+  .pill.partial { color: var(--partial); background: var(--partial-soft); }
+  .pill.idle { color: var(--idle); background: var(--idle-soft); }
+  .phase-bar {
+    margin-top: 12px;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+    position: relative;
+  }
+  .phase-bar i {
+    position: absolute; inset: 0 auto 0 0;
+    border-radius: 999px;
+    width: var(--p, 0%);
+    transform-origin: left;
+  }
+  .phase-bar i.done { background: var(--done); }
+  .phase-bar i.partial { background: var(--partial); }
+  .phase-bar i.idle { background: var(--idle); opacity: .5; }
+  .phase-meta {
+    display: flex; justify-content: space-between;
+    margin-top: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; color: var(--text-faint);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---- readout (alt metrics) ---- */
+  .readout {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 13px; overflow: hidden; box-shadow: var(--shadow);
+  }
+  .readout .row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 15px;
+    border-bottom: 1px solid var(--border);
+  }
+  .readout .row:last-child { border-bottom: 0; }
+  .readout .rk { font-size: 13.5px; color: var(--text-muted); flex: 1; }
+  .readout .rv {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700;
+    font-size: 15px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  }
+  .readout .rn { font-size: 11px; color: var(--text-faint); font-family: 'JetBrains Mono', monospace; }
+
+  /* ---- missing modules ---- */
+  .mods { display: flex; flex-wrap: wrap; gap: 7px; }
+  .mod {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px dashed var(--border-strong);
+    border-radius: 8px;
+    padding: 6px 10px;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .mod::before {
+    content: ""; width: 5px; height: 5px; border-radius: 1px;
+    background: var(--idle); opacity: .6;
+  }
+
+  /* ---- risk / verdict cards ---- */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 13px; padding: 15px 16px; box-shadow: var(--shadow);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .risk { display: flex; gap: 12px; align-items: flex-start; }
+  .risk-n {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+    color: var(--accent); flex-shrink: 0;
+    width: 24px; height: 24px; border-radius: 7px;
+    background: var(--accent-soft);
+    display: grid; place-items: center;
+  }
+  .risk-b { font-size: 13.5px; color: var(--text-muted); }
+  .risk-b b { color: var(--text); font-weight: 600; }
+
+  .verdict {
+    background: linear-gradient(160deg, var(--accent-soft), transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+    border-radius: 15px;
+    padding: 20px 18px;
+  }
+  .verdict h3 {
+    font-size: 15px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px;
+  }
+  .verdict p { font-size: 14px; color: var(--text-muted); text-wrap: pretty; }
+  .verdict p + p { margin-top: 10px; }
+  .verdict b { color: var(--text); font-weight: 600; }
+
+  footer {
+    margin-top: 40px; text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--text-faint);
+    letter-spacing: 0.04em;
+    line-height: 1.8;
+  }
+  .dot { color: var(--border-strong); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ring-fill { transition: none; }
+  }
+  @media (min-width: 560px) {
+    .metrics { grid-template-columns: repeat(4, 1fr); }
+  }
+</style>
+
+<header>
+  <div class="header-inner">
+    <div class="mark">HQ</div>
+    <div class="header-titles">
+      <b>Оперативный штаб</b>
+      <span>«Гремучая смесь» · v1.0.0</span>
+    </div>
+    <button class="theme-btn" id="themeToggle" aria-label="Переключить тему">
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="hero">
+    <div class="eyebrow">Отчёт о ходе плана</div>
+    <div class="ring">
+      <svg width="190" height="190" viewBox="0 0 190 190">
+        <defs>
+          <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="var(--accent)"/>
+            <stop offset="100%" stop-color="var(--done)"/>
+          </linearGradient>
+        </defs>
+        <circle class="ring-track" cx="95" cy="95" r="82"/>
+        <circle class="ring-fill" id="ringFill" cx="95" cy="95" r="82"/>
+      </svg>
+      <div class="ring-center">
+        <div class="num" id="pctNum">0<small>%</small></div>
+        <div class="cap">выполнено</div>
+      </div>
+    </div>
+    <p class="hero-sub">
+      Реалистичная оценка <b>по объёму работ</b>. Фундамент UI закрыт и
+      верифицирован; функциональное и серверное ядро — впереди.
+    </p>
+  </div>
+
+  <section>
+    <div class="sec-head"><h2>Кодовая база</h2><span class="line"></span></div>
+    <div class="metrics">
+      <div class="metric"><div class="v">168</div><div class="k">TS / TSX файлов</div></div>
+      <div class="metric"><div class="v">18.8<small>k</small></div><div class="k">строк TypeScript</div></div>
+      <div class="metric"><div class="v">24</div><div class="k">маршрута app</div></div>
+      <div class="metric"><div class="v">25</div><div class="k">UI-обёртки</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Фазы плана</h2><span class="line"></span></div>
+    <div class="phases">
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">00</span>
+          <span class="phase-name">Baseline и план</span>
+          <span class="pill partial">почти</span>
+        </div>
+        <div class="phase-bar"><i class="partial" style="--p:75%"></i></div>
+        <div class="phase-meta"><span>3 / 4 пункта</span><span>нет visual-baselines</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">01</span>
+          <span class="phase-name">Фундамент Base UI</span>
+          <span class="pill done">готово</span>
+        </div>
+        <div class="phase-bar"><i class="done" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>7 / 7 пунктов</span><span>гейт зелёный</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">02</span>
+          <span class="phase-name">Миграция примитивов</span>
+          <span class="pill done">готово</span>
+        </div>
+        <div class="phase-bar"><i class="done" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>8 / 8 пунктов</span><span>0 прямых контролов</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">03</span>
+          <span class="phase-name">Protocol и control-plane</span>
+          <span class="pill idle">не начато</span>
+        </div>
+        <div class="phase-bar"><i class="idle" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>0 / 6 пунктов</span><span>gRPC · Node · Neon</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">04</span>
+          <span class="phase-name">Layout и settings</span>
+          <span class="pill idle">не начато</span>
+        </div>
+        <div class="phase-bar"><i class="idle" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>0 / 4 пунктов</span><span>tile-registry</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">05</span>
+          <span class="phase-name">Материалы и viewers</span>
+          <span class="pill idle">не начато</span>
+        </div>
+        <div class="phase-bar"><i class="idle" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>0 / 4 пунктов</span><span>Rust-хранилище</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">06</span>
+          <span class="phase-name">Видео и карта</span>
+          <span class="pill idle">не начато</span>
+        </div>
+        <div class="phase-bar"><i class="idle" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>0 / 4 пунктов</span><span>частичный задел</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">07</span>
+          <span class="phase-name">Редактор · sync · i18n · телеметрия</span>
+          <span class="pill idle">не начато</span>
+        </div>
+        <div class="phase-bar"><i class="idle" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>0 / 4 пунктов</span><span>Yjs · Ed25519</span></div>
+      </div>
+      <div class="phase">
+        <div class="phase-top">
+          <span class="phase-id">08</span>
+          <span class="phase-name">Нативка и release-hardening</span>
+          <span class="pill idle">не начато</span>
+        </div>
+        <div class="phase-bar"><i class="idle" style="--p:100%"></i></div>
+        <div class="phase-meta"><span>0 / 5 пунктов</span><span>Win 10/11 + legacy</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Как считать процент</h2><span class="line"></span></div>
+    <div class="readout">
+      <div class="row">
+        <span class="rk">По пунктам чек-листа</span>
+        <span class="rv">39%</span>
+        <span class="rn">18 / 46</span>
+      </div>
+      <div class="row">
+        <span class="rk">По фазам</span>
+        <span class="rv">~28%</span>
+        <span class="rn">2 / 8</span>
+      </div>
+      <div class="row">
+        <span class="rk">По требованиям (RQ)</span>
+        <span class="rv">~13%</span>
+        <span class="rn">2 / 17</span>
+      </div>
+      <div class="row" style="background:var(--accent-soft)">
+        <span class="rk" style="color:var(--text)"><b>По объёму работ</b></span>
+        <span class="rv" style="color:var(--accent)">~30%</span>
+        <span class="rn">оценка</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Целевой workspace ещё не создан</h2><span class="line"></span></div>
+    <div class="mods">
+      <span class="mod">apps/control-plane</span>
+      <span class="mod">apps/hq-agent</span>
+      <span class="mod">apps/hq-shell-legacy</span>
+      <span class="mod">packages/media</span>
+      <span class="mod">packages/sync</span>
+      <span class="mod">packages/i18n</span>
+      <span class="mod">packages/layout-engine</span>
+      <span class="mod">packages/telemetry</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Ключевые риски</h2><span class="line"></span></div>
+    <div class="card">
+      <div class="risk">
+        <span class="risk-n">1</span>
+        <span class="risk-b"><b>Backend/данные (фазы 3–5)</b> не начаты — самый тяжёлый блок: control-plane, хранилище материалов с BLAKE3, дедупликацией, квотами и gRPC.</span>
+      </div>
+      <div class="risk">
+        <span class="risk-n">2</span>
+        <span class="risk-b"><b>Синхронизация и телеметрия</b> — Yjs/Yrs, Ed25519-пейринг, реальная Rust-телеметрия — реализуются с нуля.</span>
+      </div>
+      <div class="risk">
+        <span class="risk-n">3</span>
+        <span class="risk-b"><b>Нативка (фаза 8)</b> — modern Tauri title bar плюс legacy WRY/WebView2 109 шелл, две Windows-матрицы.</span>
+      </div>
+      <div class="risk">
+        <span class="risk-n">4</span>
+        <span class="risk-b"><b>Долг фазы 0</b> — отсутствуют исторические «до»-снапшоты для визуального контракта (честно отмечено в плане).</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="verdict">
+      <h3>Итог</h3>
+      <p>Прочный, чисто выполненный <b>UI-фундамент</b>: миграция всего интерфейса на Base UI завершена и верифицирована без визуального редизайна. Гейты <b>зелёные</b> — lint, typecheck, 19/19 Playwright, 147 статических маршрутов, rustfmt/clippy/cargo.</p>
+      <p>Функциональное и серверное ядро продукта (условие <b>v1.0.0</b>) ещё впереди: осталось примерно <b>70%</b> работы плана.</p>
+    </div>
+  </section>
+
+  <footer>
+    Гремучая смесь — Оперативный штаб<br>
+    2 коммита <span class="dot">·</span> ветка agent/operational-hq <span class="dot">·</span> отчёт 2026-08-19
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById('themeToggle');
+    btn.addEventListener('click', function () {
+      var isDark = getComputedStyle(root).getPropertyValue('--ground').trim() === '#08090a';
+      // resolve current effective theme
+      var explicit = root.getAttribute('data-theme');
+      var effDark;
+      if (explicit === 'dark') effDark = true;
+      else if (explicit === 'light') effDark = false;
+      else effDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.setAttribute('data-theme', effDark ? 'light' : 'dark');
+    });
+
+    // animate ring + counter to target
+    var target = 30;
+    var circ = 2 * Math.PI * 82;
+    var fill = document.getElementById('ringFill');
+    fill.style.setProperty('--circ', circ);
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var num = document.getElementById('pctNum');
+
+    function setRing(pct) {
+      fill.style.strokeDashoffset = circ - (circ * pct / 100);
+    }
+    if (reduce) {
+      setRing(target);
+      num.innerHTML = target + '<small>%</small>';
+      return;
+    }
+    requestAnimationFrame(function () { requestAnimationFrame(function () { setRing(target); }); });
+    var start = null, dur = 1400;
+    function step(ts) {
+      if (!start) start = ts;
+      var t = Math.min((ts - start) / dur, 1);
+      var eased = 1 - Math.pow(1 - t, 3);
+      num.innerHTML = Math.round(target * eased) + '<small>%</small>';
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  })();
+</script>
