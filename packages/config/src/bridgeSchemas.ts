@@ -9,24 +9,56 @@ export const bridgeMountConfigSchema = z.object({
   virtualPath: virtualPathSchema,
 });
 
-export const bridgeConfigSchema = z.object({
-  version: z.literal(1),
-  transport: z.literal('grpc-web').default('grpc-web'),
-  port: z.number().int().min(1024).max(65_535),
-  readOnly: z.literal(true),
-  allowedOrigins: z.array(
-    z.url().refine((value) => {
-      const url = new URL(value);
-      return url.hostname === '127.0.0.1' || url.hostname === 'localhost';
-    }, 'Only localhost origins are allowed'),
-  ),
-  mounts: z.array(bridgeMountConfigSchema),
-  stableFile: z.object({
-    probeIntervalMs: z.number().int().min(50).max(2_000),
-    timeoutMs: z.number().int().min(500).max(120_000),
-  }),
-  watchDebounceMs: z.number().int().min(25).max(1_000),
-});
+export const bridgeConfigSchema = z
+  .object({
+    version: z.literal(1),
+    transport: z.literal('grpc-web').default('grpc-web'),
+    port: z.number().int().min(1024).max(65_535),
+    /** A bridge is read-only unless a loopback operator explicitly enables imports. */
+    readOnly: z.boolean().default(true),
+    allowedOrigins: z.array(
+      z.url().refine((value) => {
+        const url = new URL(value);
+        return url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+      }, 'Only localhost origins are allowed'),
+    ),
+    mounts: z.array(bridgeMountConfigSchema),
+    stableFile: z.object({
+      probeIntervalMs: z.number().int().min(50).max(2_000),
+      timeoutMs: z.number().int().min(500).max(120_000),
+    }),
+    watchDebounceMs: z.number().int().min(25).max(1_000),
+    materialImport: z
+      .object({
+        enabled: z.boolean().default(false),
+        maxFileBytes: z
+          .number()
+          .int()
+          .positive()
+          .max(5 * 1024 * 1024 * 1024)
+          .default(5 * 1024 * 1024 * 1024),
+        chunkSizeBytes: z
+          .number()
+          .int()
+          .min(64 * 1024)
+          .max(16 * 1024 * 1024)
+          .default(1024 * 1024),
+      })
+      .default({
+        enabled: false,
+        maxFileBytes: 5 * 1024 * 1024 * 1024,
+        chunkSizeBytes: 1024 * 1024,
+      }),
+  })
+  .superRefine((config, context) => {
+    if (config.materialImport.enabled && config.readOnly) {
+      context.addIssue({
+        code: 'custom',
+        path: ['materialImport', 'enabled'],
+        message: 'Material imports require readOnly to be false.',
+      });
+    }
+  });
 
 export const bridgeHealthSchema = z.object({
   service: z.literal('gremuchaya-file-bridge'),

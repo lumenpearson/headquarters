@@ -19,6 +19,7 @@
     "@gremuchaya/config": "workspace:*",
     "@gremuchaya/domain": "workspace:*",
     "@gremuchaya/protocol": "workspace:*",
+    "@noble/hashes": "2.3.0",
     "chokidar": "5.0.0"
   },
   "devDependencies": {

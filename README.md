@@ -1,10 +1,11 @@
 # «Гремучая смесь — Оперативный штаб»
 
 Production-ready local-first оперативная система для съёмочной площадки. Единый нормализованный
-мир связывает операцию, 8 секторов, 32 объекта, 30 дел, 24 материала, 16 камер, 120 событий,
-тревоги, задачи, маршруты, каналы связи, сенсоры, аналитику и отчёты. Проект работает как Next.js
+мир связывает операцию, 8 секторов, 32 объекта, 30 дел, 24 материала, 16 симулированных каналов и
+120 событий: тревоги, задачи, маршруты, каналы связи, сенсоры, аналитику и отчёты. Проект работает
+как Next.js
 web SPA и как нативная Tauri 2 оболочка со статическим offline export. Основной контур остаётся
-local-first; сеть требуется только для опционального слоя Yandex Maps API 2.1.
+local-first; сеть требуется только для опционального слоя Yandex Maps JavaScript API v3.
 
 ## Что реализовано
 
@@ -20,11 +21,25 @@ local-first; сеть требуется только для опциональ�
 - терминальный квадратный UI для 720p, Full HD, ultrawide и 4K: без скруглений, blur и теней;
 - полноразмерная flex/grid-матрица без фиксированного `max-width`: панели занимают доступный монитор,
   а плотные экраны используют внутреннюю прокрутку вместо обрезки или горизонтального overflow;
-- настоящий CCTV-плеер на HTML Video: live/archive timeline, frame step, ±10 секунд, скорость,
-  громкость, mute, snapshot, Picture-in-Picture, fullscreen, PTZ и сетка из 12 каналов;
-- тактическая карта на Yandex Maps JavaScript API 2.1 с объектами, маршрутами, тревогами,
+- CCTV-плеер на Vidstack React 1.15.6 с собственной terminal-компоновкой: demo/archive timeline,
+  frame step, ±10 секунд, скорость, громкость, mute, snapshot, Picture-in-Picture, fullscreen,
+  PTZ и реестр 16 каналов с фильтрами, сортировкой и пагинацией 12+4; декодируется только выбранный
+  источник, а остальные каналы используют статические thumbnails; штатные источники — встроенные
+  демо-ролики, назначенные локальные материалы и явно разрешённая пользователем веб-камера;
+- тактическая карта на Yandex Maps JavaScript API v3 с объектами, маршрутами, тревогами,
   ограниченными зонами, датчиками и сохранением географического viewport;
 - типизированные domain/application/infrastructure/UI границы в Turborepo;
+- Base UI 1.7 как headless-основа 25 публичных Terminal-компонентов без изменения терминальной
+  дизайн-системы; прямые Base UI imports и нативные JSX-controls вне `packages/ui` запрещены CI;
+- безопасный персонализационный draft: schema-bound темы, плотность, фон, анимации, category/all
+  reset, discard/publish, JSON export и локальная история без arbitrary HTML/CSS/JS;
+- общий deterministic `@gremuchaya/layout-engine`: bounded tile packing, compact presentation,
+  relocation и explicit overflow policy вместо document-scroll как способа скрыть контент;
+- версионированный Protobuf-контур `gremuchaya.*.v1`: common, control, materials, settings, sync,
+  telemetry, integrations и локальный bridge с генерируемыми TypeScript bindings;
+- Node ConnectRPC control-plane foundation с typed health/capabilities, бинарным gRPC-Web,
+  Connect protocol, binary Protobuf WebSocket-resume, CORS allowlist, security headers и ленивыми
+  Neon/Upstash adapters;
 - 52 Zod-валидируемые scene definition с отдельными cue и asset requirements;
 - 19 модулей: idle, map, satellite, CCTV, dossier, OSINT, face/vehicle recognition, comms,
   graph, news, access, system tables, audio, photo archive, interrogation, security, explorer и print;
@@ -32,8 +47,9 @@ local-first; сеть требуется только для опциональ�
 - BroadcastChannel screen bus с localStorage fallback и heartbeat;
 - Virtual Explorer: эмулированная файловая система, реальная папка браузера, localhost bridge и
   зарегистрированные Tauri roots;
-- локальный read-only file bridge с CORS allowlist, защитой от traversal/symlink escape,
-  бинарным gRPC-Web, server-streaming watcher и `FILE_READY` после проверки стабильности записи;
+- локальный file bridge, read-only по умолчанию, с CORS allowlist, защитой от
+  traversal/symlink escape, бинарным gRPC-Web, server-streaming watcher и
+  явным opt-in для ограниченного локального импорта в `shared/materials`;
 - Tauri-команды для мониторов, managed windows, безопасного чтения и native watcher;
 - скрытый инженерный контур, simulation flags, локальные snapshots, JSON export;
 - local placeholders и runtime asset override без изменения scene-файлов.
@@ -68,6 +84,18 @@ pnpm dev:hq
 fullscreen, цифры `1–9` переключают разделы, `Space` управляет видеопотоком, `Esc` закрывает
 drawer или production-панель. В совместимом `/control/` сохранены прежние сочетания и инженерный
 overlay `Ctrl+Shift+Alt+D`.
+
+На экране «ФАЙЛЫ» сочетание `Ctrl+Shift+Alt+S` открывает скрытый локальный import dialog. Он
+доступен только при явном opt-in loopback bridge из раздела ниже; если bridge не запущен или
+оставлен read-only, диалог честно показывает локальную ошибку и не отправляет файл в сеть.
+
+### Черновик персонализации
+
+В «НАСТРОЙКИ» работает локальный **SAFE DRAFT**. Тема, плотность, фон и анимации применяются как
+обратимый preview, а `[CTRL+ENTER] ОПУБЛИКОВАТЬ` атомарно фиксирует revision. `[R]` сбрасывает
+категорию, `[RR]` — весь draft, `[ESC]` отменяет неподтверждённые изменения, `[↓]` формирует
+JSON export. Значения проходят централизованную schema validation, поэтому ни сохранённый draft,
+ни будущий edit mode не могут внедрить HTML, JavaScript или произвольное CSS.
 
 ## Терминальный режим оператора
 
@@ -115,9 +143,106 @@ pnpm bridge
 В `bridge.config.json` замените `mounts[].root` на точный каталог съёмочной машины. Bridge слушает
 только `127.0.0.1`, принимает только разрешённые Origin и обслуживает бинарный gRPC-Web поверх
 HTTP/1.1. REST `/v1/*` и WebSocket endpoints отсутствуют. Контракт находится в
-`packages/protocol/proto/gremuchaya/bridge/v1/bridge.proto`: unary RPC `Health`/`List` и
-server-streaming RPC `ReadFile`/`Watch`. Статические runtime JSON остаются локальными ресурсами
-приложения и не являются сетевым REST API.
+`packages/protocol/proto/gremuchaya/bridge/v1/bridge.proto`: unary RPC `Health`/`List`,
+material-import RPC и server-streaming RPC `ReadFile`/`ReadImportedMaterial`/`Watch`.
+Статические runtime JSON остаются локальными ресурсами приложения и не являются сетевым REST API.
+
+По умолчанию bridge остаётся строго read-only. Для локального импорта в content-addressed mirror
+`shared/materials/.hq` оператор должен сознательно включить **оба** флага в локальном, не
+коммитимом `bridge.config.json`:
+
+```json
+{
+  "readOnly": false,
+  "materialImport": {
+    "enabled": true,
+    "maxFileBytes": 5368709120,
+    "chunkSizeBytes": 1048576
+  }
+}
+```
+
+Импорт сначала рассчитывает ожидаемый BLAKE3 digest в потоковом module worker браузера (с
+потоковым fallback для legacy shell), а bridge заново и независимо проверяет его перед commit.
+Затем он принимает упорядоченные ограниченные чанки, кладёт объект атомарно по content hash и
+создаёт отдельную мета-запись. Файлы служебной директории `.hq` никогда не выдаются через обычный
+Explorer RPC. Загруженные материалы сразу показываются в реестре «ФАЙЛЫ» как `LOCAL MIRROR /
+GRPC-WEB`; UI передаёт файл в ограниченных Protobuf-чанках, может отменить текущий импорт и
+отображает cursor-paginated recent list. Локальный viewer уже безопасно показывает изображения,
+PDF, plain/structured text и local audio/video: содержимое читается тем же gRPC-Web stream и
+только в ограниченные 2 MiB (text) либо 32 MiB (image/PDF/media) buffers. Последний вариант
+использует тот же custom Vidstack player. Oversized и неизвестные типы не исполняются и остаются
+metadata-only до специализированных streaming viewers. Это пока локальный foundation: облачный
+Blob, долгоживущие resumable-сессии после перезапуска, версии, корзина, преобразования и
+межклиентская синхронизация ещё не включены.
+
+### Control-plane foundation
+
+Локальный control-plane запускается отдельно от UI и file bridge:
+
+```powershell
+Copy-Item apps/control-plane/.env.example apps/control-plane/.env.local
+$env:HQ_CONTROL_PLANE_PORT = "4100"
+$env:HQ_CONTROL_PLANE_ALLOWED_ORIGINS = "http://127.0.0.1:3000,http://localhost:3000"
+pnpm --filter @gremuchaya/control-plane build
+pnpm control-plane
+```
+
+RPC `gremuchaya.control.v1.ControlPlaneService/Health` и `GetCapabilities` доступны через
+Connect/gRPC-Web. Capabilities инфраструктурных сервисов остаются `enabled=false`, пока не
+подключены соответствующие PostgreSQL, Redis, Blob и application-service adapters. Endpoint
+`/api/health` намеренно отсутствует: прикладной REST не используется.
+
+Первичная schema Neon подготовлена как проверяемая версия `0001_control_plane_foundation`.
+Соединение не открывается при старте health-only сервиса: чтобы применить миграции к
+предварительно созданной приватной базе Neon, пользователь задаёт секрет только в окружении
+процесса и запускает отдельную команду:
+
+```powershell
+$env:HQ_CONTROL_PLANE_DATABASE_URL = "postgresql://<role>:<password>@<neon-host>/<database>?sslmode=require"
+pnpm --filter @gremuchaya/control-plane migrate
+```
+
+Мигратор использует таблицу `hq_schema_migrations`, SHA-256 checksum и PostgreSQL advisory
+transaction lock. URL базы и любые другие секреты не попадают в репозиторий, браузерный bundle
+или gRPC-ответы.
+
+Для presence, lease лидера сессии, sequence и rate limit control-plane использует отдельный
+ленивый Upstash Redis adapter. Для включения надо передать **обе** server-only переменные;
+одна переменная без другой отклоняется при запуске:
+
+```powershell
+$env:HQ_CONTROL_PLANE_REDIS_REST_URL = "https://<redis-id>.upstash.io"
+$env:HQ_CONTROL_PLANE_REDIS_REST_TOKEN = "<upstash-rest-token>"
+pnpm control-plane
+```
+
+PostgreSQL остаётся источником истины. Redis содержит лишь быстро истекающее присутствие,
+координационные lease и счётчики; state не может быть восстановлен из Redis после перезапуска.
+
+#### Realtime transport
+
+Тот же process control-plane принимает **только бинарные Protobuf WebSocket frames** на
+`/realtime`. После `ClientHello` с идентификаторами группы/устройства сервер возвращает `ready`,
+переигрывает события с cursor `after_sequence` и продолжает доставку новых событий. Если cursor
+старее ограниченной retained history, клиент получает явный `resync_required`, а не неполное
+состояние. Text frames и повреждённые Protobuf messages получают типизированный error envelope;
+upgrade с неразрешённого Origin отвергается.
+
+Этот слой уже проверяет reconnect/replay в интеграционном тесте, но пока является
+однопроцессным transport foundation: authentication/pairing и cross-instance durable fanout будут
+подключены к SyncService и PostgreSQL/Redis до production-развёртывания. Реальный Vercel проект,
+секреты и WebSocket provider не настраиваются автоматически и требуют отдельного интерактивного
+входа пользователя.
+
+Полный исходный контракт находится в `packages/protocol/proto/gremuchaya/*/v1`. После изменения
+`.proto` необходимо выполнить:
+
+```powershell
+pnpm --filter @gremuchaya/protocol generate
+pnpm --dir packages/protocol exec buf lint
+pnpm --filter @gremuchaya/protocol test
+```
 
 ### Tauri native roots
 
@@ -131,13 +256,123 @@ pnpm tauri:dev
 Абсолютные пользовательские пути, `..` и symlink/junction внутри зарегистрированного root
 отклоняются native-командами.
 
-### Yandex Maps API 2.1
+### Симулированные каналы, локальные материалы и веб-камера
 
-Карта использует официальный JavaScript API 2.1 и не содержит прежней рисованной SVG-подложки.
-Создайте браузерный API-ключ в панели разработчика Яндекса и выберите один из способов:
+Экран `/video/cameras` использует единый типизированный реестр всех 16 симулированных каналов. На
+одном viewport
+показывается не более 12 статических thumbnails; оставшиеся каналы доступны через локальную
+пагинацию, фильтры и сортировку. Только выбранный поток передаётся Vidstack, поэтому скрытые и
+внеэкранные плитки не создают дополнительные media decoders.
 
-1. На установленной машине откройте `/map/`, вставьте ключ в локальную форму и нажмите
-   `[APPLY] ПОДКЛЮЧИТЬ`. Ключ сохраняется только в localStorage текущего приложения.
+Основная source model намеренно не требует настоящих камер:
+
+- `DEMO_VIDEO` — встроенный WebM-ролик, зацикленный для выбранного симулированного канала;
+- `LOCAL_MATERIAL` — видео, выбранное для симулированного канала через поле источника на `/video`.
+  В local storage сохраняется только `cameraId → materialId` (UUID), а не файловый путь, `blob:` URL
+  или байты. Материалы до 32 MiB читаются ограниченным binary gRPC-Web запросом и получают временный
+  `blob:` URL. Для более крупных видео UI сначала запрашивает через gRPC-Web пятиминутный
+  playback-grant, а затем Vidstack читает только нужные диапазоны файла через защищённый loopback
+  HTTP Range data plane. Grant URL хранится только в памяти, не раскрывает путь материала,
+  продлевается лишь при разрешённом чтении и явно отзывается при смене канала, источника либо
+  размонтировании экрана. HTTP здесь переносит только байты медиа и не является прикладным REST API;
+- `WEBCAM` — локальный `MediaStream`, который запрашивается только после `[W] WEBCAM` или клавиши
+  `W`, никогда не включается при загрузке страницы и не отправляется в bridge, control-plane или
+  групповую синхронизацию.
+
+При смене канала, повторном нажатии кнопки и размонтировании экрана все tracks веб-камеры
+останавливаются. Отказ разрешения, отсутствие устройства, занятое устройство и завершение track
+показываются внутри terminal-панели; после остановки плеер возвращается на демо-источник. UI явно
+маркирует `DEMO LOOP`, `LOCAL MATERIAL` и `LOCAL WEBCAM`, поэтому симуляция не выдаётся за реальное
+наблюдение.
+
+Если локальный каталог материалов недоступен, назначенный канал сохраняет своё UUID-назначение, но
+безопасно возвращается к демо-циклу и показывает terminal-статус ошибки. Это не открывает произвольный
+локальный путь и не пытается восстановить устаревший runtime `blob:` URL. Источник веб-камеры остаётся
+отдельным временным override и не заменяет назначение материала.
+
+Range-grant выдаётся только для зарегистрированного локального аудио/видео, привязан к
+`127.0.0.1`, допускает один RFC 7233 byte range за запрос, поддерживает `GET`/`HEAD`, возвращает
+`416` для некорректного диапазона и проверяет точный origin приложения. В памяти bridge хранится
+только SHA-256 digest capability-token; исходный токен существует лишь в непрозрачном URL. При
+отзыве, истечении idle TTL или остановке bridge последующее чтение возвращает `404`.
+
+### Локальная синхронизация воспроизведения
+
+Для демо-роликов и загруженных материалов browser-сессии одного профиля синхронизируют `PLAY`,
+`PAUSE`, `SEEK`, скорость и выбор канала через отдельный `BroadcastChannel`-контур. Команда несёт
+только `epoch`, последовательность, момент выполнения, безопасный source identity
+`cameraId + DEMO_VIDEO | LOCAL_MATERIAL + materialId`, позицию и скорость. Она никогда не несёт
+путь, `blob:` URL, capability URL, token или `MediaStream`; локальная веб-камера и выключенный RTSP
+adapter намеренно остаются несинхронизируемыми.
+
+Локальная команда исполняется через 40 ms, а получатель применяет только новую валидную команду для
+того же source identity. Повторные и устаревшие последовательности отбрасываются; в режиме
+`LEADER` принимаются только команды назначенного leader device. Общий Zustand snapshot bus больше
+не реплицирует transient `videoPlaying`, `videoLive` и `videoPosition`, чтобы не обгонять этот
+упорядоченный playback-поток. Подключение того же command contract к control-plane WebSocket/Protobuf
+остаётся отдельным следующим checkpoint: он нужен для синхронизации между разными браузерными
+профилями, устройствами и группами.
+
+### Необязательный RTSP compatibility adapter
+
+Ранее реализованный Tauri RTSP→HLS модуль сохранён для совместимости и тестирования, но выключен по
+умолчанию, не является production-требованием и не участвует в обычном сценарии. Без opt-in в
+browser registry нет ни одного `RTSP_GATEWAY` source, пустая native-конфигурация не запускает FFmpeg
+workers, а loopback health возвращает `disabled`.
+
+Для осознанного compatibility-теста его можно включить отдельно:
+
+```powershell
+$env:NEXT_PUBLIC_HQ_ENABLE_NATIVE_RTSP_GATEWAY = "true"
+$env:HQ_CAMERA_STREAMS_CONFIG = `
+  (Resolve-Path "apps/hq/src-tauri/media-gateway.config.local.json").Path
+pnpm tauri:dev
+```
+
+Шаблон `apps/hq/src-tauri/media-gateway.config.example.json` намеренно содержит пустой массив
+`cameras`. Если compatibility adapter действительно нужен, создайте игнорируемый Git локальный
+файл и заполните его самостоятельно; credentials не должны попадать в example, Next.js environment,
+browser state или логи. Внешний browser gateway также остаётся opt-in и принимает только
+credential-free HTTP(S) origin через `NEXT_PUBLIC_HQ_RTSP_GATEWAY_ORIGIN`.
+
+Сохранённый adapter по-прежнему имеет следующие ограничения и гарантии:
+
+- bind выполняется только на `127.0.0.1` и случайном свободном порту;
+- CORS разрешён только dev-origin приложения и Tauri origins;
+- браузер повторно проверяет protocol, hostname, stream ID, grant и HLS filename;
+- одновременно работает не больше двух FFmpeg workers в безопасном example, допустимый предел — 16;
+- один worker может обслуживать несколько окон через consumer leases;
+- worker останавливается после выхода последнего consumer;
+- `kill_on_drop` и shutdown control-window завершают дочерние процессы;
+- supervisor проверяет workers каждые 500 мс и после завершения FFmpeg перезапускает тот же поток;
+- reconnect сохраняет прежние `stream_id`, 256-битный grant, generation и manifest URL;
+- повторный запуск использует exponential backoff от 500 мс до 30 секунд с детерминированным
+  per-camera jitter; после пяти последовательных сбоев поток помечается `degraded`;
+- после 30 секунд стабильной работы счётчик последовательных сбоев сбрасывается;
+- native status сообщает `starting`, `ready`, `reconnecting` или `degraded`, число consumer leases,
+  перезапусков и возраст последнего manifest; публичный loopback health содержит только агрегаты;
+- Tauri-клиент повторяет неуспешный startup с паузами 500 мс, 1, 2, 4 и максимум 8 секунд;
+- после временного перехода Vidstack на локальный fallback клиент повторно проверяет native lease и
+  возвращает плеер на тот же HLS URL, когда worker снова становится `ready`;
+- HLS playlist ограничен шестью двухсекундными сегментами;
+- `delete_segments` удаляет вышедшие из окна сегменты;
+- traversal и произвольные имена файлов не обслуживаются;
+- недоступный FFmpeg при первом spawn приводит к локальному WebM fallback; завершившийся после
+  запуска worker остаётся под контролем supervisor и восстанавливается на прежнем HLS URL.
+
+Проверка с настоящей RTSP/RTSPS камерой, Credential Manager, persistent recording и camera fleet
+hardening сознательно исключены из Definition of Done. Они могут появиться только как отдельный
+future compatibility scope, если требования проекта изменятся.
+
+### Yandex Maps JavaScript API v3
+
+Карта использует официальный JavaScript API v3 в векторном режиме и не содержит прежней
+рисованной SVG-подложки. Создайте JavaScript API v3-ключ в панели разработчика Яндекса,
+разрешите HTTP Referer для каждого web-origin приложения и выберите один из способов:
+
+1. На установленной машине откройте `/map/`, вставьте v3-ключ в локальную форму и нажмите
+   `[APPLY] ПОДКЛЮЧИТЬ`. Ключ сохраняется только в localStorage текущего приложения. Старый
+   localStorage-ключ v2 намеренно не импортируется: требуется явно выдать или вставить ключ v3.
 2. Для заранее настроенной сборки скопируйте `apps/hq/.env.example` в `apps/hq/.env.local` и задайте:
 
 ```powershell
@@ -145,9 +380,10 @@ $env:NEXT_PUBLIC_YANDEX_MAPS_API_KEY = "ваш_ключ"
 pnpm --filter @gremuchaya/hq build
 ```
 
-В кабинете ключа разрешите домен web-версии. Для desktop-сборки учитывайте origin Tauri webview.
-Без ключа приложение продолжает работать, а карта показывает терминальное состояние настройки;
-остальные экраны и локальный CCTV-поток остаются автономными.
+В кабинете ключа разрешите домен web-версии и используйте точные HTTP Referer origins. Для
+desktop-сборки учитывайте origin Tauri webview. Без ключа или при недоступном provider приложение
+продолжает работать: карта показывает наполненный координатами и объектами терминальный fallback,
+а остальные экраны и локальный CCTV-поток остаются автономными.
 
 ## Runtime-конфигурация
 
@@ -184,3 +420,4 @@ Windows NSIS installer появится в `apps/hq/src-tauri/target/release/bun
 - [Offline/static routes](docs/architecture/adr/0006-static-export-routes.md)
 - [Release runbook](docs/release/runbook.md)
 - [Известные ограничения](docs/release/known-limitations.md)
+- [Protobuf control-plane contracts](docs/adr/0008-control-plane-protobuf-contracts.md)

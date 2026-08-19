@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, useEffect, useMemo, useState } from 'react';
 import {
   TerminalButton,
   TerminalInput,
@@ -145,6 +145,27 @@ export function OperationsShell({
   const setRoute = useOperationsStore((state) => state.setRoute);
   const selectObject = useOperationsStore((state) => state.selectObject);
   const selectCase = useOperationsStore((state) => state.selectCase);
+  const personalization = useOperationsStore((state) => state.personalization);
+  const theme = settingString(personalization.draft.values['themes.id'], 'terminal-red');
+  const density = settingString(personalization.draft.values['layout.density'], 'dense');
+  const background = settingString(
+    personalization.draft.values['backgrounds.kind'],
+    'terminal-grid',
+  );
+  const focusPattern = settingString(personalization.draft.values['patterns.focus'], 'brackets');
+  const typographyScale = settingNumber(personalization.draft.values['typography.scale'], 1);
+  const sizeScale = settingNumber(personalization.draft.values['sizes.scale'], 1);
+  const styleMode = settingString(personalization.draft.values['styles.mode'], 'strict-terminal');
+  const accent = settingString(personalization.draft.values['colors.accent'], 'orange');
+  const animationIntensity = settingNumber(
+    personalization.draft.values['animations.intensity'],
+    0.65,
+  );
+  const draftAnimations = settingBoolean(personalization.draft.values['animations.enabled'], true);
+  const reducedMotion = settingBoolean(
+    personalization.draft.values['accessibility.reducedMotion'],
+    false,
+  );
 
   useEffect(() => {
     setRoute(route);
@@ -218,9 +239,22 @@ export function OperationsShell({
 
   return (
     <div
-      className={`ops-shell ${compact ? 'ops-shell--compact' : ''} ${production.cameraSafe ? 'ops-shell--camera-safe' : ''} ${production.animations ? '' : 'ops-shell--no-motion'} ops-cursor--${production.cursorMode}`}
+      className={`ops-shell ${compact ? 'ops-shell--compact' : ''} ${production.cameraSafe ? 'ops-shell--camera-safe' : ''} ${production.animations && draftAnimations && !reducedMotion ? '' : 'ops-shell--no-motion'} ops-cursor--${production.cursorMode}`}
       data-transport="grpc-web"
+      data-theme={theme}
+      data-layout-density={density}
+      data-background-kind={background}
+      data-focus-pattern={focusPattern}
+      data-style-mode={styleMode}
+      data-accent={accent}
       onPointerDownCapture={disableAutoDemo}
+      style={
+        {
+          '--ops-type-scale': Math.min(1.25, Math.max(0.85, typographyScale * sizeScale)),
+          '--ops-motion-duration': `${Math.round(80 + animationIntensity * 180)}ms`,
+          '--ops-background-duration': `${Math.round(30_000 - animationIntensity * 18_000)}ms`,
+        } as CSSProperties
+      }
     >
       <pre className="ops-shell__ascii" aria-hidden="true">
         {asciiSignalField}
@@ -236,6 +270,18 @@ export function OperationsShell({
       <ProductionPanel />
     </div>
   );
+}
+
+function settingString(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function settingNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function settingBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function OpsTopBar({ route }: { readonly route: OperationsRoute }) {

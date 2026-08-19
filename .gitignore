@@ -17,6 +17,9 @@ Thumbs.db
 apps/hq/public/config/project.override.json
 apps/hq/public/config/bridge.local.json
 apps/hq/public/runtime/project.override.json
+apps/hq/src-tauri/media-gateway.config.local.json
+shared/materials/*
+!shared/materials/.gitkeep
 .env*.local
 !.env.example
 !**/.env.example

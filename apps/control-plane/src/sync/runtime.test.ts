@@ -25,6 +25,7 @@ describe('paired-device lifecycle runtime', () => {
       group: { id: created.group.id },
       device: { id: created.device.id, role: 'ADMIN' },
       role: 'ADMIN',
+      accessTokenId: expect.any(String),
     });
   });
 
@@ -91,6 +92,73 @@ describe('paired-device lifecycle runtime', () => {
 
     const revoked = runtime.revokeDevice(ownerContext, owner.group.id, paired.device.id);
     expect(revoked.device.status).toBe('REVOKED');
+  });
+
+  it('binds pairing grants to the exact issuer access token and revokes them on rotation or replay', () => {
+    const runtime = createRuntime();
+    const owner = runtime.createGroup({
+      name: 'Red terminal group',
+      initialDevice: deviceInput('HQ primary'),
+    });
+    const initialContext = authenticate(runtime, owner.session.accessToken);
+    const initialGrant = runtime.createPairingCode(initialContext, owner.group.id, 'VIEWER');
+
+    const refreshed = runtime.refreshDeviceSession(owner.session.refreshToken);
+    expectRuntimeError(
+      () =>
+        runtime.pairDevice({
+          pairingCode: initialGrant.code,
+          ...deviceInput('Rotated-token observer', 'ed25519:rotated-token-observer'),
+        }),
+      'UNAUTHENTICATED',
+    );
+    expectRuntimeError(
+      () => runtime.createPairingCode(initialContext, owner.group.id, 'VIEWER'),
+      'UNAUTHENTICATED',
+    );
+
+    const refreshedContext = authenticate(runtime, refreshed.accessToken);
+    const replayGrant = runtime.createPairingCode(refreshedContext, owner.group.id, 'EDITOR');
+    expectRuntimeError(
+      () => runtime.refreshDeviceSession(owner.session.refreshToken),
+      'UNAUTHENTICATED',
+    );
+    expectRuntimeError(
+      () =>
+        runtime.pairDevice({
+          pairingCode: replayGrant.code,
+          ...deviceInput('Replay observer', 'ed25519:replay-observer'),
+        }),
+      'UNAUTHENTICATED',
+    );
+  });
+
+  it('fails closed when a pairing grant outlives its issuer access token', () => {
+    let now = new Date('2026-08-18T09:00:00.000Z');
+    const runtime = createRuntime({
+      now: () => now,
+      accessTokenLifetimeMs: 10,
+      pairingCodeLifetimeMs: 100,
+    });
+    const owner = runtime.createGroup({
+      name: 'Red terminal group',
+      initialDevice: deviceInput('HQ primary'),
+    });
+    const grant = runtime.createPairingCode(
+      authenticate(runtime, owner.session.accessToken),
+      owner.group.id,
+      'VIEWER',
+    );
+
+    now = new Date(now.getTime() + 10);
+    expectRuntimeError(
+      () =>
+        runtime.pairDevice({
+          pairingCode: grant.code,
+          ...deviceInput('Expired issuer observer', 'ed25519:expired-issuer-observer'),
+        }),
+      'UNAUTHENTICATED',
+    );
   });
 
   it('enforces group membership, actor identity, page bounds, and the final-admin guard', () => {

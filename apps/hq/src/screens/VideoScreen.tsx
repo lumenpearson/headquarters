@@ -2,18 +2,97 @@
 
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  isVideoProvider,
+  MediaPlayer,
+  MediaProvider,
+  type MediaPlayerInstance,
+  type VideoSrc,
+} from '@vidstack/react';
 import { TerminalButton, TerminalSelect, TerminalSlider } from '@gremuchaya/ui/primitives';
 
 import { Gauge, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
+import {
+  BridgeMaterialClient,
+  type MaterialEntry,
+} from '@/infrastructure/materials/BridgeMaterialClient';
+import {
+  materialPreviewLimits,
+  readMaterialBlob,
+} from '@/infrastructure/materials/MaterialPreviewReader';
+import {
+  demoCameraMaterialOption,
+  isAssignableCameraMaterial,
+  readCameraMaterialAssignments,
+  setCameraMaterialAssignment,
+  writeCameraMaterialAssignments,
+  type CameraMaterialAssignments,
+} from '@/infrastructure/media/cameraMaterialAssignments';
+import {
+  createCameraStreamRegistry,
+  queryCameraRegistry,
+  type CameraRegistryFilter,
+  type CameraRegistrySort,
+} from '@/infrastructure/media/cameraStreamRegistry';
+import {
+  getNativeCameraRetryDelay,
+  startNativeCameraStream,
+  stopNativeCameraStream,
+  type NativeCameraStream,
+} from '@/infrastructure/media/nativeCameraGateway';
+import {
+  createPlaybackSyncTarget,
+  PlaybackSyncCoordinator,
+  type PlaybackSyncAction,
+  type PlaybackSyncCommand,
+  type PlaybackSyncTarget,
+} from '@/infrastructure/media/PlaybackSyncCoordinator';
 import { useOperationsStore } from '@/state/operationsStore';
 
-const surveillanceSource = '/assets/video/surveillance-k17.webm';
+const cameraPageSize = 12;
 
 const playbackRateOptions = [0.5, 1, 1.5, 2, 4].map((rate) => ({
   value: String(rate),
   label: `${rate}×`,
 }));
+
+const cameraFilterOptions = [
+  { value: 'all', label: 'ВСЕ КАНАЛЫ' },
+  { value: 'online', label: 'ТОЛЬКО ACTIVE' },
+  { value: 'alert', label: 'ТОЛЬКО ALERT' },
+  { value: 'lost', label: 'ПОТЕРЯ СИГНАЛА' },
+] as const;
+
+const cameraSortOptions = [
+  { value: 'registry', label: 'ПОРЯДОК РЕЕСТРА' },
+  { value: 'id', label: 'ИДЕНТИФИКАТОР' },
+  { value: 'signal', label: 'УРОВЕНЬ СИГНАЛА' },
+  { value: 'sector', label: 'СЕКТОР' },
+] as const;
+
+interface WebcamSession {
+  readonly cameraId: string;
+  readonly stream: MediaStream;
+}
+
+type WebcamState = 'idle' | 'requesting' | 'active' | 'denied' | 'unavailable' | 'ended';
+type MaterialCatalogState = 'loading' | 'ready' | 'unavailable';
+type MaterialSourceState = 'idle' | 'loading' | 'ready' | 'missing' | 'unavailable';
+type PlaybackSyncState = 'CONNECTING' | 'ACTIVE' | 'SOURCE MISMATCH' | 'LOCAL ONLY';
+
+interface CameraMaterialSource {
+  readonly cameraId: string;
+  readonly materialId: string;
+  readonly source: string;
+  readonly transport: 'BOUNDED_BLOB' | 'RANGE_GRANT';
+}
+
+interface CameraMaterialSourceFailure {
+  readonly cameraId: string;
+  readonly materialId: string;
+  readonly message: string;
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return '00:00';
@@ -23,66 +102,573 @@ function formatTime(seconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
 }
 
+function samePlaybackTarget(left: PlaybackSyncTarget, right: PlaybackSyncTarget): boolean {
+  return (
+    left.cameraId === right.cameraId &&
+    left.sourceKind === right.sourceKind &&
+    left.materialId === right.materialId
+  );
+}
+
 export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'archive' }) {
   const router = useRouter();
   const state = useOperationsStore((value) => value);
-  const feedRef = useRef<HTMLElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<MediaPlayerInstance>(null);
   const [duration, setDuration] = useState(18);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [volume, setVolume] = useState(0.35);
   const [muted, setMuted] = useState(true);
-  const [mediaError, setMediaError] = useState(false);
+  const [failedCameraId, setFailedCameraId] = useState<string | null>(null);
+  const [sourceOverride, setSourceOverride] = useState<{
+    readonly cameraId: string;
+    readonly source: string;
+  } | null>(null);
+  const [cameraFilter, setCameraFilter] = useState<CameraRegistryFilter>('all');
+  const [cameraSort, setCameraSort] = useState<CameraRegistrySort>('registry');
+  const [cameraPageIndex, setCameraPageIndex] = useState(1);
+  const nativeConsumerSeed = useId();
+  const nativeConsumerId = useMemo(
+    () => `hq-video-${nativeConsumerSeed.replaceAll(/[^a-zA-Z0-9_-]/gu, '')}`,
+    [nativeConsumerSeed],
+  );
+  const [nativeStream, setNativeStream] = useState<NativeCameraStream | null>(null);
+  const [webcamSession, setWebcamSession] = useState<WebcamSession | null>(null);
+  const [webcamState, setWebcamState] = useState<WebcamState>('idle');
+  const [cameraMaterialAssignments, setCameraMaterialAssignments] =
+    useState<CameraMaterialAssignments>({});
+  const [cameraMaterials, setCameraMaterials] = useState<readonly MaterialEntry[]>([]);
+  const [materialCatalogState, setMaterialCatalogState] = useState<MaterialCatalogState>('loading');
+  const [cameraMaterialSource, setCameraMaterialSource] = useState<CameraMaterialSource | null>(
+    null,
+  );
+  const [cameraMaterialSourceFailure, setCameraMaterialSourceFailure] =
+    useState<CameraMaterialSourceFailure | null>(null);
+  const [playbackSyncState, setPlaybackSyncState] = useState<PlaybackSyncState>('CONNECTING');
+  const webcamSessionRef = useRef<WebcamSession | null>(null);
+  const webcamRequestRef = useRef(0);
+  const selectedCameraIdRef = useRef<string | undefined>(undefined);
+  const cameraMaterialAssignmentsRef = useRef<CameraMaterialAssignments>({});
+  const playbackSyncRef = useRef<PlaybackSyncCoordinator | null>(null);
+  const playbackCommandHandlerRef = useRef<(command: PlaybackSyncCommand) => void>(() => undefined);
+  const materialClient = useMemo(() => new BridgeMaterialClient(), []);
+  const cameras = useMemo(() => Object.values(state.cameras), [state.cameras]);
   const selected = state.cameras[state.ui.selectedCameraId] ?? Object.values(state.cameras)[0];
+  const selectedMaterialId =
+    selected === undefined ? undefined : cameraMaterialAssignments[selected.id];
+  const selectedMaterial = cameraMaterials.find(
+    (material) => material.materialId === selectedMaterialId,
+  );
+  const activeCameraMaterialSource =
+    cameraMaterialSource !== null &&
+    cameraMaterialSource.cameraId === selected?.id &&
+    cameraMaterialSource.materialId === selectedMaterialId
+      ? cameraMaterialSource
+      : null;
+  const activeCameraMaterialFailure =
+    cameraMaterialSourceFailure !== null &&
+    cameraMaterialSourceFailure.cameraId === selected?.id &&
+    cameraMaterialSourceFailure.materialId === selectedMaterialId
+      ? cameraMaterialSourceFailure
+      : null;
+  const materialSourceState: MaterialSourceState =
+    selectedMaterialId === undefined
+      ? 'idle'
+      : selectedMaterial === undefined
+        ? materialCatalogState === 'loading'
+          ? 'loading'
+          : materialCatalogState === 'unavailable'
+            ? 'unavailable'
+            : 'missing'
+        : activeCameraMaterialSource !== null
+          ? 'ready'
+          : activeCameraMaterialFailure === null
+            ? 'loading'
+            : 'unavailable';
+  const cameraLocalSources = useMemo(
+    () =>
+      activeCameraMaterialSource === null
+        ? {}
+        : { [activeCameraMaterialSource.cameraId]: activeCameraMaterialSource.source },
+    [activeCameraMaterialSource],
+  );
+  const streamRegistry = useMemo(
+    () => createCameraStreamRegistry(cameras, { localSources: cameraLocalSources }),
+    [cameraLocalSources, cameras],
+  );
+  const selectedStream = selected === undefined ? undefined : streamRegistry[selected.id];
+  const selectedWebcamSession =
+    webcamSession !== null && webcamSession.cameraId === selected?.id && webcamSession.stream.active
+      ? webcamSession
+      : null;
+  const selectedWebcamSource =
+    selectedWebcamSession === null
+      ? null
+      : ({ src: selectedWebcamSession.stream, type: 'video/object' } as const);
+  const selectedNativeStream = nativeStream?.cameraId === selected?.id ? nativeStream : null;
+  const selectedSourceOverride =
+    sourceOverride !== null && sourceOverride.cameraId === selected?.id
+      ? sourceOverride.source
+      : null;
+  const selectedMaterialMediaSource =
+    activeCameraMaterialSource === null || selectedMaterial === undefined
+      ? null
+      : ({
+          src: activeCameraMaterialSource.source,
+          type: selectedMaterial.mimeType === 'video/webm' ? 'video/webm' : 'video/mp4',
+        } satisfies VideoSrc);
+  const selectedSource =
+    selectedWebcamSource ??
+    selectedSourceOverride ??
+    selectedNativeStream?.manifestUrl ??
+    selectedMaterialMediaSource ??
+    selectedStream?.browserSource;
+  const selectedMaterialSourceActive =
+    selectedWebcamSource === null &&
+    selectedSourceOverride === null &&
+    selectedNativeStream === null &&
+    selectedMaterialMediaSource !== null;
+  const selectedTransport =
+    selectedWebcamSession === null
+      ? (selectedNativeStream?.transport ?? selectedStream?.transport)
+      : 'WEBCAM';
+  const isWebcamSelected = selectedWebcamSession !== null;
+  const playbackSyncTarget = useMemo<PlaybackSyncTarget | null>(() => {
+    if (selected === undefined || isWebcamSelected) return null;
+    if (selectedTransport === 'DEMO_VIDEO') {
+      return createPlaybackSyncTarget(selected.id, 'DEMO_VIDEO');
+    }
+    if (selectedTransport === 'LOCAL_MATERIAL' && selectedMaterialId !== undefined) {
+      return createPlaybackSyncTarget(selected.id, 'LOCAL_MATERIAL', selectedMaterialId);
+    }
+    return null;
+  }, [isWebcamSelected, selected, selectedMaterialId, selectedTransport]);
+  const mediaError = selected?.id === failedCameraId;
   const activeChannel =
     state.channels[state.ui.selectedChannelId] ?? Object.values(state.channels)[0];
-  const cameraWall = useMemo(() => Object.values(state.cameras).slice(0, 12), [state.cameras]);
+  const cameraPage = useMemo(
+    () =>
+      queryCameraRegistry(cameras, streamRegistry, {
+        filter: cameraFilter,
+        sort: cameraSort,
+        page: cameraPageIndex,
+        pageSize: cameraPageSize,
+      }),
+    [cameraFilter, cameraPageIndex, cameras, cameraSort, streamRegistry],
+  );
+  const cameraRegistryHealth = useMemo(
+    () => ({
+      online: cameras.filter((camera) => camera.status === 'ACTIVE').length,
+      alert: cameras.filter((camera) => camera.status === 'ALERT').length,
+      lost: cameras.filter((camera) => camera.status === 'SIGNAL_LOST').length,
+      gateway: Object.values(streamRegistry).filter((stream) => stream.transport === 'RTSP_GATEWAY')
+        .length,
+      demo: Object.values(streamRegistry).filter((stream) => stream.transport === 'DEMO_VIDEO')
+        .length,
+      materials: Object.values(streamRegistry).filter(
+        (stream) => stream.transport === 'LOCAL_MATERIAL',
+      ).length,
+    }),
+    [cameras, streamRegistry],
+  );
+  const assignableCameraMaterials = useMemo(
+    () => cameraMaterials.filter(isAssignableCameraMaterial),
+    [cameraMaterials],
+  );
+  const materialSourceOptions = useMemo(() => {
+    const options: Array<{
+      readonly value: string;
+      readonly label: string;
+      readonly disabled?: boolean;
+    }> = [
+      { value: demoCameraMaterialOption, label: '[DEMO] SURVEILLANCE LOOP' },
+      ...assignableCameraMaterials.map((material) => ({
+        value: material.materialId,
+        label: `[FILE] ${abbreviateMaterialName(material.displayName)}`,
+      })),
+    ];
+    if (
+      selectedMaterialId !== undefined &&
+      !assignableCameraMaterials.some((material) => material.materialId === selectedMaterialId)
+    ) {
+      options.push({
+        value: selectedMaterialId,
+        label: `[MISSING] ${selectedMaterialId.slice(0, 12)}`,
+        disabled: true,
+      });
+    }
+    return options;
+  }, [assignableCameraMaterials, selectedMaterialId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const persisted = readCameraMaterialAssignments(window.localStorage);
+      cameraMaterialAssignmentsRef.current = persisted;
+      setCameraMaterialAssignments(persisted);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    void materialClient
+      .list('', 100, controller.signal)
+      .then((page) => {
+        if (!active) return;
+        setCameraMaterials(
+          page.materials
+            .filter(isAssignableCameraMaterial)
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt, 'en-US')),
+        );
+        setMaterialCatalogState('ready');
+      })
+      .catch(() => {
+        if (!active || controller.signal.aborted) return;
+        setCameraMaterials([]);
+        setMaterialCatalogState('unavailable');
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [materialClient]);
+
+  useEffect(() => {
+    const cameraId = selected?.id;
+    if (
+      cameraId === undefined ||
+      selectedMaterialId === undefined ||
+      selectedMaterial === undefined
+    )
+      return;
+
+    const controller = new AbortController();
+    let released = false;
+    let objectUrl: string | undefined;
+    let playbackGrantId: string | undefined;
+    const releaseSource = () => {
+      if (objectUrl !== undefined) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = undefined;
+      }
+      if (playbackGrantId !== undefined) {
+        const grantId = playbackGrantId;
+        playbackGrantId = undefined;
+        void materialClient.revokePlaybackGrant(grantId).catch(() => undefined);
+      }
+    };
+    void Promise.resolve().then(() => {
+      if (!released) setCameraMaterialSourceFailure(null);
+    });
+    void (async () => {
+      const useBoundedBlob = selectedMaterial.byteSize <= BigInt(materialPreviewLimits.binaryBytes);
+      if (useBoundedBlob) {
+        const blob = await readMaterialBlob(materialClient, selectedMaterial, controller.signal);
+        objectUrl = URL.createObjectURL(blob);
+        if (released) {
+          releaseSource();
+          return;
+        }
+        setCameraMaterialSource({
+          cameraId,
+          materialId: selectedMaterial.materialId,
+          source: objectUrl,
+          transport: 'BOUNDED_BLOB',
+        });
+        return;
+      }
+
+      const grant = await materialClient.getPlaybackGrant(selectedMaterial, controller.signal);
+      playbackGrantId = grant.grantId;
+      if (released) {
+        releaseSource();
+        return;
+      }
+      setCameraMaterialSource({
+        cameraId,
+        materialId: selectedMaterial.materialId,
+        source: grant.url,
+        transport: 'RANGE_GRANT',
+      });
+    })().catch((error: unknown) => {
+      if (released || controller.signal.aborted) return;
+      setCameraMaterialSourceFailure({
+        cameraId,
+        materialId: selectedMaterial.materialId,
+        message: error instanceof Error ? error.message : 'LOCAL MATERIAL STREAM UNAVAILABLE',
+      });
+    });
+    return () => {
+      released = true;
+      controller.abort();
+      releaseSource();
+    };
+  }, [materialCatalogState, materialClient, selected?.id, selectedMaterial, selectedMaterialId]);
+
+  useEffect(() => {
+    selectedCameraIdRef.current = selected?.id;
+    const activeSession = webcamSessionRef.current;
+    if (activeSession !== null && activeSession.cameraId !== selected?.id) {
+      webcamRequestRef.current += 1;
+      activeSession.stream.getTracks().forEach((track) => track.stop());
+      webcamSessionRef.current = null;
+    }
+  }, [selected?.id]);
+
+  useEffect(
+    () => () => {
+      webcamRequestRef.current += 1;
+      webcamSessionRef.current?.stream.getTracks().forEach((track) => track.stop());
+      webcamSessionRef.current = null;
+    },
+    [],
+  );
+
+  const stopWebcam = useCallback(() => {
+    webcamRequestRef.current += 1;
+    webcamSessionRef.current?.stream.getTracks().forEach((track) => track.stop());
+    webcamSessionRef.current = null;
+    setWebcamSession(null);
+    setWebcamState('idle');
+  }, []);
+
+  const assignCameraMaterial = useCallback(
+    (nextMaterialId: string) => {
+      const cameraId = selected?.id;
+      if (cameraId === undefined) return;
+      if (isWebcamSelected) stopWebcam();
+      const nextAssignments = setCameraMaterialAssignment(
+        cameraMaterialAssignmentsRef.current,
+        cameraId,
+        nextMaterialId,
+      );
+      cameraMaterialAssignmentsRef.current = nextAssignments;
+      writeCameraMaterialAssignments(window.localStorage, nextAssignments);
+      setCameraMaterialAssignments(nextAssignments);
+      setSourceOverride(null);
+      setFailedCameraId(null);
+    },
+    [isWebcamSelected, selected?.id, stopWebcam],
+  );
+
+  const toggleWebcam = useCallback(async () => {
+    const cameraId = selected?.id;
+    if (cameraId === undefined) return;
+    const current = webcamSessionRef.current;
+    if (current?.cameraId === cameraId && current.stream.active) {
+      stopWebcam();
+      return;
+    }
+    current?.stream.getTracks().forEach((track) => track.stop());
+    webcamSessionRef.current = null;
+    setWebcamSession(null);
+
+    if (navigator.mediaDevices?.getUserMedia === undefined) {
+      setWebcamState('unavailable');
+      return;
+    }
+    const requestId = webcamRequestRef.current + 1;
+    webcamRequestRef.current = requestId;
+    setWebcamState('requesting');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 25, max: 30 },
+        },
+      });
+      if (webcamRequestRef.current !== requestId || selectedCameraIdRef.current !== cameraId) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const session = { cameraId, stream } satisfies WebcamSession;
+      webcamSessionRef.current = session;
+      setWebcamSession(session);
+      setSourceOverride(null);
+      setFailedCameraId(null);
+      setWebcamState('active');
+      for (const track of stream.getVideoTracks()) {
+        track.addEventListener(
+          'ended',
+          () => {
+            if (webcamSessionRef.current?.stream !== stream) return;
+            webcamSessionRef.current = null;
+            setWebcamSession(null);
+            setWebcamState('ended');
+          },
+          { once: true },
+        );
+      }
+    } catch (error: unknown) {
+      if (webcamRequestRef.current !== requestId) return;
+      const unavailableErrorNames = new Set([
+        'NotFoundError',
+        'NotReadableError',
+        'OverconstrainedError',
+      ]);
+      setWebcamState(
+        error instanceof DOMException && unavailableErrorNames.has(error.name)
+          ? 'unavailable'
+          : 'denied',
+      );
+    }
+  }, [selected?.id, stopWebcam]);
+
+  const applyPlaybackAction = useCallback(
+    (action: Exclude<PlaybackSyncAction, 'SELECT'>, positionSeconds: number, rate: number) => {
+      const player = playerRef.current;
+      const mediaDuration = player?.duration || duration || 18;
+      const nextPosition = Math.min(mediaDuration, Math.max(0, positionSeconds));
+      const nextPercent = (nextPosition / mediaDuration) * 100;
+      if (action === 'SET_RATE') {
+        setPlaybackRate(rate);
+        if (player !== null) player.playbackRate = rate;
+        return;
+      }
+      if (action === 'SEEK') {
+        if (player !== null) player.currentTime = nextPosition;
+        state.setVideoPosition(nextPercent);
+        state.setVideoLive(nextPercent >= 99.5);
+        return;
+      }
+      if (player !== null) player.currentTime = nextPosition;
+      state.setVideoPosition(nextPercent);
+      state.setVideoLive(nextPercent >= 99.5);
+      if (action === 'PLAY') {
+        state.setVideoPlaying(true);
+        void player?.play().catch(() => undefined);
+      } else {
+        state.setVideoPlaying(false);
+        void player?.pause().catch(() => undefined);
+      }
+    },
+    [duration, state],
+  );
+
+  const applyPlaybackCommand = useCallback(
+    (command: PlaybackSyncCommand) => {
+      if (command.action === 'SELECT') {
+        if (state.cameras[command.target.cameraId] === undefined) {
+          setPlaybackSyncState('SOURCE MISMATCH');
+          return;
+        }
+        state.selectCamera(command.target.cameraId);
+        setPlaybackSyncState('ACTIVE');
+        return;
+      }
+      if (playbackSyncTarget === null || !samePlaybackTarget(playbackSyncTarget, command.target)) {
+        setPlaybackSyncState('SOURCE MISMATCH');
+        return;
+      }
+      applyPlaybackAction(command.action, command.positionSeconds, command.playbackRate);
+      setPlaybackSyncState('ACTIVE');
+    },
+    [applyPlaybackAction, playbackSyncTarget, state],
+  );
+
+  useEffect(() => {
+    playbackCommandHandlerRef.current = applyPlaybackCommand;
+  }, [applyPlaybackCommand]);
+
+  useEffect(() => {
+    try {
+      const coordinator = new PlaybackSyncCoordinator({
+        onCommand: (command) => playbackCommandHandlerRef.current(command),
+      });
+      playbackSyncRef.current = coordinator;
+      void Promise.resolve().then(() => setPlaybackSyncState('ACTIVE'));
+      return () => {
+        if (playbackSyncRef.current === coordinator) playbackSyncRef.current = null;
+        coordinator.close();
+      };
+    } catch {
+      void Promise.resolve().then(() => setPlaybackSyncState('LOCAL ONLY'));
+      return undefined;
+    }
+  }, []);
+
+  const requestPlaybackAction = useCallback(
+    (
+      action: Exclude<PlaybackSyncAction, 'SELECT'>,
+      positionSeconds = playerRef.current?.currentTime ?? currentTime,
+      rate = playbackRate,
+    ) => {
+      if (playbackSyncTarget !== null) {
+        const command = playbackSyncRef.current?.publish({
+          action,
+          target: playbackSyncTarget,
+          positionSeconds,
+          playbackRate: rate,
+        });
+        if (command !== null && command !== undefined) {
+          setPlaybackSyncState('ACTIVE');
+          return;
+        }
+      }
+      applyPlaybackAction(action, positionSeconds, rate);
+      setPlaybackSyncState('LOCAL ONLY');
+    },
+    [applyPlaybackAction, currentTime, playbackRate, playbackSyncTarget],
+  );
+
+  const selectCameraWithSync = useCallback(
+    (cameraId: string) => {
+      if (isWebcamSelected) stopWebcam();
+      setFailedCameraId(null);
+      setSourceOverride(null);
+      const target = createPlaybackSyncTarget(cameraId, 'DEMO_VIDEO');
+      const command =
+        target === null ? null : playbackSyncRef.current?.publish({ action: 'SELECT', target });
+      if (command !== null && command !== undefined) {
+        setPlaybackSyncState('ACTIVE');
+        return;
+      }
+      state.selectCamera(cameraId);
+      setPlaybackSyncState('LOCAL ONLY');
+    },
+    [isWebcamSelected, state, stopWebcam],
+  );
 
   const fullscreen = useCallback(() => {
-    if (feedRef.current !== null) void feedRef.current.requestFullscreen();
+    void playerRef.current?.enterFullscreen().catch(() => undefined);
   }, []);
 
   const seekToPercent = useCallback(
     (percent: number) => {
+      if (isWebcamSelected) return;
       const nextPercent = Math.min(100, Math.max(0, percent));
-      if (videoRef.current !== null) {
-        videoRef.current.currentTime = (nextPercent / 100) * (duration || 18);
-      }
-      state.setVideoPosition(nextPercent);
-      state.setVideoLive(nextPercent >= 99.5);
+      const player = playerRef.current;
+      requestPlaybackAction('SEEK', (nextPercent / 100) * (player?.duration || duration || 18));
     },
-    [duration, state],
+    [duration, isWebcamSelected, requestPlaybackAction],
   );
 
   const seekBy = useCallback(
     (seconds: number) => {
-      const video = videoRef.current;
-      if (video === null) return;
-      video.currentTime = Math.min(
-        video.duration || duration,
-        Math.max(0, video.currentTime + seconds),
+      if (isWebcamSelected) return;
+      const player = playerRef.current;
+      if (player === null) return;
+      const nextPosition = Math.min(
+        player.duration || duration,
+        Math.max(0, player.currentTime + seconds),
       );
-      state.setVideoPosition((video.currentTime / (video.duration || duration)) * 100);
-      state.setVideoLive(false);
+      requestPlaybackAction('SEEK', nextPosition);
     },
-    [duration, state],
+    [duration, isWebcamSelected, requestPlaybackAction],
   );
 
   const goLive = useCallback(() => {
-    const video = videoRef.current;
-    if (video !== null) {
-      video.currentTime = Math.max(0, (video.duration || duration) - 0.12);
-      void video.play();
-    }
-    state.setVideoPosition(100);
-    state.setVideoLive(true);
-    if (!state.ui.videoPlaying) state.toggleVideo();
-  }, [duration, state]);
+    const player = playerRef.current;
+    requestPlaybackAction('PLAY', player?.duration || duration || 18);
+  }, [duration, requestPlaybackAction]);
 
   const takeSnapshot = useCallback(() => {
-    const video = videoRef.current;
-    if (video === null || video.videoWidth === 0 || video.videoHeight === 0) return;
+    const provider = playerRef.current?.provider;
+    const video = isVideoProvider(provider) ? provider.video : undefined;
+    if (video === undefined || video.videoWidth === 0 || video.videoHeight === 0) return;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -100,38 +686,120 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   }, [selected?.id]);
 
   const togglePictureInPicture = useCallback(() => {
-    const video = videoRef.current;
-    if (video === null || !document.pictureInPictureEnabled) return;
-    if (document.pictureInPictureElement !== null) {
-      void document.exitPictureInPicture();
-    } else {
-      void video.requestPictureInPicture();
-    }
+    const player = playerRef.current;
+    if (player === null) return;
+    void player.enterPictureInPicture().catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (video === null) return;
-    video.playbackRate = playbackRate;
-    video.volume = volume;
-    video.muted = muted;
+    const player = playerRef.current;
+    if (player === null) return;
+    player.playbackRate = playbackRate;
+    player.volume = volume;
+    player.muted = muted;
   }, [muted, playbackRate, volume]);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (video === null || mediaError || selected === undefined) return;
+    const player = playerRef.current;
+    if (player === null || mediaError || selected === undefined) return;
     if (state.ui.videoPlaying) {
-      void video.play().catch(() => undefined);
+      void player.play().catch(() => undefined);
     } else {
-      video.pause();
+      void player.pause().catch(() => undefined);
     }
   }, [mediaError, selected, state.ui.videoPlaying]);
+
+  useEffect(() => {
+    const cameraId = selected?.id;
+    if (cameraId === undefined || selectedStream?.transport !== 'RTSP_GATEWAY') return;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const connect = async (attempt: number): Promise<void> => {
+      try {
+        const stream = await startNativeCameraStream(cameraId, nativeConsumerId);
+        if (stream === null) return;
+        if (cancelled) {
+          await stopNativeCameraStream(cameraId, nativeConsumerId).catch(() => undefined);
+          return;
+        }
+        setNativeStream(stream);
+      } catch {
+        if (!cancelled) {
+          retryTimer = setTimeout(
+            () => void connect(attempt + 1),
+            getNativeCameraRetryDelay(attempt),
+          );
+        }
+      }
+    };
+
+    void connect(0);
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+      void stopNativeCameraStream(cameraId, nativeConsumerId).catch(() => undefined);
+    };
+  }, [nativeConsumerId, selected?.id, selectedStream?.transport]);
+
+  useEffect(() => {
+    const cameraId = selected?.id;
+    if (
+      cameraId === undefined ||
+      selectedStream?.transport !== 'RTSP_GATEWAY' ||
+      selectedNativeStream === null ||
+      selectedSourceOverride === null
+    ) {
+      return;
+    }
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleRecovery = (attempt: number): void => {
+      retryTimer = setTimeout(() => {
+        void startNativeCameraStream(cameraId, nativeConsumerId)
+          .then(async (stream) => {
+            if (stream === null) return;
+            if (cancelled) {
+              await stopNativeCameraStream(cameraId, nativeConsumerId).catch(() => undefined);
+              return;
+            }
+            setNativeStream(stream);
+            setSourceOverride((current) => (current?.cameraId === cameraId ? null : current));
+            playerRef.current?.startLoading();
+          })
+          .catch(() => {
+            if (!cancelled) scheduleRecovery(attempt + 1);
+          });
+      }, getNativeCameraRetryDelay(attempt));
+    };
+
+    scheduleRecovery(0);
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [
+    nativeConsumerId,
+    selected?.id,
+    selectedNativeStream,
+    selectedSourceOverride,
+    selectedStream?.transport,
+  ]);
 
   useEffect(() => {
     if (mode === 'archive' && state.ui.videoLive) state.setVideoLive(false);
   }, [mode, state]);
 
-  if (selected === undefined) return null;
+  if (selected === undefined || selectedStream === undefined) return null;
+  const activeSelectedSource = selectedSource ?? selectedStream.browserSource;
+  const selectedSourceLabel = isWebcamSelected
+    ? '● LOCAL WEBCAM'
+    : selectedTransport === 'LOCAL_MATERIAL'
+      ? '▶ LOCAL MATERIAL'
+      : selectedTransport === 'RTSP_GATEWAY'
+        ? '● OPTIONAL LIVE'
+        : '↻ DEMO LOOP';
 
   return (
     <div className={`ops-screen video-screen video-screen--${mode}`}>
@@ -170,50 +838,81 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
 
       <div className="video-layout">
         <div className="video-primary-column">
-          <section
-            ref={feedRef}
+          <MediaPlayer
+            ref={playerRef}
             className={`video-main-feed ${selected.status === 'SIGNAL_LOST' || mediaError ? 'is-signal-lost' : ''}`}
+            src={activeSelectedSource}
+            poster={selectedStream.thumbnailSource}
+            title={`${selected.id} / ${selected.location}`}
+            autoPlay
+            loop={!isWebcamSelected}
+            muted={muted}
+            playsInline
+            preload="auto"
+            crossOrigin={
+              selectedMaterialSourceActive &&
+              activeCameraMaterialSource?.transport === 'RANGE_GRANT'
+                ? 'anonymous'
+                : undefined
+            }
             onDoubleClick={fullscreen}
+            onLoadedMetadata={() => {
+              const reportedDuration = playerRef.current?.duration;
+              const nextDuration =
+                reportedDuration !== undefined &&
+                Number.isFinite(reportedDuration) &&
+                reportedDuration > 0
+                  ? reportedDuration
+                  : 18;
+              setDuration(nextDuration);
+              if (playerRef.current !== null && !isWebcamSelected) {
+                playerRef.current.currentTime = (state.ui.videoPosition / 100) * nextDuration;
+              }
+            }}
+            onDurationChange={(nextDuration) =>
+              setDuration(Number.isFinite(nextDuration) && nextDuration > 0 ? nextDuration : 18)
+            }
+            onTimeUpdate={(detail) => {
+              setCurrentTime(detail.currentTime);
+              if (isWebcamSelected) return;
+              state.setVideoPosition(
+                (detail.currentTime / (playerRef.current?.duration || duration)) * 100,
+              );
+            }}
+            onError={() => {
+              if (isWebcamSelected) {
+                stopWebcam();
+                setSourceOverride({
+                  cameraId: selected.id,
+                  source: selectedStream.fallbackSource,
+                });
+                setFailedCameraId(null);
+                return;
+              }
+              if (activeSelectedSource !== selectedStream.fallbackSource) {
+                setSourceOverride({
+                  cameraId: selected.id,
+                  source: selectedStream.fallbackSource,
+                });
+                setFailedCameraId(null);
+                return;
+              }
+              setFailedCameraId(selected.id);
+            }}
             onKeyDown={(event) => {
               if (event.key === ' ') {
                 event.preventDefault();
-                state.toggleVideo();
+                requestPlaybackAction(state.ui.videoPlaying ? 'PAUSE' : 'PLAY');
               }
               if (event.key === 'ArrowLeft') seekBy(-5);
               if (event.key === 'ArrowRight') seekBy(5);
               if (event.key.toLowerCase() === 'f') fullscreen();
+              if (event.key.toLowerCase() === 'w') void toggleWebcam();
             }}
             tabIndex={0}
             aria-label={`Видеопоток ${selected.id}`}
           >
-            <video
-              ref={videoRef}
-              src={surveillanceSource}
-              poster="/assets/video/camera-01.webp"
-              autoPlay
-              loop
-              muted={muted}
-              playsInline
-              preload="auto"
-              onLoadedMetadata={(event) => {
-                const nextDuration = event.currentTarget.duration || 18;
-                setDuration(nextDuration);
-                event.currentTarget.currentTime = (state.ui.videoPosition / 100) * nextDuration;
-              }}
-              onDurationChange={(event) => setDuration(event.currentTarget.duration || 18)}
-              onTimeUpdate={(event) => {
-                const video = event.currentTarget;
-                setCurrentTime(video.currentTime);
-                state.setVideoPosition((video.currentTime / (video.duration || duration)) * 100);
-              }}
-              onPlay={() => {
-                if (!state.ui.videoPlaying) state.toggleVideo();
-              }}
-              onPause={() => {
-                if (state.ui.videoPlaying) state.toggleVideo();
-              }}
-              onError={() => setMediaError(true)}
-            />
+            <MediaProvider mediaProps={{ className: 'video-main-feed__media' }} />
             <div className="video-scanlines" aria-hidden="true" />
             <div
               className="recognition-box"
@@ -227,7 +926,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               <span>
                 <b>{selected.id}</b> / {selected.location}
               </span>
-              <i>{selected.recording ? '● ПРЯМОЙ ЭФИР / REC' : '○ STBY'}</i>
+              <i>{selectedSourceLabel}</i>
             </header>
             <div className="video-overlay-left">
               <span>КАМЕРА {selected.id}</span>
@@ -255,15 +954,16 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 <span>ПЕРЕКЛЮЧЕНИЕ НА РЕЗЕРВНЫЙ КАНАЛ</span>
                 <TerminalButton
                   onClick={() => {
-                    setMediaError(false);
-                    videoRef.current?.load();
+                    setFailedCameraId(null);
+                    setSourceOverride(null);
+                    playerRef.current?.startLoading();
                   }}
                 >
                   [R] RETRY STREAM
                 </TerminalButton>
               </div>
             ) : null}
-          </section>
+          </MediaPlayer>
 
           <Panel
             title="УПРАВЛЕНИЕ ПОТОКОМ"
@@ -273,36 +973,68 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             <div className="transport-controls">
               <TerminalButton
                 onClick={() => {
-                  seekToPercent(0);
-                  if (state.ui.videoPlaying) state.toggleVideo();
+                  requestPlaybackAction('PAUSE', 0);
                 }}
               >
                 [■] STOP
               </TerminalButton>
-              <TerminalButton onClick={() => seekBy(-1 / selected.fps)}>[|◀] FRAME</TerminalButton>
-              <TerminalButton onClick={() => seekBy(-10)}>[◀] -10S</TerminalButton>
+              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(-1 / selected.fps)}>
+                [|◀] FRAME
+              </TerminalButton>
+              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(-10)}>
+                [◀] -10S
+              </TerminalButton>
               <TerminalButton
                 tone="primary"
                 className="is-primary"
-                onClick={() => state.toggleVideo()}
+                onClick={() => requestPlaybackAction(state.ui.videoPlaying ? 'PAUSE' : 'PLAY')}
               >
                 {state.ui.videoPlaying ? '[Ⅱ] PAUSE' : '[▶] PLAY'}
               </TerminalButton>
-              <TerminalButton onClick={() => seekBy(10)}>[▶] +10S</TerminalButton>
-              <TerminalButton onClick={() => seekBy(1 / selected.fps)}>[▶|] FRAME</TerminalButton>
-              <TerminalButton className={state.ui.videoLive ? 'is-live' : ''} onClick={goLive}>
+              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(10)}>
+                [▶] +10S
+              </TerminalButton>
+              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(1 / selected.fps)}>
+                [▶|] FRAME
+              </TerminalButton>
+              <TerminalButton
+                className={state.ui.videoLive ? 'is-live' : ''}
+                disabled={isWebcamSelected}
+                onClick={goLive}
+              >
                 [●] LIVE
               </TerminalButton>
               <TerminalButton onClick={takeSnapshot}>[S] SNAP</TerminalButton>
               <TerminalButton onClick={togglePictureInPicture}>[P] PIP</TerminalButton>
               <TerminalButton onClick={fullscreen}>[F] FULL</TerminalButton>
+              <TerminalButton
+                className={isWebcamSelected ? 'is-live' : ''}
+                disabled={webcamState === 'requesting' || !selectedStream.webcamEligible}
+                onClick={() => void toggleWebcam()}
+              >
+                {webcamState === 'requesting'
+                  ? '[W] REQUEST'
+                  : isWebcamSelected
+                    ? '[W] STOP CAM'
+                    : '[W] WEBCAM'}
+              </TerminalButton>
             </div>
             <div className="transport-secondary">
               <TerminalSelect
+                className="camera-source-select"
+                value={selectedMaterialId ?? demoCameraMaterialOption}
+                options={materialSourceOptions}
+                onValueChange={assignCameraMaterial}
+                label="Источник выбранного канала"
+              />
+              <TerminalSelect
                 value={String(playbackRate)}
                 options={playbackRateOptions}
-                onValueChange={(value) => setPlaybackRate(Number(value))}
+                onValueChange={(value) =>
+                  requestPlaybackAction('SET_RATE', currentTime, Number(value))
+                }
                 label="Скорость воспроизведения"
+                disabled={isWebcamSelected}
               />
               <TerminalButton onClick={() => setMuted((value) => !value)}>
                 {muted ? '[M] MUTED' : '[M] AUDIO'}
@@ -318,7 +1050,44 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 showValue={false}
               />
               <span>
-                {formatTime(currentTime)} / {formatTime(duration)}
+                {isWebcamSelected
+                  ? 'LOCAL DEVICE / LIVE'
+                  : `${formatTime(currentTime)} / ${formatTime(duration)}`}
+              </span>
+              <span
+                className={`playback-sync-status playback-sync-status--${playbackSyncState.toLowerCase().replaceAll(' ', '-')}`}
+                aria-live="polite"
+              >
+                [⇄] SYNC / {playbackSyncTarget === null ? 'LOCAL SOURCE' : playbackSyncState}
+              </span>
+              <span className="webcam-status" aria-live="polite">
+                {webcamState === 'denied' ? <b>CAMERA ACCESS DENIED</b> : null}
+                {webcamState === 'unavailable' ? <b>CAMERA API UNAVAILABLE</b> : null}
+                {webcamState === 'ended' ? <b>CAMERA STREAM ENDED</b> : null}
+              </span>
+              <span className="camera-material-status" aria-live="polite">
+                {selectedMaterialId !== undefined && materialSourceState === 'loading' ? (
+                  <b>LOADING LOCAL MATERIAL…</b>
+                ) : null}
+                {selectedMaterialId !== undefined && materialSourceState === 'ready' ? (
+                  <b>
+                    {activeCameraMaterialSource?.transport === 'RANGE_GRANT'
+                      ? 'RANGE STREAM READY'
+                      : 'MATERIAL READY'}{' '}
+                    / {abbreviateMaterialName(selectedMaterial?.displayName ?? '')}
+                  </b>
+                ) : null}
+                {selectedMaterialId !== undefined && materialSourceState === 'missing' ? (
+                  <b>MATERIAL NOT AVAILABLE IN LOCAL MIRROR</b>
+                ) : null}
+                {selectedMaterialId !== undefined && materialSourceState === 'unavailable' ? (
+                  <b>
+                    {activeCameraMaterialFailure?.message || 'LOCAL MATERIAL STREAM UNAVAILABLE'}
+                  </b>
+                ) : null}
+                {selectedMaterialId === undefined && materialCatalogState === 'unavailable' ? (
+                  <b>LOCAL MATERIAL CATALOG OFFLINE</b>
+                ) : null}
               </span>
             </div>
             <div className="video-scrubber">
@@ -328,6 +1097,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 value={state.ui.videoPosition}
                 onValueChange={seekToPercent}
                 label="Позиция видеопотока"
+                disabled={isWebcamSelected}
                 min={0}
                 max={100}
                 step={0.01}
@@ -350,25 +1120,55 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
 
         <Panel
           title="СЕТКА КАМЕР"
-          eyebrow={`ACTIVE / ${cameraWall.length}`}
+          eyebrow={`VIEW ${cameraPage.page}/${cameraPage.totalPages} / ${cameraPage.totalItems} CHANNELS`}
           className="camera-grid-panel"
         >
+          <div className="camera-grid-toolbar">
+            <TerminalSelect
+              value={cameraFilter}
+              options={cameraFilterOptions}
+              onValueChange={(value) => {
+                setCameraFilter(value as CameraRegistryFilter);
+                setCameraPageIndex(1);
+              }}
+              label="Фильтр камер"
+            />
+            <TerminalSelect
+              value={cameraSort}
+              options={cameraSortOptions}
+              onValueChange={(value) => {
+                setCameraSort(value as CameraRegistrySort);
+                setCameraPageIndex(1);
+              }}
+              label="Сортировка камер"
+            />
+          </div>
           <div className="camera-grid">
-            {cameraWall.map((camera, index) => (
+            {cameraPage.items.map(({ camera, stream }) => (
               <TerminalButton
                 key={camera.id}
                 className={`${camera.id === selected.id ? 'is-selected' : ''} ${camera.status === 'SIGNAL_LOST' ? 'is-lost' : ''}`}
-                onClick={() => state.selectCamera(camera.id)}
+                onClick={() => {
+                  selectCameraWithSync(camera.id);
+                }}
                 title={`${camera.location} / открыть поток`}
               >
                 <div className="camera-thumb">
                   <Image
-                    src={`/assets/video/camera-${String(index + 1).padStart(2, '0')}.webp`}
+                    src={stream.thumbnailSource}
                     alt={`Камера ${camera.id}: ${camera.location}`}
                     fill
                     sizes="(max-width: 1500px) 24vw, 16vw"
                   />
-                  <span>{camera.status === 'SIGNAL_LOST' ? 'NO SIGNAL' : '● LIVE'}</span>
+                  <span>
+                    {camera.status === 'SIGNAL_LOST'
+                      ? 'NO SIGNAL'
+                      : stream.transport === 'LOCAL_MATERIAL'
+                        ? '▶ FILE'
+                        : stream.transport === 'RTSP_GATEWAY'
+                          ? '● LIVE'
+                          : '↻ DEMO'}
+                  </span>
                 </div>
                 <footer>
                   <strong>{camera.id}</strong>
@@ -377,7 +1177,72 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 </footer>
               </TerminalButton>
             ))}
+            {cameraPage.items.length >= cameraPageSize ? null : (
+              <aside className="camera-grid-query-summary" aria-label="Сводка реестра камер">
+                <header>
+                  <strong>[ REGISTRY QUERY ]</strong>
+                  <span>{cameraFilter.toUpperCase()}</span>
+                </header>
+                <dl>
+                  <div>
+                    <dt>MATCH</dt>
+                    <dd>{cameraPage.totalItems}</dd>
+                  </div>
+                  <div>
+                    <dt>ACTIVE</dt>
+                    <dd>{cameraRegistryHealth.online}</dd>
+                  </div>
+                  <div>
+                    <dt>ALERT</dt>
+                    <dd>{cameraRegistryHealth.alert}</dd>
+                  </div>
+                  <div>
+                    <dt>LOST</dt>
+                    <dd>{cameraRegistryHealth.lost}</dd>
+                  </div>
+                  <div>
+                    <dt>DEMO</dt>
+                    <dd>{cameraRegistryHealth.demo}</dd>
+                  </div>
+                  <div>
+                    <dt>MATERIAL</dt>
+                    <dd>{cameraRegistryHealth.materials}</dd>
+                  </div>
+                  <div>
+                    <dt>WEBCAM</dt>
+                    <dd>{isWebcamSelected ? 1 : 0}</dd>
+                  </div>
+                  <div>
+                    <dt>RTSP OPT-IN</dt>
+                    <dd>{cameraRegistryHealth.gateway}</dd>
+                  </div>
+                </dl>
+                <p>
+                  HIDDEN FEEDS: STATIC THUMBNAILS / DECODE TARGET: <b>{selected.id}</b>
+                </p>
+              </aside>
+            )}
           </div>
+          <nav className="camera-grid-pagination" aria-label="Страницы реестра камер">
+            <TerminalButton
+              disabled={cameraPage.page <= 1}
+              onClick={() => setCameraPageIndex((page) => Math.max(1, page - 1))}
+            >
+              [←] PREV
+            </TerminalButton>
+            <span>
+              PAGE {String(cameraPage.page).padStart(2, '0')} /{' '}
+              {String(cameraPage.totalPages).padStart(2, '0')}
+            </span>
+            <TerminalButton
+              disabled={cameraPage.page >= cameraPage.totalPages}
+              onClick={() =>
+                setCameraPageIndex((page) => Math.min(cameraPage.totalPages, page + 1))
+              }
+            >
+              [→] NEXT
+            </TerminalButton>
+          </nav>
         </Panel>
 
         <aside className="video-side-stack">
@@ -419,6 +1284,13 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 <dt>STREAM</dt>
                 <dd>
                   {selected.resolution} / {selected.fps} FPS
+                </dd>
+              </div>
+              <div>
+                <dt>TRANSPORT</dt>
+                <dd>
+                  {selectedTransport}
+                  {selectedSourceOverride === null ? '' : ' / FALLBACK'}
                 </dd>
               </div>
               <div>
@@ -515,7 +1387,9 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             </div>
             {activeChannel === undefined ? null : (
               <footer>
-                <TerminalButton onClick={() => state.toggleVideo()}>
+                <TerminalButton
+                  onClick={() => requestPlaybackAction(state.ui.videoPlaying ? 'PAUSE' : 'PLAY')}
+                >
                   [{state.ui.videoPlaying ? 'Ⅱ' : '▶'}] SAMPLE
                 </TerminalButton>
                 <TerminalButton onClick={() => state.openDrawer('channel', activeChannel.id)}>
@@ -587,6 +1461,11 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       </div>
     </div>
   );
+}
+
+function abbreviateMaterialName(value: string): string {
+  const compact = value.trim().replaceAll(/\s+/gu, ' ');
+  return compact.length <= 34 ? compact : `${compact.slice(0, 31)}…`;
 }
 
 function PtzPanel() {

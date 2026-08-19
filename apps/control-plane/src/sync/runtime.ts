@@ -41,6 +41,12 @@ export interface AuthenticatedDevice {
   readonly device: PairedDevice;
   readonly role: DeviceRole;
   readonly sessionId: string;
+  /**
+   * Internal exact bearer identity. This value is never serialized through
+   * the public RPC contract; it binds sensitive grants to the access token
+   * that actually authenticated the caller.
+   */
+  readonly accessTokenId: string;
 }
 
 export interface CreateGroupInput {
@@ -133,6 +139,8 @@ interface PairingCodeRecord {
   readonly role: Exclude<DeviceRole, 'ADMIN'>;
   readonly expiresAt: Date;
   readonly createdByDeviceId: string;
+  readonly createdBySessionId: string;
+  readonly createdByAccessTokenId: string;
   consumedAt?: Date;
   revokedAt?: Date;
 }
@@ -141,6 +149,7 @@ interface SessionRecord {
   readonly id: string;
   readonly groupId: string;
   readonly deviceId: string;
+  accessTokenId: string;
   accessTokenHash: string;
   refreshTokenHash: string;
   accessTokenExpiresAt: Date;
@@ -177,6 +186,7 @@ export class PairedDeviceRuntime {
   readonly #deviceIdByPublicKey = new Map<string, string>();
   readonly #memberships = new Map<string, MembershipRecord>();
   readonly #pairingCodesByHash = new Map<string, PairingCodeRecord>();
+  readonly #sessionsById = new Map<string, SessionRecord>();
   readonly #sessionsByAccessHash = new Map<string, SessionRecord>();
   readonly #sessionsByRefreshHash = new Map<string, RefreshTokenReference>();
   readonly #now: () => Date;
@@ -255,10 +265,17 @@ export class PairedDeviceRuntime {
     groupId: string,
     role: Exclude<DeviceRole, 'ADMIN'>,
   ): PairingCodeGrant {
+    const now = this.currentTime();
+    const issuer = this.requireActivePairingIssuer(authenticated, now);
     const group = this.requireGroup(groupId);
     this.requireSameGroup(authenticated, group.id);
     this.requireRole(authenticated, 'ADMIN');
-    const now = this.currentTime();
+    if (issuer.groupId !== group.id || issuer.deviceId !== authenticated.device.id) {
+      throw new PairedDeviceRuntimeError(
+        'UNAUTHENTICATED',
+        'The authenticated access token is invalid or expired.',
+      );
+    }
     const code = this.createToken('pair');
     const grant: PairingCodeRecord = {
       tokenHash: this.hashToken('pair', code),
@@ -266,6 +283,8 @@ export class PairedDeviceRuntime {
       role,
       expiresAt: new Date(now.getTime() + this.#pairingCodeLifetimeMs),
       createdByDeviceId: authenticated.device.id,
+      createdBySessionId: issuer.id,
+      createdByAccessTokenId: issuer.accessTokenId,
     };
     this.#pairingCodesByHash.set(grant.tokenHash, grant);
     return {
@@ -302,11 +321,20 @@ export class PairedDeviceRuntime {
       membershipKey(group.id, grant.createdByDeviceId),
     );
     const creatorDevice = this.#devicesById.get(grant.createdByDeviceId);
+    const issuerSession = this.#sessionsById.get(grant.createdBySessionId);
     if (
       creatorMembership === undefined ||
       creatorMembership.revokedAt !== undefined ||
       creatorDevice === undefined ||
-      creatorDevice.status === 'REVOKED'
+      creatorDevice.status === 'REVOKED' ||
+      issuerSession === undefined ||
+      issuerSession.groupId !== group.id ||
+      issuerSession.deviceId !== grant.createdByDeviceId ||
+      issuerSession.revokedAt !== undefined ||
+      issuerSession.refreshTokenExpiresAt.getTime() <= now.getTime() ||
+      issuerSession.accessTokenExpiresAt.getTime() <= now.getTime() ||
+      issuerSession.accessTokenId !== grant.createdByAccessTokenId ||
+      this.#sessionsByAccessHash.get(issuerSession.accessTokenHash) !== issuerSession
     ) {
       throw new PairedDeviceRuntimeError(
         'UNAUTHENTICATED',
@@ -377,7 +405,9 @@ export class PairedDeviceRuntime {
     const nextAccessTokenHash = this.hashToken('access', nextAccessToken);
     const nextRefreshTokenHash = this.hashToken('refresh', nextRefreshToken);
     const previousRefreshExpiresAt = copyDate(session.refreshTokenExpiresAt);
+    this.revokePairingCodesForAccessToken(session.accessTokenId, now);
     this.#sessionsByAccessHash.delete(session.accessTokenHash);
+    session.accessTokenId = this.createId();
     session.accessTokenHash = nextAccessTokenHash;
     session.refreshTokenHash = nextRefreshTokenHash;
     session.accessTokenExpiresAt = new Date(now.getTime() + this.#accessTokenLifetimeMs);
@@ -418,6 +448,7 @@ export class PairedDeviceRuntime {
       device: this.toPairedDevice(device, membership),
       role: membership.role,
       sessionId: session.id,
+      accessTokenId: session.accessTokenId,
     };
   }
 
@@ -543,12 +574,14 @@ export class PairedDeviceRuntime {
       id: this.createId(),
       groupId: group.id,
       deviceId: device.id,
+      accessTokenId: this.createId(),
       accessTokenHash: this.hashToken('access', accessToken),
       refreshTokenHash: this.hashToken('refresh', refreshToken),
       issuedAt: now,
       accessTokenExpiresAt: new Date(now.getTime() + this.#accessTokenLifetimeMs),
       refreshTokenExpiresAt: new Date(now.getTime() + this.#refreshTokenLifetimeMs),
     };
+    this.#sessionsById.set(session.id, session);
     this.#sessionsByAccessHash.set(session.accessTokenHash, session);
     this.#sessionsByRefreshHash.set(session.refreshTokenHash, {
       session,
@@ -577,6 +610,62 @@ export class PairedDeviceRuntime {
   private revokeSession(session: SessionRecord, now: Date): void {
     session.revokedAt ??= now;
     this.#sessionsByAccessHash.delete(session.accessTokenHash);
+    this.revokePairingCodesForSession(session.id, now);
+  }
+
+  /**
+   * An authenticated context is an internal capability, but it may have gone
+   * stale after a refresh, expiry, session revoke, device revoke, or membership
+   * revoke. Pairing-code issuance must therefore re-check the exact session and
+   * bearer identity rather than trust the previously returned object.
+   */
+  private requireActivePairingIssuer(authenticated: AuthenticatedDevice, now: Date): SessionRecord {
+    const session = this.#sessionsById.get(authenticated.sessionId);
+    const membership =
+      session === undefined
+        ? undefined
+        : this.#memberships.get(membershipKey(session.groupId, session.deviceId));
+    const device = session === undefined ? undefined : this.#devicesById.get(session.deviceId);
+    if (
+      session === undefined ||
+      membership === undefined ||
+      device === undefined ||
+      session.groupId !== authenticated.group.id ||
+      session.deviceId !== authenticated.device.id ||
+      session.accessTokenId !== authenticated.accessTokenId ||
+      session.revokedAt !== undefined ||
+      session.refreshTokenExpiresAt.getTime() <= now.getTime() ||
+      session.accessTokenExpiresAt.getTime() <= now.getTime() ||
+      membership.revokedAt !== undefined ||
+      membership.role !== authenticated.role ||
+      device.status === 'REVOKED' ||
+      this.#sessionsByAccessHash.get(session.accessTokenHash) !== session
+    ) {
+      throw new PairedDeviceRuntimeError(
+        'UNAUTHENTICATED',
+        'The authenticated access token is invalid or expired.',
+      );
+    }
+    return session;
+  }
+
+  private revokePairingCodesForAccessToken(accessTokenId: string, now: Date): void {
+    for (const pairingCode of this.#pairingCodesByHash.values()) {
+      if (
+        pairingCode.createdByAccessTokenId === accessTokenId &&
+        pairingCode.consumedAt === undefined
+      ) {
+        pairingCode.revokedAt ??= now;
+      }
+    }
+  }
+
+  private revokePairingCodesForSession(sessionId: string, now: Date): void {
+    for (const pairingCode of this.#pairingCodesByHash.values()) {
+      if (pairingCode.createdBySessionId === sessionId && pairingCode.consumedAt === undefined) {
+        pairingCode.revokedAt ??= now;
+      }
+    }
   }
 
   private requireGroup(groupId: string): PairedGroup {

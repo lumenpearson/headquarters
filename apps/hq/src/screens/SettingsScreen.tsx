@@ -1,17 +1,84 @@
 'use client';
 
 import {
+  getSettingsDefinitionsForCategory,
+  settingCategories,
+  type SettingCategory,
+  type SettingDefinition,
+  type SettingValue,
+} from '@gremuchaya/settings-schema';
+import {
   TerminalButton,
   TerminalInput,
+  TerminalNumberField,
   TerminalSelect,
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
+import { useMemo, useState } from 'react';
 
 import { Panel } from '@/components/operations/OpsUi';
+import {
+  querySettingsHistory,
+  settingsHistoryOperations,
+  type SettingsHistoryOperation,
+} from '@/infrastructure/settings/SettingsHistoryLedger';
 import { useOperationsStore } from '@/state/operationsStore';
 
 export function SettingsScreen() {
   const state = useOperationsStore((value) => value);
+  const draft = state.personalization.draft;
+  const [catalogCategory, setCatalogCategory] = useState<SettingCategory>('themes');
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [historyOperation, setHistoryOperation] = useState<SettingsHistoryOperation | 'all'>('all');
+  const [historyCategory, setHistoryCategory] = useState<SettingCategory | 'all'>('all');
+  const [historySettingId, setHistorySettingId] = useState('');
+  const [historyDate, setHistoryDate] = useState('');
+  const [historyOrder, setHistoryOrder] = useState<'newest' | 'oldest'>('newest');
+  const [historyPageNumber, setHistoryPageNumber] = useState(1);
+  const categoryDefinitions = useMemo(
+    () => getSettingsDefinitionsForCategory(catalogCategory),
+    [catalogCategory],
+  );
+  const historyPage = useMemo(
+    () =>
+      querySettingsHistory(state.personalization.history, {
+        page: historyPageNumber,
+        pageSize: 6,
+        order: historyOrder,
+        operation: historyOperation === 'all' ? undefined : historyOperation,
+        category: historyCategory === 'all' ? undefined : historyCategory,
+        settingId: historySettingId.trim() || undefined,
+        date: historyDate || undefined,
+      }),
+    [
+      historyCategory,
+      historyDate,
+      historyOperation,
+      historyOrder,
+      historyPageNumber,
+      historySettingId,
+      state.personalization.history,
+    ],
+  );
+  const exportDraft = () => {
+    const href = URL.createObjectURL(
+      new Blob([state.exportSettingsDraft()], { type: 'application/json' }),
+    );
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = 'gremuchaya-hq-settings-draft.json';
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(href), 0);
+  };
+  const importDraft = async (file: File | undefined) => {
+    if (file === undefined) return;
+    try {
+      state.importSettingsDraft(await file.text());
+      setImportStatus(`[✓] IMPORTED ${file.name.toUpperCase()}`);
+    } catch {
+      setImportStatus('[!] IMPORT REJECTED: SCHEMA VALIDATION FAILED');
+    }
+  };
   return (
     <div className="ops-screen settings-screen">
       <header className="ops-screen__title">
@@ -168,12 +235,228 @@ export function SettingsScreen() {
             [R] СБРОСИТЬ ОПЕРАТИВНЫЙ МИР
           </TerminalButton>
         </Panel>
+        <Panel
+          title="ПЕРСОНАЛИЗАЦИЯ / КАТАЛОГ"
+          eyebrow={`SAFE DRAFT / ${draft.changedIds.length} ИЗМЕНЕНИЙ / REV ${state.personalization.published.revision}`}
+          className="settings-personalization"
+        >
+          <div className="settings-catalog-toolbar">
+            <TerminalSelect
+              label="Категория персонализации"
+              value={catalogCategory}
+              onValueChange={setCatalogCategory}
+              options={settingCategories.map((category) => ({
+                value: category,
+                label: categoryLabel(category),
+              }))}
+            />
+            <span>
+              {categoryDefinitions.length} ПАРАМЕТР(А) ·{' '}
+              {
+                categoryDefinitions.filter((definition) => draft.changedIds.includes(definition.id))
+                  .length
+              }{' '}
+              ИЗМЕНЕНО
+            </span>
+          </div>
+          {categoryDefinitions.map((definition) => (
+            <SchemaSetting
+              key={definition.id}
+              definition={definition}
+              value={draft.values[definition.id] ?? definition.defaultValue}
+              changed={draft.changedIds.includes(definition.id)}
+              onValueChange={(value) => state.applySettingsPatch([{ id: definition.id, value }])}
+            />
+          ))}
+          <div className="settings-draft-actions">
+            <TerminalButton
+              className="ops-action"
+              onClick={() => state.resetSettingsCategory(catalogCategory)}
+            >
+              [R] СБРОСИТЬ КАТЕГОРИЮ
+            </TerminalButton>
+            <TerminalButton className="ops-action" onClick={() => state.resetAllSettings()}>
+              [RR] СБРОСИТЬ ВСЁ
+            </TerminalButton>
+            <TerminalButton className="ops-action" onClick={() => state.discardSettingsDraft()}>
+              [ESC] ОТМЕНИТЬ DRAFT
+            </TerminalButton>
+            <TerminalButton
+              className="ops-action"
+              disabled={state.personalization.undoStack.length === 0}
+              onClick={() => state.undoSettingsDraft()}
+            >
+              [CTRL+Z] UNDO
+            </TerminalButton>
+            <TerminalButton
+              className="ops-action"
+              disabled={state.personalization.redoStack.length === 0}
+              onClick={() => state.redoSettingsDraft()}
+            >
+              [CTRL+Y] REDO
+            </TerminalButton>
+            <TerminalButton className="ops-action" onClick={exportDraft}>
+              [↓] EXPORT JSON
+            </TerminalButton>
+            <TerminalButton
+              className="ops-action"
+              onClick={() => document.getElementById('settings-import-file')?.click()}
+            >
+              [↑] IMPORT JSON
+            </TerminalButton>
+            <TerminalButton
+              className="ops-action ops-action--primary"
+              onClick={() => state.publishSettingsDraft()}
+            >
+              [CTRL+ENTER] ОПУБЛИКОВАТЬ
+            </TerminalButton>
+          </div>
+          <p className="settings-draft-history">
+            ИСТОРИЯ DRAFT: {draft.history.length} СОБЫТИЙ · ЛОКАЛЬНЫЙ SCOPE · БЕЗ НЕБЕЗОПАСНЫХ
+            CSS/JS
+          </p>
+          {importStatus === null ? null : <p className="settings-import-status">{importStatus}</p>}
+          <TerminalInput
+            id="settings-import-file"
+            type="file"
+            accept="application/json,.json"
+            aria-label="Импорт черновика настроек"
+            className="settings-import-input"
+            onChange={(event) => {
+              void importDraft(event.currentTarget.files?.[0]);
+              event.currentTarget.value = '';
+            }}
+          />
+        </Panel>
+        <Panel
+          title="ИСТОРИЯ НАСТРОЕК"
+          eyebrow={
+            'LOCAL LEDGER / ' +
+            state.personalization.history.length +
+            ' СОБЫТИЙ / ' +
+            state.personalization.undoStack.length +
+            ' UNDO'
+          }
+          className="settings-history"
+        >
+          <div className="settings-history-filters">
+            <TerminalSelect
+              label="Операция истории"
+              value={historyOperation}
+              onValueChange={(value) => {
+                setHistoryOperation(value as SettingsHistoryOperation | 'all');
+                setHistoryPageNumber(1);
+              }}
+              options={[
+                { value: 'all', label: 'ВСЕ ОПЕРАЦИИ' },
+                ...settingsHistoryOperations.map((operation) => ({
+                  value: operation,
+                  label: operation.toUpperCase(),
+                })),
+              ]}
+            />
+            <TerminalSelect
+              label="Категория истории"
+              value={historyCategory}
+              onValueChange={(value) => {
+                setHistoryCategory(value as SettingCategory | 'all');
+                setHistoryPageNumber(1);
+              }}
+              options={[
+                { value: 'all', label: 'ВСЕ КАТЕГОРИИ' },
+                ...settingCategories.map((category) => ({
+                  value: category,
+                  label: category.toUpperCase(),
+                })),
+              ]}
+            />
+            <TerminalInput
+              aria-label="Фильтр истории по параметру"
+              placeholder="SETTING ID"
+              value={historySettingId}
+              onValueChange={(value) => {
+                setHistorySettingId(value);
+                setHistoryPageNumber(1);
+              }}
+            />
+            <TerminalInput
+              type="date"
+              aria-label="Фильтр истории по дате"
+              value={historyDate}
+              onValueChange={(value) => {
+                setHistoryDate(value);
+                setHistoryPageNumber(1);
+              }}
+            />
+            <TerminalSelect
+              label="Порядок истории"
+              value={historyOrder}
+              onValueChange={(value) => {
+                setHistoryOrder(value as 'newest' | 'oldest');
+                setHistoryPageNumber(1);
+              }}
+              options={[
+                { value: 'newest', label: 'СНАЧАЛА НОВЫЕ' },
+                { value: 'oldest', label: 'СНАЧАЛА СТАРЫЕ' },
+              ]}
+            />
+          </div>
+          <div className="settings-history-list" aria-live="polite">
+            {historyPage.items.length === 0 ? (
+              <p className="settings-history-empty">НЕТ СОБЫТИЙ ПО ТЕКУЩЕМУ ФИЛЬТРУ</p>
+            ) : (
+              historyPage.items.map((entry) => (
+                <article className="settings-history-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.operation.toUpperCase()}</strong>
+                    <small>{formatHistoryDate(entry.at)}</small>
+                  </div>
+                  <p>{entry.changedIds.join(', ') || 'ПУБЛИКАЦИЯ БЕЗ ИЗМЕНЕНИЙ'}</p>
+                  <span>{entry.category?.toUpperCase() ?? 'LOCAL'}</span>
+                  <TerminalButton
+                    className="ops-action"
+                    size="small"
+                    onClick={() => state.restoreSettingsHistoryEntry(entry.id)}
+                  >
+                    [↩] В DRAFT
+                  </TerminalButton>
+                </article>
+              ))
+            )}
+          </div>
+          <div className="settings-history-pagination">
+            <TerminalButton
+              className="ops-action"
+              size="small"
+              disabled={historyPage.page <= 1}
+              onClick={() => setHistoryPageNumber(historyPage.page - 1)}
+            >
+              [←] НАЗАД
+            </TerminalButton>
+            <span>
+              СТР. {historyPage.page} / {historyPage.pageCount} · ВСЕГО {historyPage.total}
+            </span>
+            <TerminalButton
+              className="ops-action"
+              size="small"
+              disabled={historyPage.page >= historyPage.pageCount}
+              onClick={() => setHistoryPageNumber(historyPage.page + 1)}
+            >
+              ВПЕРЁД [→]
+            </TerminalButton>
+          </div>
+          <p className="settings-draft-history">
+            ВОССТАНОВЛЕНИЕ ЗАГРУЖАЕТ СОСТОЯНИЕ В ЛОКАЛЬНЫЙ DRAFT; ПУБЛИКАЦИЯ СОЗДАЁТ НОВУЮ РЕВИЗИЮ И
+            НЕ ПЕРЕЗАПИСЫВАЕТ ИСТОРИЮ.
+          </p>
+        </Panel>
         <Panel title="ГОРЯЧИЕ КЛАВИШИ" eyebrow="KEYMAP / TERMINAL" className="settings-keymap">
           {[
             ['1–9', 'ПЕРЕХОД ПО РАЗДЕЛАМ'],
             ['CTRL+K', 'ГЛОБАЛЬНЫЙ ПОИСК'],
             ['CTRL+SHIFT+P', 'PRODUCTION PANEL'],
             ['F', 'FULLSCREEN'],
+            ['W', 'WEBCAM ON / OFF'],
             ['SPACE', 'PLAY / PAUSE VIDEO'],
             ['ESC', 'ЗАКРЫТЬ DRAWER / PANEL'],
           ].map(([key, label]) => (
@@ -186,6 +469,141 @@ export function SettingsScreen() {
       </div>
     </div>
   );
+}
+
+function SchemaSetting({
+  definition,
+  value,
+  changed,
+  onValueChange,
+}: {
+  readonly definition: SettingDefinition;
+  readonly value: SettingValue;
+  readonly changed: boolean;
+  readonly onValueChange: (value: SettingValue) => void;
+}) {
+  const label = settingLabel(definition.id);
+  const editor = definition.editor;
+  const control = (() => {
+    switch (editor.kind) {
+      case 'boolean':
+        return (
+          <TerminalSwitch
+            label={label}
+            className="settings-toggle"
+            checked={value === true}
+            onCheckedChange={onValueChange}
+          />
+        );
+      case 'enum':
+        return (
+          <TerminalSelect
+            label={label}
+            value={String(value)}
+            onValueChange={(nextValue) =>
+              onValueChange(
+                typeof definition.defaultValue === 'number' ? Number(nextValue) : nextValue,
+              )
+            }
+            options={editor.options.map((option) => ({
+              value: option,
+              label: option.toUpperCase(),
+            }))}
+          />
+        );
+      case 'number':
+        return (
+          <TerminalNumberField
+            label={label}
+            value={typeof value === 'number' ? value : null}
+            min={editor.minimum}
+            max={editor.maximum}
+            step={editor.step}
+            onValueChange={(nextValue) => {
+              if (nextValue !== null) onValueChange(nextValue);
+            }}
+          />
+        );
+      case 'string-list':
+        return (
+          <TerminalInput
+            aria-label={label}
+            value={Array.isArray(value) ? value.join(`${editor.delimiter} `) : ''}
+            onValueChange={(nextValue) =>
+              onValueChange(
+                [...new Set(nextValue.split(editor.delimiter).map((item) => item.trim()))].filter(
+                  Boolean,
+                ),
+              )
+            }
+          />
+        );
+    }
+  })();
+
+  return (
+    <Setting
+      label={`${label}${changed ? ' *' : ''}`}
+      detail={`${definition.scope.toUpperCase()} · ${definition.description}`}
+    >
+      {control}
+    </Setting>
+  );
+}
+
+function settingLabel(id: string): string {
+  return id
+    .replaceAll('.', ' / ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toUpperCase();
+}
+
+function categoryLabel(category: SettingCategory): string {
+  return (
+    {
+      general: 'ОБЩИЕ / GENERAL',
+      information: 'ИНФОРМАЦИЯ / INFORMATION',
+      layout: 'МАКЕТ / LAYOUT',
+      tiles: 'ПЛИТКИ / TILES',
+      themes: 'ТЕМЫ / THEMES',
+      styles: 'СТИЛИ / STYLES',
+      colors: 'ЦВЕТА / COLORS',
+      typography: 'ТИПОГРАФИКА / TYPOGRAPHY',
+      sizes: 'РАЗМЕРЫ / SIZES',
+      backgrounds: 'ФОНЫ / BACKGROUNDS',
+      patterns: 'ПАТТЕРНЫ / PATTERNS',
+      animations: 'АНИМАЦИИ / ANIMATIONS',
+      startup: 'ЗАПУСК / STARTUP',
+      player: 'ПЛЕЕР / PLAYER',
+      cameras: 'КАМЕРЫ / CAMERAS',
+      map: 'КАРТА / MAP',
+      tables: 'ТАБЛИЦЫ / TABLES',
+      popups: 'POP-UP / POPUPS',
+      keybinds: 'КЛАВИШИ / KEYBINDS',
+      localization: 'ЛОКАЛИЗАЦИЯ / LOCALIZATION',
+      dateTime: 'ДАТА И ВРЕМЯ / DATE TIME',
+      telemetry: 'ТЕЛЕМЕТРИЯ / TELEMETRY',
+      simulation: 'СИМУЛЯЦИЯ / SIMULATION',
+      groups: 'ГРУППЫ / GROUPS',
+      materials: 'МАТЕРИАЛЫ / MATERIALS',
+      titlebar: 'ВЕРХНЯЯ ПАНЕЛЬ / TITLEBAR',
+      accessibility: 'ДОСТУПНОСТЬ / ACCESSIBILITY',
+      performance: 'ПРОИЗВОДИТЕЛЬНОСТЬ / PERFORMANCE',
+      privacy: 'ПРИВАТНОСТЬ / PRIVACY',
+      diagnostics: 'ДИАГНОСТИКА / DIAGNOSTICS',
+      github: 'GITHUB / ИНТЕГРАЦИЯ',
+      advanced: 'РАСШИРЕННЫЕ / ADVANCED',
+    } satisfies Record<SettingCategory, string>
+  )[category];
+}
+
+function formatHistoryDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  return new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  }).format(date);
 }
 
 function Setting({

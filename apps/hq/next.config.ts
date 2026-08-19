@@ -1,4 +1,4 @@
-import type { NextConfig } from 'next';
+import type { NextConfig } from 'next'
 
 const target = process.env.HQ_TARGET === 'desktop' ? 'desktop' : 'web';
 

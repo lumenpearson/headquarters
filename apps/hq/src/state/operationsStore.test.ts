@@ -41,6 +41,14 @@ describe('operationsStore', () => {
     expect(next.ui.ptz.zoom).toBe(1.5);
   });
 
+  it('sets playback intent explicitly without relying on an inverse toggle', () => {
+    const store = operationsStore.getState();
+    store.setVideoPlaying(false);
+    expect(operationsStore.getState().ui.videoPlaying).toBe(false);
+    operationsStore.getState().setVideoPlaying(true);
+    expect(operationsStore.getState().ui.videoPlaying).toBe(true);
+  });
+
   it('applies production presets and restores continuity snapshots', () => {
     const store = operationsStore.getState();
     store.setRoute('map');
@@ -83,5 +91,53 @@ describe('operationsStore', () => {
     operationsStore.getState().completeTask(task?.id ?? 'missing');
     expect(operationsStore.getState().tasks[task?.id ?? '']?.status).toBe('completed');
     expect(operationsStore.getState().tasks[task?.id ?? '']?.progress).toBe(100);
+  });
+
+  it('keeps personalization as a versioned draft with independent category reset and publish', () => {
+    const store = operationsStore.getState();
+    store.applySettingsPatch([
+      { id: 'themes.id', value: 'cold-cyan' },
+      { id: 'layout.density', value: 'mainframe' },
+    ]);
+    store.resetSettingsCategory('themes');
+
+    let current = operationsStore.getState();
+    expect(current.personalization.draft.values['themes.id']).toBe('terminal-red');
+    expect(current.personalization.draft.values['layout.density']).toBe('mainframe');
+    store.publishSettingsDraft();
+
+    current = operationsStore.getState();
+    expect(current.personalization.published.revision).toBe(1);
+    expect(current.personalization.published.values['layout.density']).toBe('mainframe');
+    expect(current.personalization.draft.changedIds).toEqual([]);
+  });
+
+  it('keeps local settings history reversible without mutating the published revision', () => {
+    const store = operationsStore.getState();
+    store.applySettingsPatch([{ id: 'themes.id', value: 'cold-cyan' }]);
+    store.applySettingsPatch([{ id: 'layout.density', value: 'mainframe' }]);
+
+    let current = operationsStore.getState();
+    expect(current.personalization.history).toHaveLength(2);
+    expect(current.personalization.undoStack).toHaveLength(2);
+    expect(current.personalization.draft.values['layout.density']).toBe('mainframe');
+
+    store.undoSettingsDraft();
+    current = operationsStore.getState();
+    expect(current.personalization.draft.values['themes.id']).toBe('cold-cyan');
+    expect(current.personalization.draft.values['layout.density']).toBe('dense');
+    expect(current.personalization.redoStack).toHaveLength(1);
+    expect(current.personalization.published.revision).toBe(0);
+
+    store.redoSettingsDraft();
+    current = operationsStore.getState();
+    expect(current.personalization.draft.values['layout.density']).toBe('mainframe');
+
+    const historicalTheme = current.personalization.history.find(
+      (entry) => entry.operation === 'patch' && entry.changedIds.includes('themes.id'),
+    );
+    expect(historicalTheme).toBeDefined();
+    current.restoreSettingsHistoryEntry(historicalTheme?.id ?? 'missing');
+    expect(operationsStore.getState().personalization.draft.values['themes.id']).toBe('cold-cyan');
   });
 });

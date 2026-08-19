@@ -5,7 +5,7 @@ import type { BridgeConfig, BridgeEntry } from '@gremuchaya/config';
 import { createVirtualPath, joinVirtualPath, type VirtualPath } from '@gremuchaya/domain';
 
 import { mimeForPath } from './mime.js';
-import { resolveExistingSafePath } from './pathSecurity.js';
+import { PathSecurityError, resolveExistingSafePath } from './pathSecurity.js';
 
 export class BridgeService {
   constructor(readonly config: BridgeConfig) {}
@@ -18,13 +18,19 @@ export class BridgeService {
 
   async list(mountId: string, requestedPath: string): Promise<readonly BridgeEntry[]> {
     const mount = this.getMount(mountId);
+    assertPublicPath(requestedPath);
     const safe = await resolveExistingSafePath(mount.root, requestedPath);
     const directory = await stat(safe.path);
     if (!directory.isDirectory()) throw new Error('Requested path is not a directory.');
     const entries = await readdir(safe.path, { withFileTypes: true });
     const result: BridgeEntry[] = [];
     for (const entry of entries) {
-      if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) continue;
+      if (
+        entry.name === '.hq' ||
+        entry.isSymbolicLink() ||
+        (!entry.isDirectory() && !entry.isFile())
+      )
+        continue;
       const childVirtualPath = joinVirtualPath(safe.virtualPath, entry.name);
       const child = await resolveExistingSafePath(mount.root, childVirtualPath);
       const metadata = await stat(child.path);
@@ -56,6 +62,7 @@ export class BridgeService {
     readonly virtualPath: VirtualPath;
   }> {
     const mount = this.getMount(mountId);
+    assertPublicPath(requestedPath);
     const safe = await resolveExistingSafePath(mount.root, requestedPath);
     const metadata = await stat(safe.path);
     if (!metadata.isFile()) throw new Error('Requested path is not a file.');
@@ -66,5 +73,12 @@ export class BridgeService {
       size: metadata.size,
       virtualPath: createVirtualPath(requestedPath),
     };
+  }
+}
+
+function assertPublicPath(requestedPath: string): void {
+  const segments = requestedPath.replaceAll('\\', '/').split('/').filter(Boolean);
+  if (segments.includes('.hq')) {
+    throw new PathSecurityError('Bridge internal material paths are not exposed.');
   }
 }

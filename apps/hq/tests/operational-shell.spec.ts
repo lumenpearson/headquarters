@@ -1,4 +1,16 @@
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { createClient } from '@connectrpc/connect';
+import { createGrpcWebTransport } from '@connectrpc/connect-web';
 import { expect, test } from '@playwright/test';
+import type { BridgeConfig } from '@gremuchaya/config';
+import { createVirtualPath } from '@gremuchaya/domain';
+import { FileBridgeService } from '@gremuchaya/protocol';
+
+import { startBridge } from '../../file-bridge/src/server.js';
 
 test('boots the unified operational world and opens a linked object', async ({ page }) => {
   await page.goto('/');
@@ -13,7 +25,8 @@ test('boots the unified operational world and opens a linked object', async ({ p
 test('keeps map, camera and drawer interactions connected', async ({ page }) => {
   await page.goto('/map');
   await expect(page.locator('.yandex-tactical-map')).toBeVisible();
-  await expect(page.getByLabel('Ключ Yandex Maps API')).toHaveClass(/terminal-input/);
+  await expect(page.getByLabel('Ключ Yandex Maps API v3')).toHaveClass(/terminal-input/);
+  await expect(page.getByText('[ YANDEX MAPS API V3 // KEY REQUIRED ]')).toBeVisible();
   await expect(page.getByRole('button', { name: '[APPLY] ПОДКЛЮЧИТЬ' })).toHaveClass(
     /terminal-button/,
   );
@@ -26,7 +39,29 @@ test('keeps map, camera and drawer interactions connected', async ({ page }) => 
   await expect(page.locator('.video-channel-info')).toBeVisible();
 });
 
-test('runs the real surveillance player and keeps the 720p matrix horizontal-scroll free', async ({
+test('loads the Yandex Maps JavaScript API v3 endpoint and retains its no-provider fallback', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('gremuchaya-hq:yandex-maps-v3-api-key', 'test-v3-key');
+  });
+  await page.route('https://api-maps.yandex.ru/v3/**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/javascript',
+      body: 'window.ymaps3 = { ready: Promise.resolve() };',
+    });
+  });
+
+  await page.goto('/map');
+  await expect(page.locator('script#yandex-maps-api-v3')).toHaveAttribute(
+    'src',
+    /api-maps\.yandex\.ru\/v3\/\?apikey=test-v3-key&lang=ru_RU/,
+  );
+  await expect(page.locator('.yandex-tactical-map__fallback')).toBeVisible();
+  await expect(page.getByText('[ MAP PROVIDER V3 UNAVAILABLE ]')).toBeVisible();
+});
+
+test('runs the Vidstack surveillance player and keeps the 720p matrix horizontal-scroll free', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -73,6 +108,201 @@ test('operates playback and PTZ through typed Base UI media controls', async ({ 
     .toBeGreaterThan(speedBefore);
   await page.getByRole('button', { name: '▲', exact: true }).click();
   await expect(page.locator('.ptz-panel footer')).not.toContainText('TILT 0');
+});
+
+test('pages and filters the complete camera registry without decoding hidden feeds', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/video/cameras');
+
+  await expect(page.locator('.camera-grid > button')).toHaveCount(12);
+  await expect(page.locator('.camera-grid-pagination')).toContainText('PAGE 01 / 02');
+  await page.getByRole('button', { name: '[→] NEXT', exact: true }).click();
+  await expect(page.locator('.camera-grid > button')).toHaveCount(4);
+  await expect(page.locator('.camera-grid')).toContainText('CAM-15');
+
+  const filter = page.getByRole('combobox', { name: 'Фильтр камер' });
+  await filter.click();
+  await page.getByRole('option', { name: 'ПОТЕРЯ СИГНАЛА', exact: true }).click();
+  await expect(page.locator('.camera-grid > button')).toHaveCount(1);
+  await expect(page.locator('.camera-grid')).toContainText('CAM-14');
+  await expect(page.locator('.camera-grid-pagination')).toContainText('PAGE 01 / 01');
+  await expect(page.locator('.camera-grid-query-summary')).toContainText('HIDDEN FEEDS');
+  await page.getByRole('button', { name: /Камера CAM-14:/ }).click();
+  await expect(page.locator('.video-channel-info')).toContainText('CAM-14');
+  await expect(page.locator('.video-channel-info')).toContainText('DEMO_VIDEO');
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const root = document.scrollingElement;
+        return (
+          root !== null &&
+          root.scrollHeight === root.clientHeight &&
+          root.scrollWidth === root.clientWidth
+        );
+      }),
+    )
+    .toBe(true);
+});
+
+test('uses a webcam only after explicit local permission and returns to the demo source', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 640;
+          canvas.height = 360;
+          const context = canvas.getContext('2d');
+          context?.fillRect(0, 0, canvas.width, canvas.height);
+          return canvas.captureStream(5);
+        },
+      },
+    });
+  });
+  await page.goto('/video');
+
+  const webcamButton = page.getByRole('button', { name: '[W] WEBCAM', exact: true });
+  await webcamButton.click();
+  await expect(page.getByRole('button', { name: '[W] STOP CAM', exact: true })).toBeVisible();
+  await expect(page.locator('.video-channel-info')).toContainText('WEBCAM');
+  await expect(page.locator('.video-main-feed > header')).toContainText('LOCAL WEBCAM');
+
+  await page.getByRole('button', { name: '[W] STOP CAM', exact: true }).click();
+  await expect(page.getByRole('button', { name: '[W] WEBCAM', exact: true })).toBeVisible();
+  await expect(page.locator('.video-channel-info')).toContainText('DEMO_VIDEO');
+});
+
+test('restores and clears a per-channel local material assignment without persisting a runtime URL', async ({
+  page,
+}) => {
+  const materialId = '018f0f1a-8000-7000-8000-000000000000';
+  await page.addInitScript((persistedMaterialId) => {
+    window.localStorage.setItem(
+      'hq.camera-material-assignments.v1',
+      JSON.stringify({ 'K-17': persistedMaterialId }),
+    );
+  }, materialId);
+  await page.goto('/video');
+
+  const sourceSelect = page.getByRole('combobox', { name: 'Источник выбранного канала' });
+  await expect(sourceSelect).toContainText('[MISSING] 018f0f1a-80');
+  await sourceSelect.click();
+  await page.getByRole('option', { name: '[DEMO] SURVEILLANCE LOOP', exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.localStorage.getItem('hq.camera-material-assignments.v1')),
+    )
+    .toBe('{}');
+  await expect(sourceSelect).toContainText('[DEMO] SURVEILLANCE LOOP');
+});
+
+test('streams an oversized local video through a revocable browser range grant', async ({
+  page,
+}) => {
+  const root = await mkdtemp(join(tmpdir(), 'gremuchaya-browser-range-'));
+  const config: BridgeConfig = {
+    version: 1,
+    transport: 'grpc-web',
+    port: 0,
+    readOnly: false,
+    allowedOrigins: ['http://127.0.0.1:3000'],
+    mounts: [
+      {
+        id: 'materials',
+        label: 'МАТЕРИАЛЫ',
+        root,
+        virtualPath: createVirtualPath('/МАТЕРИАЛЫ'),
+      },
+    ],
+    stableFile: { probeIntervalMs: 50, timeoutMs: 500 },
+    watchDebounceMs: 25,
+    materialImport: {
+      enabled: true,
+      maxFileBytes: 64 * 1024 * 1024,
+      chunkSizeBytes: 1024 * 1024,
+    },
+  };
+  const running = await startBridge(config);
+  try {
+    const address = running.server.address() as AddressInfo;
+    const bridgeOrigin = `http://127.0.0.1:${address.port}`;
+    const client = createClient(
+      FileBridgeService,
+      createGrpcWebTransport({ baseUrl: bridgeOrigin, useBinaryFormat: true }),
+    );
+    const bundledVideo = await readFile(
+      join(process.cwd(), 'public', 'assets', 'video', 'surveillance-k17.webm'),
+    );
+    const bytes = Buffer.alloc(33 * 1024 * 1024);
+    bundledVideo.copy(bytes);
+    const started = await client.beginMaterialImport({
+      mountId: 'materials',
+      fileName: 'phase6-range-camera.webm',
+      declaredMimeType: 'video/webm',
+      totalSize: BigInt(bytes.byteLength),
+      expectedBlake3: '',
+    });
+    if (started.session === undefined) throw new Error('Expected browser-range import session.');
+    for (let offset = 0; offset < bytes.byteLength; offset += started.session.chunkSize) {
+      const data = bytes.subarray(offset, offset + started.session.chunkSize);
+      await client.uploadMaterialChunk({
+        uploadId: started.session.uploadId,
+        offset: BigInt(offset),
+        data,
+      });
+    }
+    const completed = await client.completeMaterialImport({ uploadId: started.session.uploadId });
+    if (completed.material === undefined) throw new Error('Expected browser-range material.');
+
+    await page.route('http://127.0.0.1:4177/**', async (route) => {
+      const requested = new URL(route.request().url());
+      const proxied = await route.fetch({
+        url: `${bridgeOrigin}${requested.pathname}${requested.search}`,
+      });
+      await route.fulfill({ response: proxied });
+    });
+    await page.addInitScript((materialId) => {
+      window.localStorage.setItem(
+        'hq.camera-material-assignments.v1',
+        JSON.stringify({ 'K-17': materialId }),
+      );
+    }, completed.material.materialId);
+    await page.goto('/video');
+
+    const sourceSelect = page.getByRole('combobox', { name: 'Источник выбранного канала' });
+    await expect(sourceSelect).toContainText('[FILE] phase6-range-camera.webm');
+    await expect(page.locator('.camera-material-status')).toContainText('RANGE STREAM READY');
+    await expect.poll(() => running.activePlaybackGrantCount()).toBe(1);
+
+    await sourceSelect.click();
+    await page.getByRole('option', { name: '[DEMO] SURVEILLANCE LOOP', exact: true }).click();
+    await expect.poll(() => running.activePlaybackGrantCount()).toBe(0);
+  } finally {
+    await running.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('synchronizes demo playback between local browser sessions without syncing media URLs', async ({
+  context,
+  page,
+}) => {
+  const follower = await context.newPage();
+  await page.goto('/video');
+  await follower.goto('/video');
+
+  await expect(page.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
+  await expect(follower.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
+  await page.getByRole('button', { name: '[Ⅱ] PAUSE', exact: true }).click();
+
+  await expect(follower.getByRole('button', { name: '[▶] PLAY', exact: true })).toBeVisible();
+  await expect(follower.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
+  await follower.close();
 });
 
 test('renders static screen and scene routes without a white flash', async ({ page }) => {
@@ -184,6 +414,120 @@ test('persists settings through Base UI switch, select and input adapters', asyn
   await expect(page.getByRole('combobox', { name: 'Cursor mode' })).toContainText('HIDDEN');
   await expect(page.getByRole('textbox', { name: 'Фиксированное время' })).toHaveValue('13:37:42');
   await expect(page.locator('.settings-row select')).toHaveCount(0);
+});
+
+test('keeps settings overflow inside its own pane at 720p', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/settings');
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const root = document.scrollingElement;
+        return root?.scrollHeight === root?.clientHeight;
+      }),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      page
+        .locator('.settings-layout')
+        .evaluate((element) => element.scrollHeight > element.clientHeight),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      page.locator('.ops-workspace').evaluate((element) => getComputedStyle(element).overflowY),
+    )
+    .toBe('hidden');
+});
+
+test('renders the full safe personalization catalogue and resets one selected category', async ({
+  page,
+}) => {
+  await page.goto('/settings');
+
+  const category = page.getByRole('combobox', { name: 'Категория персонализации' });
+  await category.click();
+  await expect(
+    page.getByRole('option', { name: 'АНИМАЦИИ / ANIMATIONS', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('option', { name: 'МАТЕРИАЛЫ / MATERIALS', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('option', { name: 'РАСШИРЕННЫЕ / ADVANCED', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('option', { name: 'АНИМАЦИИ / ANIMATIONS', exact: true }).click();
+
+  const enabled = page.getByRole('switch', { name: 'ANIMATIONS / ENABLED' });
+  await expect(enabled).toBeChecked();
+  await enabled.click();
+  await expect(enabled).not.toBeChecked();
+  await page.getByRole('button', { name: '[R] СБРОСИТЬ КАТЕГОРИЮ', exact: true }).click();
+  await expect(enabled).toBeChecked();
+  await expect(page.getByRole('textbox', { name: 'ANIMATIONS / INTENSITY' })).toBeVisible();
+});
+
+test('round-trips a schema-validated settings draft through the terminal import control', async ({
+  page,
+}) => {
+  await page.goto('/settings');
+
+  const downloadReady = page.waitForEvent('download');
+  await page.getByRole('button', { name: '[↓] EXPORT JSON', exact: true }).click();
+  const download = await downloadReady;
+  const path = await download.path();
+  if (path === null) throw new Error('Settings export did not produce a local file.');
+
+  await page.locator('#settings-import-file').setInputFiles(path);
+  await expect(page.locator('.settings-import-status')).toContainText('[✓] IMPORTED');
+});
+
+test('keeps local settings history filterable and reversible inside its own settings pane', async ({
+  page,
+}) => {
+  await page.goto('/settings');
+
+  const theme = page.getByRole('combobox', { name: 'THEMES / ID' });
+  await theme.click();
+  await page.getByRole('option', { name: 'COLD-CYAN', exact: true }).click();
+  await expect(page.locator('.settings-history-row').first()).toContainText('PATCH');
+  await expect(page.locator('.settings-history-row').first()).toContainText('themes.id');
+
+  await page.getByRole('button', { name: '[CTRL+Z] UNDO', exact: true }).click();
+  await expect(theme).toContainText('TERMINAL-RED');
+  await expect(page.locator('.settings-history-row').first()).toContainText('UNDO');
+
+  await page.getByRole('button', { name: '[CTRL+Y] REDO', exact: true }).click();
+  await expect(theme).toContainText('COLD-CYAN');
+
+  const operation = page.getByRole('combobox', { name: 'Операция истории' });
+  await operation.click();
+  await page.getByRole('option', { name: 'PATCH', exact: true }).click();
+  await expect(page.locator('.settings-history-row')).toHaveCount(1);
+  await expect(page.locator('.settings-history-pagination')).toContainText('ВСЕГО 1');
+});
+
+test('applies schema-backed visual preview tokens without introducing arbitrary style input', async ({
+  page,
+}) => {
+  await page.goto('/settings');
+
+  const category = page.getByRole('combobox', { name: 'Категория персонализации' });
+  await category.click();
+  await page.getByRole('option', { name: 'ЦВЕТА / COLORS', exact: true }).click();
+  const accent = page.getByRole('combobox', { name: 'COLORS / ACCENT' });
+  await accent.click();
+  await page.getByRole('option', { name: 'CYAN', exact: true }).click();
+  await expect(page.locator('.ops-shell')).toHaveAttribute('data-accent', 'cyan');
+
+  await category.click();
+  await page.getByRole('option', { name: 'ФОНЫ / BACKGROUNDS', exact: true }).click();
+  const background = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
+  await background.click();
+  await page.getByRole('option', { name: 'GRADIENT', exact: true }).click();
+  await expect(page.locator('.ops-shell')).toHaveAttribute('data-background-kind', 'gradient');
 });
 
 test('supports keyboard semantics across the complete terminal primitive catalog', async ({
@@ -400,6 +744,31 @@ test('migrates registry filters and actions to typed terminal controls', async (
   await expect(
     page.locator('.cases-screen button:not(.terminal-button):not(.terminal-select)'),
   ).toHaveCount(0);
+});
+
+test('opens the hidden local material-import surface without adding page scroll', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/files');
+  await page.keyboard.press('Control+Shift+Alt+KeyS');
+
+  const dialog = page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByLabel('Выбрать материалы для локального импорта')).toHaveClass(
+    /terminal-input/,
+  );
+  await expect(page.locator('.material-import-dialog__recent')).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const root = document.scrollingElement;
+        return root?.scrollHeight === root?.clientHeight;
+      }),
+    )
+    .toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
 });
 
 test('keeps overview, communications and tactical layers interactive through wrappers', async ({

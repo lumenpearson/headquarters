@@ -25,6 +25,7 @@ export class BridgeWatcher {
         ignoreInitial: true,
         followSymlinks: false,
         awaitWriteFinish: false,
+        ignored: (path) => relative(canonicalRoot, path).split(/[\\/]/u).includes('.hq'),
       });
       const emit = (
         type: 'FILE_ADDED' | 'FILE_CHANGED' | 'FILE_REMOVED' | 'DIRECTORY_CHANGED',

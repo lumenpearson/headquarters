@@ -5,8 +5,14 @@
   "readOnly": true,
   "allowedOrigins": ["http://127.0.0.1:3000", "http://localhost:3000", "tauri://localhost"],
   "mounts": [
-    { "id": "incoming", "label": "ВХОДЯЩИЕ", "root": "D:/HQ/INCOMING", "virtualPath": "/ВХОДЯЩИЕ" }
+    {
+      "id": "materials",
+      "label": "ОБЩИЕ МАТЕРИАЛЫ",
+      "root": "shared/materials",
+      "virtualPath": "/МАТЕРИАЛЫ"
+    }
   ],
   "stableFile": { "probeIntervalMs": 250, "timeoutMs": 30000 },
-  "watchDebounceMs": 100
+  "watchDebounceMs": 100,
+  "materialImport": { "enabled": false, "maxFileBytes": 5368709120, "chunkSizeBytes": 1048576 }
 }

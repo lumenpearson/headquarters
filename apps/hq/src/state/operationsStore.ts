@@ -17,11 +17,34 @@ import type {
   SystemNode,
   TacticalRoute,
 } from '@gremuchaya/domain';
+import {
+  applyDraftPatch,
+  createFactorySnapshot,
+  createSettingsDraft,
+  createSettingsDraftCheckpoint,
+  exportDraft,
+  getSettingDefinition,
+  importDraft,
+  publishDraft,
+  resetDraftAll,
+  resetDraftCategory,
+  restoreSettingsDraft,
+} from '@gremuchaya/settings-schema';
+import type {
+  SettingCategory,
+  SettingsDraft,
+  SettingsPatch,
+  SettingsSnapshot,
+} from '@gremuchaya/settings-schema';
 import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/react/shallow';
 import { createStore } from 'zustand/vanilla';
 
 import { operationsSeed } from '../data/operationsSeed';
+import {
+  createSettingsHistoryEntry,
+  type SettingsHistoryEntry,
+} from '../infrastructure/settings/SettingsHistoryLedger';
 
 export type OperationsRoute =
   | 'overview'
@@ -137,6 +160,14 @@ interface OperationsMetrics {
   readonly simulationStep: number;
 }
 
+interface PersonalizationState {
+  readonly published: SettingsSnapshot;
+  readonly draft: SettingsDraft;
+  readonly history: readonly SettingsHistoryEntry[];
+  readonly undoStack: readonly SettingsHistoryEntry[];
+  readonly redoStack: readonly SettingsHistoryEntry[];
+}
+
 export interface OperationsState {
   readonly operation: typeof operationsSeed.operation;
   readonly sectors: Readonly<Record<string, Sector>>;
@@ -156,6 +187,7 @@ export interface OperationsState {
   readonly reports: Readonly<Record<string, OpsReport>>;
   readonly ui: OperationsUiState;
   readonly production: ProductionState;
+  readonly personalization: PersonalizationState;
   readonly metrics: OperationsMetrics;
   readonly audit: readonly OpsAuditEntry[];
   readonly setRoute: (route: OperationsRoute) => void;
@@ -174,6 +206,7 @@ export interface OperationsState {
   readonly acknowledgeAlert: (id: string) => void;
   readonly completeTask: (id: string) => void;
   readonly toggleVideo: () => void;
+  readonly setVideoPlaying: (playing: boolean) => void;
   readonly setVideoPosition: (position: number) => void;
   readonly setVideoLive: (live: boolean) => void;
   readonly adjustPtz: (axis: 'pan' | 'tilt' | 'zoom', delta: number) => void;
@@ -190,6 +223,16 @@ export interface OperationsState {
   readonly applyPreset: (preset: string) => void;
   readonly saveSnapshot: (name: string) => void;
   readonly restoreSnapshot: (id: string) => void;
+  readonly applySettingsPatch: (patches: readonly SettingsPatch[]) => void;
+  readonly resetSettingsCategory: (category: SettingCategory) => void;
+  readonly resetAllSettings: () => void;
+  readonly discardSettingsDraft: () => void;
+  readonly publishSettingsDraft: () => void;
+  readonly undoSettingsDraft: () => void;
+  readonly redoSettingsDraft: () => void;
+  readonly restoreSettingsHistoryEntry: (id: string) => void;
+  readonly exportSettingsDraft: () => string;
+  readonly importSettingsDraft: (serialized: string) => void;
   readonly resetWorld: () => void;
   readonly simulationTick: () => void;
 }
@@ -220,6 +263,7 @@ function keyed<Value extends { readonly id: string }>(
 }
 
 function createBaseState() {
+  const publishedSettings = createFactorySnapshot();
   return {
     operation: operationsSeed.operation,
     sectors: keyed(operationsSeed.sectors),
@@ -274,6 +318,13 @@ function createBaseState() {
       autoDemo: false,
       snapshots: [] as readonly ProductionSnapshot[],
     },
+    personalization: {
+      published: publishedSettings,
+      draft: createSettingsDraft(publishedSettings),
+      history: [],
+      undoStack: [],
+      redoStack: [],
+    },
     metrics: {
       cpu: 43,
       ram: 68,
@@ -307,6 +358,26 @@ function auditEntry(action: string, entityId: string): OpsAuditEntry {
     action,
     entityId,
     operator: 'ОП-01',
+  };
+}
+
+function settingsMetadata(prefix: string): { readonly id: string; readonly at: string } {
+  return { id: `${prefix}-${Date.now()}`, at: new Date().toISOString() };
+}
+
+function appendSettingsHistory(
+  state: PersonalizationState,
+  entry: SettingsHistoryEntry,
+  options: { readonly reversible: boolean; readonly redoStack?: readonly SettingsHistoryEntry[] },
+): PersonalizationState {
+  const historyEntry = createSettingsHistoryEntry(entry);
+  return {
+    ...state,
+    history: [historyEntry, ...state.history].slice(0, 200),
+    undoStack: options.reversible
+      ? [...state.undoStack, historyEntry].slice(-100)
+      : state.undoStack,
+    redoStack: options.redoStack ?? (options.reversible ? [] : state.redoStack),
   };
 }
 
@@ -376,6 +447,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     }),
   toggleVideo: () =>
     set((state) => ({ ui: { ...state.ui, videoPlaying: !state.ui.videoPlaying } })),
+  setVideoPlaying: (videoPlaying) => set((state) => ({ ui: { ...state.ui, videoPlaying } })),
   setVideoPosition: (videoPosition) =>
     set((state) => ({
       ui: { ...state.ui, videoPosition: clamp(videoPosition, 0, 100) },
@@ -480,6 +552,252 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         audit: [auditEntry('ВОССТАНОВЛЕНО СОСТОЯНИЕ СЦЕНЫ', id), ...state.audit].slice(0, 100),
       };
     }),
+  applySettingsPatch: (patches) =>
+    set((state) => {
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = applyDraftPatch(state.personalization.draft, patches, settingsMetadata('SET'));
+      const personalization = appendSettingsHistory(
+        { ...state.personalization, draft },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'patch',
+          category: getSettingDefinition(patches[0]?.id ?? '')?.category,
+          changedIds: patches.map((patch) => patch.id),
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        { reversible: true },
+      );
+      return {
+        personalization,
+        audit: [
+          auditEntry('ОБНОВЛЁН ЧЕРНОВИК НАСТРОЕК', patches.map((patch) => patch.id).join(',')),
+          ...state.audit,
+        ].slice(0, 100),
+      };
+    }),
+  resetSettingsCategory: (category) =>
+    set((state) => {
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = resetDraftCategory(
+        state.personalization.draft,
+        category,
+        settingsMetadata('SET-CATEGORY-RESET'),
+      );
+      const personalization = appendSettingsHistory(
+        { ...state.personalization, draft },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'reset-category',
+          category,
+          changedIds: draft.history.at(-1)?.changedIds ?? [],
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        { reversible: true },
+      );
+      return {
+        personalization,
+        audit: [auditEntry('СБРОШЕНА КАТЕГОРИЯ НАСТРОЕК', category), ...state.audit].slice(0, 100),
+      };
+    }),
+  resetAllSettings: () =>
+    set((state) => {
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = resetDraftAll(state.personalization.draft, settingsMetadata('SET-ALL-RESET'));
+      const personalization = appendSettingsHistory(
+        { ...state.personalization, draft },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'reset-all',
+          changedIds: draft.history.at(-1)?.changedIds ?? [],
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        { reversible: true },
+      );
+      return {
+        personalization,
+        audit: [auditEntry('СБРОШЕН ВЕСЬ ЧЕРНОВИК НАСТРОЕК', 'ALL'), ...state.audit].slice(0, 100),
+      };
+    }),
+  discardSettingsDraft: () =>
+    set((state) => {
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = createSettingsDraft(state.personalization.published);
+      const personalization = appendSettingsHistory(
+        { ...state.personalization, draft },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'discard',
+          changedIds: before.changedIds,
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        { reversible: true },
+      );
+      return {
+        personalization,
+        audit: [auditEntry('ОТМЕНЁН ЧЕРНОВИК НАСТРОЕК', 'DRAFT'), ...state.audit].slice(0, 100),
+      };
+    }),
+  publishSettingsDraft: () =>
+    set((state) => {
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const published = publishDraft(state.personalization.draft);
+      const draft = createSettingsDraft(published);
+      const personalization = appendSettingsHistory(
+        { ...state.personalization, published, draft },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'publish',
+          changedIds: before.changedIds,
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+          publishedRevision: published.revision,
+        },
+        { reversible: false, redoStack: [] },
+      );
+      return {
+        personalization,
+        audit: [
+          auditEntry('ОПУБЛИКОВАНЫ НАСТРОЙКИ', String(published.revision)),
+          ...state.audit,
+        ].slice(0, 100),
+      };
+    }),
+  undoSettingsDraft: () =>
+    set((state) => {
+      const entry = state.personalization.undoStack.at(-1);
+      if (entry === undefined) return state;
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = restoreSettingsDraft(
+        state.personalization.draft,
+        entry.before,
+        settingsMetadata('SET-UNDO'),
+      );
+      const personalization = appendSettingsHistory(
+        {
+          ...state.personalization,
+          draft,
+          undoStack: state.personalization.undoStack.slice(0, -1),
+        },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'undo',
+          category: entry.category,
+          changedIds: entry.changedIds,
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        {
+          reversible: false,
+          redoStack: [...state.personalization.redoStack, entry].slice(-100),
+        },
+      );
+      return {
+        personalization,
+        audit: [auditEntry('ОТМЕНЕНО ИЗМЕНЕНИЕ НАСТРОЕК', entry.id), ...state.audit].slice(0, 100),
+      };
+    }),
+  redoSettingsDraft: () =>
+    set((state) => {
+      const entry = state.personalization.redoStack.at(-1);
+      if (entry === undefined) return state;
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = restoreSettingsDraft(
+        state.personalization.draft,
+        entry.after,
+        settingsMetadata('SET-REDO'),
+      );
+      const personalization = appendSettingsHistory(
+        {
+          ...state.personalization,
+          draft,
+          redoStack: state.personalization.redoStack.slice(0, -1),
+        },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'redo',
+          category: entry.category,
+          changedIds: entry.changedIds,
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        { reversible: true },
+      );
+      return {
+        personalization,
+        audit: [auditEntry('ПОВТОРЕНО ИЗМЕНЕНИЕ НАСТРОЕК', entry.id), ...state.audit].slice(0, 100),
+      };
+    }),
+  restoreSettingsHistoryEntry: (id) =>
+    set((state) => {
+      const entry = state.personalization.history.find((candidate) => candidate.id === id);
+      if (entry === undefined) return state;
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = restoreSettingsDraft(
+        state.personalization.draft,
+        entry.after,
+        settingsMetadata('SET-RESTORE'),
+      );
+      const personalization = appendSettingsHistory(
+        { ...state.personalization, draft },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'restore',
+          category: entry.category,
+          changedIds: entry.changedIds,
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        { reversible: true },
+      );
+      return {
+        personalization,
+        audit: [
+          auditEntry('СОСТОЯНИЕ ИЗ ИСТОРИИ ЗАГРУЖЕНО В DRAFT', entry.id),
+          ...state.audit,
+        ].slice(0, 100),
+      };
+    }),
+  exportSettingsDraft: () => exportDraft(get().personalization.draft),
+  importSettingsDraft: (serialized) =>
+    set((state) => {
+      const before = createSettingsDraftCheckpoint(state.personalization.draft);
+      const draft = importDraft(
+        state.personalization.draft,
+        serialized,
+        settingsMetadata('SET-IMPORT'),
+      );
+      const personalization = appendSettingsHistory(
+        { ...state.personalization, draft },
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'import',
+          changedIds: draft.history.at(-1)?.changedIds ?? [],
+          before,
+          after: createSettingsDraftCheckpoint(draft),
+        },
+        { reversible: true },
+      );
+      return {
+        personalization,
+        audit: [auditEntry('ИМПОРТИРОВАН ЧЕРНОВИК НАСТРОЕК', 'DRAFT'), ...state.audit].slice(
+          0,
+          100,
+        ),
+      };
+    }),
   resetWorld: () => {
     const base = createBaseState();
     set({ ...base, production: { ...base.production, snapshots: get().production.snapshots } });
@@ -568,23 +886,38 @@ export function useOperationsStore<Selection>(
 }
 
 interface PersistedOperationsState {
-  readonly version: 3;
+  readonly version: 4 | 5;
   readonly ui: OperationsUiState;
   readonly production: Omit<ProductionState, 'snapshots'>;
   readonly alerts: Readonly<Record<string, Alert>>;
   readonly tasks: Readonly<Record<string, OpsTask>>;
   readonly audit: readonly OpsAuditEntry[];
+  readonly personalization: PersonalizationState;
 }
 
 function persistedSnapshot(state: OperationsState): PersistedOperationsState {
   const { snapshots: _snapshots, ...production } = state.production;
   return {
-    version: 3,
+    version: 5,
     ui: state.ui,
     production,
     alerts: state.alerts,
     tasks: state.tasks,
     audit: state.audit,
+    personalization: state.personalization,
+  };
+}
+
+function hydratePersonalization(
+  persisted: PersonalizationState,
+  fallback: PersonalizationState,
+): PersonalizationState {
+  return {
+    published: persisted.published,
+    draft: persisted.draft,
+    history: persisted.history ?? fallback.history,
+    undoStack: persisted.undoStack ?? fallback.undoStack,
+    redoStack: persisted.redoStack ?? fallback.redoStack,
   };
 }
 
@@ -595,13 +928,20 @@ export function initializeOperationsClient(): () => void {
     const snapshotsRaw = localStorage.getItem(snapshotStateKey);
     if (stored !== null) {
       const parsed = JSON.parse(stored) as Partial<PersistedOperationsState>;
-      if (parsed.version === 3 && parsed.ui !== undefined && parsed.production !== undefined) {
+      const personalization = parsed.personalization;
+      if (
+        (parsed.version === 4 || parsed.version === 5) &&
+        parsed.ui !== undefined &&
+        parsed.production !== undefined &&
+        personalization !== undefined
+      ) {
         operationsStore.setState((state) => ({
           ui: { ...state.ui, ...parsed.ui, productionPanelOpen: false, drawer: null },
           production: { ...state.production, ...parsed.production },
           alerts: parsed.alerts ?? state.alerts,
           tasks: parsed.tasks ?? state.tasks,
           audit: parsed.audit ?? state.audit,
+          personalization: hydratePersonalization(personalization, state.personalization),
         }));
       }
     }
@@ -618,12 +958,21 @@ export function initializeOperationsClient(): () => void {
   let applyingRemote = false;
   if (broadcast !== null) {
     broadcast.onmessage = (event: MessageEvent<PersistedOperationsState>) => {
-      if (event.data.version !== 3) return;
+      if (event.data.version !== 4 && event.data.version !== 5) return;
+      // Timed playback is ordered by PlaybackSyncCoordinator. Applying these
+      // transient fields from the general world snapshot would race the
+      // scheduled epoch/sequence command and reintroduce timing drift.
+      const {
+        videoPlaying: _videoPlaying,
+        videoLive: _videoLive,
+        videoPosition: _videoPosition,
+        ...remoteUi
+      } = event.data.ui;
       applyingRemote = true;
       operationsStore.setState((state) => ({
         ui: {
           ...state.ui,
-          ...event.data.ui,
+          ...remoteUi,
           productionPanelOpen: state.ui.productionPanelOpen,
           drawer: state.ui.drawer,
         },
@@ -631,6 +980,7 @@ export function initializeOperationsClient(): () => void {
         alerts: event.data.alerts,
         tasks: event.data.tasks,
         audit: event.data.audit,
+        personalization: hydratePersonalization(event.data.personalization, state.personalization),
       }));
       applyingRemote = false;
     };
