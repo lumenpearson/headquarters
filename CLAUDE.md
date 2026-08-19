@@ -114,6 +114,10 @@ Both run as part of `pnpm check` via `scripts/`:
   committed tree; stale generated bindings fail the check. Always run
   `pnpm --filter @gremuchaya/protocol generate` and commit the result after touching a `.proto` file.
 
+## Git Commit Conventions
+
+- Никогда не добавляйте строки `Co-Authored-By` или любые другие упоминания ИИ-ассистента в сообщения коммитов.
+
 ### Protocol / RPC surface
 
 Versioned Protobuf contracts live under
