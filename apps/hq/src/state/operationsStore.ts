@@ -135,6 +135,26 @@ interface OperationsUiState {
   readonly productionPanelOpen: boolean;
 }
 
+/**
+ * Edit-mode session state.
+ *
+ * Deliberately separate from `personalization`, which already owns the draft,
+ * undo/redo stacks and history: edit mode is a lens over that draft, not a
+ * second copy of it. Only what personalization has no place for lives here.
+ *
+ * Deliberately absent from `persistedSnapshot`. Reopening the application in
+ * edit mode would be a surprise, and a stale selection would point at an
+ * element that may no longer exist.
+ */
+interface EditModeState {
+  readonly active: boolean;
+  /** Empty string rather than undefined, matching the other selections here. */
+  readonly selectedElementId: string;
+  readonly dockEdge: EditDockEdge;
+}
+
+export type EditDockEdge = 'left' | 'right' | 'top' | 'bottom';
+
 interface ProductionState {
   readonly paused: boolean;
   readonly preset: string;
@@ -188,6 +208,7 @@ export interface OperationsState {
   readonly ui: OperationsUiState;
   readonly production: ProductionState;
   readonly personalization: PersonalizationState;
+  readonly edit: EditModeState;
   readonly metrics: OperationsMetrics;
   readonly audit: readonly OpsAuditEntry[];
   readonly setRoute: (route: OperationsRoute) => void;
@@ -223,6 +244,10 @@ export interface OperationsState {
   readonly applyPreset: (preset: string) => void;
   readonly saveSnapshot: (name: string) => void;
   readonly restoreSnapshot: (id: string) => void;
+  readonly enterEditMode: () => void;
+  readonly exitEditMode: () => void;
+  readonly selectEditElement: (id: string) => void;
+  readonly dockEditPanel: (edge: EditDockEdge) => void;
   readonly applySettingsPatch: (patches: readonly SettingsPatch[]) => void;
   readonly resetSettingsCategory: (category: SettingCategory) => void;
   readonly resetAllSettings: () => void;
@@ -324,6 +349,14 @@ function createBaseState() {
       history: [],
       undoStack: [],
       redoStack: [],
+    },
+    edit: {
+      active: false,
+      selectedElementId: '',
+      // `as const` matches the idiom already used for filesView here:
+      // createBaseState has no declared return type, so a bare literal widens
+      // to string and stops satisfying EditDockEdge.
+      dockEdge: 'right' as const,
     },
     metrics: {
       cpu: 43,
@@ -552,6 +585,17 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         audit: [auditEntry('ВОССТАНОВЛЕНО СОСТОЯНИЕ СЦЕНЫ', id), ...state.audit].slice(0, 100),
       };
     }),
+  enterEditMode: () => set((state) => ({ edit: { ...state.edit, active: true } })),
+
+  exitEditMode: () =>
+    // The selection belongs to one editing pass and is dropped with it. The
+    // dock edge is where the operator parked the panel, so it survives.
+    set((state) => ({ edit: { ...state.edit, active: false, selectedElementId: '' } })),
+
+  selectEditElement: (id) => set((state) => ({ edit: { ...state.edit, selectedElementId: id } })),
+
+  dockEditPanel: (edge) => set((state) => ({ edit: { ...state.edit, dockEdge: edge } })),
+
   applySettingsPatch: (patches) =>
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);

@@ -141,3 +141,42 @@ describe('operationsStore', () => {
     expect(operationsStore.getState().personalization.draft.values['themes.id']).toBe('cold-cyan');
   });
 });
+
+describe('edit mode', () => {
+  beforeEach(() => {
+    operationsStore.getState().exitEditMode();
+  });
+
+  it('opens and closes without touching the settings draft', () => {
+    const before = operationsStore.getState().personalization.draft;
+
+    operationsStore.getState().enterEditMode();
+    expect(operationsStore.getState().edit.active).toBe(true);
+
+    operationsStore.getState().exitEditMode();
+    expect(operationsStore.getState().edit.active).toBe(false);
+    // Edit mode is a lens over the existing draft, never a second copy of it.
+    expect(operationsStore.getState().personalization.draft).toBe(before);
+  });
+
+  it('clears the selected element when the mode closes', () => {
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().selectEditElement('tile.overview.alerts');
+    expect(operationsStore.getState().edit.selectedElementId).toBe('tile.overview.alerts');
+
+    operationsStore.getState().exitEditMode();
+    // A stale selection would outlive the mode and reappear on the next entry.
+    expect(operationsStore.getState().edit.selectedElementId).toBe('');
+  });
+
+  it('keeps the panel edge across a close and reopen', () => {
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().dockEditPanel('left');
+    operationsStore.getState().exitEditMode();
+    operationsStore.getState().enterEditMode();
+
+    // Where the operator parked the panel is a preference for the session,
+    // unlike the selection, which belongs to one editing pass.
+    expect(operationsStore.getState().edit.dockEdge).toBe('left');
+  });
+});
