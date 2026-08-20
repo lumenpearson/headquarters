@@ -13,8 +13,9 @@ operator-supplied HTML, CSS or JavaScript.
 **Architecture:** Edit mode is a **draft layer over the committed settings
 snapshot**, never a mutation of it. `packages/settings-schema` already models
 drafts, per-category reset and history; F1 adds an edit-session store on top,
-plus the floating panel that drives it. The single 997-line `operationsStore` is
-decomposed first so an edit keystroke does not re-render production data.
+plus the floating panel that drives it. `operationsStore` is left in place: its
+one measured defect is six selectors that allocate a fresh collection on every
+notification, which Task 1 fixes without moving any code.
 
 **Tech Stack:** React 19, Zustand (vanilla `createStore` + `useStore`), Base UI
 via `@gremuchaya/ui` `Terminal*` wrappers, `@gremuchaya/settings-schema`,
@@ -69,27 +70,21 @@ test below.
 
 | File                                                 | Responsibility                                                       |
 | ---------------------------------------------------- | -------------------------------------------------------------------- |
-| `apps/hq/src/state/operations/productionStore.ts`    | Domain data only: sectors, objects, cases, cameras, events.          |
-| `apps/hq/src/state/operations/uiStore.ts`            | Route, selection, panel open/closed.                                 |
 | `apps/hq/src/state/personalization/settingsStore.ts` | Committed snapshot and the published draft.                          |
 | `apps/hq/src/state/personalization/editStore.ts`     | Edit session: draft, undo/redo stacks, selected element, panel edge. |
-| `apps/hq/src/state/index.ts`                         | Re-exports the selectors screens already import.                     |
-| `apps/hq/src/application/edit/editSession.ts`        | Use cases: enter, exit, apply, undo, redo, reset, switch state.      |
 | `apps/hq/src/application/edit/issueDraft.ts`         | Builds the prefilled GitHub issue URL from a draft diff.             |
 | `apps/hq/src/components/edit/EditPanel.tsx`          | The floating panel shell.                                            |
 | `apps/hq/src/components/edit/EditPanelDock.ts`       | Magnetic edge resolution — pure, no React.                           |
-| `apps/hq/src/components/edit/EditableTile.tsx`       | Wraps a tile: selection outline, resize cursors, drag handle.        |
 | `apps/hq/src/components/edit/EditModeFrame.tsx`      | Accent-gradient window border while edit mode is on.                 |
 | `apps/hq/src/styles/edit.css`                        | Edit-mode-only styling, including the selection rules.               |
 
 **Modified:**
 
-| File                                    | Change                                               |
-| --------------------------------------- | ---------------------------------------------------- |
-| `apps/hq/src/state/operationsStore.ts`  | Reduced to a re-export shim, then deleted in Task 2. |
-| `apps/hq/app/layout.tsx`                | Mounts `EditModeFrame` and `EditPanel`.              |
-| `packages/settings-schema/src/index.ts` | Adds the `editMode.*` definitions Task 3 needs.      |
-| `apps/hq/package.json`                  | Adds `@dnd-kit/core`.                                |
+| File                                     | Change                                    |
+| ---------------------------------------- | ----------------------------------------- |
+| `apps/hq/src/screens/OverviewScreen.tsx` | Six selectors gain `useShallow` (Task 1). |
+| `apps/hq/app/layout.tsx`                 | Mounts `EditModeFrame` and `EditPanel`.   |
+| `apps/hq/app/globals.css`                | Imports `edit.css`.                       |
 
 **Tests:**
 
@@ -100,124 +95,112 @@ test below.
 
 ---
 
-## Task 1: Decompose the store — production and UI
+## Task 1: Stop six selectors re-rendering on every store update
 
 **Files:**
 
-- Create: `apps/hq/src/state/operations/productionStore.ts`
-- Create: `apps/hq/src/state/operations/uiStore.ts`
-- Create: `apps/hq/src/state/index.ts`
-- Modify: `apps/hq/src/state/operationsStore.ts`
-- Test: `apps/hq/src/state/operationsStore.test.ts` (existing, must stay green)
+- Modify: `apps/hq/src/screens/OverviewScreen.tsx:18-29`
+- Test: `apps/hq/src/screens/OverviewScreen.rerender.test.tsx` (create)
 
 **Interfaces:**
 
-- Consumes: nothing.
-- Produces: `useProductionStore`, `useOperationsUiStore`, and a re-export
-  `useOperationsStore` with the identical selector signature screens use today,
-  so no screen changes in this task.
+- Consumes: `useOperationsStore` from `../state/operationsStore.js` (unchanged),
+  `useShallow` from `zustand/react/shallow`.
+- Produces: nothing new. This task changes no module boundary and no import
+  path, deliberately.
 
-- [ ] **Step 1: Pin the current behaviour before moving anything**
+**Why this and not a decomposition.** Zustand 5 compares a selector's result
+with `Object.is`. `Object.values(state.sectors)` allocates a new array on every
+notification, so it never compares equal and the component re-renders whenever
+anything in the store changes — including an edit-mode keystroke. Splitting the
+store into per-domain stores would not fix that; the same six selectors would
+still re-render on any production-data change. `useShallow` fixes it where it
+is, and adds no new module.
 
-The existing suite is the safety net for a pure move. Confirm it is green and
-note the count, so a regression is visible rather than inferred.
+- [ ] **Step 1: Write the failing test**
 
-Run: `pnpm --filter @gremuchaya/hq test -- src/state/operationsStore.test.ts`
-Expected: PASS. Record the test count in the commit message.
+```tsx
+// apps/hq/src/screens/OverviewScreen.rerender.test.tsx
+import { render } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
-- [ ] **Step 2: Extract the production slice**
+import { operationsStore } from '../state/operationsStore.js';
+import { OverviewScreen } from './OverviewScreen.js';
 
-Move every reducer and field that touches domain data — `sectors`, `objects`,
-`cases`, `cameras`, `events`, `people`, `sensors`, `routes`, `reports`, `tasks`,
-`alerts`, `insights`, `channels`, `attachments` — into a store of its own. Copy
-the bodies verbatim; this task changes structure, not behaviour.
+describe('OverviewScreen subscription cost', () => {
+  it('does not re-render when an unrelated part of the store changes', () => {
+    let renders = 0;
+    function Probe() {
+      renders += 1;
+      return <OverviewScreen />;
+    }
 
-```ts
-// apps/hq/src/state/operations/productionStore.ts
-'use client';
+    render(<Probe />);
+    const before = renders;
 
-import type { Sector, OperationalObject, CaseFile } from '@gremuchaya/domain';
-import { useStore } from 'zustand/react';
-import { createStore } from 'zustand/vanilla';
+    // Notify subscribers without changing anything the screen reads. With
+    // Object.is comparison and an allocating selector, this still re-renders.
+    operationsStore.setState((state) => ({ ...state }));
 
-import { operationsSeed } from '../../data/operationsSeed';
-
-/**
- * Domain data only. It is separated from UI and personalization state because
- * edit mode mutates a draft on every keystroke, and a merged store would
- * re-render every consumer of production data on each one.
- */
-export interface ProductionState {
-  readonly sectors: readonly Sector[];
-  readonly objects: readonly OperationalObject[];
-  readonly cases: readonly CaseFile[];
-}
-
-export const productionStore = createStore<ProductionState>()(() => ({
-  sectors: operationsSeed.sectors,
-  objects: operationsSeed.objects,
-  cases: operationsSeed.cases,
-}));
-
-export function useProductionStore<T>(selector: (state: ProductionState) => T): T {
-  return useStore(productionStore, selector);
-}
+    expect(renders).toBe(before);
+  });
+});
 ```
 
-- [ ] **Step 3: Extract the UI slice**
+- [ ] **Step 2: Run the test to verify it fails**
 
-```ts
-// apps/hq/src/state/operations/uiStore.ts
-'use client';
+Run: `pnpm --filter @gremuchaya/hq test -- src/screens/OverviewScreen.rerender.test.tsx`
+Expected: FAIL — the allocating selectors force a re-render, so the count grows.
 
-import { useStore } from 'zustand/react';
-import { createStore } from 'zustand/vanilla';
+If the test errors instead on a missing `@testing-library/react`, add it as a
+dev dependency of `apps/hq` in this step and note it in the commit; do not
+weaken the test to avoid the dependency.
 
-export type OperationsRoute = 'overview' | 'objects' | 'cases' | 'map' | 'video' | 'files';
+- [ ] **Step 3: Wrap the six allocating selectors**
 
-export interface OperationsUiState {
-  readonly route: OperationsRoute;
-  readonly selectedObjectId: string | undefined;
-  navigate: (route: OperationsRoute) => void;
-  selectObject: (id: string | undefined) => void;
-}
+In `apps/hq/src/screens/OverviewScreen.tsx`, add the import and wrap exactly the
+selectors that construct a new collection. Leave the other six alone — they
+return stable references, and `useShallow` there would only add overhead.
 
-export const operationsUiStore = createStore<OperationsUiState>()((set) => ({
-  route: 'overview',
-  selectedObjectId: undefined,
-  navigate: (route) => {
-    set({ route });
-  },
-  selectObject: (id) => {
-    set({ selectedObjectId: id });
-  },
-}));
+```tsx
+import { useShallow } from 'zustand/react/shallow';
 
-export function useOperationsUiStore<T>(selector: (state: OperationsUiState) => T): T {
-  return useStore(operationsUiStore, selector);
-}
+const operation = useOperationsStore((state) => state.operation);
+const sectors = useOperationsStore(useShallow((state) => Object.values(state.sectors)));
+const objects = useOperationsStore(useShallow((state) => Object.values(state.objects)));
+const tasks = useOperationsStore(useShallow((state) => Object.values(state.tasks)));
+const attachments = useOperationsStore(useShallow((state) => Object.values(state.attachments)));
+const events = useOperationsStore(useShallow((state) => state.events.slice(0, 8)));
+const alerts = useOperationsStore(useShallow((state) => Object.values(state.alerts)));
+const metrics = useOperationsStore((state) => state.metrics);
+const openDrawer = useOperationsStore((state) => state.openDrawer);
+const selectObject = useOperationsStore((state) => state.selectObject);
+const setFileFilter = useOperationsStore((state) => state.setFileKindFilter);
+const setAnalyticsFilter = useOperationsStore((state) => state.setAnalyticsFilter);
 ```
 
-- [ ] **Step 4: Make `operationsStore.ts` a shim so no screen changes yet**
+- [ ] **Step 4: Run the test to verify it passes**
 
-```ts
-// apps/hq/src/state/operationsStore.ts
-export { useProductionStore, productionStore } from './operations/productionStore.js';
-export { useOperationsUiStore, operationsUiStore } from './operations/uiStore.js';
-export type { ProductionState } from './operations/productionStore.js';
-export type { OperationsState, OperationsRoute } from './operations/uiStore.js';
+Run: `pnpm --filter @gremuchaya/hq test -- src/screens/OverviewScreen.rerender.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 5: Leave zero instances behind, not one**
+
+Run:
+
+```bash
+grep -rn "useOperationsStore((state) =>" apps/hq/src --include=*.tsx   | grep -E "Object\.(values|keys|entries)|\.slice\(|\.filter\(|\.map\("
 ```
 
-- [ ] **Step 5: Verify the move changed nothing**
-
-Run: `pnpm --filter @gremuchaya/hq test && pnpm typecheck && node scripts/check-ui-boundary.mjs`
-Expected: the same test count as Step 1, all passing.
+Expected: no output. If a match appears anywhere, wrap it in this task rather
+than opening a follow-up — the point is that the pattern is gone from the
+codebase, not tracked.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/hq/src/state
-git commit -m "refactor(hq): split the operations store by responsibility"
+git add apps/hq/src/screens/OverviewScreen.tsx apps/hq/src/screens/OverviewScreen.rerender.test.tsx
+git commit -m "perf(hq): stop overview selectors re-rendering on every store update"
 ```
 
 ---

@@ -90,31 +90,43 @@ long.
 
 ### Rewrite — will not carry the target feature set
 
-**`apps/hq/src/state/operationsStore.ts` (997 lines).** Not condemned for size,
-and not naive — it already composes the settings-draft machinery correctly. It
-is condemned for **shape**: `OperationsUiState`, `ProductionState` and
-`PersonalizationState` are merged into one `OperationsState` in one store. Edit
-mode (R7) needs per-element draft state, undo/redo over arbitrary edits, and a
-clean separation between _committed_ and _being edited_. Retrofitting that into
-a single merged store means every edit-mode action re-renders every consumer of
-production data.
-
-The rewrite is a **decomposition, not a redesign**: the existing reducers move
-into per-domain stores behind the same public selectors, so screens do not
-change in the same commit. Target shape:
-
-```
-apps/hq/src/state/
-  operations/productionStore.ts    — domain data (sectors, objects, cases, …)
-  operations/uiStore.ts            — route, selection, panel state
-  personalization/settingsStore.ts — committed snapshot + published draft
-  personalization/editStore.ts     — NEW: edit-mode draft, undo/redo, selection
-  index.ts                         — the selectors screens already import
-```
-
 **`apps/control-plane/src/realtime/hub.ts` history.** `#historyByGroup` is an
 in-memory `Map`. Replace with `history_events`/`sync_events` (V2 C3). Replace,
 not extend — a hub that reads from both is a hub with two sources of truth.
+
+That is the only rewrite. The list was longer; see the correction below.
+
+### Corrected — `operationsStore` does not need decomposing
+
+An earlier revision of this document put `apps/hq/src/state/operationsStore.ts`
+under Rewrite, arguing that merging production, UI and personalization state
+into one store means every edit-mode action re-renders every consumer of
+production data. **That reasoning was wrong, and it was not measured.**
+
+Measured: of 50 `useOperationsStore(...)` call sites, 44 return a stable
+reference — a primitive, an object already held in state, or an action — and
+Zustand's default `Object.is` comparison makes them bail correctly on an
+unrelated update. Six return a freshly constructed collection, and all six are
+in one file:
+
+```powershell
+Select-String -Path apps/hq/src -Pattern 'useOperationsStore\(\(state\) =>' -Recurse |
+  Where-Object { $_.Line -match 'Object\.(values|keys|entries)|\.slice\(|\.filter\(|\.map\(' }
+```
+
+→ six matches, every one in `apps/hq/src/screens/OverviewScreen.tsx`.
+
+The defect is real: `Object.values(state.sectors)` allocates a new array on
+every store notification, so those six components re-render whenever anything in
+the store changes. But its cause is the **selector**, not the store's shape, and
+splitting the store would not have fixed it — any production-data edit would
+still re-render all six. The remedy is `useShallow` on six selectors in one
+file.
+
+Decomposing 997 lines across four modules and rewriting seventeen import sites
+would have been churn that left the actual defect in place, plus a re-export
+shim living alongside the thing it re-exports. Revised verdict for
+`operationsStore.ts`: **keep, with a targeted selector fix** (F1 Task 1).
 
 ### Wire — written, tested, connected to nothing
 
