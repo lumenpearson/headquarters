@@ -42,9 +42,25 @@ export function EditPanel() {
   const [category, setCategory] = useState<SettingCategory>('layout');
   const [dragging, setDragging] = useState(false);
 
+  /*
+   * Pointer capture is what makes the drag work at all. A drag ends with the
+   * pointer somewhere else on screen -- that is the point of it -- so without
+   * capture the release lands on whatever is under the cursor and this handler
+   * never runs: the panel keeps its old edge and stays stuck in the dragging
+   * state. Capture routes every subsequent pointer event back here regardless
+   * of where the pointer went.
+   */
+  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
+  }, []);
+
   // Actions are read off the vanilla store instead of subscribed to, so the
   // panel does not re-render when an action identity changes.
   const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     setDragging(false);
     operationsStore
       .getState()
@@ -67,9 +83,7 @@ export function EditPanel() {
       className="edit-panel"
       data-edge={dockEdge}
       data-dragging={dragging}
-      onPointerDown={() => {
-        setDragging(true);
-      }}
+      onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
     >
       <header className="edit-panel__header">
