@@ -169,3 +169,11 @@ never leak into the UI. Real nodes shadow an emulated/config-defined node at the
 - `apps/hq/AGENTS.md` is regenerated automatically by `next dev`; don't hand-edit it, just commit it
   if it changes.
 - Before editing any file, read it first. Before modifying a function, grep for all callers. Reresearch before you edit.
+- Keep `docs/plans/actual_plan.md` current as work happens, not afterward. It is the repository's
+  one plan document by design (its own header explains why prior plan files were folded into it and
+  removed): the current state of the project, its proven history and the route ahead all live in one
+  place so they cannot drift apart. When a task finishes, a defect is found, or something the plan
+  claimed turns out wrong, update the plan in the same batch of work — the corrections register (§6)
+  exists because claims left uncorrected are worse than claims never made. A second plan document
+  appearing anywhere is a sign something drifted; fold it back in rather than treating it as a new
+  source of truth.
