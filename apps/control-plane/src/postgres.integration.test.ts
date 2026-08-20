@@ -3,6 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createNeonDatabase, type SqlClient } from './db/database.js';
+import {
+  describesSameDatabase,
+  disposableDatabaseName,
+  sweepDisposableDatabases,
+} from './db/disposableDatabases.js';
 import { migrations, runMigrations } from './db/migrations.js';
 import { DurablePairedDeviceRuntime } from './sync/durable-runtime.js';
 import type { AuthenticatedDevice } from './sync/runtime.js';
@@ -21,8 +26,26 @@ import type { AuthenticatedDevice } from './sync/runtime.js';
  * own databases and is destructive by design.
  */
 const testDatabaseUrl = process.env.HQ_CONTROL_PLANE_TEST_DATABASE_URL;
+const deploymentDatabaseUrl = process.env.HQ_CONTROL_PLANE_DATABASE_URL;
+
+// This suite drops databases. Refusing to start beats warning in a comment:
+// with both URLs configured, the two must not resolve to the same database.
+if (
+  testDatabaseUrl !== undefined &&
+  deploymentDatabaseUrl !== undefined &&
+  describesSameDatabase(testDatabaseUrl, deploymentDatabaseUrl)
+) {
+  throw new Error(
+    'HQ_CONTROL_PLANE_TEST_DATABASE_URL must not address the same database as ' +
+      'HQ_CONTROL_PLANE_DATABASE_URL: this suite creates and drops databases.',
+  );
+}
+
 const describeIntegration = testDatabaseUrl === undefined ? describe.skip : describe;
 const networkTimeoutMs = 120_000;
+// One hour is far beyond the whole suite's worst case (18 scenarios, 120 s
+// each), so a sweep can never reach a run that is still in flight.
+const staleDatabaseAfterMs = 3_600_000;
 const tokenPepper = 'integration-token-pepper-with-at-least-thirty-two-characters';
 
 describeIntegration('durable paired-device lifecycle against real PostgreSQL', () => {
@@ -32,6 +55,15 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
   let database: SqlClient;
 
   beforeAll(async () => {
+    // Sweep first: a previous run killed before `afterAll` leaves its database
+    // behind, and the instant in the name is what makes that safe to decide.
+    const swept = await sweepDisposableDatabases(admin, Date.now(), staleDatabaseAfterMs);
+    if (swept.dropped.length > 0) {
+      // Raw stderr, not console.warn: Vitest's reporter intercepts console
+      // output from hooks and never prints it, and a sweep that removes a
+      // database has to be visible to whoever ran the suite.
+      process.stderr.write(`Swept abandoned test databases: ${swept.dropped.join(', ')}\n`);
+    }
     database = await createIsolatedDatabase();
     await runMigrations(database);
   }, networkTimeoutMs);
@@ -621,7 +653,7 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
   }
 
   async function createIsolatedDatabase(): Promise<SqlClient> {
-    const name = `hqtest_${uniqueSuffix()}`;
+    const name = disposableDatabaseName(Date.now(), uniqueSuffix());
     await admin.query({ text: `CREATE DATABASE ${name}` });
     createdDatabases.push(name);
     const url = new URL(baseUrl);
