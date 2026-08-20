@@ -41,22 +41,12 @@ shared/materials/*
 !shared/materials/.gitkeep
 
 # --- Tooling and editors ---
-.husky/_/
 .vercel/
 .idea/
 *.swp
 *.swo
 
-# Keep the shared workspace configuration, ignore personal editor state.
-# settings.json is tracked on purpose: it overrides user-level formatting that
-# would otherwise rewrite files against the committed Prettier config.
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-
 # --- Agent and assistant local state ---
-.claude/settings.local.json
-.codex/
 .aider*
 
 # --- Scratch files ---
@@ -65,3 +55,6 @@ shared/materials/*
 *.bak
 *.orig
 *.rej
+
+# --- Git ---
+.git
