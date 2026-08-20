@@ -20,6 +20,7 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    setupFiles: ['./vitest.setup.ts'],
     // Default stays 'node'; component tests opt into jsdom individually via a
     // `// @vitest-environment jsdom` docblock, so plain-logic tests keep the
     // cheaper node environment.

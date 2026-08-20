@@ -26,6 +26,7 @@
 @import '../src/styles/hq.css';
 @import '../src/styles/terminal.css';
 @import '../src/styles/operations.css';
+@import '../src/styles/edit.css';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 /*

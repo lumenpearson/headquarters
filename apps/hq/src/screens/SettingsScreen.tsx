@@ -4,19 +4,17 @@ import {
   getSettingsDefinitionsForCategory,
   settingCategories,
   type SettingCategory,
-  type SettingDefinition,
-  type SettingValue,
 } from '@gremuchaya/settings-schema';
 import {
   TerminalButton,
   TerminalInput,
-  TerminalNumberField,
   TerminalSelect,
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 import { useMemo, useState } from 'react';
 
 import { Panel } from '@/components/operations/OpsUi';
+import { categoryLabel, SchemaSetting, Setting } from '@/components/settings/SchemaSetting';
 import {
   querySettingsHistory,
   settingsHistoryOperations,
@@ -471,132 +469,6 @@ export function SettingsScreen() {
   );
 }
 
-function SchemaSetting({
-  definition,
-  value,
-  changed,
-  onValueChange,
-}: {
-  readonly definition: SettingDefinition;
-  readonly value: SettingValue;
-  readonly changed: boolean;
-  readonly onValueChange: (value: SettingValue) => void;
-}) {
-  const label = settingLabel(definition.id);
-  const editor = definition.editor;
-  const control = (() => {
-    switch (editor.kind) {
-      case 'boolean':
-        return (
-          <TerminalSwitch
-            label={label}
-            className="settings-toggle"
-            checked={value === true}
-            onCheckedChange={onValueChange}
-          />
-        );
-      case 'enum':
-        return (
-          <TerminalSelect
-            label={label}
-            value={String(value)}
-            onValueChange={(nextValue) =>
-              onValueChange(
-                typeof definition.defaultValue === 'number' ? Number(nextValue) : nextValue,
-              )
-            }
-            options={editor.options.map((option) => ({
-              value: option,
-              label: option.toUpperCase(),
-            }))}
-          />
-        );
-      case 'number':
-        return (
-          <TerminalNumberField
-            label={label}
-            value={typeof value === 'number' ? value : null}
-            min={editor.minimum}
-            max={editor.maximum}
-            step={editor.step}
-            onValueChange={(nextValue) => {
-              if (nextValue !== null) onValueChange(nextValue);
-            }}
-          />
-        );
-      case 'string-list':
-        return (
-          <TerminalInput
-            aria-label={label}
-            value={Array.isArray(value) ? value.join(`${editor.delimiter} `) : ''}
-            onValueChange={(nextValue) =>
-              onValueChange(
-                [...new Set(nextValue.split(editor.delimiter).map((item) => item.trim()))].filter(
-                  Boolean,
-                ),
-              )
-            }
-          />
-        );
-    }
-  })();
-
-  return (
-    <Setting
-      label={`${label}${changed ? ' *' : ''}`}
-      detail={`${definition.scope.toUpperCase()} · ${definition.description}`}
-    >
-      {control}
-    </Setting>
-  );
-}
-
-function settingLabel(id: string): string {
-  return id
-    .replaceAll('.', ' / ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .toUpperCase();
-}
-
-function categoryLabel(category: SettingCategory): string {
-  return (
-    {
-      general: 'ОБЩИЕ / GENERAL',
-      information: 'ИНФОРМАЦИЯ / INFORMATION',
-      layout: 'МАКЕТ / LAYOUT',
-      tiles: 'ПЛИТКИ / TILES',
-      themes: 'ТЕМЫ / THEMES',
-      styles: 'СТИЛИ / STYLES',
-      colors: 'ЦВЕТА / COLORS',
-      typography: 'ТИПОГРАФИКА / TYPOGRAPHY',
-      sizes: 'РАЗМЕРЫ / SIZES',
-      backgrounds: 'ФОНЫ / BACKGROUNDS',
-      patterns: 'ПАТТЕРНЫ / PATTERNS',
-      animations: 'АНИМАЦИИ / ANIMATIONS',
-      startup: 'ЗАПУСК / STARTUP',
-      player: 'ПЛЕЕР / PLAYER',
-      cameras: 'КАМЕРЫ / CAMERAS',
-      map: 'КАРТА / MAP',
-      tables: 'ТАБЛИЦЫ / TABLES',
-      popups: 'POP-UP / POPUPS',
-      keybinds: 'КЛАВИШИ / KEYBINDS',
-      localization: 'ЛОКАЛИЗАЦИЯ / LOCALIZATION',
-      dateTime: 'ДАТА И ВРЕМЯ / DATE TIME',
-      telemetry: 'ТЕЛЕМЕТРИЯ / TELEMETRY',
-      simulation: 'СИМУЛЯЦИЯ / SIMULATION',
-      groups: 'ГРУППЫ / GROUPS',
-      materials: 'МАТЕРИАЛЫ / MATERIALS',
-      titlebar: 'ВЕРХНЯЯ ПАНЕЛЬ / TITLEBAR',
-      accessibility: 'ДОСТУПНОСТЬ / ACCESSIBILITY',
-      performance: 'ПРОИЗВОДИТЕЛЬНОСТЬ / PERFORMANCE',
-      privacy: 'ПРИВАТНОСТЬ / PRIVACY',
-      diagnostics: 'ДИАГНОСТИКА / DIAGNOSTICS',
-      github: 'GITHUB / ИНТЕГРАЦИЯ',
-      advanced: 'РАСШИРЕННЫЕ / ADVANCED',
-    } satisfies Record<SettingCategory, string>
-  )[category];
-}
-
 function formatHistoryDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return value;
@@ -604,24 +476,4 @@ function formatHistoryDate(value: string): string {
     dateStyle: 'short',
     timeStyle: 'medium',
   }).format(date);
-}
-
-function Setting({
-  label,
-  detail,
-  children,
-}: {
-  readonly label: string;
-  readonly detail: string;
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <div className="settings-row">
-      <span>
-        <strong>{label}</strong>
-        <small>{detail}</small>
-      </span>
-      {children}
-    </div>
-  );
 }
