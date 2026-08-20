@@ -37,6 +37,7 @@ export interface PairedDeviceLifecycle {
     authenticated: AuthenticatedDevice,
     groupId: string,
     role: Exclude<DeviceRole, 'ADMIN'>,
+    mutation?: MutationReceiptContext,
   ): Awaitable<PairingCodeGrant>;
   pairDevice(input: PairDeviceInput): Awaitable<CreatedPairedGroup>;
   /**
@@ -60,5 +61,6 @@ export interface PairedDeviceLifecycle {
     authenticated: AuthenticatedDevice,
     groupId: string,
     deviceId: string,
+    mutation?: MutationReceiptContext,
   ): Awaitable<RevokedPairedDevice>;
 }

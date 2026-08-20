@@ -52,6 +52,7 @@ export function createPairedDeviceSyncService(
             platform: request.initialDevice?.platform ?? '',
             applicationVersion: request.initialDevice?.applicationVersion ?? '',
           },
+          ...toMutationReceiptInput(request.context?.requestId),
         });
         return {
           group: toGroup(created.group),
@@ -65,10 +66,14 @@ export function createPairedDeviceSyncService(
       return withRuntimeErrors(async () => {
         const authenticated = await authenticateRequest(options.runtime, context);
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
-        const grant = await options.runtime.createPairingCode(
-          authenticated,
-          requireResourceId(request.groupId?.value, 'group_id'),
-          toPairingRole(request.role),
+        const mutation = toMutationReceiptContext(request.context?.requestId);
+        const grant = await callWithMutation(mutation, (context) =>
+          options.runtime.createPairingCode(
+            authenticated,
+            requireResourceId(request.groupId?.value, 'group_id'),
+            toPairingRole(request.role),
+            ...context,
+          ),
         );
         return {
           pairingCode: {
@@ -137,10 +142,14 @@ export function createPairedDeviceSyncService(
       return withRuntimeErrors(async () => {
         const authenticated = await authenticateRequest(options.runtime, context);
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
-        const revoked = await options.runtime.revokeDevice(
-          authenticated,
-          requireResourceId(request.groupId?.value, 'group_id'),
-          requireResourceId(request.deviceId?.value, 'device_id'),
+        const mutation = toMutationReceiptContext(request.context?.requestId);
+        const revoked = await callWithMutation(mutation, (context) =>
+          options.runtime.revokeDevice(
+            authenticated,
+            requireResourceId(request.groupId?.value, 'group_id'),
+            requireResourceId(request.deviceId?.value, 'device_id'),
+            ...context,
+          ),
         );
         return {
           result: {
@@ -182,6 +191,18 @@ function toMutationReceiptContext(
     }
     throw error;
   }
+}
+
+/**
+ * Applies an optional trailing `mutation` argument without ever passing an
+ * explicit `undefined`, which `exactOptionalPropertyTypes` rejects against an
+ * optional parameter.
+ */
+function callWithMutation<T>(
+  mutation: MutationReceiptContext | undefined,
+  call: (context: [MutationReceiptContext] | []) => T,
+): T {
+  return call(mutation === undefined ? [] : [mutation]);
 }
 
 /** Spread form, because `exactOptionalPropertyTypes` rejects an explicit `undefined`. */

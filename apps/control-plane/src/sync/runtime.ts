@@ -66,6 +66,12 @@ export interface CreateGroupInput {
     readonly platform: string;
     readonly applicationVersion: string;
   };
+  /**
+   * Optional durable-retry identity. Bootstrap is rare but not harmless to
+   * repeat: without a receipt a lost response leaves the operator with two
+   * groups and no way to tell which one their next call will reach.
+   */
+  readonly mutation?: MutationReceiptContext;
 }
 
 export interface PairDeviceInput {
@@ -207,6 +213,13 @@ interface MutationReceiptRecord {
   groupId?: string;
   deviceId?: string;
   sessionId?: string;
+  /**
+   * A pairing code's hash. Not every mutation produces a session, and a code is
+   * the one outcome a retry has to be able to reach in order to retire it.
+   */
+  resourceHash?: string;
+  /** The group revision a revoke produced, so a replay does not report drift. */
+  revision?: bigint;
 }
 
 interface MutationReceiptClaim {
@@ -286,6 +299,21 @@ export class PairedDeviceRuntime {
     const now = this.currentTime();
     const groupName = requireText(input.name, 'name');
     const initialDevice = normalizeDeviceInput(input.initialDevice);
+    const claim = this.claimReceipt(
+      'CREATE_GROUP',
+      input.mutation,
+      [
+        ['group_name', groupName],
+        ['device_name', initialDevice.name],
+        ['public_key', initialDevice.publicKey],
+        ['platform', initialDevice.platform],
+        ['application_version', initialDevice.applicationVersion],
+      ],
+      now,
+    );
+    if (claim?.replay !== undefined) return this.replayCreatedLifecycle(claim, claim.replay, now);
+    // Checked after the receipt lookup: a retry of a committed bootstrap
+    // legitimately presents the key its own first attempt registered.
     this.ensurePublicKeyAvailable(initialDevice.publicKey);
 
     const groupId = this.createId();
@@ -318,6 +346,7 @@ export class PairedDeviceRuntime {
     this.#deviceIdByPublicKey.set(device.publicKey, deviceId);
     this.#memberships.set(membershipKey(groupId, deviceId), membership);
     const session = this.issueSession(group, device, membership, now);
+    this.completeReceipt(claim, groupId, deviceId, session.record.id, now);
     return {
       group: copyGroup(group),
       device: this.toPairedDevice(device, membership),
@@ -329,8 +358,20 @@ export class PairedDeviceRuntime {
     authenticated: AuthenticatedDevice,
     groupId: string,
     role: Exclude<DeviceRole, 'ADMIN'>,
+    mutation?: MutationReceiptContext,
   ): PairingCodeGrant {
     const now = this.currentTime();
+    const claim = this.claimReceipt(
+      'CREATE_PAIRING_CODE',
+      mutation,
+      [
+        ['group_id', groupId],
+        ['role', role],
+        ['actor_device_id', authenticated.device.id],
+        ['actor_access_token_id', authenticated.accessTokenId],
+      ],
+      now,
+    );
     const issuer = this.requireActivePairingIssuer(authenticated, now);
     const group = this.requireGroup(groupId);
     this.requireSameGroup(authenticated, group.id);
@@ -341,6 +382,7 @@ export class PairedDeviceRuntime {
         'The authenticated access token is invalid or expired.',
       );
     }
+    if (claim?.replay !== undefined) this.retireReplacedPairingCode(claim, claim.replay);
     const code = this.createToken('pair');
     const grant: PairingCodeRecord = {
       tokenHash: this.hashToken('pair', code),
@@ -352,12 +394,60 @@ export class PairedDeviceRuntime {
       createdByAccessTokenId: issuer.accessTokenId,
     };
     this.#pairingCodesByHash.set(grant.tokenHash, grant);
+    this.completePairingCodeReceipt(claim, group.id, grant.tokenHash, now);
     return {
       code,
       groupId: group.id,
       role,
       expiresAt: copyDate(grant.expiresAt),
     };
+  }
+
+  /**
+   * A retry of a pairing-code request cannot return the original code: only its
+   * hash was stored. Minting a replacement is the only way to answer, so the
+   * code the lost response carried is retired in the same step. Without that,
+   * one retry would leave two live capabilities and the operator would know
+   * about only one of them.
+   */
+  private retireReplacedPairingCode(
+    claim: MutationReceiptClaim,
+    receipt: MutationReceiptRecord,
+  ): void {
+    if (receipt.fingerprint !== claim.fingerprint) {
+      throw new PairedDeviceRuntimeError(
+        'ALREADY_EXISTS',
+        'The mutation request identifier was already used with a different request payload.',
+      );
+    }
+    const recorded =
+      receipt.resourceHash === undefined
+        ? undefined
+        : this.#pairingCodesByHash.get(receipt.resourceHash);
+    if (recorded === undefined) throw replayNoLongerAuthorized();
+    if (recorded.consumedAt !== undefined) {
+      // The pairing already happened. Minting a second code here would grant a
+      // capability the operator never asked for a second time.
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The pairing code created by this request has already been used.',
+      );
+    }
+    recorded.revokedAt ??= this.currentTime();
+  }
+
+  private completePairingCodeReceipt(
+    claim: MutationReceiptClaim | undefined,
+    groupId: string,
+    resourceHash: string,
+    now: Date,
+  ): void {
+    if (claim === undefined) return;
+    const receipt = this.#receipts.get(claim.key);
+    if (receipt === undefined) return;
+    receipt.groupId = groupId;
+    receipt.resourceHash = resourceHash;
+    receipt.completedAt = now;
   }
 
   pairDevice(input: PairDeviceInput): {
@@ -595,7 +685,19 @@ export class PairedDeviceRuntime {
     authenticated: AuthenticatedDevice,
     groupId: string,
     deviceId: string,
+    mutation?: MutationReceiptContext,
   ): { readonly group: PairedGroup; readonly device: PairedDevice } {
+    const claim = this.claimReceipt(
+      'REVOKE_DEVICE',
+      mutation,
+      [
+        ['group_id', groupId],
+        ['device_id', deviceId],
+        ['actor_device_id', authenticated.device.id],
+      ],
+      this.currentTime(),
+    );
+    if (claim?.replay !== undefined) return this.replayRevokedDevice(claim, claim.replay);
     const group = this.requireGroup(groupId);
     this.requireSameGroup(authenticated, group.id);
     this.requireRole(authenticated, 'ADMIN');
@@ -647,12 +749,61 @@ export class PairedDeviceRuntime {
       updatedAt: now,
     };
     this.#groups.set(group.id, updatedGroup);
+    this.completeRevokeReceipt(claim, group.id, targetDevice.id, updatedGroup.revision, now);
     return {
       group: copyGroup(updatedGroup),
       // A device can remain globally online in another group. This result is
       // scoped to the membership just revoked, so expose its lifecycle state.
       device: { ...this.toPairedDevice(targetDevice, targetMembership), status: 'REVOKED' },
     };
+  }
+
+  /**
+   * A revoke is not naturally idempotent: re-running it bumps the group
+   * revision a second time and then fails, because the membership it wants is
+   * already gone. The receipt answers with the revision the caller's own
+   * mutation produced rather than whatever the group has drifted to since.
+   */
+  private replayRevokedDevice(
+    claim: MutationReceiptClaim,
+    receipt: MutationReceiptRecord,
+  ): { readonly group: PairedGroup; readonly device: PairedDevice } {
+    if (receipt.fingerprint !== claim.fingerprint) {
+      throw new PairedDeviceRuntimeError(
+        'ALREADY_EXISTS',
+        'The mutation request identifier was already used with a different request payload.',
+      );
+    }
+    const { groupId, deviceId, revision } = receipt;
+    if (groupId === undefined || deviceId === undefined || revision === undefined) {
+      throw replayNoLongerAuthorized();
+    }
+    const group = this.#groups.get(groupId);
+    const device = this.#devicesById.get(deviceId);
+    const membership = this.#memberships.get(membershipKey(groupId, deviceId));
+    if (group === undefined || device === undefined || membership === undefined) {
+      throw replayNoLongerAuthorized();
+    }
+    return {
+      group: { ...copyGroup(group), revision },
+      device: { ...this.toPairedDevice(device, membership), status: 'REVOKED' },
+    };
+  }
+
+  private completeRevokeReceipt(
+    claim: MutationReceiptClaim | undefined,
+    groupId: string,
+    deviceId: string,
+    revision: bigint,
+    now: Date,
+  ): void {
+    if (claim === undefined) return;
+    const receipt = this.#receipts.get(claim.key);
+    if (receipt === undefined) return;
+    receipt.groupId = groupId;
+    receipt.deviceId = deviceId;
+    receipt.revision = revision;
+    receipt.completedAt = now;
   }
 
   assertContextActor(authenticated: AuthenticatedDevice, actorDeviceId: string | undefined): void {

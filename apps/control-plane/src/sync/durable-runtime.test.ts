@@ -30,7 +30,7 @@ describe('durable paired-device lifecycle adapter', () => {
     expect(database.queries).toHaveLength(1);
 
     const statement = database.queries[0];
-    expect(statement.text).toContain('WITH inserted_group AS');
+    expect(statement.text).toContain('inserted_group AS');
     expect(statement.text).toContain('INSERT INTO device_sessions');
     expect(statement.text).toContain('INSERT INTO device_access_tokens');
     expect(statement.text).not.toContain('Terminal Red');
@@ -71,7 +71,7 @@ describe('durable paired-device lifecycle adapter', () => {
     expect(database.queries).toHaveLength(2);
     const issueStatement = database.queries[0];
     const redeemStatement = database.queries[1];
-    expect(issueStatement.text).toContain('WITH locked_group AS MATERIALIZED');
+    expect(issueStatement.text).toContain('locked_group AS MATERIALIZED');
     expect(issueStatement.text).toContain('authorized_actor AS MATERIALIZED');
     // Issuance locks and re-validates the exact live session/access-token
     // pair that authenticated the caller, not merely the device.
@@ -513,10 +513,10 @@ function toDevice(row: Record<string, unknown>) {
     lastSeenAt: row.device_last_seen_at as Date,
   };
 }
-
 describe('durable mutation idempotency receipts', () => {
-  it('gates every data-modifying CTE behind the receipt claim and stores no response', async () => {
+  it('claims in a statement of its own, so the mutation can complete the row', async () => {
     const database = new ScriptedSqlClient([
+      [{ receipt_claimed: 'claimed' }],
       [
         {
           pairing_group_id: groupId,
@@ -524,10 +524,13 @@ describe('durable mutation idempotency receipts', () => {
           pairing_expires_at: new Date('2026-08-18T09:10:00.000Z'),
         },
       ],
+      [{ receipt_claimed: 'claimed' }],
       [lifecycleRow({ device_id: analystDeviceId, role: 'EDITOR', group_revision: '2' })],
     ]);
     const runtime = createRuntime(database);
-    const grant = await runtime.createPairingCode(authenticatedAdmin(), groupId, 'EDITOR');
+    const grant = await runtime.createPairingCode(authenticatedAdmin(), groupId, 'EDITOR', {
+      requestId: 'req-code',
+    });
 
     const paired = await runtime.pairDevice({
       pairingCode: grant.code,
@@ -535,26 +538,51 @@ describe('durable mutation idempotency receipts', () => {
       mutation: { requestId: 'req-pair-1' },
     });
 
-    const redeemStatement = database.queries[1];
-    expect(redeemStatement.text).toContain('INSERT INTO mutation_receipts');
-    expect(redeemStatement.text).toContain('ON CONFLICT (scope, request_id_hash) DO UPDATE');
-    expect(redeemStatement.text).toContain('WHERE mutation_receipts.completed_at IS NULL');
-    // The gate must sit upstream of redemption: if the claim is refused, no
-    // pairing candidate is produced and nothing downstream can mutate.
-    expect(redeemStatement.text).toContain('CROSS JOIN mutation_gate');
-    expect(redeemStatement.text).toContain('completed_receipt AS');
-    expect(redeemStatement.values).toContain('PAIR_DEVICE');
-    // Only hashes reach the database: neither the raw identifier nor any
-    // credential is a bound parameter.
-    expect(redeemStatement.values).not.toContain('req-pair-1');
-    expectCredentialIsNeverPersisted(redeemStatement, grant.code);
-    expectCredentialIsNeverPersisted(redeemStatement, paired.session.accessToken);
-    expectCredentialIsNeverPersisted(redeemStatement, paired.session.refreshToken);
+    const claim = database.queries[2];
+    const redeem = database.queries[3];
+    // The claim must not travel inside the mutation. PostgreSQL runs every
+    // data-modifying CTE against one pre-statement snapshot, so a receipt
+    // inserted by a CTE is invisible to the CTE that has to complete it, and
+    // `completed_at` would stay NULL forever.
+    expect(claim.text).toContain('INSERT INTO mutation_receipts');
+    expect(claim.text).toContain('ON CONFLICT (scope, request_id_hash) DO UPDATE');
+    expect(claim.text).toContain('WHERE mutation_receipts.completed_at IS NULL');
+    expect(redeem.text).not.toContain('INSERT INTO mutation_receipts');
+    // The mutation locks the committed row instead, which is what serializes
+    // two concurrent retries of one identifier.
+    expect(redeem.text).toContain('locked_receipt AS MATERIALIZED');
+    expect(redeem.text).toContain('FOR UPDATE OF receipt');
+    expect(redeem.text).toContain('CROSS JOIN mutation_gate');
+    expect(redeem.text).toContain('completed_receipt AS');
+    expect(claim.values).toContain('PAIR_DEVICE');
+
+    // Only hashes are ever bound: not the raw identifier, not the code, not a
+    // credential the response carries.
+    expect(claim.values).not.toContain('req-pair-1');
+    expect(redeem.values).not.toContain('req-pair-1');
+    expectCredentialIsNeverPersisted(claim, grant.code);
+    expectCredentialIsNeverPersisted(redeem, grant.code);
+    expectCredentialIsNeverPersisted(redeem, paired.session.accessToken);
+    expectCredentialIsNeverPersisted(redeem, paired.session.refreshToken);
   });
 
-  it('answers a refused pairing claim by re-issuing credentials for the recorded session', async () => {
+  it('issues no claim statement at all when the caller supplies no request id', async () => {
+    const database = new ScriptedSqlClient([[lifecycleRow()]]);
+    const runtime = createRuntime(database);
+
+    await runtime.refreshDeviceSession('hq_refresh_token');
+
+    expect(database.queries).toHaveLength(1);
+    const statement = database.queries[0];
+    expect(statement.text).not.toContain('INSERT INTO mutation_receipts');
+    expect(statement.values?.slice(8)).toEqual([null, null]);
+    // A NULL identifier keeps the gate open, so pre-receipt behaviour is intact.
+    expect(statement.text).toContain('SELECT 1 AS open WHERE $10::text IS NULL');
+  });
+
+  it('skips the mutation entirely once a completed receipt owns the identity', async () => {
     const database = new ScriptedSqlClient([
-      // The gated mutation is a no-op because a completed receipt refused the claim.
+      // The claim is refused: no row comes back.
       [],
       [
         {
@@ -568,30 +596,31 @@ describe('durable mutation idempotency receipts', () => {
       [lifecycleRow({ device_id: analystDeviceId, role: 'EDITOR', group_revision: '2' })],
     ]);
     const runtime = createRuntime(database);
-    const request = {
+    database.setReceiptFingerprint(
+      await fingerprintFor((probe) =>
+        probe.pairDevice({
+          pairingCode: 'hq_pair_retry',
+          ...deviceInput('HQ analyst', 'ed25519:analyst'),
+          mutation: { requestId: 'req-pair-retry' },
+        }),
+      ),
+    );
+
+    const replayed = await runtime.pairDevice({
       pairingCode: 'hq_pair_retry',
       ...deviceInput('HQ analyst', 'ed25519:analyst'),
       mutation: { requestId: 'req-pair-retry' },
-    };
-    // The scripted receipt must carry the fingerprint this exact request
-    // produces, so read it back from the claim the adapter just bound.
-    const probe = new ScriptedSqlClient([[]]);
-    await createRuntime(probe)
-      .pairDevice(request)
-      .catch(() => undefined);
-    const fingerprint = probe.queries[0]?.values?.[16];
-    database.setReceiptFingerprint(fingerprint);
-
-    const replayed = await runtime.pairDevice(request);
+    });
 
     expect(database.queries).toHaveLength(3);
+    // No redemption statement is issued: claim, read the receipt, re-issue.
+    expect(database.queries.some((statement) => statement.text.includes('pairing_candidate'))).toBe(
+      false,
+    );
     expect(database.queries[1].text).toContain('FROM mutation_receipts AS receipt');
-    // Re-issuance rotates the recorded session rather than redeeming a code again.
     expect(database.queries[2].text).toContain('rotated_session AS');
-    expect(database.queries[2].text).not.toContain('pairing_codes');
     expect(replayed.device.id).toBe(analystDeviceId);
     expect(replayed.session.accessToken).toMatch(/^hq_access_/u);
-    expect(replayed.session.refreshToken).toMatch(/^hq_refresh_/u);
   });
 
   it('reports a reused identifier with a different payload instead of issuing credentials', async () => {
@@ -616,8 +645,9 @@ describe('durable mutation idempotency receipts', () => {
     expect(database.queries).toHaveLength(2);
   });
 
-  it('reports the operation failure when its own claim never completed', async () => {
+  it('reports the operation failure when its own claim did commit', async () => {
     const database = new ScriptedSqlClient([
+      [{ receipt_claimed: 'claimed' }],
       [],
       [
         {
@@ -634,21 +664,187 @@ describe('durable mutation idempotency receipts', () => {
     await expect(
       runtime.refreshDeviceSession('hq_refresh_token', { requestId: 'req-failed' }),
     ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'UNAUTHENTICATED' });
-    expect(database.queries).toHaveLength(2);
-  });
-
-  it('binds every receipt parameter to NULL when the caller supplies no request id', async () => {
-    const database = new ScriptedSqlClient([[lifecycleRow()]]);
-    const runtime = createRuntime(database);
-
-    await runtime.refreshDeviceSession('hq_refresh_token');
-
-    const statement = database.queries[0];
-    expect(statement.values?.slice(8)).toEqual([null, null, null, null]);
-    // A NULL identifier keeps the gate open, so pre-receipt behaviour is intact.
-    expect(statement.text).toContain('SELECT 1 AS open WHERE $10::text IS NULL');
   });
 });
+
+describe('durable receipts for the remaining mutations', () => {
+  it('gates bootstrap behind the claim and records the session it created', async () => {
+    const database = new ScriptedSqlClient([[{ receipt_claimed: 'claimed' }], [lifecycleRow()]]);
+    const runtime = createRuntime(database);
+
+    await runtime.createGroup({
+      name: 'Terminal Red',
+      initialDevice: deviceInput('HQ primary', 'ed25519:primary'),
+      mutation: { requestId: 'req-bootstrap' },
+    });
+
+    const statement = database.queries[1];
+    // The group insert selects from the gate, so a refused claim cannot create
+    // a second group.
+    expect(statement.text).toContain("SELECT $1, $2, 'LEADER', $3, 1, $4, $4 FROM mutation_gate");
+    expect(statement.text).toContain('completed_receipt AS');
+    expect(database.queries[0].values).toContain('CREATE_GROUP');
+    expect(database.queries[0].values).not.toContain('req-bootstrap');
+  });
+
+  it('records the code hash so a retry can retire what it already minted', async () => {
+    const database = new ScriptedSqlClient([
+      [{ receipt_claimed: 'claimed' }],
+      [
+        {
+          pairing_group_id: groupId,
+          pairing_role: 'EDITOR',
+          pairing_expires_at: new Date('2026-08-18T09:10:00.000Z'),
+        },
+      ],
+    ]);
+    const runtime = createRuntime(database);
+
+    const grant = await runtime.createPairingCode(authenticatedAdmin(), groupId, 'EDITOR', {
+      requestId: 'req-code',
+    });
+
+    const statement = database.queries[1];
+    expect(statement.text).toContain('resource_hash = issued_pairing_code.code_hash');
+    expect(statement.text).toContain('CROSS JOIN mutation_gate');
+    expect(database.queries[0].values).toContain('CREATE_PAIRING_CODE');
+    // Only the hash is persisted; the code itself never becomes a parameter.
+    expectCredentialIsNeverPersisted(statement, grant.code);
+  });
+
+  it('replaces a recorded pairing code and refuses once it has been consumed', async () => {
+    const replaced = new ScriptedSqlClient([
+      [],
+      [
+        {
+          receipt_fingerprint: undefined,
+          receipt_completed_at: now,
+          receipt_group_id: groupId,
+          receipt_resource_hash: 'recorded-code-hash',
+        },
+      ],
+      [
+        {
+          actor_active: true,
+          target_active: true,
+          pairing_group_id: groupId,
+          pairing_role: 'EDITOR',
+          pairing_expires_at: new Date('2026-08-18T09:10:00.000Z'),
+        },
+      ],
+    ]);
+    const fingerprint = await fingerprintFor((probe) =>
+      probe.createPairingCode(authenticatedAdmin(), groupId, 'EDITOR', { requestId: 'req-code' }),
+    );
+    replaced.setReceiptFingerprint(fingerprint);
+
+    const grant = await createRuntime(replaced).createPairingCode(
+      authenticatedAdmin(),
+      groupId,
+      'EDITOR',
+      { requestId: 'req-code' },
+    );
+
+    expect(grant.code).toMatch(/^hq_pair_/u);
+    const replacement = replaced.queries[2];
+    // The retirement and the replacement are one statement, so a retry can
+    // never leave two live capabilities.
+    expect(replacement.text).toContain('retired_code AS');
+    expect(replacement.text).toContain('INSERT INTO pairing_codes');
+    expect(replacement.values).toContain('recorded-code-hash');
+
+    const consumed = new ScriptedSqlClient([
+      [],
+      [
+        {
+          receipt_fingerprint: undefined,
+          receipt_completed_at: now,
+          receipt_group_id: groupId,
+          receipt_resource_hash: 'recorded-code-hash',
+        },
+      ],
+      [{ actor_active: true, target_active: false }],
+    ]);
+    consumed.setReceiptFingerprint(fingerprint);
+    await expect(
+      createRuntime(consumed).createPairingCode(authenticatedAdmin(), groupId, 'EDITOR', {
+        requestId: 'req-code',
+      }),
+    ).rejects.toMatchObject({ code: 'FAILED_PRECONDITION' });
+  });
+
+  it('replays a revoke with the revision its own mutation produced', async () => {
+    const database = new ScriptedSqlClient([
+      [],
+      [
+        {
+          receipt_fingerprint: undefined,
+          receipt_completed_at: now,
+          receipt_group_id: groupId,
+          receipt_device_id: analystDeviceId,
+          receipt_revision: '7',
+        },
+      ],
+      [
+        {
+          // The replay statement projects the recorded revision as a bound
+          // parameter, so this is what PostgreSQL would return for it.
+          ...groupRow({ group_revision: '7' }),
+          ...deviceRow({
+            device_id: analystDeviceId,
+            role: 'EDITOR',
+            device_status: 'REVOKED',
+          }),
+        },
+      ],
+    ]);
+    database.setReceiptFingerprint(
+      await fingerprintFor((probe) =>
+        probe.revokeDevice(authenticatedAdmin(), groupId, analystDeviceId, {
+          requestId: 'req-revoke',
+        }),
+      ),
+    );
+
+    const replayed = await createRuntime(database).revokeDevice(
+      authenticatedAdmin(),
+      groupId,
+      analystDeviceId,
+      { requestId: 'req-revoke' },
+    );
+
+    // Unlike every other mutation here, the revoke projection is built from
+    // scalar subqueries and returns a row even when the gate is shut, so the
+    // refused claim has to short-circuit before the statement is issued.
+    expect(database.queries.some((statement) => statement.text.includes('eligible_target'))).toBe(
+      false,
+    );
+    expect(database.queries[2].text).toContain('$3::bigint AS group_revision');
+    expect(database.queries[2].values).toContain('7');
+    expect(replayed.group.revision).toBe(7n);
+    // Membership-scoped, like the mutation itself: the device may still be
+    // online in another group, so the status is a literal in the projection.
+    expect(database.queries[2].text).toContain("'REVOKED' AS device_status");
+    expect(replayed.device.status).toBe('REVOKED');
+  });
+});
+
+/**
+ * A receipt fingerprint is an HMAC the adapter computes internally, so a
+ * scripted "already completed" row can only be built once that value is known.
+ * Running the call against a client that answers nothing surfaces the claim
+ * statement, whose last parameter is the fingerprint. This keeps the test
+ * honest: it asserts the adapter accepts its own fingerprint, never a
+ * hardcoded stand-in.
+ */
+async function fingerprintFor(
+  call: (runtime: DurablePairedDeviceRuntime) => Promise<unknown>,
+): Promise<unknown> {
+  const probe = new ScriptedSqlClient([[]]);
+  await call(createRuntime(probe)).catch(() => undefined);
+  const values = probe.queries[0]?.values ?? [];
+  return values[3];
+}
 
 function expectCredentialIsNeverPersisted(statement: SqlStatement, rawCredential: string): void {
   const serializedValues = JSON.stringify(statement.values ?? [], (_key, value: unknown) =>

@@ -299,7 +299,9 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
                  (SELECT count(*)::int FROM group_memberships
                    WHERE group_id = $1 AND revoked_at IS NULL) AS members,
                  (SELECT count(*)::int FROM mutation_receipts
-                   WHERE scope = 'PAIR_DEVICE' AND completed_at IS NOT NULL) AS receipts`,
+                   WHERE scope = 'PAIR_DEVICE'
+                     AND completed_at IS NOT NULL
+                     AND group_id = $1) AS receipts`,
         values: [owner.groupId],
       });
       expect(state[0]?.members).toBe(2);
@@ -424,7 +426,10 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
 
       const rows = await database.query<Record<string, unknown>>({
         text: `SELECT * FROM mutation_receipts
-               WHERE scope = 'PAIR_DEVICE' AND session_id IS NOT NULL`,
+               WHERE scope = 'PAIR_DEVICE'
+                 AND session_id IS NOT NULL
+                 AND group_id = $1`,
+        values: [paired.group.id],
       });
       expect(rows).toHaveLength(1);
       const serialized = JSON.stringify(rows[0]);
@@ -437,6 +442,144 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
         expect(serialized).not.toContain(secret);
       }
       expect(rows[0]?.session_id).toEqual(expect.any(String));
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'answers a retried bootstrap without creating a second group',
+    async () => {
+      const runtime = createRuntime();
+      const request = {
+        name: `Terminal ${uniqueSuffix()}`,
+        initialDevice: {
+          name: 'HQ primary',
+          publicKey: `ed25519:${uniqueSuffix()}`,
+          platform: 'windows',
+          applicationVersion: '0.1.0',
+        },
+        mutation: { requestId: uniqueSuffix() },
+      };
+
+      const first = await runtime.createGroup(request);
+      const retry = await runtime.createGroup(request);
+
+      expect(retry.group.id).toBe(first.group.id);
+      expect(retry.device.id).toBe(first.device.id);
+      const groups = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM groups WHERE name = $1',
+        values: [request.name],
+      });
+      expect(groups[0]?.n).toBe(1);
+      const identity = await runtime.authenticateAccessToken(retry.session.accessToken);
+      expect(identity.group.id).toBe(first.group.id);
+      expect(identity.role).toBe('ADMIN');
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'retires the code a retried pairing-code request already minted',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const mutation = { requestId: uniqueSuffix() };
+
+      const first = await runtime.createPairingCode(
+        owner.authenticated,
+        owner.groupId,
+        'EDITOR',
+        mutation,
+      );
+      const retry = await runtime.createPairingCode(
+        owner.authenticated,
+        owner.groupId,
+        'EDITOR',
+        mutation,
+      );
+
+      expect(retry.code).not.toBe(first.code);
+      // Exactly one live capability per request. Without the retirement the
+      // operator would hold one code while a second stayed redeemable.
+      const live = await database.query<{ n: number }>({
+        text: `SELECT count(*)::int AS n FROM pairing_codes
+               WHERE group_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL`,
+        values: [owner.groupId],
+      });
+      expect(live[0]?.n).toBe(1);
+      await expect(runtime.pairDevice(newDevice(first.code))).rejects.toMatchObject({
+        code: 'UNAUTHENTICATED',
+      });
+      const paired = await runtime.pairDevice(newDevice(retry.code));
+      expect(paired.device.role).toBe('EDITOR');
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'refuses to mint a replacement once the recorded code has been consumed',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const mutation = { requestId: uniqueSuffix() };
+      const grant = await runtime.createPairingCode(
+        owner.authenticated,
+        owner.groupId,
+        'EDITOR',
+        mutation,
+      );
+      await runtime.pairDevice(newDevice(grant.code));
+
+      await expect(
+        runtime.createPairingCode(owner.authenticated, owner.groupId, 'EDITOR', mutation),
+      ).rejects.toMatchObject({ code: 'FAILED_PRECONDITION' });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'answers a retried revoke with the revision its own mutation produced',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const first = await runtime.pairDevice(
+        newDevice(
+          (await runtime.createPairingCode(owner.authenticated, owner.groupId, 'EDITOR')).code,
+        ),
+      );
+      const second = await runtime.pairDevice(
+        newDevice(
+          (await runtime.createPairingCode(owner.authenticated, owner.groupId, 'EDITOR')).code,
+        ),
+      );
+      const mutation = { requestId: uniqueSuffix() };
+
+      const revoked = await runtime.revokeDevice(
+        owner.authenticated,
+        owner.groupId,
+        first.device.id,
+        mutation,
+      );
+      // An unrelated revoke moves the group on. A replay that re-read the group
+      // would report a revision this caller never produced.
+      await runtime.revokeDevice(owner.authenticated, owner.groupId, second.device.id);
+      const retry = await runtime.revokeDevice(
+        owner.authenticated,
+        owner.groupId,
+        first.device.id,
+        mutation,
+      );
+
+      expect(retry.device.id).toBe(revoked.device.id);
+      expect(retry.device.status).toBe('REVOKED');
+      expect(retry.group.revision).toBe(revoked.group.revision);
+      const group = await database.query<{ revision: string }>({
+        text: 'SELECT revision::text AS revision FROM groups WHERE id = $1',
+        values: [owner.groupId],
+      });
+      // Two revokes happened, so the group is one ahead of the replayed value:
+      // the retry bumped nothing.
+      expect(BigInt(group[0]?.revision ?? '0')).toBe(revoked.group.revision + 1n);
     },
     networkTimeoutMs,
   );

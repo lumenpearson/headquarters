@@ -16,8 +16,17 @@
  * guarantee.
  */
 
-/** Mutations that currently persist a receipt. */
-export type MutationScope = 'PAIR_DEVICE' | 'REFRESH_DEVICE_SESSION';
+/**
+ * Mutations that persist a receipt. Every destructive lifecycle RPC is covered:
+ * each one either mints a capability or destroys one, so re-executing it on a
+ * retry has a consequence the caller cannot undo.
+ */
+export type MutationScope =
+  | 'CREATE_GROUP'
+  | 'CREATE_PAIRING_CODE'
+  | 'PAIR_DEVICE'
+  | 'REFRESH_DEVICE_SESSION'
+  | 'REVOKE_DEVICE';
 
 /**
  * The subset of `gremuchaya.common.v1.MutationContext` that reaches the

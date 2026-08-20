@@ -516,12 +516,95 @@ const mutationIdempotencyReceipts: Migration = {
   ],
 };
 
+/**
+ * Extends receipts to the remaining destructive mutations.
+ *
+ * `0005` assumed every receipt produced a device session, because the two
+ * mutations it covered both issued credentials. `CreatePairingCode` produces a
+ * code and no session, and `RevokeDevice` produces a membership change and no
+ * session, so those shape constraints have to go. They are replaced by one
+ * scope-aware constraint that still refuses a half-recorded outcome — the
+ * property that actually matters, since replay reads these columns.
+ *
+ * The old constraints are dropped by catalogue lookup rather than by name:
+ * `0005` declared them inline, so their names are server-generated and a
+ * hardcoded `mutation_receipts_check1` would be a guess about PostgreSQL's
+ * numbering.
+ *
+ * `resource_hash` holds a pairing code's hash so a retry can revoke the code it
+ * already minted instead of leaving a second live capability. It is a hash for
+ * the same reason every other credential column is: the raw code is never
+ * stored. `revision` records the group revision a revoke produced, so a replay
+ * answers with the revision the caller's own mutation created rather than
+ * whatever the group has drifted to since.
+ */
+const mutationReceiptsForRemainingMutations: Migration = {
+  id: '0006_mutation_receipts_for_remaining_mutations',
+  statements: [
+    sql('ALTER TABLE mutation_receipts ADD COLUMN IF NOT EXISTS resource_hash text'),
+    sql('ALTER TABLE mutation_receipts ADD COLUMN IF NOT EXISTS revision bigint'),
+    sql(`DO $$
+      DECLARE dropped_constraint text;
+      BEGIN
+        FOR dropped_constraint IN
+          SELECT conname
+          FROM pg_constraint
+          WHERE conrelid = 'mutation_receipts'::regclass
+            AND contype = 'c'
+        LOOP
+          EXECUTE format(
+            'ALTER TABLE mutation_receipts DROP CONSTRAINT %I', dropped_constraint
+          );
+        END LOOP;
+      END $$`),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_scope_check
+      CHECK (scope IN (
+        'CREATE_GROUP',
+        'CREATE_PAIRING_CODE',
+        'PAIR_DEVICE',
+        'REFRESH_DEVICE_SESSION',
+        'REVOKE_DEVICE'
+      ))`),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_expiry_check
+      CHECK (expires_at > claimed_at)`),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_outcome_check
+      CHECK (
+        CASE
+          -- An unfinished claim records no outcome at all, which is what makes
+          -- a NULL completed_at mean exactly one thing to the replay path.
+          WHEN completed_at IS NULL THEN
+            group_id IS NULL
+            AND device_id IS NULL
+            AND session_id IS NULL
+            AND resource_hash IS NULL
+            AND revision IS NULL
+          WHEN scope IN ('CREATE_GROUP', 'PAIR_DEVICE') THEN
+            group_id IS NOT NULL AND device_id IS NOT NULL AND session_id IS NOT NULL
+          WHEN scope = 'REFRESH_DEVICE_SESSION' THEN
+            session_id IS NOT NULL
+          WHEN scope = 'CREATE_PAIRING_CODE' THEN
+            group_id IS NOT NULL AND resource_hash IS NOT NULL
+          WHEN scope = 'REVOKE_DEVICE' THEN
+            group_id IS NOT NULL AND device_id IS NOT NULL AND revision IS NOT NULL
+          ELSE false
+        END
+      )`),
+    sql(
+      'CREATE INDEX IF NOT EXISTS mutation_receipts_resource_idx ON mutation_receipts (resource_hash) WHERE resource_hash IS NOT NULL',
+    ),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
   pairedDeviceReplayAndIntegrity,
   pairedDevicePairingIssuerBinding,
   mutationIdempotencyReceipts,
+  mutationReceiptsForRemainingMutations,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

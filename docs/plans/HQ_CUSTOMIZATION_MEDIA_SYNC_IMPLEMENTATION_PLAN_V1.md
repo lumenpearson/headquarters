@@ -1104,7 +1104,10 @@ cross-instance behavior remains unproven.
 
 The **immediate non-skippable L1 subwave** is therefore now **durable
 idempotency receipts with response replay**, so `MutationContext` can be relied
-on for retries. Section 13.1.4 records that subwave.
+on for retries. Sections 13.1.4 and 13.1.5 record that subwave; 13.1.5 also
+corrects an evidence claim made in 13.1.4. With every destructive lifecycle
+mutation now covered, the **next non-skippable L1 subwave is persistent
+group/history events**.
 
 After that, the remaining L1 gates are persistent group/history events,
 remaining service handlers, Redis cross-instance fanout and deployment SLO
@@ -1171,11 +1174,20 @@ unscoping the identifier fails exactly 1; ignoring expiry fails exactly 1;
 treating an incomplete receipt as replayable fails exactly 1. No mutant failed
 a test it was not aimed at. Five durable-adapter tests cover the generated
 statement and the refused-claim paths; seven PostgreSQL scenarios cover the
-same properties against a live engine, including two identical retries racing
-and an assertion that no receipt row contains a raw credential or the raw
-request identifier.
+same properties, including two identical retries racing and an assertion that
+no receipt row contains a raw credential or the raw request identifier.
 
-Gate: strict `typecheck`, `lint`, offline `test` (77 passed / 14 skipped).
+**Correction, 2026-08-20.** This checkpoint originally described those seven
+PostgreSQL scenarios as passing against a live engine. They were written and
+committed but never executed — the suite skips without
+`HQ_CONTROL_PLANE_TEST_DATABASE_URL`, and the run that produced the numbers
+quoted here was the offline one. When they were finally executed, in the
+following subwave, **all of them failed**, and for a real reason: see 13.1.5.
+The durable receipts described above did not work. The claim recorded here
+should have read "written, not run".
+
+Gate as actually run at the time: strict `typecheck`, `lint`, offline `test`
+(77 passed / 14 skipped). No live-database evidence.
 
 Not claimed: receipts for `CreateGroup`, `CreatePairingCode` and `RevokeDevice`
 — their `MutationContext` is still accepted and ignored, so those three remain
@@ -1183,6 +1195,109 @@ non-idempotent and are the next subwave. Also unclaimed: expired-receipt
 reaping (rows are bounded by `expires_at` and indexed for it, but nothing
 deletes them yet), and cross-instance behaviour, which the single-process
 suite cannot observe.
+
+### 13.1.5 Receipts for every destructive mutation, and the CTE-visibility defect — 2026-08-20
+
+This subwave extended receipts to `CreateGroup`, `CreatePairingCode` and
+`RevokeDevice`, and — on first executing the PostgreSQL suite — found that the
+previous subwave's receipts had never worked at all.
+
+#### The defect
+
+Every mutation is one statement with data-modifying CTEs. Receipts were built
+the same way: a `claimed_receipt` CTE inserted the row, and a `completed_receipt`
+CTE at the tail updated it with the outcome. PostgreSQL runs every
+data-modifying CTE against **one pre-statement snapshot**, so the completion
+matched no row: the insert was invisible to it. `completed_at` stayed NULL
+forever, the gate never closed, and every retry re-executed its mutation.
+
+Reduced to its essentials against a live database:
+
+```
+WITH claimed AS (INSERT INTO r ... RETURNING scope),
+     made    AS (INSERT INTO thing ... SELECT FROM claimed RETURNING id),
+     completed AS (UPDATE r SET completed_at = now() FROM made WHERE ... RETURNING rid)
+SELECT ...
+-->  made_rows: 1,  completed_rows: 0
+```
+
+Nothing offline could see this. The structural tests assert the shape of the
+generated SQL and passed. The deterministic runtime has different semantics and
+passed. Only executing the statements against PostgreSQL exposed it — which is
+precisely the reason 13.1.3 exists, and precisely the reason the previous
+checkpoint should not have claimed coverage it had not run.
+
+#### The fix
+
+The claim moves into its own statement, committed before the mutation runs, so
+the receipt row is visible to the mutation statement that has to complete it.
+The mutation then locks that committed row instead of inserting one:
+
+```sql
+locked_receipt AS MATERIALIZED (
+  SELECT receipt.request_id_hash FROM mutation_receipts AS receipt
+  WHERE receipt.scope = $a AND receipt.request_id_hash = $b
+    AND receipt.completed_at IS NULL
+  FOR UPDATE OF receipt
+)
+```
+
+A refused claim short-circuits before the mutation statement is issued. The
+post-mutation resolution stays as a second layer for the case where a
+concurrent retry completes the receipt between the claim and the mutation.
+
+#### The three new scopes
+
+| Mutation            | Why a retry is not free                                                       | How a retry is answered                                                                |
+| ------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `CreateGroup`       | A lost response leaves two groups and no way to tell which the next call hits | Re-issue credentials on the recorded session.                                          |
+| `CreatePairingCode` | A lost response leaves a live code nobody has seen                            | Retire the recorded code and mint a replacement, so one identity means one capability. |
+| `RevokeDevice`      | Re-running bumps the revision again, then fails on the membership it wants    | Return the recorded revision, not the group's current one.                             |
+
+A consumed recorded code refuses replacement with `FAILED_PRECONDITION`: the
+pairing it authorised has happened, and minting another would grant a second
+capability nobody asked for.
+
+Migration `0006` drops `0005`'s shape constraints — they assumed every receipt
+produced a session, which is false for the two new non-credential mutations —
+and replaces them with one scope-aware constraint. The old constraints are
+dropped by catalogue lookup, because `0005` declared them inline and their
+names are server-generated.
+
+#### Evidence, including what is _not_ established
+
+**18 PostgreSQL scenarios pass against live Neon**, covering retried bootstrap,
+pairing, refresh, pairing-code replacement, consumed-code refusal, retried
+revoke, reused identifiers, failed-claim reuse, post-revoke refusal, and the
+absence of any raw credential in a receipt row.
+
+Mutation testing of the deterministic runtime: disabling the bootstrap replay,
+the pairing-code retirement, the consumed-code check, the recorded revision, or
+the revoke receipt each fails exactly the tests aimed at it and no others.
+
+Mutation testing against the live database is **weaker, and is reported as
+such**:
+
+| Mutant                                        | Result   | Why                                                                                                    |
+| --------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| A completed receipt no longer refuses a claim | killed 1 | The post-mutation resolution still catches the rest, so only the bootstrap path depends on it alone.   |
+| `FOR UPDATE OF receipt` removed               | survived | The race scenario is serialized by the pairing code's own `FOR UPDATE`, so it does not test this lock. |
+| The gate stops checking `completed_at`        | survived | The short-circuit already returned before the gate mattered.                                           |
+
+So the suite establishes the **observable contract** — a retry does not
+double-execute and returns a usable answer — but it does **not** establish that
+the in-statement receipt lock is what provides serialization. The layers are
+deliberately redundant, which is defensible, and it means no single layer is
+individually covered. A test that genuinely exercises two concurrent mutation
+statements for one identifier remains unwritten.
+
+Gate: strict `typecheck`, `lint`, offline `test` (87 passed / 18 skipped), and
+the online suite (18 passed). No connection string is committed.
+
+Not claimed: expired-receipt reaping (rows are bounded by `expires_at` and
+indexed for it, but nothing deletes them), receipt coverage for RPCs beyond the
+five destructive lifecycle mutations, and cross-instance behaviour, which a
+single-process suite cannot observe.
 
 ### 13.2 Linear route to phase closure
 

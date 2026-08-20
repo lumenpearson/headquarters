@@ -189,6 +189,169 @@ describe('mutation idempotency receipts', () => {
   });
 });
 
+describe('mutation idempotency receipts for the remaining mutations', () => {
+  it('answers a retried bootstrap without creating a second group', () => {
+    const runtime = createRuntime();
+    const request = {
+      name: 'Red terminal group',
+      initialDevice: deviceInput('HQ primary'),
+      mutation: { requestId: 'req-bootstrap' },
+    };
+
+    const first = runtime.createGroup(request);
+    const retry = runtime.createGroup(request);
+
+    expect(retry.group.id).toBe(first.group.id);
+    expect(retry.device.id).toBe(first.device.id);
+    // A second bootstrap would leave the operator holding credentials for a
+    // group nobody else knows about.
+    expect(runtime.authenticateAccessToken(retry.session.accessToken)).toMatchObject({
+      group: { id: first.group.id },
+      role: 'ADMIN',
+    });
+  });
+
+  it('retires the code a retried pairing-code request already minted', () => {
+    const runtime = createRuntime();
+    const owner = bootstrap(runtime);
+    const mutation = { requestId: 'req-code' };
+
+    const first = runtime.createPairingCode(
+      owner.authenticated,
+      owner.group.id,
+      'EDITOR',
+      mutation,
+    );
+    const retry = runtime.createPairingCode(
+      owner.authenticated,
+      owner.group.id,
+      'EDITOR',
+      mutation,
+    );
+
+    expect(retry.code).not.toBe(first.code);
+    expect(retry.groupId).toBe(first.groupId);
+    // Only one live capability may exist per request: the code from the lost
+    // response is retired, not left dangling until expiry.
+    expectRuntimeError(
+      () =>
+        runtime.pairDevice({
+          pairingCode: first.code,
+          ...deviceInput('HQ analyst', 'ed25519:analyst'),
+        }),
+      'UNAUTHENTICATED',
+    );
+    const paired = runtime.pairDevice({
+      pairingCode: retry.code,
+      ...deviceInput('HQ analyst', 'ed25519:analyst'),
+    });
+    expect(paired.device.role).toBe('EDITOR');
+  });
+
+  it('refuses to mint a replacement once the recorded code has been used', () => {
+    const runtime = createRuntime();
+    const owner = bootstrap(runtime);
+    const mutation = { requestId: 'req-code-consumed' };
+    const grant = runtime.createPairingCode(
+      owner.authenticated,
+      owner.group.id,
+      'EDITOR',
+      mutation,
+    );
+    runtime.pairDevice({
+      pairingCode: grant.code,
+      ...deviceInput('HQ analyst', 'ed25519:analyst'),
+    });
+
+    // The pairing this code authorised has happened. Minting another would
+    // grant a second capability the operator never asked for.
+    expectRuntimeError(
+      () => runtime.createPairingCode(owner.authenticated, owner.group.id, 'EDITOR', mutation),
+      'FAILED_PRECONDITION',
+    );
+  });
+
+  it('answers a retried revoke with the revision its own mutation produced', () => {
+    const runtime = createRuntime();
+    const owner = bootstrap(runtime);
+    const first = pairAnalyst(runtime, owner, 'ed25519:analyst-1');
+    const second = pairAnalyst(runtime, owner, 'ed25519:analyst-2');
+    const mutation = { requestId: 'req-revoke' };
+
+    const revoked = runtime.revokeDevice(
+      owner.authenticated,
+      owner.group.id,
+      first.device.id,
+      mutation,
+    );
+    // An unrelated revoke moves the group on, so a replay that simply re-read
+    // the group would report a revision this caller never produced.
+    runtime.revokeDevice(owner.authenticated, owner.group.id, second.device.id);
+    const retry = runtime.revokeDevice(
+      owner.authenticated,
+      owner.group.id,
+      first.device.id,
+      mutation,
+    );
+
+    expect(retry.device.id).toBe(revoked.device.id);
+    expect(retry.device.status).toBe('REVOKED');
+    expect(retry.group.revision).toBe(revoked.group.revision);
+  });
+
+  it('keeps an unidentified repeat revoke failing, so receipts add no new authority', () => {
+    const runtime = createRuntime();
+    const owner = bootstrap(runtime);
+    const analyst = pairAnalyst(runtime, owner);
+    runtime.revokeDevice(owner.authenticated, owner.group.id, analyst.device.id, {
+      requestId: 'req-revoke-once',
+    });
+
+    // Without a request identifier the second call is a new mutation, and the
+    // membership it wants is already gone.
+    expectRuntimeError(
+      () => runtime.revokeDevice(owner.authenticated, owner.group.id, analyst.device.id),
+      'PERMISSION_DENIED',
+    );
+    // A different identifier is likewise a different mutation.
+    expectRuntimeError(
+      () =>
+        runtime.revokeDevice(owner.authenticated, owner.group.id, analyst.device.id, {
+          requestId: 'req-revoke-twice',
+        }),
+      'PERMISSION_DENIED',
+    );
+  });
+
+  it('rejects a reused identifier across every scope', () => {
+    const runtime = createRuntime();
+    const owner = bootstrap(runtime);
+    const analyst = pairAnalyst(runtime, owner);
+
+    runtime.createPairingCode(owner.authenticated, owner.group.id, 'EDITOR', {
+      requestId: 'req-scope-code',
+    });
+    expectRuntimeError(
+      () =>
+        runtime.createPairingCode(owner.authenticated, owner.group.id, 'VIEWER', {
+          requestId: 'req-scope-code',
+        }),
+      'ALREADY_EXISTS',
+    );
+
+    runtime.revokeDevice(owner.authenticated, owner.group.id, analyst.device.id, {
+      requestId: 'req-scope-revoke',
+    });
+    expectRuntimeError(
+      () =>
+        runtime.revokeDevice(owner.authenticated, owner.group.id, owner.device.id, {
+          requestId: 'req-scope-revoke',
+        }),
+      'ALREADY_EXISTS',
+    );
+  });
+});
+
 describe('mutation receipt encoding', () => {
   it('rejects an unbounded request identifier and normalizes the proto3 default', () => {
     expect(normalizeRequestId(undefined)).toBeUndefined();
@@ -236,6 +399,7 @@ function bootstrap(runtime: PairedDeviceRuntime): BootstrappedOwner {
 function pairAnalyst(
   runtime: PairedDeviceRuntime,
   owner: BootstrappedOwner,
+  publicKey = 'ed25519:analyst',
 ): {
   readonly device: { readonly id: string };
   readonly session: { readonly refreshToken: string };
@@ -243,7 +407,7 @@ function pairAnalyst(
   const grant = runtime.createPairingCode(owner.authenticated, owner.group.id, 'EDITOR');
   const paired = runtime.pairDevice({
     pairingCode: grant.code,
-    ...deviceInput('HQ analyst', 'ed25519:analyst'),
+    ...deviceInput('HQ analyst', publicKey),
   });
   return { device: paired.device, session: paired.session };
 }
