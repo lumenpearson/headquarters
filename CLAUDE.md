@@ -96,8 +96,11 @@ Package ownership:
 
 State ownership:
 
-- Zustand owns the current client runtime snapshot, split into scene, screens, operator, workspace,
-  explorer, developer and connection slices.
+- Zustand owns the current client runtime snapshot across two stores:
+  `apps/hq/src/state/operationsStore.ts` (the runtime — `OperationsUiState`, `ProductionState` and
+  `PersonalizationState` composed into one `OperationsState`) and `apps/hq/src/state/appStore.ts`
+  (a small `runtimeState` holder). It is not yet split into per-domain slices; treat any plan that
+  assumes scene/screens/workspace/explorer/connection slices as describing a target, not the code.
 - Scene definitions (52 Zod-validated scenes) are immutable configuration, not runtime state.
 - IndexedDB/native storage owns persisted snapshots; media and timer handles are never persisted.
 - Application services perform all IO and cross-slice transitions; React components only dispatch
@@ -165,3 +168,4 @@ never leak into the UI. Real nodes shadow an emulated/config-defined node at the
   `exactOptionalPropertyTypes`, `noUnusedLocals`/`noUnusedParameters`, `verbatimModuleSyntax` are all on.
 - `apps/hq/AGENTS.md` is regenerated automatically by `next dev`; don't hand-edit it, just commit it
   if it changes.
+- Before editing any file, read it first. Before modifying a function, grep for all callers. Reresearch before you edit.
