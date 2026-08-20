@@ -6,7 +6,11 @@
     "jsx": "preserve",
     "module": "ESNext",
     "noEmit": true,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
       "@/*": ["./src/*"]
     },

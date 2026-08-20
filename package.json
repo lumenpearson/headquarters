@@ -34,7 +34,9 @@
     "tauri": "pnpm --filter @gremuchaya/hq tauri",
     "tauri:dev": "pnpm --filter @gremuchaya/hq tauri dev",
     "tauri:build": "pnpm --filter @gremuchaya/hq tauri build",
-    "prepare": "husky"
+    "prepare": "husky",
+    "ui:add": "pnpm --filter @gremuchaya/hq exec shadcn add --yes && node scripts/sync-shadcn.mjs",
+    "ui:sync": "node scripts/sync-shadcn.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx,mts,cts}": [

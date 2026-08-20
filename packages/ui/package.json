@@ -18,7 +18,15 @@
       "import": "./dist/primitives/index.js"
     },
     "./styles/tokens.css": "./src/styles/tokens.css",
-    "./styles/primitives.css": "./src/styles/primitives.css"
+    "./styles/primitives.css": "./src/styles/primitives.css",
+    "./shadcn": {
+      "types": "./dist/shadcn/index.d.ts",
+      "import": "./dist/shadcn/index.js"
+    },
+    "./shadcn/utils": {
+      "types": "./dist/shadcn/utils.d.ts",
+      "import": "./dist/shadcn/utils.js"
+    }
   },
   "scripts": {
     "build": "tsc -b",
@@ -39,6 +47,11 @@
     "vitest": "4.1.10"
   },
   "dependencies": {
-    "@base-ui/react": "1.7.0"
+    "@base-ui/react": "1.7.0",
+    "@hugeicons/core-free-icons": "^4.2.3",
+    "@hugeicons/react": "^1.1.9",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
   }
 }
