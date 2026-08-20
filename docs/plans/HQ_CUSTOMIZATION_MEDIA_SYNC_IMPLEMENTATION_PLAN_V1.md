@@ -1104,7 +1104,7 @@ cross-instance behavior remains unproven.
 
 The **immediate non-skippable L1 subwave** is therefore now **durable
 idempotency receipts with response replay**, so `MutationContext` can be relied
-on for retries.
+on for retries. Section 13.1.4 records that subwave.
 
 After that, the remaining L1 gates are persistent group/history events,
 remaining service handlers, Redis cross-instance fanout and deployment SLO
@@ -1115,6 +1115,74 @@ workspace lockfile reconciliation after the already-pending layout/settings/
 materials/video package manifests are committed; historical commit `132b61f`
 therefore remains source-verified but is not independently frozen-install
 reproducible.
+
+### 13.1.4 Durable idempotency receipts checkpoint — 2026-08-20
+
+`MutationContext.request_id` existed on the wire since `0996ea8` but nothing
+read it, so a retry of a destructive mutation re-executed it. Two cases were
+not merely wasteful but unrecoverable:
+
+- **Pairing.** A lost `PairDevice` response leaves the code consumed and the
+  device holding a membership it has no credentials for. The retry is rejected
+  as an already-consumed code, and the one-time capability is gone.
+- **Refresh.** A lost `RefreshDeviceSession` response leaves the client holding
+  the token rotation just retired. The retry presents it, the replay detector
+  correctly classifies that as a stolen credential, and the whole session
+  family is revoked. A dropped packet therefore bricks a paired device.
+
+Migration `0005_mutation_idempotency_receipts` adds `mutation_receipts`.
+It stores **no response body**. Pairing and refresh responses carry raw bearer
+credentials, so persisting them would replace "credentials are never stored"
+with "credentials are stored for the receipt retention window" — a strictly
+worse property than the problem being solved. The row holds a purpose-separated
+HMAC of the request identifier, an opaque fingerprint of the semantic request
+payload, and the identity of the rows the mutation produced.
+
+A retry is therefore answered by **re-issuing credentials on the recorded
+session**, not by replaying bytes. This is the honest reading of "response
+replay" under a no-credential-at-rest constraint: the caller observes the
+property it actually needs — the mutation ran exactly once, and it now holds
+usable credentials for it.
+
+The claim is a data-modifying CTE at the head of the existing single-statement
+mutations. Every downstream CTE chains from it, so a refused claim makes the
+whole statement a no-op rather than a second redemption, and the conflicting
+`ON CONFLICT ... DO UPDATE` takes the receipt row lock, which serializes
+concurrent retries of one identifier. `completed_at IS NULL` means exactly one
+thing — the mutation did not commit — so a failed attempt leaves its identifier
+re-claimable instead of burning it.
+
+Fail-closed properties, each covered by a test:
+
+| Property                                                | Why it matters                                                                                   |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| A receipt records identity, never authority             | Membership, device status and session liveness are re-checked at replay, so a revoke still wins. |
+| A reused identifier with a different payload is refused | A retry cannot inherit another request's credentials; the answer is `ALREADY_EXISTS`.            |
+| The identifier is scoped per operation                  | One value used on two RPCs performs two mutations rather than colliding.                         |
+| Receipts expire                                         | The window in which a recorded mutation can mint credentials is bounded.                         |
+| Absent `request_id` changes nothing                     | Replay detection keeps its fail-closed meaning for clients that have not opted in.               |
+
+Evidence. Ten deterministic runtime tests exercise behaviour, not SQL shape —
+whether a retry performs a second mutation, whether it is misread as an attack,
+whether a receipt survives a revoke. They were **mutation-tested**: disabling
+receipt claiming fails 4; removing the replay-time authorization re-check fails
+exactly the 2 revocation tests; ignoring the fingerprint fails exactly 1;
+unscoping the identifier fails exactly 1; ignoring expiry fails exactly 1;
+treating an incomplete receipt as replayable fails exactly 1. No mutant failed
+a test it was not aimed at. Five durable-adapter tests cover the generated
+statement and the refused-claim paths; seven PostgreSQL scenarios cover the
+same properties against a live engine, including two identical retries racing
+and an assertion that no receipt row contains a raw credential or the raw
+request identifier.
+
+Gate: strict `typecheck`, `lint`, offline `test` (77 passed / 14 skipped).
+
+Not claimed: receipts for `CreateGroup`, `CreatePairingCode` and `RevokeDevice`
+— their `MutationContext` is still accepted and ignored, so those three remain
+non-idempotent and are the next subwave. Also unclaimed: expired-receipt
+reaping (rows are bounded by `expires_at` and indexed for it, but nothing
+deletes them yet), and cross-instance behaviour, which the single-process
+suite cannot observe.
 
 ### 13.2 Linear route to phase closure
 

@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-export type AuthCredentialKind = 'access' | 'pair' | 'refresh';
+export type AuthCredentialKind = 'access' | 'pair' | 'receipt' | 'refresh';
 
 /**
  * The durable authentication migration currently stores HMAC values with this
@@ -262,6 +262,8 @@ function bootstrapDigest(secret: string): Buffer {
 }
 
 function credentialDomain(kind: AuthCredentialKind): AuthCredentialKind {
-  if (kind === 'access' || kind === 'pair' || kind === 'refresh') return kind;
+  if (kind === 'access' || kind === 'pair' || kind === 'receipt' || kind === 'refresh') {
+    return kind;
+  }
   throw new Error('Unsupported credential kind');
 }

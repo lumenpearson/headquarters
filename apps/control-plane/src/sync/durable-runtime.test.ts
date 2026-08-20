@@ -369,7 +369,7 @@ class RejectingSqlClient implements SqlClient {
 class ScriptedSqlClient implements SqlClient {
   readonly queries: SqlStatement[] = [];
   readonly transactions: SqlStatement[][] = [];
-  readonly #responses: Array<readonly Record<string, unknown>[]>;
+  readonly #responses: Array<Record<string, unknown>[]>;
 
   constructor(responses: readonly (readonly Record<string, unknown>[])[]) {
     this.#responses = responses.map((response) => [...response]);
@@ -387,6 +387,22 @@ class ScriptedSqlClient implements SqlClient {
 
   async transaction(statements: readonly SqlStatement[]): Promise<void> {
     this.transactions.push([...statements]);
+  }
+
+  /**
+   * A receipt fingerprint is an HMAC the adapter computes internally, so a
+   * scripted "already completed" row can only be built once that value is
+   * known. Rewriting it here keeps the test honest: it asserts the adapter
+   * accepts its own fingerprint, never a hardcoded stand-in.
+   */
+  setReceiptFingerprint(fingerprint: unknown): void {
+    for (const response of this.#responses) {
+      for (const row of response) {
+        if ('receipt_fingerprint' in row) {
+          (row as { receipt_fingerprint: unknown }).receipt_fingerprint = fingerprint;
+        }
+      }
+    }
   }
 }
 
@@ -497,6 +513,142 @@ function toDevice(row: Record<string, unknown>) {
     lastSeenAt: row.device_last_seen_at as Date,
   };
 }
+
+describe('durable mutation idempotency receipts', () => {
+  it('gates every data-modifying CTE behind the receipt claim and stores no response', async () => {
+    const database = new ScriptedSqlClient([
+      [
+        {
+          pairing_group_id: groupId,
+          pairing_role: 'EDITOR',
+          pairing_expires_at: new Date('2026-08-18T09:10:00.000Z'),
+        },
+      ],
+      [lifecycleRow({ device_id: analystDeviceId, role: 'EDITOR', group_revision: '2' })],
+    ]);
+    const runtime = createRuntime(database);
+    const grant = await runtime.createPairingCode(authenticatedAdmin(), groupId, 'EDITOR');
+
+    const paired = await runtime.pairDevice({
+      pairingCode: grant.code,
+      ...deviceInput('HQ analyst', 'ed25519:analyst'),
+      mutation: { requestId: 'req-pair-1' },
+    });
+
+    const redeemStatement = database.queries[1];
+    expect(redeemStatement.text).toContain('INSERT INTO mutation_receipts');
+    expect(redeemStatement.text).toContain('ON CONFLICT (scope, request_id_hash) DO UPDATE');
+    expect(redeemStatement.text).toContain('WHERE mutation_receipts.completed_at IS NULL');
+    // The gate must sit upstream of redemption: if the claim is refused, no
+    // pairing candidate is produced and nothing downstream can mutate.
+    expect(redeemStatement.text).toContain('CROSS JOIN mutation_gate');
+    expect(redeemStatement.text).toContain('completed_receipt AS');
+    expect(redeemStatement.values).toContain('PAIR_DEVICE');
+    // Only hashes reach the database: neither the raw identifier nor any
+    // credential is a bound parameter.
+    expect(redeemStatement.values).not.toContain('req-pair-1');
+    expectCredentialIsNeverPersisted(redeemStatement, grant.code);
+    expectCredentialIsNeverPersisted(redeemStatement, paired.session.accessToken);
+    expectCredentialIsNeverPersisted(redeemStatement, paired.session.refreshToken);
+  });
+
+  it('answers a refused pairing claim by re-issuing credentials for the recorded session', async () => {
+    const database = new ScriptedSqlClient([
+      // The gated mutation is a no-op because a completed receipt refused the claim.
+      [],
+      [
+        {
+          receipt_fingerprint: undefined,
+          receipt_completed_at: now,
+          receipt_group_id: groupId,
+          receipt_device_id: analystDeviceId,
+          receipt_session_id: '018b2a02-0000-7000-8000-000000000010',
+        },
+      ],
+      [lifecycleRow({ device_id: analystDeviceId, role: 'EDITOR', group_revision: '2' })],
+    ]);
+    const runtime = createRuntime(database);
+    const request = {
+      pairingCode: 'hq_pair_retry',
+      ...deviceInput('HQ analyst', 'ed25519:analyst'),
+      mutation: { requestId: 'req-pair-retry' },
+    };
+    // The scripted receipt must carry the fingerprint this exact request
+    // produces, so read it back from the claim the adapter just bound.
+    const probe = new ScriptedSqlClient([[]]);
+    await createRuntime(probe)
+      .pairDevice(request)
+      .catch(() => undefined);
+    const fingerprint = probe.queries[0]?.values?.[16];
+    database.setReceiptFingerprint(fingerprint);
+
+    const replayed = await runtime.pairDevice(request);
+
+    expect(database.queries).toHaveLength(3);
+    expect(database.queries[1].text).toContain('FROM mutation_receipts AS receipt');
+    // Re-issuance rotates the recorded session rather than redeeming a code again.
+    expect(database.queries[2].text).toContain('rotated_session AS');
+    expect(database.queries[2].text).not.toContain('pairing_codes');
+    expect(replayed.device.id).toBe(analystDeviceId);
+    expect(replayed.session.accessToken).toMatch(/^hq_access_/u);
+    expect(replayed.session.refreshToken).toMatch(/^hq_refresh_/u);
+  });
+
+  it('reports a reused identifier with a different payload instead of issuing credentials', async () => {
+    const database = new ScriptedSqlClient([
+      [],
+      [
+        {
+          receipt_fingerprint: 'a-different-requests-fingerprint',
+          receipt_completed_at: now,
+          receipt_group_id: groupId,
+          receipt_device_id: analystDeviceId,
+          receipt_session_id: '018b2a02-0000-7000-8000-000000000010',
+        },
+      ],
+    ]);
+    const runtime = createRuntime(database);
+
+    await expect(
+      runtime.refreshDeviceSession('hq_refresh_token', { requestId: 'req-collision' }),
+    ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'ALREADY_EXISTS' });
+    // No third query: a mismatched fingerprint must not reach re-issuance.
+    expect(database.queries).toHaveLength(2);
+  });
+
+  it('reports the operation failure when its own claim never completed', async () => {
+    const database = new ScriptedSqlClient([
+      [],
+      [
+        {
+          receipt_fingerprint: 'irrelevant',
+          receipt_completed_at: null,
+          receipt_group_id: null,
+          receipt_device_id: null,
+          receipt_session_id: null,
+        },
+      ],
+    ]);
+    const runtime = createRuntime(database);
+
+    await expect(
+      runtime.refreshDeviceSession('hq_refresh_token', { requestId: 'req-failed' }),
+    ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'UNAUTHENTICATED' });
+    expect(database.queries).toHaveLength(2);
+  });
+
+  it('binds every receipt parameter to NULL when the caller supplies no request id', async () => {
+    const database = new ScriptedSqlClient([[lifecycleRow()]]);
+    const runtime = createRuntime(database);
+
+    await runtime.refreshDeviceSession('hq_refresh_token');
+
+    const statement = database.queries[0];
+    expect(statement.values?.slice(8)).toEqual([null, null, null, null]);
+    // A NULL identifier keeps the gate open, so pre-receipt behaviour is intact.
+    expect(statement.text).toContain('SELECT 1 AS open WHERE $10::text IS NULL');
+  });
+});
 
 function expectCredentialIsNeverPersisted(statement: SqlStatement, rawCredential: string): void {
   const serializedValues = JSON.stringify(statement.values ?? [], (_key, value: unknown) =>

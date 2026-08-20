@@ -14,6 +14,11 @@ import {
   type PairedGroup,
 } from './runtime.js';
 import type { Awaitable, PairedDeviceLifecycle } from './lifecycle.js';
+import {
+  MutationRequestIdError,
+  normalizeRequestId,
+  type MutationReceiptContext,
+} from './receipts.js';
 
 export interface PairedDeviceServiceOptions {
   readonly runtime: PairedDeviceLifecycle;
@@ -84,6 +89,7 @@ export function createPairedDeviceSyncService(
           publicKey: request.publicKey,
           platform: request.platform,
           applicationVersion: request.applicationVersion,
+          ...toMutationReceiptInput(request.context?.requestId),
         });
         return {
           group: toGroup(paired.group),
@@ -96,9 +102,14 @@ export function createPairedDeviceSyncService(
     },
 
     async refreshDeviceSession(request) {
-      return withRuntimeErrors(async () => ({
-        session: toSession(await options.runtime.refreshDeviceSession(request.refreshToken)),
-      }));
+      return withRuntimeErrors(async () => {
+        const mutation = toMutationReceiptContext(request.context?.requestId);
+        const session =
+          mutation === undefined
+            ? await options.runtime.refreshDeviceSession(request.refreshToken)
+            : await options.runtime.refreshDeviceSession(request.refreshToken, mutation);
+        return { session: toSession(session) };
+      });
     },
 
     async listDevices(request, context) {
@@ -148,6 +159,37 @@ function authenticateRequest(
   context: HandlerContext,
 ): Awaitable<AuthenticatedDevice> {
   return runtime.authenticateAccessToken(readBearerToken(context));
+}
+
+/**
+ * `request_id` is the only part of `MutationContext` that carries idempotency
+ * meaning. `correlation_id` is response metadata and `issued_at` is a client
+ * clock reading, so neither may take part in retry identity.
+ *
+ * An oversized identifier is rejected as an argument error rather than
+ * silently truncated: truncation would let two different retries share one
+ * receipt.
+ */
+function toMutationReceiptContext(
+  requestId: string | undefined,
+): MutationReceiptContext | undefined {
+  try {
+    const normalized = normalizeRequestId(requestId);
+    return normalized === undefined ? undefined : { requestId: normalized };
+  } catch (error: unknown) {
+    if (error instanceof MutationRequestIdError) {
+      throw new PairedDeviceRuntimeError('INVALID_ARGUMENT', error.message);
+    }
+    throw error;
+  }
+}
+
+/** Spread form, because `exactOptionalPropertyTypes` rejects an explicit `undefined`. */
+function toMutationReceiptInput(requestId: string | undefined): {
+  readonly mutation?: MutationReceiptContext;
+} {
+  const mutation = toMutationReceiptContext(requestId);
+  return mutation === undefined ? {} : { mutation };
 }
 
 function assertContextActor(

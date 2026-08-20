@@ -9,6 +9,7 @@ import type {
   PairDeviceInput,
   PairingCodeGrant,
 } from './runtime.js';
+import type { MutationReceiptContext } from './receipts.js';
 
 /** A result may be supplied by the deterministic local runtime or a durable repository. */
 export type Awaitable<T> = T | Promise<T>;
@@ -38,7 +39,16 @@ export interface PairedDeviceLifecycle {
     role: Exclude<DeviceRole, 'ADMIN'>,
   ): Awaitable<PairingCodeGrant>;
   pairDevice(input: PairDeviceInput): Awaitable<CreatedPairedGroup>;
-  refreshDeviceSession(refreshToken: string): Awaitable<PairedDeviceSession>;
+  /**
+   * `mutation` carries the client's `MutationContext.request_id`. Supplying it
+   * makes rotation safely retryable: without a receipt, a retry presents an
+   * already-rotated token and is correctly classified as a replay attack,
+   * which revokes the session family and strands the device.
+   */
+  refreshDeviceSession(
+    refreshToken: string,
+    mutation?: MutationReceiptContext,
+  ): Awaitable<PairedDeviceSession>;
   authenticateAccessToken(accessToken: string): Awaitable<AuthenticatedDevice>;
   listDevices(
     authenticated: AuthenticatedDevice,

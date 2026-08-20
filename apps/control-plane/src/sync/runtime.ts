@@ -1,5 +1,14 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
+import {
+  encodeFingerprintPayload,
+  encodeRequestIdPayload,
+  normalizeRequestId,
+  type FingerprintField,
+  type MutationReceiptContext,
+  type MutationScope,
+} from './receipts.js';
+
 export type DeviceRole = 'VIEWER' | 'EDITOR' | 'ADMIN';
 export type DeviceStatus = 'OFFLINE' | 'ONLINE' | 'REVOKED';
 export type AuthorityMode = 'LEADER' | 'MULTI_AUTHORITY';
@@ -65,6 +74,11 @@ export interface PairDeviceInput {
   readonly publicKey: string;
   readonly platform: string;
   readonly applicationVersion: string;
+  /**
+   * Optional durable-retry identity. Absent means the caller has not opted
+   * into idempotency, which keeps the pre-receipt contract intact.
+   */
+  readonly mutation?: MutationReceiptContext;
 }
 
 export interface PairingCodeGrant {
@@ -93,6 +107,12 @@ export interface PairedDeviceRuntimeOptions {
   readonly accessTokenLifetimeMs?: number;
   readonly refreshTokenLifetimeMs?: number;
   readonly pairingCodeLifetimeMs?: number;
+  /**
+   * How long a completed idempotency receipt keeps answering retries. It
+   * bounds both storage and the window in which a recorded mutation can
+   * re-issue credentials.
+   */
+  readonly mutationReceiptLifetimeMs?: number;
 }
 
 export type PairedDeviceErrorCode =
@@ -168,9 +188,44 @@ interface RefreshTokenReference {
   readonly expiresAt: Date;
 }
 
+/**
+ * The in-memory counterpart of the `mutation_receipts` row. It records no
+ * response for the same reason the table does not: pairing and refresh
+ * responses carry raw bearer credentials, and a retry is answered by
+ * re-issuing credentials for `sessionId` instead of by replaying bytes.
+ *
+ * `completedAt === undefined` means exactly one thing — the mutation did not
+ * finish — so such a receipt stays re-claimable and a failed attempt never
+ * permanently burns its request identifier.
+ */
+interface MutationReceiptRecord {
+  readonly scope: MutationScope;
+  readonly expiresAt: Date;
+  fingerprint: string;
+  claimedAt: Date;
+  completedAt?: Date;
+  groupId?: string;
+  deviceId?: string;
+  sessionId?: string;
+}
+
+interface MutationReceiptClaim {
+  readonly key: string;
+  readonly fingerprint: string;
+  /** Present only when a previous attempt already committed this mutation. */
+  readonly replay: MutationReceiptRecord | undefined;
+}
+
+interface CompletedMutationOutcome {
+  readonly groupId: string;
+  readonly deviceId: string;
+  readonly sessionId: string;
+}
+
 const defaultAccessTokenLifetimeMs = 15 * 60 * 1000;
 const defaultRefreshTokenLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 const defaultPairingCodeLifetimeMs = 10 * 60 * 1000;
+const defaultMutationReceiptLifetimeMs = 24 * 60 * 60 * 1000;
 const defaultPageSize = 50;
 const maxPageSize = 100;
 
@@ -189,11 +244,13 @@ export class PairedDeviceRuntime {
   readonly #sessionsById = new Map<string, SessionRecord>();
   readonly #sessionsByAccessHash = new Map<string, SessionRecord>();
   readonly #sessionsByRefreshHash = new Map<string, RefreshTokenReference>();
+  readonly #receipts = new Map<string, MutationReceiptRecord>();
   readonly #now: () => Date;
   readonly #randomBytes: (size: number) => Uint8Array;
   readonly #accessTokenLifetimeMs: number;
   readonly #refreshTokenLifetimeMs: number;
   readonly #pairingCodeLifetimeMs: number;
+  readonly #mutationReceiptLifetimeMs: number;
   readonly #tokenPepper: string;
 
   constructor(options: PairedDeviceRuntimeOptions) {
@@ -214,6 +271,10 @@ export class PairedDeviceRuntime {
     this.#pairingCodeLifetimeMs = positiveLifetime(
       options.pairingCodeLifetimeMs ?? defaultPairingCodeLifetimeMs,
       'pairingCodeLifetimeMs',
+    );
+    this.#mutationReceiptLifetimeMs = positiveLifetime(
+      options.mutationReceiptLifetimeMs ?? defaultMutationReceiptLifetimeMs,
+      'mutationReceiptLifetimeMs',
     );
   }
 
@@ -257,7 +318,11 @@ export class PairedDeviceRuntime {
     this.#deviceIdByPublicKey.set(device.publicKey, deviceId);
     this.#memberships.set(membershipKey(groupId, deviceId), membership);
     const session = this.issueSession(group, device, membership, now);
-    return { group: copyGroup(group), device: this.toPairedDevice(device, membership), session };
+    return {
+      group: copyGroup(group),
+      device: this.toPairedDevice(device, membership),
+      session: session.envelope,
+    };
   }
 
   createPairingCode(
@@ -302,8 +367,29 @@ export class PairedDeviceRuntime {
   } {
     const code = requireText(input.pairingCode, 'pairing_code');
     const deviceInput = normalizeDeviceInput(input);
-    this.ensurePublicKeyAvailable(deviceInput.publicKey);
     const now = this.currentTime();
+    const claim = this.claimReceipt(
+      'PAIR_DEVICE',
+      input.mutation,
+      [
+        ['pairing_code_hash', this.hashToken('pair', code)],
+        ['device_name', deviceInput.name],
+        ['public_key', deviceInput.publicKey],
+        ['platform', deviceInput.platform],
+        ['application_version', deviceInput.applicationVersion],
+      ],
+      now,
+    );
+    if (claim?.replay !== undefined) {
+      // The pairing code was already consumed by this exact request. Replaying
+      // the mutation would fail closed and strand a device that holds a
+      // membership but never received its credentials.
+      return this.replayCreatedLifecycle(claim, claim.replay, now);
+    }
+    // Public-key availability is checked after the receipt lookup: a retry of a
+    // committed pairing legitimately presents the key its own first attempt
+    // registered.
+    this.ensurePublicKeyAvailable(deviceInput.publicKey);
     const grant = this.#pairingCodesByHash.get(this.hashToken('pair', code));
     if (
       grant === undefined ||
@@ -366,18 +452,34 @@ export class PairedDeviceRuntime {
     };
     this.#groups.set(updatedGroup.id, updatedGroup);
     const session = this.issueSession(updatedGroup, device, membership, now);
+    this.completeReceipt(claim, updatedGroup.id, deviceId, session.record.id, now);
     return {
       group: copyGroup(updatedGroup),
       device: this.toPairedDevice(device, membership),
-      session,
+      session: session.envelope,
     };
   }
 
-  refreshDeviceSession(refreshToken: string): PairedDeviceSession {
+  refreshDeviceSession(
+    refreshToken: string,
+    mutation?: MutationReceiptContext,
+  ): PairedDeviceSession {
     const token = requireText(refreshToken, 'refresh_token');
     const refreshTokenHash = this.hashToken('refresh', token);
-    const reference = this.#sessionsByRefreshHash.get(refreshTokenHash);
     const now = this.currentTime();
+    const claim = this.claimReceipt(
+      'REFRESH_DEVICE_SESSION',
+      mutation,
+      [['refresh_token_hash', refreshTokenHash]],
+      now,
+    );
+    if (claim?.replay !== undefined) {
+      // Without this branch the retry presents an already-rotated token, which
+      // the replay detector below would correctly read as an attack and answer
+      // by revoking the whole session family.
+      return this.reissueSessionCredentials(claim, claim.replay, now);
+    }
+    const reference = this.#sessionsByRefreshHash.get(refreshTokenHash);
     if (
       reference === undefined ||
       reference.expiresAt.getTime() <= now.getTime() ||
@@ -422,6 +524,7 @@ export class PairedDeviceRuntime {
       session,
       expiresAt: copyDate(session.refreshTokenExpiresAt),
     });
+    this.completeReceipt(claim, group.id, device.id, session.id, now);
     return this.toSessionEnvelope(session, membership, nextAccessToken, nextRefreshToken);
   }
 
@@ -562,12 +665,155 @@ export class PairedDeviceRuntime {
     }
   }
 
+  /**
+   * Claims the idempotency identity of one mutation. An absent request id is
+   * the proto3 default for a client that has not opted into retries, so it
+   * disables receipt handling and leaves the pre-receipt contract intact.
+   *
+   * A stored receipt is authoritative only once it is complete. An incomplete
+   * one belongs to an attempt that never committed, carries no fingerprint
+   * authority, and is therefore overwritten rather than treated as a conflict.
+   */
+  private claimReceipt(
+    scope: MutationScope,
+    mutation: MutationReceiptContext | undefined,
+    fields: readonly FingerprintField[],
+    now: Date,
+  ): MutationReceiptClaim | undefined {
+    const requestId = normalizeRequestId(mutation?.requestId);
+    if (requestId === undefined) return undefined;
+    const key = this.hashToken('receipt', encodeRequestIdPayload(scope, requestId));
+    const fingerprint = this.hashToken('receipt', encodeFingerprintPayload(scope, fields));
+    const stored = this.#receipts.get(key);
+    const live =
+      stored === undefined || stored.expiresAt.getTime() <= now.getTime() ? undefined : stored;
+    if (live?.completedAt !== undefined) return { key, fingerprint, replay: live };
+    this.#receipts.set(key, {
+      scope,
+      fingerprint,
+      claimedAt: now,
+      expiresAt: new Date(now.getTime() + this.#mutationReceiptLifetimeMs),
+    });
+    return { key, fingerprint, replay: undefined };
+  }
+
+  private completeReceipt(
+    claim: MutationReceiptClaim | undefined,
+    groupId: string,
+    deviceId: string,
+    sessionId: string,
+    now: Date,
+  ): void {
+    if (claim === undefined) return;
+    const receipt = this.#receipts.get(claim.key);
+    if (receipt === undefined) return;
+    receipt.groupId = groupId;
+    receipt.deviceId = deviceId;
+    receipt.sessionId = sessionId;
+    receipt.completedAt = now;
+  }
+
+  /**
+   * A completed receipt stores no response, so a retry is answered by issuing
+   * fresh credentials on the recorded session. The client observes the
+   * property it needs — the mutation ran exactly once and it now holds usable
+   * credentials — while raw tokens stay absent from storage.
+   */
+  private reissueSessionCredentials(
+    claim: MutationReceiptClaim,
+    receipt: MutationReceiptRecord,
+    now: Date,
+  ): PairedDeviceSession {
+    const outcome = this.requireReplayableReceipt(claim, receipt);
+    const session = this.#sessionsById.get(outcome.sessionId);
+    if (session === undefined) throw replayNoLongerAuthorized();
+    const membership = this.#memberships.get(membershipKey(session.groupId, session.deviceId));
+    const device = this.#devicesById.get(session.deviceId);
+    if (
+      membership === undefined ||
+      device === undefined ||
+      membership.revokedAt !== undefined ||
+      device.status === 'REVOKED' ||
+      session.revokedAt !== undefined ||
+      session.refreshTokenExpiresAt.getTime() <= now.getTime()
+    ) {
+      throw replayNoLongerAuthorized();
+    }
+    const nextAccessToken = this.createToken('access');
+    const nextRefreshToken = this.createToken('refresh');
+    const previousRefreshExpiresAt = copyDate(session.refreshTokenExpiresAt);
+    const previousRefreshTokenHash = session.refreshTokenHash;
+    this.revokePairingCodesForAccessToken(session.accessTokenId, now);
+    this.#sessionsByAccessHash.delete(session.accessTokenHash);
+    session.accessTokenId = this.createId();
+    session.accessTokenHash = this.hashToken('access', nextAccessToken);
+    session.refreshTokenHash = this.hashToken('refresh', nextRefreshToken);
+    session.accessTokenExpiresAt = new Date(now.getTime() + this.#accessTokenLifetimeMs);
+    session.refreshTokenExpiresAt = new Date(now.getTime() + this.#refreshTokenLifetimeMs);
+    session.issuedAt = now;
+    this.#sessionsByAccessHash.set(session.accessTokenHash, session);
+    // The superseded credential stays addressable so a genuine later replay of
+    // it is still detected rather than merely rejected as unknown.
+    this.#sessionsByRefreshHash.set(previousRefreshTokenHash, {
+      session,
+      expiresAt: previousRefreshExpiresAt,
+    });
+    this.#sessionsByRefreshHash.set(session.refreshTokenHash, {
+      session,
+      expiresAt: copyDate(session.refreshTokenExpiresAt),
+    });
+    return this.toSessionEnvelope(session, membership, nextAccessToken, nextRefreshToken);
+  }
+
+  private replayCreatedLifecycle(
+    claim: MutationReceiptClaim,
+    receipt: MutationReceiptRecord,
+    now: Date,
+  ): {
+    readonly group: PairedGroup;
+    readonly device: PairedDevice;
+    readonly session: PairedDeviceSession;
+  } {
+    const envelope = this.reissueSessionCredentials(claim, receipt, now);
+    const group = this.requireGroup(envelope.groupId);
+    const device = this.requireDevice(envelope.deviceId);
+    const membership = this.requireActiveMembership(group.id, device.id);
+    return {
+      group: copyGroup(group),
+      device: this.toPairedDevice(device, membership),
+      session: envelope,
+    };
+  }
+
+  /**
+   * A completed receipt answers only the request that produced it. A request
+   * identifier reused with a different payload is a client defect or a
+   * deliberate collision attempt, and either way must not inherit another
+   * request's credentials.
+   */
+  private requireReplayableReceipt(
+    claim: MutationReceiptClaim,
+    receipt: MutationReceiptRecord,
+  ): CompletedMutationOutcome {
+    if (receipt.fingerprint !== claim.fingerprint) {
+      throw new PairedDeviceRuntimeError(
+        'ALREADY_EXISTS',
+        'The mutation request identifier was already used with a different request payload.',
+      );
+    }
+    const { groupId, deviceId, sessionId } = receipt;
+    if (groupId === undefined || deviceId === undefined || sessionId === undefined) {
+      throw replayNoLongerAuthorized();
+    }
+    return { groupId, deviceId, sessionId };
+  }
+
   private issueSession(
     group: PairedGroup,
     device: DeviceRecord,
     membership: MembershipRecord,
     now: Date,
-  ): PairedDeviceSession {
+  ): { readonly envelope: PairedDeviceSession; readonly record: SessionRecord } {
     const accessToken = this.createToken('access');
     const refreshToken = this.createToken('refresh');
     const session: SessionRecord = {
@@ -587,7 +833,10 @@ export class PairedDeviceRuntime {
       session,
       expiresAt: copyDate(session.refreshTokenExpiresAt),
     });
-    return this.toSessionEnvelope(session, membership, accessToken, refreshToken);
+    return {
+      envelope: this.toSessionEnvelope(session, membership, accessToken, refreshToken),
+      record: session,
+    };
   }
 
   private toSessionEnvelope(
@@ -758,7 +1007,7 @@ export class PairedDeviceRuntime {
     return `hq_${kind}_${Buffer.from(this.#randomBytes(32)).toString('base64url')}`;
   }
 
-  private hashToken(kind: 'access' | 'pair' | 'refresh', value: string): string {
+  private hashToken(kind: 'access' | 'pair' | 'receipt' | 'refresh', value: string): string {
     return createHmac('sha256', this.#tokenPepper)
       .update(`v1\u0000${kind}\u0000${value}`)
       .digest('base64url');
@@ -803,6 +1052,18 @@ function requireText(value: string, field: string): string {
     throw new PairedDeviceRuntimeError('INVALID_ARGUMENT', `${field} must not be empty.`);
   }
   return normalized;
+}
+
+/**
+ * A receipt records identity, never authority. Membership, session and device
+ * state are re-checked at replay time, so a mutation that was valid when it
+ * committed cannot resurrect credentials after a revoke.
+ */
+function replayNoLongerAuthorized(): PairedDeviceRuntimeError {
+  return new PairedDeviceRuntimeError(
+    'UNAUTHENTICATED',
+    'The recorded mutation can no longer issue credentials.',
+  );
 }
 
 function membershipKey(groupId: string, deviceId: string): string {

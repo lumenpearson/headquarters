@@ -1,6 +1,14 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
 import type { SqlClient, SqlParameter, SqlStatement } from '../db/database.js';
+import {
+  encodeFingerprintPayload,
+  encodeRequestIdPayload,
+  normalizeRequestId,
+  type FingerprintField,
+  type MutationReceiptContext,
+  type MutationScope,
+} from './receipts.js';
 import { PairedDeviceRuntimeError } from './runtime.js';
 import type {
   AuthenticatedDevice,
@@ -18,10 +26,11 @@ const hashVersion = 'v1';
 const defaultAccessTokenLifetimeMs = 15 * 60 * 1000;
 const defaultRefreshTokenLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 const defaultPairingCodeLifetimeMs = 10 * 60 * 1000;
+const defaultMutationReceiptLifetimeMs = 24 * 60 * 60 * 1000;
 const defaultPageSize = 50;
 const maxPageSize = 100;
 
-export type DurableCredentialKind = 'access' | 'refresh' | 'pair';
+export type DurableCredentialKind = 'access' | 'pair' | 'receipt' | 'refresh';
 
 export interface DurablePairedDeviceRuntimeOptions {
   /**
@@ -46,6 +55,12 @@ export interface DurablePairedDeviceRuntimeOptions {
   readonly accessTokenLifetimeMs?: number;
   readonly refreshTokenLifetimeMs?: number;
   readonly pairingCodeLifetimeMs?: number;
+  /**
+   * How long a completed idempotency receipt keeps answering retries. It
+   * bounds both `mutation_receipts` growth and the window in which a recorded
+   * mutation can re-issue credentials.
+   */
+  readonly mutationReceiptLifetimeMs?: number;
 }
 
 interface SessionMaterial {
@@ -94,7 +109,26 @@ type LifecycleRow = Record<string, unknown> & {
   readonly active_admin_count?: unknown;
   readonly group?: unknown;
   readonly device?: unknown;
+  readonly receipt_fingerprint?: unknown;
+  readonly receipt_completed_at?: unknown;
+  readonly receipt_group_id?: unknown;
+  readonly receipt_device_id?: unknown;
+  readonly receipt_session_id?: unknown;
 };
+
+/** The receipt identity of one mutation attempt, resolved before its statement runs. */
+interface MutationReceiptClaim {
+  readonly scope: MutationScope;
+  readonly requestIdHash: string;
+  readonly fingerprint: string;
+  readonly expiresAt: Date;
+}
+
+interface CompletedMutationOutcome {
+  readonly groupId: string;
+  readonly deviceId: string;
+  readonly sessionId: string;
+}
 
 /**
  * PostgreSQL-backed counterpart to `PairedDeviceRuntime`.
@@ -129,6 +163,7 @@ export class DurablePairedDeviceRuntime {
   readonly #accessTokenLifetimeMs: number;
   readonly #refreshTokenLifetimeMs: number;
   readonly #pairingCodeLifetimeMs: number;
+  readonly #mutationReceiptLifetimeMs: number;
 
   constructor(options: DurablePairedDeviceRuntimeOptions) {
     this.#database = options.database;
@@ -160,6 +195,10 @@ export class DurablePairedDeviceRuntime {
     this.#pairingCodeLifetimeMs = positiveLifetime(
       options.pairingCodeLifetimeMs ?? defaultPairingCodeLifetimeMs,
       'pairingCodeLifetimeMs',
+    );
+    this.#mutationReceiptLifetimeMs = positiveLifetime(
+      options.mutationReceiptLifetimeMs ?? defaultMutationReceiptLifetimeMs,
+      'mutationReceiptLifetimeMs',
     );
   }
 
@@ -374,12 +413,43 @@ export class DurablePairedDeviceRuntime {
     const now = this.currentTime();
     const deviceId = this.createId(now);
     const session = this.issueSessionMaterial(now);
+    const pairingCodeHash = this.hashToken('pair', pairingCode);
+    const receipt = this.receiptClaim('PAIR_DEVICE', input.mutation, now, [
+      ['pairing_code_hash', pairingCodeHash],
+      ['device_name', device.name],
+      ['public_key', device.publicKey],
+      ['platform', device.platform],
+      ['application_version', device.applicationVersion],
+    ]);
 
     const rows = await this.query<LifecycleRow>(
       sql(
-        `WITH pairing_candidate AS MATERIALIZED (
+        `WITH claimed_receipt AS MATERIALIZED (
+           INSERT INTO mutation_receipts (
+             scope, request_id_hash, hash_version, request_fingerprint, claimed_at, expires_at
+           )
+           SELECT $15, $16, $2, $17, $3, $18
+           WHERE $16::text IS NOT NULL
+           ON CONFLICT (scope, request_id_hash) DO UPDATE
+             SET claimed_at = EXCLUDED.claimed_at,
+                 expires_at = EXCLUDED.expires_at,
+                 request_fingerprint = EXCLUDED.request_fingerprint
+             WHERE mutation_receipts.completed_at IS NULL
+           RETURNING scope
+         ),
+         -- Every data-modifying CTE below chains from this gate, so a refused
+         -- claim makes the whole statement a no-op rather than a second
+         -- redemption. The conflicting update also takes the receipt row lock,
+         -- which serializes concurrent retries of one request identifier.
+         mutation_gate AS MATERIALIZED (
+           SELECT 1 AS open FROM claimed_receipt
+           UNION ALL
+           SELECT 1 AS open WHERE $16::text IS NULL
+         ),
+         pairing_candidate AS MATERIALIZED (
            SELECT pairing_code.group_id
            FROM pairing_codes AS pairing_code
+           CROSS JOIN mutation_gate
            WHERE pairing_code.code_hash = $1
              AND pairing_code.hash_version = $2
              AND pairing_code.consumed_at IS NULL
@@ -500,6 +570,18 @@ export class DurablePairedDeviceRuntime {
              groups.revision,
              groups.created_at,
              groups.updated_at
+         ),
+         completed_receipt AS (
+           UPDATE mutation_receipts AS receipt
+           SET group_id = inserted_membership.group_id,
+               device_id = inserted_membership.device_id,
+               session_id = inserted_session.id,
+               completed_at = $3
+           FROM inserted_membership
+           CROSS JOIN inserted_session
+           WHERE receipt.scope = $15
+             AND receipt.request_id_hash = $16
+           RETURNING receipt.request_id_hash
          )
          SELECT
            updated_group.id AS group_id,
@@ -541,20 +623,29 @@ export class DurablePairedDeviceRuntime {
           session.accessTokenId,
           session.accessTokenHash,
           session.accessTokenExpiresAt,
+          receipt?.scope ?? null,
+          receipt?.requestIdHash ?? null,
+          receipt?.fingerprint ?? null,
+          receipt?.expiresAt ?? null,
         ],
       ),
     );
     const row = rows[0];
-    if (row === undefined) {
-      throw new PairedDeviceRuntimeError(
-        'UNAUTHENTICATED',
-        'The pairing code is invalid, expired, or has already been consumed.',
-      );
-    }
-    return this.toCreatedLifecycle(row, session);
+    if (row !== undefined) return this.toCreatedLifecycle(row, session);
+    const pairingFailure = new PairedDeviceRuntimeError(
+      'UNAUTHENTICATED',
+      'The pairing code is invalid, expired, or has already been consumed.',
+    );
+    if (receipt === undefined) throw pairingFailure;
+    const outcome = await this.resolveRefusedClaim(receipt, pairingFailure);
+    const replayed = await this.reissueSessionCredentials(outcome.sessionId, now);
+    return this.toCreatedLifecycle(replayed.row, replayed.material);
   }
 
-  async refreshDeviceSession(refreshToken: string): Promise<PairedDeviceSession> {
+  async refreshDeviceSession(
+    refreshToken: string,
+    mutation?: MutationReceiptContext,
+  ): Promise<PairedDeviceSession> {
     const token = requireText(refreshToken, 'refresh_token');
     const now = this.currentTime();
     const nextRefreshToken = this.createToken('refresh');
@@ -562,12 +653,39 @@ export class DurablePairedDeviceRuntime {
     const nextAccessTokenId = this.createId(now);
     const refreshTokenExpiresAt = new Date(now.getTime() + this.#refreshTokenLifetimeMs);
     const accessTokenExpiresAt = new Date(now.getTime() + this.#accessTokenLifetimeMs);
+    const refreshTokenHash = this.hashToken('refresh', token);
+    const receipt = this.receiptClaim('REFRESH_DEVICE_SESSION', mutation, now, [
+      ['refresh_token_hash', refreshTokenHash],
+    ]);
 
     const rows = await this.query<LifecycleRow>(
       sql(
-        `WITH refresh_candidate AS MATERIALIZED (
+        `WITH claimed_receipt AS MATERIALIZED (
+           INSERT INTO mutation_receipts (
+             scope, request_id_hash, hash_version, request_fingerprint, claimed_at, expires_at
+           )
+           SELECT $9, $10, $2, $11, $3, $12
+           WHERE $10::text IS NOT NULL
+           ON CONFLICT (scope, request_id_hash) DO UPDATE
+             SET claimed_at = EXCLUDED.claimed_at,
+                 expires_at = EXCLUDED.expires_at,
+                 request_fingerprint = EXCLUDED.request_fingerprint
+             WHERE mutation_receipts.completed_at IS NULL
+           RETURNING scope
+         ),
+         -- Both candidate CTEs chain from this gate, and every rotation and
+         -- replay-revocation CTE below chains from them. A refused claim
+         -- therefore makes the statement a no-op instead of letting a retry
+         -- of an already-rotated token be classified as an attack.
+         mutation_gate AS MATERIALIZED (
+           SELECT 1 AS open FROM claimed_receipt
+           UNION ALL
+           SELECT 1 AS open WHERE $10::text IS NULL
+         ),
+         refresh_candidate AS MATERIALIZED (
            SELECT session.id, session.group_id
            FROM device_sessions AS session
+           CROSS JOIN mutation_gate
            WHERE (session.refresh_token_hash = $1 AND session.refresh_hash_version = $2)
              OR (
                session.refresh_previous_token_hash = $1
@@ -579,6 +697,7 @@ export class DurablePairedDeviceRuntime {
            SELECT session.id, session.group_id
            FROM device_refresh_token_history AS refresh_history
            JOIN device_sessions AS session ON session.id = refresh_history.session_id
+           CROSS JOIN mutation_gate
            WHERE refresh_history.token_hash = $1
              AND refresh_history.hash_version = $2
          ),
@@ -723,6 +842,17 @@ export class DurablePairedDeviceRuntime {
            WHERE access_token.session_id IN (SELECT replayed_refresh_token.session_id FROM replayed_refresh_token)
              AND access_token.revoked_at IS NULL
            RETURNING access_token.id
+         ),
+         completed_receipt AS (
+           UPDATE mutation_receipts AS receipt
+           SET group_id = rotated_session.group_id,
+               device_id = rotated_session.device_id,
+               session_id = rotated_session.id,
+               completed_at = $3
+           FROM rotated_session
+           WHERE receipt.scope = $9
+             AND receipt.request_id_hash = $10
+           RETURNING receipt.request_id_hash
          )
          SELECT
            groups.id AS group_id,
@@ -754,7 +884,7 @@ export class DurablePairedDeviceRuntime {
           AND membership.revoked_at IS NULL
          WHERE devices.status <> 'REVOKED'`,
         [
-          this.hashToken('refresh', token),
+          refreshTokenHash,
           this.#tokenHashVersion,
           now,
           this.hashToken('refresh', nextRefreshToken),
@@ -762,24 +892,46 @@ export class DurablePairedDeviceRuntime {
           nextAccessTokenId,
           this.hashToken('access', nextAccessToken),
           accessTokenExpiresAt,
+          receipt?.scope ?? null,
+          receipt?.requestIdHash ?? null,
+          receipt?.fingerprint ?? null,
+          receipt?.expiresAt ?? null,
         ],
       ),
     );
     const row = rows[0];
-    if (row === undefined) {
-      throw new PairedDeviceRuntimeError(
-        'UNAUTHENTICATED',
-        'The refresh token is invalid or expired.',
-      );
+    if (row !== undefined) {
+      return {
+        accessToken: nextAccessToken,
+        refreshToken: nextRefreshToken,
+        accessTokenExpiresAt: readDate(row.access_token_expires_at, 'access_token_expires_at'),
+        refreshTokenExpiresAt: readDate(row.refresh_token_expires_at, 'refresh_token_expires_at'),
+        deviceId: readText(row.device_id, 'device_id'),
+        groupId: readText(row.group_id, 'group_id'),
+        role: readRole(row.role),
+      };
     }
+    const refreshFailure = new PairedDeviceRuntimeError(
+      'UNAUTHENTICATED',
+      'The refresh token is invalid or expired.',
+    );
+    if (receipt === undefined) throw refreshFailure;
+    const outcome = await this.resolveRefusedClaim(receipt, refreshFailure);
+    const replayed = await this.reissueSessionCredentials(outcome.sessionId, now);
     return {
-      accessToken: nextAccessToken,
-      refreshToken: nextRefreshToken,
-      accessTokenExpiresAt: readDate(row.access_token_expires_at, 'access_token_expires_at'),
-      refreshTokenExpiresAt: readDate(row.refresh_token_expires_at, 'refresh_token_expires_at'),
-      deviceId: readText(row.device_id, 'device_id'),
-      groupId: readText(row.group_id, 'group_id'),
-      role: readRole(row.role),
+      accessToken: replayed.material.accessToken,
+      refreshToken: replayed.material.refreshToken,
+      accessTokenExpiresAt: readDate(
+        replayed.row.access_token_expires_at,
+        'access_token_expires_at',
+      ),
+      refreshTokenExpiresAt: readDate(
+        replayed.row.refresh_token_expires_at,
+        'refresh_token_expires_at',
+      ),
+      deviceId: readText(replayed.row.device_id, 'device_id'),
+      groupId: readText(replayed.row.group_id, 'group_id'),
+      role: readRole(replayed.row.role),
     };
   }
   /**
@@ -1145,6 +1297,235 @@ export class DurablePairedDeviceRuntime {
         'The mutation context actor does not match the authenticated device.',
       );
     }
+  }
+
+  /**
+   * Resolves the receipt identity of one mutation. An absent or empty
+   * `request_id` is the proto3 default for a client that has not opted into
+   * retries, so it returns `undefined` and every receipt parameter is bound to
+   * NULL, leaving the pre-receipt statement semantics unchanged.
+   */
+  private receiptClaim(
+    scope: MutationScope,
+    mutation: MutationReceiptContext | undefined,
+    now: Date,
+    fields: readonly FingerprintField[],
+  ): MutationReceiptClaim | undefined {
+    const requestId = normalizeRequestId(mutation?.requestId);
+    if (requestId === undefined) return undefined;
+    return {
+      scope,
+      requestIdHash: this.hashToken('receipt', encodeRequestIdPayload(scope, requestId)),
+      fingerprint: this.hashToken('receipt', encodeFingerprintPayload(scope, fields)),
+      expiresAt: new Date(now.getTime() + this.#mutationReceiptLifetimeMs),
+    };
+  }
+
+  /**
+   * Explains a mutation statement that produced no row while a receipt claim
+   * was in play. The claim is refused only by a committed receipt, so a
+   * completed row means a previous attempt already performed this exact
+   * mutation and the caller is retrying it.
+   *
+   * An incomplete row is this attempt's own claim: the mutation genuinely
+   * failed, and the operation's real error is raised so a retry is not
+   * disguised as success.
+   */
+  private async resolveRefusedClaim(
+    receipt: MutationReceiptClaim,
+    mutationFailure: PairedDeviceRuntimeError,
+  ): Promise<CompletedMutationOutcome> {
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `SELECT
+           receipt.request_fingerprint AS receipt_fingerprint,
+           receipt.completed_at AS receipt_completed_at,
+           receipt.group_id AS receipt_group_id,
+           receipt.device_id AS receipt_device_id,
+           receipt.session_id AS receipt_session_id
+         FROM mutation_receipts AS receipt
+         WHERE receipt.scope = $1
+           AND receipt.request_id_hash = $2
+           AND receipt.expires_at > $3`,
+        [receipt.scope, receipt.requestIdHash, this.currentTime()],
+      ),
+    );
+    const row = rows[0];
+    if (row?.receipt_completed_at === undefined || row.receipt_completed_at === null) {
+      throw mutationFailure;
+    }
+    if (readText(row.receipt_fingerprint, 'receipt_fingerprint') !== receipt.fingerprint) {
+      throw new PairedDeviceRuntimeError(
+        'ALREADY_EXISTS',
+        'The mutation request identifier was already used with a different request payload.',
+      );
+    }
+    return {
+      groupId: readText(row.receipt_group_id, 'receipt_group_id'),
+      deviceId: readText(row.receipt_device_id, 'receipt_device_id'),
+      sessionId: readText(row.receipt_session_id, 'receipt_session_id'),
+    };
+  }
+
+  /**
+   * Answers a retry by issuing fresh credentials on the session the original
+   * mutation created, because no response — and therefore no raw token — was
+   * ever stored.
+   *
+   * The receipt records identity, never authority: membership, device status
+   * and session liveness are re-checked here, so a mutation that was valid
+   * when it committed cannot resurrect credentials after a revoke. Rotation is
+   * mandatory rather than incidental — only the hash of the current refresh
+   * token exists, so the previous credential cannot be returned again.
+   */
+  private async reissueSessionCredentials(
+    sessionId: string,
+    now: Date,
+  ): Promise<{ readonly row: LifecycleRow; readonly material: SessionMaterial }> {
+    const nextRefreshToken = this.createToken('refresh');
+    const nextAccessToken = this.createToken('access');
+    const nextAccessTokenId = this.createId(now);
+    const refreshTokenExpiresAt = new Date(now.getTime() + this.#refreshTokenLifetimeMs);
+    const accessTokenExpiresAt = new Date(now.getTime() + this.#accessTokenLifetimeMs);
+    const material: SessionMaterial = {
+      id: sessionId,
+      accessTokenId: nextAccessTokenId,
+      accessToken: nextAccessToken,
+      accessTokenHash: this.hashToken('access', nextAccessToken),
+      accessTokenExpiresAt,
+      refreshToken: nextRefreshToken,
+      refreshTokenHash: this.hashToken('refresh', nextRefreshToken),
+      refreshTokenExpiresAt,
+    };
+
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `WITH locked_group AS MATERIALIZED (
+           SELECT groups.id
+           FROM groups
+           JOIN device_sessions AS session ON session.group_id = groups.id
+           WHERE session.id = $1
+           FOR UPDATE OF groups
+         ),
+         active_session AS MATERIALIZED (
+           SELECT
+             session.id,
+             session.device_id,
+             session.group_id,
+             session.issued_at,
+             session.expires_at,
+             session.refresh_token_hash,
+             session.refresh_hash_version
+           FROM device_sessions AS session
+           JOIN locked_group ON locked_group.id = session.group_id
+           JOIN group_memberships AS membership
+             ON membership.group_id = session.group_id
+            AND membership.device_id = session.device_id
+            AND membership.revoked_at IS NULL
+           JOIN devices ON devices.id = session.device_id
+           WHERE session.id = $1
+             AND session.revoked_at IS NULL
+             AND session.expires_at > $2
+             AND devices.status <> 'REVOKED'
+           FOR UPDATE OF session, membership
+         ),
+         rotated_session AS (
+           UPDATE device_sessions AS session
+           SET refresh_previous_token_hash = active_session.refresh_token_hash,
+               refresh_previous_hash_version = active_session.refresh_hash_version,
+               refresh_previous_expires_at = active_session.expires_at,
+               refresh_previous_retired_at = $2,
+               refresh_token_hash = $3,
+               refresh_hash_version = $4,
+               issued_at = $2,
+               expires_at = $5,
+               refresh_rotated_at = $2,
+               last_seen_at = $2
+           FROM active_session
+           WHERE session.id = active_session.id
+           RETURNING session.id, session.device_id, session.group_id, session.expires_at
+         ),
+         retired_refresh_token AS (
+           INSERT INTO device_refresh_token_history (
+             token_hash, session_id, hash_version, issued_at, expires_at, retired_at, retired_reason
+           )
+           SELECT
+             active_session.refresh_token_hash,
+             active_session.id,
+             active_session.refresh_hash_version,
+             active_session.issued_at,
+             active_session.expires_at,
+             $2,
+             'ROTATED'
+           FROM active_session
+           JOIN rotated_session ON rotated_session.id = active_session.id
+           ON CONFLICT (token_hash) DO NOTHING
+         ),
+         retired_access_tokens AS (
+           UPDATE device_access_tokens AS access_token
+           SET revoked_at = $2,
+               revoked_reason = 'REFRESH_ROTATED'
+           WHERE access_token.session_id IN (SELECT rotated_session.id FROM rotated_session)
+             AND access_token.revoked_at IS NULL
+           RETURNING access_token.id
+         ),
+         issued_access_token AS (
+           INSERT INTO device_access_tokens (
+             id, session_id, token_hash, hash_version, issued_at, expires_at, last_seen_at
+           )
+           SELECT $6, rotated_session.id, $7, $4, $2, $8, $2
+           FROM rotated_session
+           RETURNING session_id, expires_at
+         )
+         SELECT
+           groups.id AS group_id,
+           groups.name AS group_name,
+           groups.authority_mode AS group_authority_mode,
+           groups.leader_device_id AS group_leader_device_id,
+           groups.revision AS group_revision,
+           groups.created_at AS group_created_at,
+           groups.updated_at AS group_updated_at,
+           devices.id AS device_id,
+           devices.name AS device_name,
+           devices.public_key AS device_public_key,
+           devices.platform AS device_platform,
+           devices.application_version AS device_application_version,
+           devices.status AS device_status,
+           devices.created_at AS device_created_at,
+           devices.last_seen_at AS device_last_seen_at,
+           membership.role AS role,
+           rotated_session.id AS session_id,
+           issued_access_token.expires_at AS access_token_expires_at,
+           rotated_session.expires_at AS refresh_token_expires_at
+         FROM rotated_session
+         JOIN issued_access_token ON issued_access_token.session_id = rotated_session.id
+         JOIN groups ON groups.id = rotated_session.group_id
+         JOIN devices ON devices.id = rotated_session.device_id
+         JOIN group_memberships AS membership
+           ON membership.group_id = rotated_session.group_id
+          AND membership.device_id = rotated_session.device_id
+          AND membership.revoked_at IS NULL
+         WHERE devices.status <> 'REVOKED'`,
+        [
+          sessionId,
+          now,
+          material.refreshTokenHash,
+          this.#tokenHashVersion,
+          refreshTokenExpiresAt,
+          nextAccessTokenId,
+          material.accessTokenHash,
+          accessTokenExpiresAt,
+        ],
+      ),
+    );
+    const row = rows[0];
+    if (row === undefined) {
+      throw new PairedDeviceRuntimeError(
+        'UNAUTHENTICATED',
+        'The recorded mutation can no longer issue credentials.',
+      );
+    }
+    return { row, material };
   }
 
   private async query<Row extends Record<string, unknown>>(

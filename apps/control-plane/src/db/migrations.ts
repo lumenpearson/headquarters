@@ -469,11 +469,59 @@ const pairedDevicePairingIssuerBinding: Migration = {
   ],
 };
 
+/**
+ * Durable idempotency receipts for destructive lifecycle mutations.
+ *
+ * The table stores no response body. Pairing and refresh responses carry raw
+ * bearer credentials, so persisting them would replace the project's
+ * "credentials are never stored" property with "credentials are stored for the
+ * receipt retention window". Only a purpose-separated hash of the request
+ * identifier, an opaque fingerprint of the semantic request payload, and the
+ * identity of the produced rows are recorded; a retry is answered by
+ * re-issuing credentials for `session_id`.
+ *
+ * A row is inserted before its mutation runs and completed by the same
+ * statement, so `completed_at IS NULL` means exactly one thing: the mutation
+ * did not commit. Such a row is re-claimable by a later attempt, which is what
+ * prevents a failed request from permanently burning its identifier. The
+ * partial unique index is not needed — the primary key already makes
+ * `(scope, request_id_hash)` the single idempotency identity.
+ */
+const mutationIdempotencyReceipts: Migration = {
+  id: '0005_mutation_idempotency_receipts',
+  statements: [
+    sql(`CREATE TABLE IF NOT EXISTS mutation_receipts (
+      scope text NOT NULL CHECK (scope IN ('PAIR_DEVICE', 'REFRESH_DEVICE_SESSION')),
+      request_id_hash text NOT NULL,
+      hash_version text NOT NULL,
+      request_fingerprint text NOT NULL,
+      group_id uuid REFERENCES groups(id) ON DELETE CASCADE,
+      device_id uuid REFERENCES devices(id) ON DELETE CASCADE,
+      session_id uuid REFERENCES device_sessions(id) ON DELETE CASCADE,
+      claimed_at timestamptz NOT NULL,
+      completed_at timestamptz,
+      expires_at timestamptz NOT NULL,
+      PRIMARY KEY (scope, request_id_hash),
+      CHECK (expires_at > claimed_at),
+      CHECK ((completed_at IS NULL) = (session_id IS NULL)),
+      CHECK ((session_id IS NULL) = (device_id IS NULL)),
+      CHECK ((session_id IS NULL) = (group_id IS NULL))
+    )`),
+    sql(
+      'CREATE INDEX IF NOT EXISTS mutation_receipts_expiry_idx ON mutation_receipts (expires_at)',
+    ),
+    sql(
+      'CREATE INDEX IF NOT EXISTS mutation_receipts_session_idx ON mutation_receipts (session_id) WHERE session_id IS NOT NULL',
+    ),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
   pairedDeviceReplayAndIntegrity,
   pairedDevicePairingIssuerBinding,
+  mutationIdempotencyReceipts,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';
