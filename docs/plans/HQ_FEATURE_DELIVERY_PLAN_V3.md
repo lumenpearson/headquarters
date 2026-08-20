@@ -36,6 +36,10 @@ them. Restated only where V3 adds one:
   pass. Not when a category is declared in `settings-schema`.
 - **Work-in-progress cap — new, and binding.** One feature in flight. No feature
   starts while its predecessor is partial.
+- **Read the module before judging it — new, and binding.** A verdict about how
+  code behaves is not written from grep output or from call sites. Open the
+  definition. Two verdicts in this document were wrong because that step was
+  skipped; both are recorded in §2 rather than quietly edited away.
 
 ---
 
@@ -116,17 +120,20 @@ Select-String -Path apps/hq/src -Pattern 'useOperationsStore\(\(state\) =>' -Rec
 
 → six matches, every one in `apps/hq/src/screens/OverviewScreen.tsx`.
 
-The defect is real: `Object.values(state.sectors)` allocates a new array on
-every store notification, so those six components re-render whenever anything in
-the store changes. But its cause is the **selector**, not the store's shape, and
-splitting the store would not have fixed it — any production-data edit would
-still re-render all six. The remedy is `useShallow` on six selectors in one
-file.
+**Correction, second pass.** Even that was wrong. `useOperationsStore` wraps
+every selector in `useShallow` before it reaches `useStore`
+(`operationsStore.ts:882-886`, unchanged since `e46fcd3`), so the allocating
+selectors are already shallow-compared and there is no defect to fix. Adding
+`useShallow` at the call sites would double-wrap the same comparison.
+
+Both wrong verdicts came from the same habit: inferring a module's behaviour
+from its call sites instead of reading the module. That is now a standing rule
+in §6.
 
 Decomposing 997 lines across four modules and rewriting seventeen import sites
-would have been churn that left the actual defect in place, plus a re-export
-shim living alongside the thing it re-exports. Revised verdict for
-`operationsStore.ts`: **keep, with a targeted selector fix** (F1 Task 1).
+would have been churn that fixed nothing, plus a re-export shim living alongside
+the thing it re-exports. Final verdict for `operationsStore.ts`: **keep,
+unchanged.**
 
 ### Wire — written, tested, connected to nothing
 

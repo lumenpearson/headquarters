@@ -95,113 +95,39 @@ test below.
 
 ---
 
-## Task 1: Stop six selectors re-rendering on every store update
+## Task 0 (done): the selector defect that was not there
 
-**Files:**
+This plan opened with a task to wrap six `OverviewScreen` selectors in
+`useShallow`, on the reasoning that `Object.values(state.sectors)` allocates a
+fresh array and Zustand 5 compares with `Object.is`.
 
-- Modify: `apps/hq/src/screens/OverviewScreen.tsx:18-29`
-- Test: `apps/hq/src/screens/OverviewScreen.rerender.test.tsx` (create)
+**That premise was wrong.** `useOperationsStore` already wraps every selector:
 
-**Interfaces:**
-
-- Consumes: `useOperationsStore` from `../state/operationsStore.js` (unchanged),
-  `useShallow` from `zustand/react/shallow`.
-- Produces: nothing new. This task changes no module boundary and no import
-  path, deliberately.
-
-**Why this and not a decomposition.** Zustand 5 compares a selector's result
-with `Object.is`. `Object.values(state.sectors)` allocates a new array on every
-notification, so it never compares equal and the component re-renders whenever
-anything in the store changes — including an edit-mode keystroke. Splitting the
-store into per-domain stores would not fix that; the same six selectors would
-still re-render on any production-data change. `useShallow` fixes it where it
-is, and adds no new module.
-
-- [ ] **Step 1: Write the failing test**
-
-```tsx
-// apps/hq/src/screens/OverviewScreen.rerender.test.tsx
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-
-import { operationsStore } from '../state/operationsStore.js';
-import { OverviewScreen } from './OverviewScreen.js';
-
-describe('OverviewScreen subscription cost', () => {
-  it('does not re-render when an unrelated part of the store changes', () => {
-    let renders = 0;
-    function Probe() {
-      renders += 1;
-      return <OverviewScreen />;
-    }
-
-    render(<Probe />);
-    const before = renders;
-
-    // Notify subscribers without changing anything the screen reads. With
-    // Object.is comparison and an allocating selector, this still re-renders.
-    operationsStore.setState((state) => ({ ...state }));
-
-    expect(renders).toBe(before);
-  });
-});
+```ts
+// apps/hq/src/state/operationsStore.ts:882-886
+export function useOperationsStore<Selection>(
+  selector: (state: OperationsState) => Selection,
+): Selection {
+  return useStore(operationsStore, useShallow(selector));
+}
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+That line has been there since the file was created (`e46fcd3`). The allocating
+selectors are therefore safe, and adding `useShallow` at the call sites would
+double-wrap the same comparison — the duplication this project is trying to
+stop, dressed as a fix.
 
-Run: `pnpm --filter @gremuchaya/hq test -- src/screens/OverviewScreen.rerender.test.tsx`
-Expected: FAIL — the allocating selectors force a re-render, so the count grows.
+What the investigation left behind, and why it is kept:
 
-If the test errors instead on a missing `@testing-library/react`, add it as a
-dev dependency of `apps/hq` in this step and note it in the commit; do not
-weaken the test to avoid the dependency.
+- `apps/hq/vitest.config.ts` gained `.tsx` test matching, an oxc JSX runtime
+  override (the app tsconfig sets `jsx: "preserve"` for Next.js, which the test
+  transform cannot parse), and the `@/*` alias Vite does not read from tsconfig.
+  This package had no component-test capability at all; Tasks 5 and 6 need it.
+- `apps/hq/src/screens/OverviewScreen.rerender.test.tsx` pins the contract
+  above, with a positive control so the negative assertion cannot pass
+  vacuously. If someone removes `useShallow` from the hook, this fails.
 
-- [ ] **Step 3: Wrap the six allocating selectors**
-
-In `apps/hq/src/screens/OverviewScreen.tsx`, add the import and wrap exactly the
-selectors that construct a new collection. Leave the other six alone — they
-return stable references, and `useShallow` there would only add overhead.
-
-```tsx
-import { useShallow } from 'zustand/react/shallow';
-
-const operation = useOperationsStore((state) => state.operation);
-const sectors = useOperationsStore(useShallow((state) => Object.values(state.sectors)));
-const objects = useOperationsStore(useShallow((state) => Object.values(state.objects)));
-const tasks = useOperationsStore(useShallow((state) => Object.values(state.tasks)));
-const attachments = useOperationsStore(useShallow((state) => Object.values(state.attachments)));
-const events = useOperationsStore(useShallow((state) => state.events.slice(0, 8)));
-const alerts = useOperationsStore(useShallow((state) => Object.values(state.alerts)));
-const metrics = useOperationsStore((state) => state.metrics);
-const openDrawer = useOperationsStore((state) => state.openDrawer);
-const selectObject = useOperationsStore((state) => state.selectObject);
-const setFileFilter = useOperationsStore((state) => state.setFileKindFilter);
-const setAnalyticsFilter = useOperationsStore((state) => state.setAnalyticsFilter);
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-Run: `pnpm --filter @gremuchaya/hq test -- src/screens/OverviewScreen.rerender.test.tsx`
-Expected: PASS.
-
-- [ ] **Step 5: Leave zero instances behind, not one**
-
-Run:
-
-```bash
-grep -rn "useOperationsStore((state) =>" apps/hq/src --include=*.tsx   | grep -E "Object\.(values|keys|entries)|\.slice\(|\.filter\(|\.map\("
-```
-
-Expected: no output. If a match appears anywhere, wrap it in this task rather
-than opening a follow-up — the point is that the pattern is gone from the
-codebase, not tracked.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add apps/hq/src/screens/OverviewScreen.tsx apps/hq/src/screens/OverviewScreen.rerender.test.tsx
-git commit -m "perf(hq): stop overview selectors re-rendering on every store update"
-```
+No change was made to `OverviewScreen.tsx`.
 
 ---
 
