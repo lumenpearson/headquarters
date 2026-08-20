@@ -10,9 +10,9 @@
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint src",
     "test": "vitest run",
-    "dev": "tsx watch src/server.ts",
-    "start": "node --enable-source-maps dist/server.js",
-    "migrate": "tsx src/migrate.ts"
+    "dev": "tsx --env-file-if-exists=.env watch src/server.ts",
+    "start": "node --enable-source-maps --env-file-if-exists=.env dist/server.js",
+    "migrate": "tsx --env-file-if-exists=.env src/migrate.ts"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.14.0",

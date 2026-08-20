@@ -181,12 +181,15 @@ Blob, долгоживущие resumable-сессии после перезап�
 Локальный control-plane запускается отдельно от UI и file bridge:
 
 ```powershell
-Copy-Item apps/control-plane/.env.example apps/control-plane/.env.local
-$env:HQ_CONTROL_PLANE_PORT = "4100"
-$env:HQ_CONTROL_PLANE_ALLOWED_ORIGINS = "http://127.0.0.1:3000,http://localhost:3000"
+Copy-Item apps/control-plane/.env.example apps/control-plane/.env
 pnpm --filter @gremuchaya/control-plane build
 pnpm control-plane
 ```
+
+`apps/control-plane/.env` читают все три точки входа пакета — `dev`, `start` и `migrate` —
+через `--env-file-if-exists`, а набор тестов через `vitest.config.ts`. Файл игнорируется
+git. Без него сервис поднимается в health-only режиме, а не падает: флаг именно
+`--env-file-if-exists`, а не `--env-file`, чтобы отсутствие файла не ломало `pnpm dev`.
 
 RPC `gremuchaya.control.v1.ControlPlaneService/Health` и `GetCapabilities` доступны через
 Connect/gRPC-Web. Capabilities инфраструктурных сервисов остаются `enabled=false`, пока не
