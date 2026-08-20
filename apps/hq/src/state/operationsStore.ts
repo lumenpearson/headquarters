@@ -46,25 +46,31 @@ import {
   type SettingsHistoryEntry,
 } from '../infrastructure/settings/SettingsHistoryLedger';
 
-export type OperationsRoute =
-  | 'overview'
-  | 'objects'
-  | 'object-detail'
-  | 'cases'
-  | 'case-detail'
-  | 'map'
-  | 'video'
-  | 'cameras'
-  | 'video-archive'
-  | 'communications'
-  | 'files'
-  | 'archive'
-  | 'analytics'
-  | 'reports'
-  | 'search'
-  | 'settings'
-  | 'system'
-  | 'ui-gallery';
+// The union is also needed at runtime: `localStorage` is a trust boundary, and
+// a persisted route has to be checked against the real set before it is
+// applied. Deriving the type from the value keeps the two from drifting.
+export const operationsRoutes = [
+  'overview',
+  'objects',
+  'object-detail',
+  'cases',
+  'case-detail',
+  'map',
+  'video',
+  'cameras',
+  'video-archive',
+  'communications',
+  'files',
+  'archive',
+  'analytics',
+  'reports',
+  'search',
+  'settings',
+  'system',
+  'ui-gallery',
+] as const;
+
+export type OperationsRoute = (typeof operationsRoutes)[number];
 
 export type DrawerKind =
   'alert' | 'event' | 'task' | 'camera' | 'route' | 'channel' | 'file' | 'insight';
@@ -965,37 +971,93 @@ function hydratePersonalization(
   };
 }
 
-export function initializeOperationsClient(): () => void {
-  if (typeof window === 'undefined') return () => undefined;
+function isCoordinate(value: unknown): value is readonly [number, number] {
+  return (
+    Array.isArray(value) && value.length === 2 && value.every((entry) => typeof entry === 'number')
+  );
+}
+
+function isMapLayerRecord(value: unknown): value is Readonly<Record<MapLayer, boolean>> {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  // `mapLayers` is the defaults object declared above; its keys are the union.
+  return Object.keys(mapLayers).every((layer) => typeof candidate[layer] === 'boolean');
+}
+
+function isProductionSnapshot(value: unknown): value is ProductionSnapshot {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  const activeAlertIds = candidate['activeAlertIds'];
+  return (
+    typeof candidate['id'] === 'string' &&
+    typeof candidate['name'] === 'string' &&
+    typeof candidate['createdAt'] === 'string' &&
+    operationsRoutes.some((route) => route === candidate['route']) &&
+    typeof candidate['selectedObjectId'] === 'string' &&
+    typeof candidate['selectedCameraId'] === 'string' &&
+    typeof candidate['selectedCaseId'] === 'string' &&
+    isCoordinate(candidate['mapCenter']) &&
+    typeof candidate['mapZoom'] === 'number' &&
+    isMapLayerRecord(candidate['mapLayers']) &&
+    Array.isArray(activeAlertIds) &&
+    activeAlertIds.every((id) => typeof id === 'string') &&
+    typeof candidate['preset'] === 'string' &&
+    typeof candidate['simulationPaused'] === 'boolean' &&
+    typeof candidate['fixedTime'] === 'string'
+  );
+}
+
+function hydratePersistedState(): void {
+  const stored = localStorage.getItem(persistedStateKey);
+  if (stored === null) return;
   try {
-    const stored = localStorage.getItem(persistedStateKey);
-    const snapshotsRaw = localStorage.getItem(snapshotStateKey);
-    if (stored !== null) {
-      const parsed = JSON.parse(stored) as Partial<PersistedOperationsState>;
-      const personalization = parsed.personalization;
-      if (
-        (parsed.version === 4 || parsed.version === 5) &&
-        parsed.ui !== undefined &&
-        parsed.production !== undefined &&
-        personalization !== undefined
-      ) {
-        operationsStore.setState((state) => ({
-          ui: { ...state.ui, ...parsed.ui, productionPanelOpen: false, drawer: null },
-          production: { ...state.production, ...parsed.production },
-          alerts: parsed.alerts ?? state.alerts,
-          tasks: parsed.tasks ?? state.tasks,
-          audit: parsed.audit ?? state.audit,
-          personalization: hydratePersonalization(personalization, state.personalization),
-        }));
-      }
-    }
-    if (snapshotsRaw !== null) {
-      const snapshots = JSON.parse(snapshotsRaw) as readonly ProductionSnapshot[];
-      operationsStore.setState((state) => ({ production: { ...state.production, snapshots } }));
+    const parsed = JSON.parse(stored) as Partial<PersistedOperationsState>;
+    const personalization = parsed.personalization;
+    if (
+      (parsed.version === 4 || parsed.version === 5) &&
+      parsed.ui !== undefined &&
+      parsed.production !== undefined &&
+      personalization !== undefined
+    ) {
+      operationsStore.setState((state) => ({
+        ui: { ...state.ui, ...parsed.ui, productionPanelOpen: false, drawer: null },
+        production: { ...state.production, ...parsed.production },
+        alerts: parsed.alerts ?? state.alerts,
+        tasks: parsed.tasks ?? state.tasks,
+        audit: parsed.audit ?? state.audit,
+        personalization: hydratePersonalization(personalization, state.personalization),
+      }));
     }
   } catch {
     localStorage.removeItem(persistedStateKey);
   }
+}
+
+function hydratePersistedSnapshots(): void {
+  const raw = localStorage.getItem(snapshotStateKey);
+  if (raw === null) return;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      localStorage.removeItem(snapshotStateKey);
+      return;
+    }
+    // The list used to be cast straight from `JSON.parse`, so anything at all
+    // could enter the store through this key.
+    const snapshots = parsed.filter(isProductionSnapshot);
+    operationsStore.setState((state) => ({ production: { ...state.production, snapshots } }));
+  } catch {
+    // Each key recovers itself. One shared catch used to remove only
+    // `persistedStateKey`, so a corrupt snapshot blob outlived every reload and
+    // threw again on the next one.
+    localStorage.removeItem(snapshotStateKey);
+  }
+}
+
+export function initializeOperationsClient(): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+  hydratePersistedState();
+  hydratePersistedSnapshots();
 
   const broadcast =
     typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(channelName);

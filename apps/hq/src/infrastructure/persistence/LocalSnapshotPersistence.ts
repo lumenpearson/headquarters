@@ -1,6 +1,5 @@
 import { appSnapshotSchema } from '@gremuchaya/config';
 import type { AppSnapshot } from '@gremuchaya/domain';
-import * as z from 'zod';
 
 import type { SnapshotPersistencePort } from '@/application/ports';
 
@@ -10,7 +9,26 @@ export class LocalSnapshotPersistence implements SnapshotPersistencePort {
   async list(): Promise<readonly AppSnapshot[]> {
     const raw = localStorage.getItem(storageKey);
     if (raw === null) return [];
-    return z.array(appSnapshotSchema).parse(JSON.parse(raw));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Not JSON at all: nothing here can ever become snapshots again.
+      localStorage.removeItem(storageKey);
+      return [];
+    }
+    if (!Array.isArray(parsed)) {
+      localStorage.removeItem(storageKey);
+      return [];
+    }
+    // localStorage is a trust boundary: a blob from an older build, another tab
+    // or the devtools console must not be able to wedge the store. Dropping
+    // only the entries that no longer validate keeps the rest listable -- and,
+    // because `save` reads through `list`, keeps saving possible at all.
+    return parsed.flatMap((entry) => {
+      const result = appSnapshotSchema.safeParse(entry);
+      return result.success ? [result.data] : [];
+    });
   }
 
   async save(snapshot: AppSnapshot): Promise<void> {
