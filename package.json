@@ -9,9 +9,9 @@
     "pnpm": ">=10.12.3"
   },
   "scripts": {
-    "dev": "turbo run dev --parallel",
-    "dev:hq": "pnpm --filter @gremuchaya/hq dev",
-    "dev:full": "turbo run dev --parallel --filter=@gremuchaya/hq --filter=@gremuchaya/file-bridge --filter=@gremuchaya/control-plane",
+    "dev": "turbo run dev",
+    "dev:hq": "turbo run dev --filter=@gremuchaya/hq",
+    "dev:full": "turbo run dev --filter=@gremuchaya/hq --filter=@gremuchaya/file-bridge --filter=@gremuchaya/control-plane",
     "bridge": "pnpm --filter @gremuchaya/file-bridge start",
     "control-plane": "pnpm --filter @gremuchaya/control-plane start",
     "build": "turbo run build",

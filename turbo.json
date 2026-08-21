@@ -28,6 +28,7 @@
       "outputs": ["playwright-report/**", "test-results/**"]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },
