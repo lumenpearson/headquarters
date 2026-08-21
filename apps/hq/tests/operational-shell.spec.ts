@@ -351,7 +351,14 @@ test('uses the terminal Base UI adapters for tooltip and drawer behavior', async
   await page.goto('/dev/ui');
 
   const tooltipTrigger = page.getByRole('button', { name: '[?] TOOLTIP', exact: true });
-  await tooltipTrigger.hover();
+  // Hovering is a single pointer move, so if it lands before the catalog hydrates
+  // nothing ever moves the pointer again and the tooltip stays closed. Leave the
+  // trigger and re-enter it until Base UI answers.
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await tooltipTrigger.hover();
+    await expect(page.getByRole('tooltip')).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(page.getByRole('tooltip')).toHaveText('Терминальная подсказка без скруглений');
   await expect(page.getByRole('tooltip')).toHaveCSS('border-radius', '0px');
 
