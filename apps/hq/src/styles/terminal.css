@@ -478,7 +478,11 @@ body.terminal-theme .hq-button:hover:not(:disabled),
 body.terminal-theme .primary-action:hover,
 body.terminal-theme .send-row button:hover,
 body.terminal-theme .snapshot-tools button:hover {
-  background: var(--accent-strong);
+  /* `background-color`, not the `background` shorthand: hovering means to tint
+     the control, not to clear its image layers. This rule outranks the
+     `patterns.focus` rules in operations.css, so the shorthand erased the focus
+     pattern from any control that was hovered and focused at once. */
+  background-color: var(--accent-strong);
   color: var(--text-inverse);
 }
 

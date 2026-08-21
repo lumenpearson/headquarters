@@ -75,3 +75,77 @@ test('R17: state changes land instantly while edit mode is on, and ease again on
   // suppression is borrowed for the session, not written into the settings.
   await expect.poll(motionDuration).toBe(configured);
 });
+
+// R13: every declared patterns.focus value has to change what a focused
+// element looks like. Three of the seven -- brackets (the default), barber and
+// scan -- used to change only the data attribute, so the setting was a control
+// that did nothing.
+for (const [option, attribute] of [
+  ['BRACKETS', 'brackets'],
+  ['BARBER', 'barber'],
+  ['SCAN', 'scan'],
+] as const) {
+  test(`R13: the ${attribute} focus pattern paints a focused control`, async ({ page }) => {
+    await page.goto('/settings');
+
+    const category = page.getByRole('combobox', { name: 'Категория персонализации' });
+    await category.click();
+    await page.getByRole('option', { name: 'ПАТТЕРНЫ / PATTERNS', exact: true }).click();
+    const pattern = page.getByRole('combobox', { name: 'PATTERNS / FOCUS' });
+    await pattern.click();
+    await page.getByRole('option', { name: option, exact: true }).click();
+    await expect(page.locator('.ops-shell')).toHaveAttribute('data-focus-pattern', attribute);
+
+    // Leave the settings screen through a client-side link. The select keeps
+    // its popup mounted after closing, and its focus guards -- not the trigger
+    // -- are what the next Tab would reach. Navigating within the app moves
+    // away from them while the draft, which does not survive a reload, stays.
+    await page.getByRole('link', { name: 'ОБЗОР' }).first().click();
+    // Wait for the destination route to settle before tabbing: a keypress sent
+    // mid-navigation lands on a document that then re-renders, and focus falls
+    // back to <body>.
+    await expect(page.locator('.ops-workspace')).toHaveAttribute('data-route', 'overview');
+    await expect(page.locator('.ops-screen')).toBeVisible();
+    await expect(page.locator('.ops-shell')).toHaveAttribute('data-focus-pattern', attribute);
+
+    // A button, not a link: the hover rule in operations.css is weaker than
+    // these pattern rules for `a` but exactly as strong for `button`, so only
+    // a button can show whether hover wipes the pattern off.
+    //
+    // Leave the control and come straight back with the keyboard. Focusing it
+    // programmatically is not enough: the browser withholds `:focus-visible`
+    // from a control focused by script after a mouse interaction, and these
+    // rules key off it. Tabbing from a blurred document is not usable either --
+    // the first stop belongs to the Next dev overlay, not the application.
+    await page.locator('.ops-nav__compact').focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+
+    // Reports which step failed rather than a bare false: a pattern that does
+    // not paint and a control that never became focus-visible are different
+    // defects, and a boolean cannot tell them apart.
+    const paintState = () =>
+      page.evaluate(() => {
+        const element = document.activeElement;
+        if (element === null) return 'nothing focused';
+        if (!element.matches(':focus-visible')) {
+          return `<${element.tagName.toLowerCase()}> focused but not focus-visible`;
+        }
+        if (!element.matches('button, a, input, select')) {
+          return `focus landed on <${element.tagName.toLowerCase()}>, which the rule excludes`;
+        }
+        // Painted with background-image, not a pseudo-element, so one rule
+        // reaches input and select as well.
+        return getComputedStyle(element).backgroundImage === 'none' ? 'unpainted' : 'painted';
+      });
+
+    await expect.poll(paintState).toBe('painted');
+
+    // Hovering must not wipe the pattern off. The hover rule further down
+    // operations.css has the same specificity as the pattern rules, so a
+    // `background` shorthand there would win on source order and reset the
+    // image layer out from under a control that is both focused and hovered.
+    await page.locator(':focus').hover();
+    await expect.poll(paintState).toBe('painted');
+  });
+}

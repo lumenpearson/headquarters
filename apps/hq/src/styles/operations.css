@@ -3671,6 +3671,64 @@ button.is-active {
     0 0 12px rgb(255 61 0 / 40%);
 }
 
+/*
+ * R13: brackets, barber and scan complete the `patterns.focus` catalogue.
+ * `solid` needs no rule of its own -- it is the base outline already applied
+ * above -- but these three were selectable and painted nothing at all.
+ *
+ * Drawn with the `background-image` longhand rather than a pseudo-element, so
+ * a single rule reaches `input` and `select`, which render neither `::before`
+ * nor `::after`. The longhand also leaves each control's own
+ * `background-color` alone, which the `background` shorthand would reset.
+ */
+.ops-shell[data-focus-pattern='brackets'] :is(button, a, input, select):focus-visible {
+  /* Corner marks stand in for the ring, in the idiom of `.ops-panel__corners`;
+     a full outline underneath them would read as a box, not as brackets. */
+  outline-color: transparent;
+  background-image:
+    linear-gradient(var(--ops-orange), var(--ops-orange)),
+    linear-gradient(var(--ops-orange), var(--ops-orange)),
+    linear-gradient(var(--ops-orange), var(--ops-orange)),
+    linear-gradient(var(--ops-orange), var(--ops-orange)),
+    linear-gradient(var(--ops-orange), var(--ops-orange)),
+    linear-gradient(var(--ops-orange), var(--ops-orange)),
+    linear-gradient(var(--ops-orange), var(--ops-orange)),
+    linear-gradient(var(--ops-orange), var(--ops-orange));
+  background-position:
+    left top,
+    left top,
+    right top,
+    right top,
+    left bottom,
+    left bottom,
+    right bottom,
+    right bottom;
+  background-size:
+    7px 1px,
+    1px 7px,
+    7px 1px,
+    1px 7px,
+    7px 1px,
+    1px 7px,
+    7px 1px,
+    1px 7px;
+  background-repeat: no-repeat;
+}
+
+.ops-shell[data-focus-pattern='barber'] :is(button, a, input, select):focus-visible {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgb(255 61 0 / 24%) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+.ops-shell[data-focus-pattern='scan'] :is(button, a, input, select):focus-visible {
+  /* Same geometry as the `scanlines` background kind, so a focused control
+     reads as the same instrument at a smaller scale. */
+  background-image: repeating-linear-gradient(0deg, rgb(255 61 0 / 20%) 0 1px, transparent 1px 4px);
+}
+
 @media (max-width: 1240px) {
   .settings-personalization,
   .settings-data {
@@ -4586,7 +4644,12 @@ button.is-active {
 .ops-shell button:not(:disabled):hover,
 .ops-shell a:hover {
   border-color: var(--ops-orange);
-  background: rgb(255 61 0 / 7%);
+  /* `background-color`, not the `background` shorthand: this rule means to
+     tint the control, and the shorthand would also reset `background-image`.
+     It has the same specificity as the `patterns.focus` rules and comes later
+     in the file, so the shorthand wiped the focus pattern off any control that
+     was hovered and focused at once. */
+  background-color: rgb(255 61 0 / 7%);
   color: var(--ops-orange-bright);
 }
 
