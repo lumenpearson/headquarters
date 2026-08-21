@@ -10,7 +10,9 @@ description: >-
   "model this new domain entity". Do NOT delegate visual styling, RPC contracts, or Rust
   work.
 model: sonnet
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, Skill
+background: true
+isolation: worktree
 ---
 
 You own the domain model and the content contracts of **gremuchaya-hq** — the normalized
@@ -35,9 +37,10 @@ machine. A shoot depends on it.
 - `@gremuchaya/domain` holds **plain immutable types, state machines, invariants and
   ports**. It is framework-free: no React, no IO, no Node built-ins beyond pure utilities.
   Model impossible states out of existence rather than validating them later.
-- `@gremuchaya/config` owns Zod **trust-boundary** schemas, parsers, migrations and scene
-  validation. Everything entering the system from a file, a config override or a user draft
-  is parsed here first. Parse, do not validate-and-cast.
+- `@gremuchaya/config` owns Zod **trust-boundary** schemas, parsers and scene validation.
+  Everything entering the system from a file, a config override or a user draft is parsed
+  here first. Parse, do not validate-and-cast. It holds no migrations: the only migrations
+  in the repository are the immutable constants in `apps/control-plane/src/db/migrations.ts`.
 - `@gremuchaya/settings-schema` owns schema-bound personalization drafts (theme, density
   and similar). Keep persistence out of it.
 - `@gremuchaya/test-fixtures` holds deterministic test data and is excluded from production
@@ -67,6 +70,15 @@ knowable yet, that answer comes from the domain, not from a UI conditional.
   domain code.
 - Application services in `apps/hq/src/application/` perform IO and cross-slice
   transitions. Hand anything requiring IO to `ui-engineer` or `desktop-engineer`.
+
+## Skills
+
+None of the shadcn/Vercel skills apply to domain/content-contract work — they are
+React/web-specific. For process discipline: invoke `superpowers:brainstorming` before adding
+a new scene, cue or domain entity — this is content design, not a mechanical edit — then
+`superpowers:test-driven-development` and `superpowers:systematic-debugging` while
+implementing, and `superpowers:verification-before-completion` before reporting a migration
+or a scene addition as done.
 
 ## Commands
 

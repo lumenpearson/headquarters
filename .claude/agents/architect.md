@@ -45,19 +45,19 @@ infrastructure (browser, bridge and Tauri adapters) implements domain/applicatio
 
 Package ownership you must respect when placing new code:
 
-| Package                       | Owns                                                              | Must never contain             |
-| ----------------------------- | ----------------------------------------------------------------- | ------------------------------ |
-| `@gremuchaya/domain`          | framework-free models, state machines, errors, paths, ports       | React, IO, framework imports   |
-| `@gremuchaya/config`          | Zod trust-boundary schemas, parsers, migrations, scene validation | runtime policy                 |
-| `@gremuchaya/protocol`        | generated Protobuf + `FileBridgeService` descriptor               | runtime policy or UI code      |
-| `@gremuchaya/ui`              | design tokens and scene-agnostic `Terminal*` primitives           | scene or domain knowledge      |
-| `@gremuchaya/layout-engine`   | deterministic bounded tile packing and overflow policy            | React or DOM measurement       |
-| `@gremuchaya/settings-schema` | schema-bound personalization draft validation                     | persistence                    |
-| `@gremuchaya/test-fixtures`   | deterministic test data                                           | production imports             |
-| `apps/hq`                     | composition root: routes, Zustand slices, services, adapters      | —                              |
-| `apps/file-bridge`            | localhost-only read-only-by-default gRPC-Web file projection      | write paths enabled by default |
-| `apps/control-plane`          | ConnectRPC health/auth/realtime service                           | ad hoc JSON or REST endpoints  |
-| `apps/hq/src-tauri`           | native Rust: monitors, windows, watcher, read-only projection     | business logic                 |
+| Package                       | Owns                                                          | Must never contain             |
+| ----------------------------- | ------------------------------------------------------------- | ------------------------------ |
+| `@gremuchaya/domain`          | framework-free models, state machines, errors, paths, ports   | React, IO, framework imports   |
+| `@gremuchaya/config`          | Zod trust-boundary schemas, parsers, scene validation         | runtime policy, migrations     |
+| `@gremuchaya/protocol`        | generated Protobuf + `FileBridgeService` descriptor           | runtime policy or UI code      |
+| `@gremuchaya/ui`              | design tokens and scene-agnostic `Terminal*` primitives       | scene or domain knowledge      |
+| `@gremuchaya/layout-engine`   | deterministic bounded tile packing and overflow policy        | React or DOM measurement       |
+| `@gremuchaya/settings-schema` | schema-bound personalization draft validation                 | persistence                    |
+| `@gremuchaya/test-fixtures`   | deterministic test data                                       | production imports             |
+| `apps/hq`                     | composition root: routes, Zustand slices, services, adapters  | —                              |
+| `apps/file-bridge`            | localhost-only read-only-by-default gRPC-Web file projection  | write paths enabled by default |
+| `apps/control-plane`          | ConnectRPC health/auth/realtime service                       | ad hoc JSON or REST endpoints  |
+| `apps/hq/src-tauri`           | native Rust: monitors, windows, watcher, read-only projection | business logic                 |
 
 ## Standing constraints you enforce in every plan
 
