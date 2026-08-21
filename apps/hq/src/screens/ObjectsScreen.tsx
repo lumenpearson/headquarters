@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
 import { EmptyState, Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
+import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
 type ObjectKindFilter = 'all' | 'person' | 'vehicle' | 'device' | 'group';
@@ -23,6 +24,12 @@ const objectKindOptions = [
 export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   const router = useRouter();
   const state = useOperationsStore((value) => value);
+  useContextMenuAction('record.open', (subject) => {
+    if (subject !== undefined) router.push(`/objects/${subject}`);
+  });
+  useContextMenuAction('record.select', (subject) => {
+    if (subject !== undefined) state.selectObject(subject);
+  });
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<ObjectKindFilter>('all');
   const [tab, setTab] = useState<'summary' | 'activity' | 'relations' | 'files' | 'map' | 'video'>(
@@ -106,6 +113,8 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
                       key={object.id}
                       className={object.id === selected?.id ? 'is-selected' : ''}
                       data-interactive="true"
+                      data-context-menu="record"
+                      data-context-subject={object.id}
                       onClick={() => state.selectObject(object.id)}
                       onDoubleClick={() => router.push(`/objects/${object.id}`)}
                     >

@@ -21,7 +21,12 @@ export function TerminalContextMenu({
 }: TerminalContextMenuProps) {
   return (
     <ContextMenu.Root>
-      <ContextMenu.Trigger render={trigger} />
+      {/*
+        The marker says "this element already answers the right button", so an
+        application-wide right-click runtime yields here instead of opening a
+        second menu over this one.
+      */}
+      <ContextMenu.Trigger data-context-menu-own="" render={trigger} />
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="terminal-menu__positioner">
           <ContextMenu.Popup

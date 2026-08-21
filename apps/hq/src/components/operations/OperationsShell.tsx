@@ -11,6 +11,7 @@ import {
 } from '@gremuchaya/ui/primitives';
 
 import { primaryNavigation } from '@/application/navigation';
+import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { subscribeKeybind, useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { AnalyticsScreen } from '@/screens/AnalyticsScreen';
 import { ArchiveScreen } from '@/screens/ArchiveScreen';
@@ -201,6 +202,13 @@ export function OperationsShell({
   }, []);
 
   useKeybind('shell.search', () => router.push('/search'));
+  // Claimed once for the whole shell rather than per screen: taking an
+  // identifier to the global search is the same act wherever the row lives.
+  useContextMenuAction('record.search', (subject) => {
+    if (subject === undefined) return;
+    operationsStore.getState().setSearchQuery(subject);
+    router.push('/search');
+  });
   useKeybind('shell.productionPanel', () => toggleProductionPanel());
   useKeybind('shell.dismiss', () => {
     closeDrawer();
@@ -237,6 +245,7 @@ export function OperationsShell({
     <div
       className={`ops-shell ${compact ? 'ops-shell--compact' : ''} ${production.cameraSafe ? 'ops-shell--camera-safe' : ''} ${motionAllowed ? '' : 'ops-shell--no-motion'} ops-cursor--${production.cursorMode}`}
       data-transport="grpc-web"
+      data-context-menu="shell"
       data-theme={theme}
       data-layout-density={density}
       data-background-kind={background}

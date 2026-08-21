@@ -9,6 +9,7 @@ export * from './TerminalIconButton.js';
 export * from './TerminalInput.js';
 export * from './TerminalMenu.js';
 export * from './TerminalNumberField.js';
+export * from './TerminalPointerMenu.js';
 export * from './TerminalPopover.js';
 export * from './TerminalProgress.js';
 export * from './TerminalRadioGroup.js';

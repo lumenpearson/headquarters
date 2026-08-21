@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalCheckbox } from '@gremuchaya/ui/primitives';
 
+import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
 import { YandexTacticalMap } from '@/components/operations/YandexTacticalMap';
 import { type MapLayer, useOperationsStore } from '@/state/operationsStore';
@@ -26,6 +27,9 @@ const layerLabels: Readonly<Record<MapLayer, string>> = {
 export function TacticalMapScreen() {
   const router = useRouter();
   const state = useOperationsStore((value) => value);
+  useContextMenuAction('record.open', (subject) => {
+    if (subject !== undefined) state.openDrawer('channel', subject);
+  });
   const selected = state.objects[state.ui.selectedObjectId];
   const visibleObjects = useMemo(
     () =>
@@ -275,6 +279,8 @@ export function TacticalMapScreen() {
                   <tr
                     key={channel.id}
                     data-interactive="true"
+                    data-context-menu="record"
+                    data-context-subject={channel.id}
                     onClick={() => state.openDrawer('channel', channel.id)}
                   >
                     <td>{channel.id}</td>

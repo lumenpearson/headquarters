@@ -124,3 +124,110 @@ test('R23: the slider takes a cursor of its own while the value is being moved',
   await expect(control).toHaveCSS('cursor', 'pointer');
   expect(await slider.evaluate((element) => element.hasAttribute('data-adjusting'))).toBe(false);
 });
+
+test('R12: the right button opens the shell menu and runs the command it prints', async ({
+  page,
+}) => {
+  await page.goto('/overview');
+  await expect(page.locator('.ops-screen')).toBeVisible();
+
+  await page.locator('.ops-workspace').click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Команды штаба' });
+  await expect(menu).toBeVisible();
+  // The chord beside the entry is printed from the keybind registry, not typed
+  // here, so the menu and the shortcut list cannot come to disagree.
+  await expect(menu.locator('kbd', { hasText: 'Ctrl + Shift + E' })).toBeVisible();
+
+  await menu.getByRole('menuitem', { name: 'Глобальный поиск' }).click();
+  await expect(page).toHaveURL(/\/search$/);
+});
+
+test('R12: a record row gets its own menu, and an action nothing owns is disabled', async ({
+  page,
+}) => {
+  await page.goto('/objects');
+  const row = page.locator('.ops-table tbody tr').first();
+  const id = (await row.locator('td strong').first().textContent()) ?? '';
+  expect(id.length).toBeGreaterThan(0);
+
+  await row.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Действия над записью' });
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Открыть карточку' }).click();
+  await expect(page).toHaveURL(new RegExp(`/objects/${id}$`));
+
+  // Reports have rows but no card behind them; the entry is drawn and refused
+  // rather than drawn and inert.
+  await page.goto('/reports');
+  await page.locator('.ops-table tbody tr').first().click({ button: 'right' });
+  const reportMenu = page.getByRole('menu', { name: 'Действия над записью' });
+  await expect(reportMenu.getByRole('menuitem', { name: 'Открыть карточку' })).toBeDisabled();
+  await expect(reportMenu.getByRole('menuitem', { name: 'Выделить строку' })).toBeEnabled();
+});
+
+test('R12: a field keeps the browser its own menu', async ({ page }) => {
+  await page.goto('/search');
+  await page.locator('.search-command input').click({ button: 'right' });
+
+  // Cut, copy, paste and spellcheck live there and this application has nothing
+  // better to put in their place.
+  await expect(page.getByRole('menu', { name: 'Команды штаба' })).toHaveCount(0);
+});
+
+/** Presses and holds with a touch pointer, which has no right button to press. */
+async function longPress(page: Page, target: Locator): Promise<void> {
+  const box = (await target.boundingBox())!;
+  await target.evaluate(
+    (element, [x, y]) => {
+      element.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          pointerType: 'touch',
+          clientX: x as number,
+          clientY: y as number,
+        }),
+      );
+    },
+    [box.x + box.width / 2, box.y + box.height / 2],
+  );
+  await page.waitForTimeout(700);
+}
+
+test('R12: a long press reaches the same menu on touch, and the setting turns it off', async ({
+  page,
+}) => {
+  await page.goto('/objects');
+  const row = page.locator('.ops-table tbody tr').first();
+
+  await longPress(page, row);
+  await expect(page.getByRole('menu', { name: 'Действия над записью' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // `popups.longPress` had been declared in the settings schema and read by
+  // nothing at all; this is the consumer that makes it mean something.
+  await page.goto('/settings');
+  await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
+  await page.getByRole('option', { name: 'POP-UP / POPUPS', exact: true }).click();
+  await page.getByRole('switch', { name: 'POPUPS / LONG PRESS' }).click();
+
+  await page.goto('/objects');
+  await longPress(page, page.locator('.ops-table tbody tr').first());
+  await expect(page.getByRole('menu', { name: 'Действия над записью' })).toHaveCount(0);
+
+  // The right button is a different gesture and is not governed by the setting.
+  await page.locator('.ops-table tbody tr').first().click({ button: 'right' });
+  await expect(page.getByRole('menu', { name: 'Действия над записью' })).toBeVisible();
+});
+
+test('R12: an element that owns its menu keeps it, and does not also get the shell one', async ({
+  page,
+}) => {
+  await page.goto('/dev/ui');
+  await page
+    .getByRole('button', { name: '[CONTEXT] TARGET', exact: true })
+    .click({ button: 'right' });
+
+  await expect(page.getByRole('menu', { name: 'Контекстные действия контура' })).toBeVisible();
+  // Two menus for one click is two places deciding what the right button does.
+  await expect(page.getByRole('menu', { name: 'Команды штаба' })).toHaveCount(0);
+});

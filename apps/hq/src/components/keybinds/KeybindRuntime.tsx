@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 
 import { findKeybind } from '@/application/keybinds/registry';
 
-type KeybindHandler = (event: KeyboardEvent) => void;
+type KeybindHandler = () => void;
 
 /*
  * One subscriber table for the whole document, in the idiom `operationsStore`
@@ -25,6 +25,34 @@ const firedListeners = new Set<(id: string) => void>();
 export function subscribeKeybindFired(listener: (id: string) => void): () => void {
   firedListeners.add(listener);
   return () => firedListeners.delete(listener);
+}
+
+/**
+ * Whether any mounted screen can act on a declared keybind right now.
+ *
+ * The context menu asks this before drawing a command: an entry that looks
+ * available and does nothing is worse than one that says it is unavailable.
+ */
+export function keybindHasOwner(id: string): boolean {
+  return (handlers.get(id)?.size ?? 0) > 0;
+}
+
+/**
+ * Runs a declared keybind's owners, whatever raised it.
+ *
+ * The single dispatch path for both gestures: the keydown listener below and
+ * the context menu, which is the same command surface reached with a pointer.
+ * Returns whether anything ran, which is how the listener decides to swallow
+ * the key.
+ */
+export function fireKeybind(id: string): boolean {
+  const owners = handlers.get(id);
+  // A declared keybind with no owner on this screen is not this application's
+  // key to swallow.
+  if (owners === undefined || owners.size === 0) return false;
+  for (const owner of [...owners]) owner();
+  for (const listener of [...firedListeners]) listener(id);
+  return true;
 }
 
 /**
@@ -71,12 +99,7 @@ export function KeybindRuntime() {
     const onKeyDown = (event: KeyboardEvent) => {
       const keybind = findKeybind(event, { typing: isTypingTarget(event.target) });
       if (keybind === undefined) return;
-      const owners = handlers.get(keybind.id);
-      // A declared keybind with no owner on this screen is not this
-      // application's key to swallow.
-      if (owners === undefined || owners.size === 0) return;
-      for (const owner of [...owners]) owner(event);
-      for (const listener of [...firedListeners]) listener(keybind.id);
+      if (!fireKeybind(keybind.id)) return;
       if (keybind.preventsDefault) event.preventDefault();
     };
     window.addEventListener('keydown', onKeyDown);

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { TerminalUiProvider } from '@gremuchaya/ui/primitives';
 
+import { ContextMenuRuntime } from '@/components/contextMenus/ContextMenuRuntime';
 import { EditModeFrame } from '@/components/edit/EditModeFrame';
 import { EditModeRuntime } from '@/components/edit/EditModeRuntime';
 import { EditPanel } from '@/components/edit/EditPanel';
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: RootLayoutProperties) {
         <TerminalUiProvider>
           <MaterialCatalogProvider>
             <KeybindRuntime />
+            <ContextMenuRuntime />
             <EditModeRuntime />
             <KeybindIntro />
             <StartupSequence />

@@ -18,6 +18,7 @@ import {
   type MaterialEntry,
   type MaterialImportProgress,
 } from '@/infrastructure/materials/BridgeMaterialClient';
+import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
 type FileSort = 'title' | 'createdAt' | 'kind' | 'sizeLabel';
@@ -31,6 +32,12 @@ const fileSortOptions = [
 
 export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const state = useOperationsStore((value) => value);
+  useContextMenuAction('record.open', (subject) => {
+    if (subject !== undefined) state.openDrawer('file', subject);
+  });
+  useContextMenuAction('record.select', (subject) => {
+    if (subject !== undefined) state.selectFile(subject);
+  });
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<FileSort>('createdAt');
   const [importOpen, setImportOpen] = useState(false);
@@ -247,6 +254,8 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                       key={file.id}
                       className={file.id === selected?.id ? 'is-selected' : ''}
                       data-interactive="true"
+                      data-context-menu="record"
+                      data-context-subject={file.id}
                       onClick={() => state.selectFile(file.id)}
                       onDoubleClick={() => state.openDrawer('file', file.id)}
                     >

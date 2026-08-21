@@ -4,12 +4,18 @@ import { useMemo, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
+import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
 export function ReportsScreen() {
   const state = useOperationsStore((value) => value);
   const [kind, setKind] = useState('all');
   const [selectedId, setSelectedId] = useState('REP-01');
+  // Only selection: this screen has no report card to open, so `record.open`
+  // stays unclaimed and the menu draws it disabled rather than pretending.
+  useContextMenuAction('record.select', (subject) => {
+    if (subject !== undefined) setSelectedId(subject);
+  });
   const reports = useMemo(
     () => Object.values(state.reports).filter((report) => kind === 'all' || report.kind === kind),
     [kind, state.reports],
@@ -83,6 +89,8 @@ export function ReportsScreen() {
                     key={report.id}
                     className={selected?.id === report.id ? 'is-selected' : ''}
                     data-interactive="true"
+                    data-context-menu="record"
+                    data-context-subject={report.id}
                     onClick={() => setSelectedId(report.id)}
                   >
                     <td>{report.id}</td>

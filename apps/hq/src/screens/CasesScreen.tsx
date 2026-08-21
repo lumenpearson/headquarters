@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
+import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
 const folders = [
@@ -34,6 +35,12 @@ const caseStatusOptions = [
 export function CasesScreen({ detailId }: { readonly detailId?: string }) {
   const router = useRouter();
   const state = useOperationsStore((value) => value);
+  useContextMenuAction('record.open', (subject) => {
+    if (subject !== undefined) router.push(`/cases/${subject}`);
+  });
+  useContextMenuAction('record.select', (subject) => {
+    if (subject !== undefined) state.selectCase(subject);
+  });
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<CaseStatusFilter>('all');
   const [sortKey, setSortKey] = useState<'code' | 'title' | 'createdAt' | 'priority'>('priority');
@@ -172,6 +179,8 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                       key={caseFile.id}
                       className={caseFile.id === selectedCase?.id ? 'is-selected' : ''}
                       data-interactive="true"
+                      data-context-menu="record"
+                      data-context-subject={caseFile.id}
                       onClick={() => state.selectCase(caseFile.id)}
                       onDoubleClick={() => router.push(`/cases/${caseFile.id}`)}
                     >
