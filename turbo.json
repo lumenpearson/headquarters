@@ -19,6 +19,7 @@
     "test": {
       "dependsOn": ["^build"],
       "env": ["HQ_CONTROL_PLANE_DATABASE_URL", "HQ_CONTROL_PLANE_TEST_DATABASE_URL"],
+      "inputs": ["$TURBO_DEFAULT$", ".env"],
       "outputs": ["coverage/**"]
     },
     "test:ui": {
