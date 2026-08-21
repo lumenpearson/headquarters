@@ -74,11 +74,6 @@ body.terminal-theme *::-webkit-scrollbar-thumb {
   background: var(--accent);
 }
 
-body.terminal-theme ::selection {
-  background: var(--accent-strong);
-  color: var(--text-inverse);
-}
-
 body.terminal-theme button,
 body.terminal-theme input,
 body.terminal-theme select,

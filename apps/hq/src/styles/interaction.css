@@ -1,0 +1,84 @@
+/*
+ * Pointer and selection policy for the whole application (R12, R23).
+ *
+ * Kept out of operations.css because it is a policy about how input behaves
+ * rather than a description of the shell's own surfaces: it must also reach
+ * the popups Base UI portals to `body`, which are not inside `.ops-shell`.
+ */
+
+/*
+ * R12: text selection is off by default.
+ *
+ * The shell reads as an instrument panel, and a stray drag across a status
+ * line used to paint half the interface in the accent colour. Selection is a
+ * capability of the places where text is genuinely the operator's to take --
+ * the fields they type into -- and of edit mode, where reading and copying a
+ * value is the point of the mode.
+ *
+ * Declared on `body` rather than on `.ops-shell` so it inherits into the
+ * portalled dialogs, menus and popovers as well.
+ */
+body.terminal-theme {
+  user-select: none;
+}
+
+/*
+ * No exemption is written for `input`, `textarea` or `contenteditable`, and
+ * that is deliberate rather than an omission: CSS UI defines `user-select` as
+ * computing to `contain` on an editing host, so a field under a `none`
+ * ancestor stays selectable by drag, double-click and Ctrl+A. Measured in
+ * Chromium before this file shipped: `getComputedStyle(field).userSelect`
+ * reads `none` there and the field selects anyway -- and it still does with
+ * `user-select: none` written directly onto the field, which is why no test
+ * accompanies this paragraph. A rule that repeated the browser's own
+ * guarantee would look load-bearing and never be.
+ */
+
+/*
+ * R12: edit mode lifts the restriction everywhere at once.
+ *
+ * Keyed off the same `data-edit-mode` attribute `EditModeRuntime` already
+ * publishes on the document root, which edit.css also uses -- one source for
+ * "is edit mode on", not a second copy of the question.
+ */
+html[data-edit-mode='on'] body.terminal-theme {
+  user-select: text;
+}
+
+/*
+ * R12: the selection colour, on the accent the operator actually chose.
+ *
+ * The previous rule painted `--accent-strong` from `:root`, which no theme and
+ * no accent ever touches -- so selection stayed the same orange through all
+ * eight themes. Inside the shell it now follows `--ops-orange`, which the
+ * theme and accent blocks in operations.css do move.
+ *
+ * The ink is black on dark themes and white on the two light ones, which is
+ * what R12 asks for and also what stays legible: `--ops-orange` is a bright
+ * amber under the dark themes and a deep rust under the light ones.
+ */
+.ops-shell {
+  --ops-selection-ink: #000;
+}
+
+.ops-shell[data-theme='high-contrast-light'],
+.ops-shell[data-theme='light-operations'] {
+  --ops-selection-ink: #fff;
+}
+
+.ops-shell ::selection,
+.ops-shell::selection {
+  background: var(--ops-orange);
+  color: var(--ops-selection-ink);
+}
+
+/*
+ * Portals live outside the shell, where the `--ops-*` family is not in scope;
+ * they keep the root accent. Making them theme-aware is R14's problem, not
+ * this one's -- every portalled surface is still styled from the dark-only
+ * `:root` token set today.
+ */
+::selection {
+  background: var(--accent-strong);
+  color: var(--text-inverse);
+}
