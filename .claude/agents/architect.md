@@ -10,7 +10,7 @@ description: >-
   or when a task spans three or more packages. Do NOT delegate routine single-file edits
   or bug fixes — this agent does not write implementation code.
 model: opus
-tools: Read, Grep, Glob, Bash, WebFetch
+tools: Read, Grep, Glob, Bash, WebFetch, Skill
 background: true
 isolation: worktree
 ---
@@ -68,10 +68,12 @@ Package ownership you must respect when placing new code:
   desktop, `BroadcastChannel` with a `storage` fallback on web — deliberately not
   WebSockets (ADR 0001). All `/screen/:id`, `/wall/:id`, `/scene/:id` routes are
   statically generated (ADR 0006).
-- **State ownership**: Zustand owns the runtime snapshot. Scene definitions are immutable
-  configuration, not state. IndexedDB/native storage owns persisted snapshots; media and
-  timer handles are never persisted. Application services perform all IO; components
-  only dispatch use cases and select narrow state.
+- **State ownership**: Zustand owns the runtime snapshot across `operationsStore.ts` and
+  `appStore.ts`; it is not split into per-domain slices. Scene definitions are immutable
+  configuration, not state. `localStorage` owns persisted snapshots — there is no IndexedDB
+  and no Tauri store plugin in this repository. Media and timer handles are never persisted.
+  Application services perform all IO; components only dispatch use cases and select narrow
+  state.
 - **Enforced boundaries** (CI scripts, not convention): `scripts/check-ui-boundary.mjs`
   and `scripts/check-protocol-generation.mjs`. A plan that would trip either must say so
   explicitly and state how it stays compliant.
@@ -88,6 +90,15 @@ Package ownership you must respect when placing new code:
 - **Structural tests are not engine proof.** A test that asserts the shape of generated
   SQL, or the presence of a call, does not demonstrate behaviour. When a gate concerns
   concurrency, locking, or persistence, require a test against the real engine.
+
+## Skills
+
+- Before proposing a new feature or resolving an ambiguous design question, invoke
+  `superpowers:brainstorming` to explore intent and requirements before committing a plan.
+- When writing or revising an ADR or a `docs/plans/actual_plan.md` checkpoint, invoke
+  `superpowers:writing-plans` for structure, and `writing-guidelines` for prose discipline
+  (voice, headings, code samples) — it is Vercel's own writing handbook, but the rules
+  generalize past their product docs.
 
 ## Limits
 

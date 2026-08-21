@@ -33,3 +33,18 @@ bundled by `eslint-config-next@16.3.1` still declare ESLint 9 as their maximum s
 The global `cargo tauri` command was not installed. The repository intentionally uses the pinned
 workspace CLI through `pnpm tauri`, so release builds do not depend on machine-global JavaScript or
 Rust CLI state.
+
+## Databases and external services
+
+Checked on 2026-08-21 against the live accounts, not against documentation.
+
+| Service                      | State                                                     | Notes                                                                                                                                                                                                 |
+| ---------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Neon (serverless PostgreSQL) | one project, `gremuchaya-hq-control-plane`, PostgreSQL 18 | Two databases. `neondb` holds the dev schema with migrations 0001-0006 applied; `hq_scratch` is the admin entry point for the destructive opt-in suite, which creates and drops `hqtest_*` beside it. |
+| Upstash (Redis)              | not provisioned                                           | `apps/control-plane/src/redis/coordination.ts` exists and passes unit tests but is constructed by nothing. No instance is needed until it is wired up — see C5 in `docs/plans/actual_plan.md`.        |
+| Browser storage              | `localStorage`, five keys                                 | No IndexedDB, no service worker, no Tauri store plugin.                                                                                                                                               |
+| `apps/file-bridge`           | content-addressed files under `<materialsMount>/.hq/`     | Disabled unless `readOnly: false` and `materialImport.enabled: true`.                                                                                                                                 |
+| CI                           | touches no database                                       | The 18-scenario PostgreSQL suite skips without `HQ_CONTROL_PLANE_TEST_DATABASE_URL`, which CI never sets. A green CI run therefore carries no database evidence at all.                               |
+
+Connection strings live only in `apps/control-plane/.env`, which git ignores. No credential, host
+or project URL belongs in this repository.

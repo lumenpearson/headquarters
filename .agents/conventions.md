@@ -83,11 +83,16 @@ Desktop-сборка — статический экспорт Next.js плюс 
 
 ## Владение состоянием
 
-- Zustand владеет текущим снимком клиентского состояния, разделённым на срезы: scene,
-  screens, operator, workspace, explorer, developer, connection.
+- Zustand владеет текущим снимком клиентского состояния в двух хранилищах —
+  `apps/hq/src/state/operationsStore.ts` и `apps/hq/src/state/appStore.ts`. На срезы по
+  доменам он не разделён; план, предполагающий срезы scene/screens/workspace/explorer/
+  connection, описывает цель, а не код.
 - Определения сцен — неизменяемая конфигурация, а не состояние исполнения.
-- IndexedDB и нативное хранилище владеют сохранёнными снимками; медиа и таймеры никогда
-  не персистятся.
+- `localStorage` владеет всем, что сохраняет браузер, — пять ключей:
+  `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
+  `gremuchaya-hq:snapshots:v1`, `hq.camera-material-assignments.v1` и ключ Яндекс Карт.
+  IndexedDB и плагина нативного хранилища Tauri в репозитории нет. Медиа и таймеры
+  никогда не персистятся.
 - Все операции ввода-вывода и межсрезовые переходы выполняют сервисы приложения;
   React-компоненты только вызывают use case и выбирают узкие срезы состояния.
 

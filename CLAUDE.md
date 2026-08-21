@@ -75,7 +75,9 @@ infrastructure (browser, bridge and Tauri adapters) implements domain/applicatio
 Package ownership:
 
 - `@gremuchaya/domain` — framework-free models, state machines, errors, paths and ports.
-- `@gremuchaya/config` — Zod trust-boundary schemas, parsers, migrations and scene validation.
+- `@gremuchaya/config` — Zod trust-boundary schemas, parsers and scene validation. It holds no
+  migrations: the only migrations in the repository are the immutable TypeScript constants in
+  `apps/control-plane/src/db/migrations.ts`.
 - `@gremuchaya/protocol` — generated Protobuf messages (`gremuchaya.*.v1`) and the shared
   `FileBridgeService` descriptor; no runtime policy or UI code.
 - `@gremuchaya/ui` — design tokens and scene-agnostic React primitives (wraps Base UI as the
@@ -102,7 +104,11 @@ State ownership:
   (a small `runtimeState` holder). It is not yet split into per-domain slices; treat any plan that
   assumes scene/screens/workspace/explorer/connection slices as describing a target, not the code.
 - Scene definitions (52 Zod-validated scenes) are immutable configuration, not runtime state.
-- IndexedDB/native storage owns persisted snapshots; media and timer handles are never persisted.
+- `localStorage` owns everything the browser persists, under five keys:
+  `gremuchaya-hq:operations:v3` (runtime state), `gremuchaya-hq:production-snapshots:v3`,
+  `gremuchaya-hq:snapshots:v1` (`LocalSnapshotPersistence`), `hq.camera-material-assignments.v1`,
+  and the Yandex Maps key. There is no IndexedDB and no Tauri store plugin anywhere in this
+  repository. Media and timer handles are never persisted.
 - Application services perform all IO and cross-slice transitions; React components only dispatch
   use cases and select narrow state.
 
