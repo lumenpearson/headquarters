@@ -6,6 +6,7 @@ import { TerminalUiProvider } from '@gremuchaya/ui/primitives';
 import { EditModeFrame } from '@/components/edit/EditModeFrame';
 import { EditModeRuntime } from '@/components/edit/EditModeRuntime';
 import { EditPanel } from '@/components/edit/EditPanel';
+import { StartupSequence } from '@/components/startup/StartupSequence';
 import { OperationsRuntime } from '@/simulation/OperationsRuntime';
 
 import '@gremuchaya/ui/styles/tokens.css';
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: RootLayoutProperties) {
       <body className="terminal-theme">
         <TerminalUiProvider>
           <EditModeRuntime />
+          <StartupSequence />
           <EditModeFrame />
           <OperationsRuntime>{children}</OperationsRuntime>
           <EditPanel />

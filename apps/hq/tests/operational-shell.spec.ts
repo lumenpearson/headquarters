@@ -600,6 +600,10 @@ test('supports keyboard semantics across the complete terminal primitive catalog
 
 test('locks the terminal visual contract for Base UI adapters', async ({ page }) => {
   await page.goto('/dev/ui');
+  // Let the R16 startup sequence finish first. It is an opaque overlay for a
+  // few hundred milliseconds, and a screenshot taken underneath it is black.
+  // It sets `pointer-events: none`, so only capture is affected, never a click.
+  await expect(page.locator('.startup-sequence')).toHaveCount(0);
   await page.locator('nextjs-portal').evaluateAll((elements) => {
     for (const element of elements) element.remove();
   });

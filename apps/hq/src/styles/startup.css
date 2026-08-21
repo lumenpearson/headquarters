@@ -1,0 +1,77 @@
+/*
+ * R16: the startup sequence.
+ *
+ * Kept out of operations.css for the same reason edit.css is: this is an
+ * overlay drawn over the shell for a few hundred milliseconds, not a part of
+ * the shell's grid.
+ */
+
+.startup-sequence {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-devtools);
+  display: grid;
+  /* R26: the overlay is exactly the viewport. A taller box here would make the
+     document scrollable for as long as the sequence runs. */
+  place-items: center;
+  /* Opaque: the sequence stands in for the shell rather than tinting it, so
+     what an operator sees during a cold start is a terminal coming up and not
+     a half-drawn dashboard behind a veil. */
+  background: var(--bg-0);
+  pointer-events: none;
+}
+
+.startup-sequence__readout {
+  display: grid;
+  gap: var(--space-1);
+  width: min(520px, 72vw);
+}
+
+.startup-sequence__line {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--font-xs);
+  letter-spacing: 0.12em;
+  /* Each line is new on the frame it appears, so animating it in is enough --
+     the staggering is done by the component revealing one line per stage. */
+  animation: startup-line-in var(--startup-stage-duration, 140ms) linear both;
+}
+
+.startup-sequence[data-stage='ready'] {
+  animation: startup-clear var(--startup-stage-duration, 140ms) linear both;
+}
+
+@keyframes startup-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes startup-clear {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+/*
+ * The platform preference is honoured here as well as through the
+ * `accessibility.reducedMotion` setting: the component stops drawing the
+ * overlay for the setting, and this stops it moving for an operator whose
+ * system asks for stillness without having touched the setting.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .startup-sequence__line,
+  .startup-sequence[data-stage='ready'] {
+    animation: none;
+  }
+}
