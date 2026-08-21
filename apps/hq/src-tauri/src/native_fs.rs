@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::{
     collections::HashMap,
     env, fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex,
@@ -231,23 +231,18 @@ pub fn unwatch_directory(
         .is_some())
 }
 
+/// Resolves a caller-supplied relative path inside `root`.
+///
+/// Segment classification is done on the string rather than through
+/// `Path::components`, because that classification is host-dependent: a Linux
+/// build reads `C:/Windows` and `..\secret` as ordinary file names, so a guard
+/// built on it would silently stop guarding anywhere except Windows.
 fn resolve_safe(root: &Path, relative_path: &str) -> Result<PathBuf, NativeFsError> {
-    let relative = Path::new(relative_path);
-    if relative.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    }) {
-        return Err(NativeFsError::InvalidPath);
-    }
     let mut current = root.to_path_buf();
-    for component in relative.components() {
-        if let Component::Normal(segment) = component {
-            current.push(segment);
-            if fs::symlink_metadata(&current)?.file_type().is_symlink() {
-                return Err(NativeFsError::SymbolicLink);
-            }
+    for segment in safe_segments(relative_path)? {
+        current.push(segment);
+        if fs::symlink_metadata(&current)?.file_type().is_symlink() {
+            return Err(NativeFsError::SymbolicLink);
         }
     }
     let canonical = current.canonicalize()?;
@@ -255,6 +250,29 @@ fn resolve_safe(root: &Path, relative_path: &str) -> Result<PathBuf, NativeFsErr
         return Err(NativeFsError::EscapedRoot);
     }
     Ok(canonical)
+}
+
+/// Splits a relative path into the plain descending segments it is allowed to
+/// contain, rejecting anything else before a single filesystem call is made.
+///
+/// Both separators are treated as separators on every host, `..` is refused, and
+/// a segment carrying `:` is refused because that covers drive prefixes
+/// (`C:/Windows`, `C:relative`) and NTFS alternate data streams alike.
+fn safe_segments(relative_path: &str) -> Result<Vec<&str>, NativeFsError> {
+    if relative_path.starts_with('/') || relative_path.starts_with('\\') {
+        return Err(NativeFsError::InvalidPath);
+    }
+    let mut segments = Vec::new();
+    for segment in relative_path.split(['/', '\\']) {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." || segment.contains(':') {
+            return Err(NativeFsError::InvalidPath);
+        }
+        segments.push(segment);
+    }
+    Ok(segments)
 }
 
 fn slash_path(path: &Path) -> String {
@@ -268,13 +286,38 @@ mod tests {
     #[test]
     fn rejects_parent_and_absolute_paths_before_io() {
         let root = Path::new("C:/hq");
-        assert!(matches!(
-            resolve_safe(root, "../secret"),
-            Err(NativeFsError::InvalidPath)
-        ));
-        assert!(matches!(
-            resolve_safe(root, "C:/Windows"),
-            Err(NativeFsError::InvalidPath)
-        ));
+        for candidate in [
+            "../secret",
+            r"..\secret",
+            "nested/../../secret",
+            "C:/Windows",
+            r"C:\Windows",
+            "C:relative",
+            "/etc/passwd",
+            r"\\server\share",
+            "report.txt:hidden",
+        ] {
+            assert!(
+                matches!(
+                    resolve_safe(root, candidate),
+                    Err(NativeFsError::InvalidPath)
+                ),
+                "expected {candidate} to be rejected without touching the filesystem"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_plain_descending_segments_with_either_separator() {
+        assert_eq!(safe_segments("").unwrap(), Vec::<&str>::new());
+        assert_eq!(safe_segments("./cases").unwrap(), vec!["cases"]);
+        assert_eq!(
+            safe_segments("cases/K-01/report.txt").unwrap(),
+            vec!["cases", "K-01", "report.txt"]
+        );
+        assert_eq!(
+            safe_segments(r"cases\K-01\report.txt").unwrap(),
+            vec!["cases", "K-01", "report.txt"]
+        );
     }
 }
