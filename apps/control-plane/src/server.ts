@@ -1,0 +1,219 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+
+import { timestampNow } from '@bufbuild/protobuf/wkt';
+import { cors, type ConnectRouter, type ServiceImpl } from '@connectrpc/connect';
+import { connectNodeAdapter } from '@connectrpc/connect-node';
+import { ControlPlaneService, SyncService, controlV1 } from '@gremuchaya/protocol';
+
+import { loadControlPlaneConfig, type ControlPlaneConfig } from './config.js';
+import { attachRealtimeTransport } from './realtime/server.js';
+import type { GroupEventPublication, RealtimeTransportOptions } from './realtime/server.js';
+import {
+  createConfiguredPairedDeviceLifecycle,
+  type ConfiguredPairedDeviceLifecycleOptions,
+} from './sync/configured-lifecycle.js';
+
+const serviceVersion = '0.1.0';
+const protocolVersion = 'gremuchaya.v1';
+
+export interface ControlPlaneStartOptions {
+  /**
+   * Explicit SyncService injection is reserved for health-only/test startup.
+   * Auth-configured startup always constructs the durable lifecycle instead so
+   * it cannot accidentally advertise an in-memory or mismatched auth runtime.
+   */
+  readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
+  readonly realtime?: RealtimeTransportOptions;
+  /**
+   * Composition-root seam for deterministic startup tests. It has no effect
+   * unless the complete auth configuration is enabled.
+   */
+  readonly pairedDeviceLifecycle?: ConfiguredPairedDeviceLifecycleOptions;
+}
+
+interface ResolvedControlPlaneCollaborators {
+  readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
+  readonly realtime?: RealtimeTransportOptions;
+}
+
+export async function startControlPlane(
+  config: ControlPlaneConfig,
+  options: ControlPlaneStartOptions = {},
+) {
+  const collaborators = await resolveControlPlaneCollaborators(config, options);
+  const startedAt = timestampNow();
+  const rpcHandler = connectNodeAdapter({
+    connect: true,
+    grpc: false,
+    grpcWeb: true,
+    routes: (router) => registerControlPlaneRoutes(router, startedAt, collaborators),
+  });
+  const server = createServer((request, response) => {
+    if (!prepareRpcResponse(request, response, config)) return;
+    void rpcHandler(request, response);
+  });
+  const realtime = attachRealtimeTransport(server, config, collaborators.realtime);
+
+  await new Promise<void>((resolveListening, rejectListening) => {
+    server.once('error', rejectListening);
+    server.listen(config.port, '127.0.0.1', resolveListening);
+  });
+
+  return {
+    server,
+    publishGroupEvent: (event: GroupEventPublication) => realtime.publish(event),
+    close: async () => {
+      await realtime.close();
+      await new Promise<void>((resolveClose, rejectClose) =>
+        server.close((error) => (error === undefined ? resolveClose() : rejectClose(error))),
+      );
+    },
+  };
+}
+
+function registerControlPlaneRoutes(
+  router: ConnectRouter,
+  startedAt: ReturnType<typeof timestampNow>,
+  collaborators: ResolvedControlPlaneCollaborators,
+): void {
+  const pairedDeviceLifecycleEnabled = collaborators.syncService !== undefined;
+  const authenticatedRealtimeEnabled = collaborators.realtime?.admission !== undefined;
+  router.service(ControlPlaneService, {
+    health() {
+      return {
+        service: 'gremuchaya-control-plane',
+        version: serviceVersion,
+        protocolVersion,
+        status: controlV1.ServingStatus.SERVING,
+        startedAt,
+        checkedAt: timestampNow(),
+        dependencies: [],
+      };
+    },
+    getCapabilities() {
+      return {
+        capabilities: [
+          { name: 'control.health', version: 'v1', enabled: true },
+          { name: 'transport.connect', version: 'v1', enabled: true },
+          { name: 'transport.grpc-web', version: 'v1', enabled: true },
+          { name: 'materials', version: 'v1', enabled: false },
+          { name: 'settings', version: 'v1', enabled: false },
+          {
+            name: 'sync.device-lifecycle',
+            version: 'v1',
+            enabled: pairedDeviceLifecycleEnabled,
+          },
+          { name: 'sync.realtime-admission', version: 'v1', enabled: authenticatedRealtimeEnabled },
+          // The complete CRDT/event/presence synchronization surface is still
+          // intentionally unavailable even when device lifecycle is injected.
+          { name: 'sync', version: 'v1', enabled: false },
+          { name: 'telemetry', version: 'v1', enabled: false },
+          { name: 'integration', version: 'v1', enabled: false },
+        ],
+      };
+    },
+  });
+  if (collaborators.syncService !== undefined)
+    router.service(SyncService, collaborators.syncService);
+}
+
+async function resolveControlPlaneCollaborators(
+  config: ControlPlaneConfig,
+  options: ControlPlaneStartOptions,
+): Promise<ResolvedControlPlaneCollaborators> {
+  if (config.auth === undefined) {
+    return {
+      ...(options.syncService === undefined ? {} : { syncService: options.syncService }),
+      ...(options.realtime === undefined ? {} : { realtime: options.realtime }),
+    };
+  }
+  if (options.syncService !== undefined) {
+    throw new Error(
+      'Auth-configured control-plane startup cannot override the durable SyncService lifecycle',
+    );
+  }
+  if (options.realtime?.admission !== undefined) {
+    throw new Error(
+      'Auth-configured control-plane startup cannot override durable realtime admission',
+    );
+  }
+  if (options.realtime?.allowUnauthenticatedDevelopment === true) {
+    throw new Error(
+      'Auth-configured control-plane startup cannot enable unauthenticated realtime transport',
+    );
+  }
+
+  const lifecycle = await createConfiguredPairedDeviceLifecycle(
+    config,
+    options.pairedDeviceLifecycle,
+  );
+  if (lifecycle === undefined) {
+    throw new Error('Auth-configured control-plane startup did not produce a durable lifecycle');
+  }
+
+  return {
+    syncService: lifecycle.syncService,
+    realtime: {
+      ...lifecycle.realtime,
+      ...(options.realtime?.hub === undefined ? {} : { hub: options.realtime.hub }),
+      ...(options.realtime?.revalidationIntervalMs === undefined
+        ? {}
+        : { revalidationIntervalMs: options.realtime.revalidationIntervalMs }),
+    },
+  };
+}
+
+function prepareRpcResponse(
+  request: IncomingMessage,
+  response: ServerResponse,
+  config: ControlPlaneConfig,
+): boolean {
+  setSecurityHeaders(response);
+  const origin = request.headers.origin;
+  if (origin !== undefined && !config.allowedOrigins.includes(origin)) {
+    response.statusCode = 403;
+    response.end();
+    return false;
+  }
+  if (origin !== undefined) {
+    response.setHeader('Access-Control-Allow-Origin', origin);
+    response.setHeader(
+      'Vary',
+      'Origin,Access-Control-Request-Method,Access-Control-Request-Headers',
+    );
+  }
+  response.setHeader('Access-Control-Expose-Headers', cors.exposedHeaders.join(','));
+  if (request.method === 'OPTIONS') {
+    response.statusCode = 204;
+    response.setHeader('Access-Control-Allow-Methods', cors.allowedMethods.join(','));
+    response.setHeader(
+      'Access-Control-Allow-Headers',
+      [...new Set([...cors.allowedHeaders, 'authorization', 'x-hq-bootstrap-secret'])].join(','),
+    );
+    response.setHeader('Access-Control-Max-Age', '7200');
+    response.end();
+    return false;
+  }
+  return true;
+}
+
+function setSecurityHeaders(response: ServerResponse): void {
+  response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  response.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+}
+
+if (isEntrypoint(import.meta.url, process.argv[1])) {
+  const config = loadControlPlaneConfig();
+  const running = await startControlPlane(config);
+  const address = running.server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : config.port;
+  process.stdout.write(`gremuchaya-control-plane listening on http://127.0.0.1:${port}\n`);
+}
+
+function isEntrypoint(moduleUrl: string, executablePath: string | undefined): boolean {
+  if (executablePath === undefined) return false;
+  const modulePath = new URL(moduleUrl).pathname.replace(/^\//u, '').replaceAll('/', '\\');
+  return modulePath.toLocaleLowerCase('en-US') === executablePath.toLocaleLowerCase('en-US');
+}

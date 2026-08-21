@@ -1,0 +1,5 @@
+{
+  "maxWorkers": 2,
+  "ffmpegPath": "ffmpeg",
+  "cameras": []
+}

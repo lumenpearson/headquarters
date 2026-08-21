@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+dist
+coverage
+target
+pnpm-lock.yaml
+apps/hq/src-tauri/gen
+apps/hq/next-env.d.ts
+packages/protocol/src/gen
+playwright-report
+test-results

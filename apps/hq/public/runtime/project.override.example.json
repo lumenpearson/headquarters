@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "values": {
+    "runtimeMode": "production",
+    "fixedClock": "14:32:17"
+  },
+  "assetOverrides": {
+    "photo-obukhov": {
+      "kind": "projected-file",
+      "virtualPath": "/ДЕЛА/ОБУХОВ/ФОТО/obukhov-final.jpg"
+    }
+  }
+}

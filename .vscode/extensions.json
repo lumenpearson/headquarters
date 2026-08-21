@@ -1,0 +1,17 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "rust-lang.rust-analyzer",
+    "tauri-apps.tauri-vscode",
+    "bufbuild.vscode-buf",
+    "ms-playwright.playwright",
+    "vitest.explorer"
+  ],
+  "unwantedRecommendations": [
+    // These format on save with their own rules and fight the committed
+    // Prettier configuration in this workspace.
+    "biomejs.biome",
+    "rvest.vs-code-prettier-eslint"
+  ]
+}

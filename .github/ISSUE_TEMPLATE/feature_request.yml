@@ -1,0 +1,78 @@
+name: Предложение по функциональности
+description: Предложить новую возможность или изменение поведения
+title: 'feat: '
+labels: ['enhancement', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Проект ведёт линейный план в `docs/plans/`. Прежде чем предлагать крупную
+        функциональность, проверьте, не запланирована ли она уже в одной из фаз.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Перед отправкой
+      options:
+        - label: Я проверил `docs/plans/` и не нашёл эту задачу среди запланированных
+          required: true
+        - label: Предложение не требует исполнения загруженного пользователем HTML, JavaScript или CSS
+          required: true
+        - label: Предложение не делает работу приложения зависимой от сети в основном контуре
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Подсистема
+      options:
+        - apps/hq — интерфейс оператора
+        - apps/hq/src-tauri — нативный слой Tauri
+        - apps/file-bridge — локальный файловый мост
+        - apps/control-plane — сетевой control-plane
+        - packages/ui — терминальные примитивы
+        - packages/layout-engine — раскладка плиток
+        - packages/settings-schema — настройки
+        - packages/protocol — Protobuf-контракты
+        - Другое / несколько
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает
+      description: Опишите проблему оператора, а не сразу реализацию
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предлагаемое решение
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Рассмотренные альтернативы
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Влияние на обязательные границы
+      description: |
+        Затрагивает ли предложение: терминальную дизайн-систему, запрет прокрутки страницы,
+        offline-first контур, Protobuf-транспорт, локальность секретов и путей?
+      placeholder: Например, нужен новый RPC в gremuchaya.material.v1 — REST не добавляется.
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Где это должно работать
+      multiple: true
+      options:
+        - Web
+        - Desktop Tauri (Windows 10/11)
+        - Legacy-оболочка (Windows 7–8.1, WebView2 109)

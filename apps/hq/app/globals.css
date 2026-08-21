@@ -1,0 +1,330 @@
+/*
+ * Tailwind is the styling engine from here on, but it is layered onto the
+ * existing terminal design system rather than replacing it.
+ *
+ * Preflight is deliberately NOT imported. Tailwind's reset rewrites margins,
+ * headings, lists and form elements, and this app already carries ~11k lines of
+ * hand-written CSS plus its own reset below that assume the unreset defaults.
+ * Importing preflight would silently restyle every existing screen. The one
+ * piece of preflight the utilities genuinely depend on -- a default border
+ * style, without which `border` renders nothing -- is reproduced in the base
+ * layer below.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/*
+ * Automatic source detection starts at this file and walks up, so it never
+ * reaches the workspace packages. `packages/ui` is where the Terminal* wrappers
+ * and the shadcn set live, and its class names must be scanned or the utilities
+ * they use are pruned from the build.
+ */
+@source '../../../packages/ui/src';
+@source '../../../packages/layout-engine/src';
+
+@import '../src/styles/hq.css';
+@import '../src/styles/terminal.css';
+@import '../src/styles/operations.css';
+@import '../src/styles/edit.css';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+/*
+ ---break---
+ */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * The `--*` custom properties in @gremuchaya/ui/styles/tokens.css remain the
+ * single source of truth for the design language. `@theme inline` makes each
+ * generated utility emit `var(--token)` instead of copying the token's value,
+ * so a runtime theme or density change still moves both the Tailwind utilities
+ * and the hand-written CSS together. Duplicating literals here would let the
+ * two drift.
+ */
+@theme inline {
+  --color-hq-bg-0: var(--bg-0);
+  --color-hq-bg-1: var(--bg-1);
+  --color-hq-bg-2: var(--bg-2);
+  --color-hq-bg-3: var(--bg-3);
+  --color-hq-panel-0: var(--panel-0);
+  --color-hq-panel-1: var(--panel-1);
+  --color-hq-panel-raised: var(--panel-raised);
+
+  --color-hq-text-0: var(--text-0);
+  --color-hq-text-1: var(--text-1);
+  --color-hq-text-2: var(--text-2);
+  --color-hq-text-inverse: var(--text-inverse);
+
+  --color-hq-line-0: var(--line-0);
+  --color-hq-line-1: var(--line-1);
+  --color-hq-line-2: var(--line-2);
+  --color-hq-line-focus: var(--line-focus);
+
+  --color-hq-accent: var(--accent);
+  --color-hq-accent-strong: var(--accent-strong);
+  --color-hq-accent-soft: var(--accent-soft);
+  --color-hq-warning: var(--warning);
+  --color-hq-warning-soft: var(--warning-soft);
+  --color-hq-critical: var(--critical);
+  --color-hq-critical-soft: var(--critical-soft);
+  --color-hq-ok: var(--ok);
+  --color-hq-ok-soft: var(--ok-soft);
+
+  --spacing-hq-1: var(--space-1);
+  --spacing-hq-2: var(--space-2);
+  --spacing-hq-3: var(--space-3);
+  --spacing-hq-4: var(--space-4);
+  --spacing-hq-5: var(--space-5);
+  --spacing-hq-6: var(--space-6);
+  --spacing-hq-7: var(--space-7);
+  --spacing-hq-8: var(--space-8);
+
+  --text-hq-xs: var(--font-xs);
+  --text-hq-sm: var(--font-sm);
+  --text-hq-md: var(--font-md);
+  --text-hq-lg: var(--font-lg);
+  --text-hq-xl: var(--font-xl);
+  --text-hq-2xl: var(--font-2xl);
+  --text-hq-3xl: var(--font-3xl);
+
+  --shadow-hq-panel: var(--shadow-panel);
+  --shadow-hq-window: var(--shadow-window);
+
+  --duration-hq-micro: var(--motion-micro);
+  --duration-hq-standard: var(--motion-standard);
+  --duration-hq-panel: var(--motion-panel);
+  --duration-hq-analysis: var(--motion-analysis);
+
+  /*
+   * `--font-sans`, `--font-mono`, `--radius-1` and `--radius-2` are deliberately
+   * absent. Their names sit in Tailwind's own `--font-*` / `--radius-*`
+   * namespaces, so `--font-sans: var(--font-sans)` inside @theme would be a
+   * self-reference. tokens.css already declares them unlayered, which outranks
+   * the theme layer, so `font-sans` and `font-mono` resolve to the terminal
+   * stacks without any mapping here.
+   */
+
+  /* shadcn/ui preset surface. */
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent: var(--ui-accent);
+  --color-accent-foreground: var(--ui-accent-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  /*
+   * The only part of Tailwind preflight the utility layer cannot work without:
+   * `border` sets a width but no style, so an unstyled default renders nothing.
+   * Width stays 0 so adding this changes no existing element.
+   */
+  *,
+  ::before,
+  ::after {
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--line-1);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  background: #030303;
+}
+
+body {
+  color: var(--text-0);
+  font-family: var(--font-sans);
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+.bootstrap-shell {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  padding: 32px;
+  place-content: center;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - 320px),
+      #1d1d1d calc(50% - 320px) calc(50% - 319px),
+      transparent calc(50% - 319px) calc(50% + 319px),
+      #1d1d1d calc(50% + 319px) calc(50% + 320px),
+      transparent calc(50% + 320px)
+    ),
+    #030303;
+  text-align: center;
+}
+
+.bootstrap-shell::before {
+  position: absolute;
+  inset: 20% 0 auto;
+  color: rgb(255 255 255 / 4%);
+  content: '010101 / MESH::INITIALIZE / 0x7F2A /\\/\\/\\ SIGNAL / 010101';
+  font: 12px/1.5 var(--font-mono);
+  letter-spacing: 0.35em;
+  white-space: nowrap;
+}
+
+.bootstrap-shell p,
+.bootstrap-shell span {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+}
+
+.bootstrap-shell h1 {
+  margin: 12px 0 8px;
+  color: #f2f2ef;
+  font-size: clamp(24px, 4vw, 52px);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.bootstrap-shell h1::before,
+.bootstrap-shell h1::after {
+  color: #ff3d00;
+}
+
+.bootstrap-shell h1::before {
+  content: '[ ';
+}
+
+.bootstrap-shell h1::after {
+  content: ' ]';
+}
+
+.bootstrap-shell button {
+  min-height: 42px;
+  margin-top: 18px;
+  border: 1px solid #ff3d00;
+  background: rgb(255 61 0 / 9%);
+  color: #ff5a24;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+/*
+ ---break---
+ */
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.488 0.243 264.376);
+  --primary-foreground: oklch(0.97 0.014 254.604);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --ui-accent: oklch(0.967 0.001 286.375);
+  --ui-accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --radius: 0;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: oklch(0.546 0.245 262.881);
+  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: oklch(0.705 0.015 286.067);
+}
+/*
+ ---break---
+ */
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.424 0.199 265.638);
+  --primary-foreground: oklch(0.97 0.014 254.604);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --ui-accent: oklch(0.274 0.006 286.033);
+  --ui-accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.623 0.214 259.815);
+  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.552 0.016 285.938);
+}

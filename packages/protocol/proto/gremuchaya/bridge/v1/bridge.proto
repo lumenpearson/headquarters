@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+package gremuchaya.bridge.v1;
+
+enum EntryKind {
+  ENTRY_KIND_UNSPECIFIED = 0;
+  ENTRY_KIND_FILE = 1;
+  ENTRY_KIND_DIRECTORY = 2;
+}
+
+enum FileEventKind {
+  FILE_EVENT_KIND_UNSPECIFIED = 0;
+  FILE_EVENT_KIND_ADDED = 1;
+  FILE_EVENT_KIND_CHANGED = 2;
+  FILE_EVENT_KIND_REMOVED = 3;
+  FILE_EVENT_KIND_DIRECTORY_CHANGED = 4;
+  FILE_EVENT_KIND_READY = 5;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string service = 1;
+  uint32 protocol_version = 2;
+  string status = 3;
+  string started_at = 4;
+  string transport = 5;
+}
+
+message ListRequest {
+  string mount_id = 1;
+  string path = 2;
+}
+
+message BridgeEntry {
+  string name = 1;
+  string path = 2;
+  EntryKind kind = 3;
+  string mime_type = 4;
+  uint64 byte_size = 5;
+  string modified_at = 6;
+}
+
+message ListResponse {
+  repeated BridgeEntry entries = 1;
+}
+
+message ReadFileRequest {
+  string mount_id = 1;
+  string path = 2;
+}
+
+message ReadFileResponse {
+  bytes data = 1;
+  string name = 2;
+  string mime_type = 3;
+  uint64 total_size = 4;
+  uint32 sequence = 5;
+}
+
+message WatchRequest {
+  repeated string mount_ids = 1;
+}
+
+message WatchResponse {
+  FileEventKind kind = 1;
+  string mount_id = 2;
+  string path = 3;
+  uint64 issued_at_ms = 4;
+}
+
+// Local-only, resumable browser-to-mirror import. The wire format stays binary
+// Protobuf/gRPC-Web; uploaded bytes never use a REST JSON fallback.
+message BeginMaterialImportRequest {
+  string mount_id = 1;
+  string file_name = 2;
+  string declared_mime_type = 3;
+  uint64 total_size = 4;
+  string expected_blake3 = 5;
+}
+
+message MaterialImportSession {
+  string upload_id = 1;
+  uint64 total_size = 2;
+  uint64 received_size = 3;
+  uint32 chunk_size = 4;
+  string state = 5;
+}
+
+message BeginMaterialImportResponse {
+  MaterialImportSession session = 1;
+}
+
+message UploadMaterialChunkRequest {
+  string upload_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+message UploadMaterialChunkResponse {
+  MaterialImportSession session = 1;
+}
+
+message GetMaterialImportStatusRequest {
+  string upload_id = 1;
+}
+
+message GetMaterialImportStatusResponse {
+  MaterialImportSession session = 1;
+}
+
+message CompleteMaterialImportRequest {
+  string upload_id = 1;
+}
+
+message MaterialImportEntry {
+  string material_id = 1;
+  string display_name = 2;
+  string mime_type = 3;
+  uint64 byte_size = 4;
+  string content_hash = 5;
+  string created_at = 6;
+}
+
+message CompleteMaterialImportResponse {
+  MaterialImportEntry material = 1;
+  bool deduplicated = 2;
+}
+
+message CancelMaterialImportRequest {
+  string upload_id = 1;
+}
+
+message CancelMaterialImportResponse {
+  MaterialImportSession session = 1;
+}
+
+message ListImportedMaterialsRequest {
+  string mount_id = 1;
+  uint32 page_size = 2;
+  string cursor = 3;
+}
+
+message ListImportedMaterialsResponse {
+  repeated MaterialImportEntry materials = 1;
+  string next_cursor = 2;
+}
+
+message ReadImportedMaterialRequest {
+  string mount_id = 1;
+  string material_id = 2;
+}
+
+message ReadImportedMaterialResponse {
+  bytes data = 1;
+  MaterialImportEntry material = 2;
+  uint32 sequence = 3;
+}
+
+// A short-lived loopback capability for browser-native media range requests.
+// Business control remains gRPC-Web; the URL is only the byte data plane and
+// never exposes the content-addressed object path.
+message GetMaterialPlaybackGrantRequest {
+  string mount_id = 1;
+  string material_id = 2;
+}
+
+message MaterialPlaybackGrant {
+  string grant_id = 1;
+  string url = 2;
+  uint64 expires_at_ms = 3;
+  string mime_type = 4;
+  uint64 byte_size = 5;
+}
+
+message GetMaterialPlaybackGrantResponse {
+  MaterialPlaybackGrant grant = 1;
+}
+
+message RevokeMaterialPlaybackGrantRequest {
+  string grant_id = 1;
+}
+
+message RevokeMaterialPlaybackGrantResponse {
+  bool revoked = 1;
+}
+
+service FileBridgeService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc ReadFile(ReadFileRequest) returns (stream ReadFileResponse);
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+  rpc BeginMaterialImport(BeginMaterialImportRequest) returns (BeginMaterialImportResponse);
+  rpc UploadMaterialChunk(UploadMaterialChunkRequest) returns (UploadMaterialChunkResponse);
+  rpc GetMaterialImportStatus(GetMaterialImportStatusRequest) returns (GetMaterialImportStatusResponse);
+  rpc CompleteMaterialImport(CompleteMaterialImportRequest) returns (CompleteMaterialImportResponse);
+  rpc CancelMaterialImport(CancelMaterialImportRequest) returns (CancelMaterialImportResponse);
+  rpc ListImportedMaterials(ListImportedMaterialsRequest) returns (ListImportedMaterialsResponse);
+  rpc ReadImportedMaterial(ReadImportedMaterialRequest) returns (stream ReadImportedMaterialResponse);
+  rpc GetMaterialPlaybackGrant(GetMaterialPlaybackGrantRequest) returns (GetMaterialPlaybackGrantResponse);
+  rpc RevokeMaterialPlaybackGrant(RevokeMaterialPlaybackGrantRequest) returns (RevokeMaterialPlaybackGrantResponse);
+}

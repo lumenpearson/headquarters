@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="72" fill="#081014"/>
+  <path d="M256 54 458 256 256 458 54 256Z" fill="#111d21" stroke="#b95745" stroke-width="14"/>
+  <circle cx="256" cy="256" r="104" fill="none" stroke="#789ba2" stroke-width="4" opacity=".55"/>
+  <path d="M256 118v276M118 256h276" stroke="#789ba2" stroke-width="3" opacity=".4"/>
+  <text x="256" y="286" fill="#e6ded4" font-family="Arial, sans-serif" font-size="94" font-weight="700" text-anchor="middle">ГС</text>
+</svg>

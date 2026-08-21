@@ -1,0 +1,951 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "archive-hydropower-station",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-apartment-hallway",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-apartment-kitchen",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-autozak",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-barrier-rybakov",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-chumakova-escort",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-gateway-karaev",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-gibdd-lipatov",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-hq-internal",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-interrogation-makeev",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-interrogation-room",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-karaev-boris",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-lipatov-yard",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-shop-chumakova",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-street-01",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-street-02",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-street-03",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "cctv-street-04",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "crop-silver94",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-address-target",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-blind-point",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-frolovy-village",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-goltsov-mobile",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-kamaz-tracker",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-leningrad-region",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-lipatov-yard",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-money-tracker",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-pedestrian-bridge",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-savvatievskoe",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-spb-kad-shushary",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-tver-bologoe",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "map-world-lipatov",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "news-background",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "news-bondarev",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "news-iksanov",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-bondarev-sketch",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-chernogor",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-egorov",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-frolova-family",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-frolova-old",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-glukhov",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-guseynov-car",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-guseynov-helmet",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-hmury",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-iksanov",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-limousine-scene",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-lipatov",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-lyuda-after",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-lyuda-before",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-lyudmila-frolova",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-murzaev-front",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-murzaev-profile",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-obukhov",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-polozov",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-poteryaeva",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-rybakov-alone",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-rybakov-beach",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-rybakov-gear",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-rybakov-group",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-shcherba",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-shigorev-young",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-shram",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-silver94-miner",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-sultan",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-sultan-detail",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-sultan-room",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "photo-wedding",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-frolovy-arrival",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-goltsov-canopy",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-goltsov-forest",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-goltsov-tasking",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-hunting-cabin",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-hydropower-station",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-kamaz",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-lipatov-briefcase",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-lipatov-gates",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "sat-region-wide",
+      "type": "map",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "scheme-hydropower-station",
+      "type": "image",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "signal-placeholder",
+      "type": "document",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "video-counter-surveillance",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "video-kozitsky-captive",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "video-lipatov-return",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "video-makeev-interrogation",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "video-silver94",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "video-vehicle-stream",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    },
+    {
+      "id": "video-vehicles-overhead",
+      "type": "video",
+      "status": "placeholder",
+      "location": {
+        "kind": "static",
+        "url": "/assets/placeholders/media-placeholder.svg"
+      },
+      "expectedMimeType": "image/svg+xml",
+      "notes": "Локальный production-safe placeholder; заменяется через project.override.json без изменения сцен."
+    }
+  ]
+}

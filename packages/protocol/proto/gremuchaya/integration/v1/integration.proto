@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package gremuchaya.integration.v1;
+
+import "google/protobuf/timestamp.proto";
+import "gremuchaya/common/v1/common.proto";
+
+enum IntegrationProvider {
+  INTEGRATION_PROVIDER_UNSPECIFIED = 0;
+  INTEGRATION_PROVIDER_GITHUB = 1;
+  INTEGRATION_PROVIDER_YANDEX_MAPS = 2;
+  INTEGRATION_PROVIDER_VERCEL = 3;
+}
+
+enum IntegrationState {
+  INTEGRATION_STATE_UNSPECIFIED = 0;
+  INTEGRATION_STATE_NOT_CONFIGURED = 1;
+  INTEGRATION_STATE_READY = 2;
+  INTEGRATION_STATE_DEGRADED = 3;
+  INTEGRATION_STATE_REVOKED = 4;
+}
+
+message IntegrationStatus {
+  IntegrationProvider provider = 1;
+  IntegrationState state = 2;
+  string account_label = 3;
+  repeated string granted_capabilities = 4;
+  google.protobuf.Timestamp checked_at = 5;
+  string detail = 6;
+}
+
+message IssueAttachment {
+  string name = 1;
+  string media_type = 2;
+  bytes content = 3;
+}
+
+message IssueDraft {
+  string title = 1;
+  string body_markdown = 2;
+  repeated string labels = 3;
+  repeated IssueAttachment attachments = 4;
+  string repository = 5;
+}
+
+message BuildIssueDraftRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  string problem = 2;
+  string reproduction = 3;
+  string element_id = 4;
+  string screen_id = 5;
+  string viewport = 6;
+  string theme = 7;
+  string before_value = 8;
+  string after_value = 9;
+  string patch = 10;
+  repeated IssueAttachment attachments = 11;
+}
+
+message BuildIssueDraftResponse {
+  IssueDraft draft = 1;
+}
+
+message OpenPrefilledIssueRequest {
+  IssueDraft draft = 1;
+}
+
+message OpenPrefilledIssueResponse {
+  string url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message CreateIssueRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  IssueDraft draft = 2;
+  bool confirmed = 3;
+}
+
+message CreateIssueResponse {
+  string url = 1;
+  uint64 issue_number = 2;
+}
+
+message TranslationProposal {
+  gremuchaya.common.v1.ResourceId id = 1;
+  string locale = 2;
+  string key = 3;
+  string source_value = 4;
+  string proposed_value = 5;
+  string english_reference = 6;
+  repeated string placeholders = 7;
+  string transliteration = 8;
+  gremuchaya.common.v1.Revision revision = 9;
+}
+
+message CreateTranslationProposalRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  TranslationProposal proposal = 2;
+}
+
+message CreateTranslationProposalResponse {
+  TranslationProposal proposal = 1;
+}
+
+message CreateTranslationPullRequestRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId proposal_id = 2;
+  bool confirmed = 3;
+}
+
+message CreateTranslationPullRequestResponse {
+  string url = 1;
+  uint64 pull_request_number = 2;
+  bool draft = 3;
+}
+
+message GetIntegrationStatusRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  IntegrationProvider provider = 2;
+}
+
+message GetIntegrationStatusResponse {
+  IntegrationStatus status = 1;
+}
+
+enum PullRequestState {
+  PULL_REQUEST_STATE_UNSPECIFIED = 0;
+  PULL_REQUEST_STATE_OPEN = 1;
+  PULL_REQUEST_STATE_MERGED = 2;
+  PULL_REQUEST_STATE_CLOSED = 3;
+}
+
+message GetPullRequestStatusRequest {
+  string repository = 1;
+  uint64 pull_request_number = 2;
+}
+
+message GetPullRequestStatusResponse {
+  PullRequestState state = 1;
+  string url = 2;
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+service IntegrationService {
+  rpc BuildIssueDraft(BuildIssueDraftRequest) returns (BuildIssueDraftResponse);
+  rpc OpenPrefilledIssue(OpenPrefilledIssueRequest) returns (OpenPrefilledIssueResponse);
+  rpc CreateIssue(CreateIssueRequest) returns (CreateIssueResponse);
+  rpc CreateTranslationProposal(CreateTranslationProposalRequest) returns (CreateTranslationProposalResponse);
+  rpc CreateTranslationPullRequest(CreateTranslationPullRequestRequest) returns (CreateTranslationPullRequestResponse);
+  rpc GetIntegrationStatus(GetIntegrationStatusRequest) returns (GetIntegrationStatusResponse);
+  rpc GetPullRequestStatus(GetPullRequestStatusRequest) returns (GetPullRequestStatusResponse);
+}

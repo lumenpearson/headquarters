@@ -1,0 +1,4 @@
+# Formats and lints ONLY staged files. This is deliberate: the repository is
+# often worked on by more than one person or agent at a time, so a hook that
+# touched the whole tree would rewrite someone else's uncommitted work.
+pnpm exec lint-staged

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#071011"/>
+      <stop offset="1" stop-color="#111b19"/>
+    </linearGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#86a094" stroke-opacity=".08"/>
+    </pattern>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect width="1600" height="900" fill="url(#grid)"/>
+  <g fill="none" stroke="#cf593f" stroke-width="2" opacity=".72">
+    <path d="M120 132h180M120 132v180M1480 768h-180M1480 768v-180"/>
+    <circle cx="800" cy="450" r="84"/>
+    <path d="M670 450h260M800 320v260"/>
+  </g>
+  <text x="120" y="728" fill="#dfded6" font-family="ui-monospace, monospace" font-size="44" letter-spacing="7">ОПЕРАТИВНЫЙ МАТЕРИАЛ</text>
+  <text x="122" y="784" fill="#86a094" font-family="ui-monospace, monospace" font-size="22" letter-spacing="3">ЛОКАЛЬНЫЙ PLACEHOLDER / ГОТОВ К ЗАМЕНЕ</text>
+</svg>

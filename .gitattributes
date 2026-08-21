@@ -1,0 +1,36 @@
+# Normalize every text file to LF in the repository and in the working tree.
+# The toolchain is Windows-first, but Prettier is configured with
+# `endOfLine: "lf"`, so a CRLF checkout makes `pnpm format:check` fail on every
+# file. Pinning eol=lf keeps the Windows, Linux and CI checkouts identical.
+* text=auto eol=lf
+
+# Windows-native scripts must keep CRLF or cmd.exe mis-parses them.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Explicit binaries: never touch these, and never show them as conflicted text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.webm binary
+*.mp4 binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.msi binary
+
+# Generated or vendored trees: keep them out of diffs and language stats.
+pnpm-lock.yaml -diff linguist-generated
+packages/protocol/src/gen/** linguist-generated
+apps/hq/src-tauri/gen/** linguist-generated
+apps/hq/next-env.d.ts linguist-generated
+apps/hq/src-tauri/Cargo.lock -diff

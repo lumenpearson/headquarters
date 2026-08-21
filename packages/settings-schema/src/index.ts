@@ -1,0 +1,685 @@
+export const settingCategories = [
+  'general',
+  'information',
+  'layout',
+  'tiles',
+  'themes',
+  'styles',
+  'colors',
+  'typography',
+  'sizes',
+  'backgrounds',
+  'patterns',
+  'animations',
+  'startup',
+  'player',
+  'cameras',
+  'map',
+  'tables',
+  'popups',
+  'keybinds',
+  'localization',
+  'dateTime',
+  'telemetry',
+  'simulation',
+  'groups',
+  'materials',
+  'titlebar',
+  'accessibility',
+  'performance',
+  'privacy',
+  'diagnostics',
+  'github',
+  'advanced',
+] as const;
+
+export type SettingCategory = (typeof settingCategories)[number];
+export type SettingValue = boolean | number | string | readonly string[];
+export type SettingValues = Readonly<Record<string, SettingValue>>;
+export type SettingScope = 'factory' | 'group' | 'device' | 'local-draft' | 'session-preview';
+
+/**
+ * A serialisable description of the only controls the safe editor is allowed
+ * to render. The editor deliberately has no arbitrary text/CSS/JS mode: each
+ * value still has to pass the validator attached to its definition.
+ */
+export type SettingEditor =
+  | { readonly kind: 'boolean' }
+  | { readonly kind: 'enum'; readonly options: readonly string[] }
+  | {
+      readonly kind: 'number';
+      readonly minimum: number;
+      readonly maximum: number;
+      readonly step: number;
+    }
+  | { readonly kind: 'string-list'; readonly delimiter: ',' };
+
+export interface SettingDefinition {
+  readonly id: string;
+  readonly category: SettingCategory;
+  readonly defaultValue: SettingValue;
+  readonly scope: Exclude<SettingScope, 'factory'>;
+  readonly description: string;
+  readonly editor: SettingEditor;
+  readonly validate: (value: unknown) => value is SettingValue;
+}
+
+export interface SettingsSnapshot {
+  readonly revision: number;
+  readonly values: SettingValues;
+}
+
+export interface SettingsDraft {
+  readonly baseRevision: number;
+  readonly values: SettingValues;
+  readonly changedIds: readonly string[];
+  readonly history: readonly SettingsHistoryEvent[];
+}
+
+/**
+ * A schema-validated immutable draft state. Checkpoints intentionally contain
+ * values only: they never carry executable CSS, HTML, JavaScript or secrets.
+ */
+export interface SettingsDraftCheckpoint {
+  readonly values: SettingValues;
+  readonly changedIds: readonly string[];
+}
+
+export interface SettingsHistoryEvent {
+  readonly id: string;
+  readonly at: string;
+  readonly operation: 'patch' | 'reset-category' | 'reset-all' | 'import' | 'restore';
+  readonly category?: SettingCategory;
+  readonly changedIds: readonly string[];
+}
+
+export interface SettingsMutationMetadata {
+  readonly id: string;
+  readonly at: string;
+}
+
+export interface SettingsPatch {
+  readonly id: string;
+  readonly value: unknown;
+}
+
+type SettingValidator = ((value: unknown) => value is SettingValue) & {
+  readonly editor: SettingEditor;
+};
+
+function withEditor(
+  editor: SettingEditor,
+  validate: (value: unknown) => value is SettingValue,
+): SettingValidator {
+  return Object.assign(validate, { editor });
+}
+
+const oneOf = <const Values extends readonly string[]>(values: Values): SettingValidator =>
+  withEditor(
+    { kind: 'enum', options: values },
+    (value): value is Values[number] =>
+      typeof value === 'string' && values.includes(value as Values[number]),
+  );
+
+const isBoolean = withEditor(
+  { kind: 'boolean' },
+  (value): value is boolean => typeof value === 'boolean',
+);
+const numberWithin = (minimum: number, maximum: number) =>
+  withEditor(
+    {
+      kind: 'number',
+      minimum,
+      maximum,
+      step: Number.isInteger(minimum) && Number.isInteger(maximum) ? 1 : 0.01,
+    },
+    (value): value is number =>
+      typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum,
+  );
+const isStringList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) && value.every((item) => typeof item === 'string'),
+);
+const oneOfNumbers = (values: readonly number[]) =>
+  withEditor(
+    { kind: 'enum', options: values.map(String) },
+    (value): value is number => typeof value === 'number' && values.includes(value),
+  );
+
+export const settingsDefinitions: readonly SettingDefinition[] = [
+  definition(
+    'general.localOnly',
+    'general',
+    true,
+    'device',
+    'Keep this client usable without a group.',
+    isBoolean,
+  ),
+  definition(
+    'information.showOperationalContext',
+    'information',
+    true,
+    'device',
+    'Show operation and sector context in panels.',
+    isBoolean,
+  ),
+  definition(
+    'layout.density',
+    'layout',
+    'dense',
+    'device',
+    'Screen density preset.',
+    oneOf(['comfortable', 'dense', 'mainframe']),
+  ),
+  definition(
+    'tiles.hiddenIds',
+    'tiles',
+    [],
+    'device',
+    'Tile IDs explicitly hidden by the operator.',
+    isStringList,
+  ),
+  definition(
+    'themes.id',
+    'themes',
+    'terminal-red',
+    'device',
+    'Active terminal color theme.',
+    oneOf([
+      'terminal-red',
+      'terminal-green',
+      'amber-crt',
+      'cold-cyan',
+      'monochrome',
+      'high-contrast-dark',
+      'high-contrast-light',
+      'light-operations',
+    ]),
+  ),
+  definition(
+    'styles.mode',
+    'styles',
+    'strict-terminal',
+    'device',
+    'Terminal presentation style.',
+    oneOf(['strict-terminal', 'dense-mainframe', 'tactical-grid', 'minimal-terminal']),
+  ),
+  definition(
+    'colors.accent',
+    'colors',
+    'orange',
+    'device',
+    'Accent token family, never arbitrary CSS.',
+    oneOf(['orange', 'green', 'amber', 'cyan', 'red']),
+  ),
+  definition(
+    'typography.scale',
+    'typography',
+    1,
+    'device',
+    'Typography scale relative to the selected density.',
+    numberWithin(0.85, 1.25),
+  ),
+  definition(
+    'sizes.scale',
+    'sizes',
+    1,
+    'device',
+    'Tile and control scale within safe layout bounds.',
+    numberWithin(0.85, 1.2),
+  ),
+  definition(
+    'backgrounds.kind',
+    'backgrounds',
+    'terminal-grid',
+    'device',
+    'Application background layer.',
+    oneOf([
+      'solid',
+      'gradient',
+      'noise',
+      'scanlines',
+      'terminal-grid',
+      'dotted-grid',
+      'barber-lines',
+      'radar',
+      'particles',
+      'image',
+      'video',
+    ]),
+  ),
+  definition(
+    'patterns.focus',
+    'patterns',
+    'brackets',
+    'device',
+    'Focused-element terminal pattern.',
+    oneOf(['solid', 'dashed', 'dotted', 'brackets', 'barber', 'scan', 'glow']),
+  ),
+  definition(
+    'animations.enabled',
+    'animations',
+    true,
+    'device',
+    'Enable motion allowed by accessibility settings.',
+    isBoolean,
+  ),
+  definition(
+    'animations.intensity',
+    'animations',
+    0.65,
+    'device',
+    'Global animation intensity.',
+    numberWithin(0, 1),
+  ),
+  definition(
+    'startup.enabled',
+    'startup',
+    true,
+    'device',
+    'Show the optimized startup sequence.',
+    isBoolean,
+  ),
+  definition(
+    'player.defaultRate',
+    'player',
+    1,
+    'device',
+    'Default media playback speed.',
+    oneOfNumbers([0.5, 1, 1.5, 2]),
+  ),
+  definition(
+    'cameras.gridDensity',
+    'cameras',
+    'adaptive',
+    'device',
+    'Camera-grid presentation mode.',
+    oneOf(['adaptive', '3x4', '3x3', '2x2']),
+  ),
+  definition(
+    'map.mode',
+    'map',
+    'tactical',
+    'device',
+    'Initial map representation.',
+    oneOf(['tactical', 'map', 'satellite']),
+  ),
+  definition(
+    'tables.pageSize',
+    'tables',
+    50,
+    'device',
+    'Virtualized table page size.',
+    numberWithin(10, 200),
+  ),
+  definition(
+    'popups.longPress',
+    'popups',
+    true,
+    'device',
+    'Enable long-press contextual actions.',
+    isBoolean,
+  ),
+  definition(
+    'keybinds.scheme',
+    'keybinds',
+    'terminal-default',
+    'device',
+    'Named keybind collection.',
+    oneOf(['terminal-default', 'vim-inspired', 'accessibility']),
+  ),
+  definition(
+    'localization.locale',
+    'localization',
+    'ru',
+    'device',
+    'Application locale.',
+    oneOf(['ru', 'en']),
+  ),
+  definition(
+    'dateTime.mode',
+    'dateTime',
+    'operation',
+    'device',
+    'Display operation or system time without changing the OS clock.',
+    oneOf(['operation', 'system', 'utc']),
+  ),
+  definition(
+    'telemetry.source',
+    'telemetry',
+    'simulation',
+    'group',
+    'Telemetry source selection.',
+    oneOf(['simulation', 'native', 'hybrid']),
+  ),
+  definition(
+    'simulation.preset',
+    'simulation',
+    'normal',
+    'group',
+    'Marked simulation preset.',
+    oneOf([
+      'normal',
+      'elevated',
+      'degraded',
+      'critical',
+      'incident',
+      'recovery',
+      'network-attack',
+      'storage-exhaustion',
+      'cpu-overload',
+    ]),
+  ),
+  definition(
+    'groups.authority',
+    'groups',
+    'leader',
+    'group',
+    'Session authority strategy.',
+    oneOf(['leader', 'multi-authority']),
+  ),
+  definition(
+    'materials.defaultCategory',
+    'materials',
+    'other',
+    'device',
+    'Default category for imported files.',
+    oneOf([
+      'video',
+      'camera',
+      'photo',
+      'audio',
+      'document',
+      'map',
+      'intercept',
+      'dossier',
+      'report',
+      'archive',
+      'technical',
+      'other',
+    ]),
+  ),
+  definition(
+    'titlebar.alignment',
+    'titlebar',
+    'split',
+    'device',
+    'Titlebar information alignment.',
+    oneOf(['left', 'center', 'split', 'right']),
+  ),
+  definition(
+    'accessibility.reducedMotion',
+    'accessibility',
+    false,
+    'device',
+    'Force reduced motion independently of system preference.',
+    isBoolean,
+  ),
+  definition(
+    'performance.inactiveDecode',
+    'performance',
+    true,
+    'device',
+    'Stop decoding invisible media streams.',
+    isBoolean,
+  ),
+  definition(
+    'privacy.copyDiagnostics',
+    'privacy',
+    false,
+    'device',
+    'Allow explicitly redacted diagnostic copy.',
+    isBoolean,
+  ),
+  definition(
+    'diagnostics.verbosity',
+    'diagnostics',
+    'standard',
+    'device',
+    'Local structured diagnostic verbosity.',
+    oneOf(['minimal', 'standard', 'verbose']),
+  ),
+  definition(
+    'github.draftOnly',
+    'github',
+    true,
+    'group',
+    'Create draft pull requests and require confirmation for issues.',
+    isBoolean,
+  ),
+  definition(
+    'advanced.liveEdit',
+    'advanced',
+    false,
+    'group',
+    'Enable synchronized live edit only after explicit opt-in.',
+    isBoolean,
+  ),
+] as const;
+
+const definitionById = new Map(
+  settingsDefinitions.map((definition) => [definition.id, definition]),
+);
+
+/** Returns the schema entry without exposing the mutable implementation map. */
+export function getSettingDefinition(id: string): SettingDefinition | undefined {
+  return definitionById.get(id);
+}
+
+/** Stable schema order is also the render order used by the settings catalogue. */
+export function getSettingsDefinitionsForCategory(
+  category: SettingCategory,
+): readonly SettingDefinition[] {
+  return settingsDefinitions.filter((definition) => definition.category === category);
+}
+
+export function createFactorySnapshot(): SettingsSnapshot {
+  return {
+    revision: 0,
+    values: Object.fromEntries(
+      settingsDefinitions.map((definition) => [definition.id, cloneValue(definition.defaultValue)]),
+    ),
+  };
+}
+
+export function createSettingsDraft(snapshot: SettingsSnapshot): SettingsDraft {
+  assertSnapshot(snapshot);
+  return {
+    baseRevision: snapshot.revision,
+    values: cloneValues(snapshot.values),
+    changedIds: [],
+    history: [],
+  };
+}
+
+export function createSettingsDraftCheckpoint(draft: SettingsDraft): SettingsDraftCheckpoint {
+  return {
+    values: cloneValues(draft.values),
+    changedIds: [...draft.changedIds],
+  };
+}
+
+/**
+ * Restores a previously captured safe checkpoint into the current draft. It
+ * preserves the current optimistic base revision so callers must still publish
+ * a new revision rather than mutating historical published state in place.
+ */
+export function restoreSettingsDraft(
+  draft: SettingsDraft,
+  checkpoint: SettingsDraftCheckpoint,
+  metadata: SettingsMutationMetadata,
+): SettingsDraft {
+  const snapshot = parseSettingsSnapshot({
+    revision: draft.baseRevision,
+    values: checkpoint.values,
+  });
+  const changedIds = unique(checkpoint.changedIds);
+  for (const id of changedIds) {
+    if (!definitionById.has(id)) throw new UnknownSettingError(id);
+  }
+  return appendHistory(draft, snapshot.values, new Set(changedIds), {
+    ...metadata,
+    operation: 'restore',
+    changedIds,
+  });
+}
+
+export function applyDraftPatch(
+  draft: SettingsDraft,
+  patches: readonly SettingsPatch[],
+  metadata: SettingsMutationMetadata,
+): SettingsDraft {
+  const values = cloneValues(draft.values);
+  const changedIds = new Set(draft.changedIds);
+  const patchIds: string[] = [];
+  for (const patch of patches) {
+    const definition = definitionById.get(patch.id);
+    if (definition === undefined) throw new UnknownSettingError(patch.id);
+    if (!definition.validate(patch.value)) throw new InvalidSettingValueError(patch.id);
+    values[patch.id] = cloneValue(patch.value);
+    changedIds.add(patch.id);
+    patchIds.push(patch.id);
+  }
+  return appendHistory(draft, values, changedIds, {
+    ...metadata,
+    operation: 'patch',
+    changedIds: unique(patchIds),
+  });
+}
+
+export function resetDraftCategory(
+  draft: SettingsDraft,
+  category: SettingCategory,
+  metadata: SettingsMutationMetadata,
+): SettingsDraft {
+  const values = cloneValues(draft.values);
+  const changedIds = new Set(draft.changedIds);
+  const resetIds = settingsDefinitions
+    .filter((definition) => definition.category === category)
+    .map((definition) => {
+      values[definition.id] = cloneValue(definition.defaultValue);
+      changedIds.add(definition.id);
+      return definition.id;
+    });
+  return appendHistory(draft, values, changedIds, {
+    ...metadata,
+    operation: 'reset-category',
+    category,
+    changedIds: resetIds,
+  });
+}
+
+export function resetDraftAll(
+  draft: SettingsDraft,
+  metadata: SettingsMutationMetadata,
+): SettingsDraft {
+  const factory = createFactorySnapshot();
+  return appendHistory(draft, factory.values, new Set(Object.keys(factory.values)), {
+    ...metadata,
+    operation: 'reset-all',
+    changedIds: Object.keys(factory.values),
+  });
+}
+
+export function importDraft(
+  draft: SettingsDraft,
+  serialized: string,
+  metadata: SettingsMutationMetadata,
+): SettingsDraft {
+  const parsed: unknown = JSON.parse(serialized);
+  const imported = parseSettingsSnapshot(parsed);
+  return appendHistory(draft, imported.values, new Set(Object.keys(imported.values)), {
+    ...metadata,
+    operation: 'import',
+    changedIds: Object.keys(imported.values),
+  });
+}
+
+export function exportDraft(draft: SettingsDraft): string {
+  return JSON.stringify({ revision: draft.baseRevision, values: draft.values }, null, 2);
+}
+
+export function publishDraft(draft: SettingsDraft): SettingsSnapshot {
+  return { revision: draft.baseRevision + 1, values: cloneValues(draft.values) };
+}
+
+export function parseSettingsSnapshot(value: unknown): SettingsSnapshot {
+  if (!isRecord(value) || !isRecord(value.values)) {
+    throw new Error(
+      'Settings import must contain a non-negative integer revision and a values object.',
+    );
+  }
+  const revision = value.revision;
+  if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0) {
+    throw new Error(
+      'Settings import must contain a non-negative integer revision and a values object.',
+    );
+  }
+  const values: Record<string, SettingValue> = {};
+  for (const definition of settingsDefinitions) {
+    const imported = value.values[definition.id];
+    if (!definition.validate(imported)) throw new InvalidSettingValueError(definition.id);
+    values[definition.id] = cloneValue(imported);
+  }
+  return { revision, values };
+}
+
+export class UnknownSettingError extends Error {
+  constructor(id: string) {
+    super(`Unknown setting: ${id}`);
+    this.name = 'UnknownSettingError';
+  }
+}
+
+export class InvalidSettingValueError extends Error {
+  constructor(id: string) {
+    super(`Invalid value for setting: ${id}`);
+    this.name = 'InvalidSettingValueError';
+  }
+}
+
+function definition(
+  id: string,
+  category: SettingCategory,
+  defaultValue: SettingValue,
+  scope: Exclude<SettingScope, 'factory'>,
+  description: string,
+  validate: SettingValidator,
+): SettingDefinition {
+  return { id, category, defaultValue, scope, description, editor: validate.editor, validate };
+}
+
+function appendHistory(
+  draft: SettingsDraft,
+  values: SettingValues,
+  changedIds: ReadonlySet<string>,
+  event: SettingsHistoryEvent,
+): SettingsDraft {
+  return {
+    baseRevision: draft.baseRevision,
+    values,
+    changedIds: [...changedIds].sort(),
+    history: [...draft.history, event],
+  };
+}
+
+function assertSnapshot(snapshot: SettingsSnapshot): void {
+  parseSettingsSnapshot(snapshot);
+}
+
+function cloneValues(values: SettingValues): Record<string, SettingValue> {
+  return Object.fromEntries(Object.entries(values).map(([id, value]) => [id, cloneValue(value)]));
+}
+
+function cloneValue(value: SettingValue): SettingValue {
+  return Array.isArray(value) ? [...value] : value;
+}
+
+function unique(values: readonly string[]): readonly string[] {
+  return [...new Set(values)];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

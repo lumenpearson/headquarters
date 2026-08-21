@@ -1,0 +1,42 @@
+# Enforces Conventional Commits and the project's attribution rule without
+# pulling in commitlint, so the hook has no dependency of its own.
+message_file="$1"
+
+# Ignore comment lines and the diff git appends under --verbose.
+subject=$(grep -v '^#' "$message_file" | grep -v '^diff --git' | sed '/^[[:space:]]*$/d' | head -n 1)
+
+if [ -z "$subject" ]; then
+  echo "commit-msg: пустое сообщение коммита." >&2
+  exit 1
+fi
+
+# Let git's own generated messages through untouched.
+case "$subject" in
+  "Merge "* | "Revert "* | "fixup!"* | "squash!"* | "Initial commit")
+    exit 0
+    ;;
+esac
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'
+
+if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
+  echo "commit-msg: сообщение не соответствует Conventional Commits." >&2
+  echo "" >&2
+  echo "  получено: $subject" >&2
+  echo "  ожидается: <тип>(<область>): <описание>" >&2
+  echo "  типы: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert" >&2
+  echo "  пример: fix(control-plane): bind pairing codes to their issuing session" >&2
+  exit 1
+fi
+
+if [ "${#subject}" -gt 100 ]; then
+  echo "commit-msg: заголовок длиннее 100 символов (${#subject})." >&2
+  exit 1
+fi
+
+# The project forbids AI-assistant attribution in commit messages.
+if grep -Eiq '^[[:space:]]*(co-authored-by|generated with|assisted-by)' "$message_file"; then
+  echo "commit-msg: уберите строки атрибуции (Co-Authored-By и подобные)." >&2
+  echo "См. CONTRIBUTING.md — упоминания ИИ-ассистентов в коммитах запрещены." >&2
+  exit 1
+fi

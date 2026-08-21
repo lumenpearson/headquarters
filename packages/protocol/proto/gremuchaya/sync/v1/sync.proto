@@ -1,0 +1,336 @@
+syntax = "proto3";
+
+package gremuchaya.sync.v1;
+
+import "google/protobuf/timestamp.proto";
+import "gremuchaya/common/v1/common.proto";
+
+enum DeviceRole {
+  DEVICE_ROLE_UNSPECIFIED = 0;
+  DEVICE_ROLE_VIEWER = 1;
+  DEVICE_ROLE_EDITOR = 2;
+  DEVICE_ROLE_ADMIN = 3;
+}
+
+enum AuthorityMode {
+  AUTHORITY_MODE_UNSPECIFIED = 0;
+  AUTHORITY_MODE_LEADER = 1;
+  AUTHORITY_MODE_MULTI_AUTHORITY = 2;
+}
+
+enum DeviceStatus {
+  DEVICE_STATUS_UNSPECIFIED = 0;
+  DEVICE_STATUS_OFFLINE = 1;
+  DEVICE_STATUS_ONLINE = 2;
+  DEVICE_STATUS_REVOKED = 3;
+}
+
+message Group {
+  gremuchaya.common.v1.ResourceId id = 1;
+  string name = 2;
+  AuthorityMode authority_mode = 3;
+  gremuchaya.common.v1.ResourceId leader_device_id = 4;
+  gremuchaya.common.v1.Revision revision = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message Device {
+  gremuchaya.common.v1.ResourceId id = 1;
+  string name = 2;
+  string public_key = 3;
+  DeviceRole role = 4;
+  DeviceStatus status = 5;
+  string platform = 6;
+  string application_version = 7;
+  google.protobuf.Timestamp last_seen_at = 8;
+}
+
+// Opaque credentials are intentionally returned only by bootstrap, pairing and
+// refresh responses. They must never be persisted in UI state, URLs or logs.
+message DeviceSession {
+  string access_token = 1;
+  string refresh_token = 2;
+  google.protobuf.Timestamp access_token_expires_at = 3;
+  google.protobuf.Timestamp refresh_token_expires_at = 4;
+  gremuchaya.common.v1.ResourceId device_id = 5;
+  gremuchaya.common.v1.ResourceId group_id = 6;
+  DeviceRole role = 7;
+}
+
+message PairingCode {
+  string code = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  DeviceRole role = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message Presence {
+  gremuchaya.common.v1.ResourceId device_id = 1;
+  DeviceStatus status = 2;
+  string active_screen = 3;
+  string selected_element = 4;
+  int64 clock_offset_ms = 5;
+  uint32 latency_ms = 6;
+  google.protobuf.Timestamp observed_at = 7;
+}
+
+message CreateGroupRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  string name = 2;
+  Device initial_device = 3;
+}
+
+message CreateGroupResponse {
+  Group group = 1;
+  Device device = 2;
+  DeviceSession session = 3;
+}
+
+message UpdateGroupRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  string name = 3;
+}
+
+message UpdateGroupResponse {
+  Group group = 1;
+}
+
+message CreatePairingCodeRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  DeviceRole role = 3;
+}
+
+message CreatePairingCodeResponse {
+  PairingCode pairing_code = 1;
+}
+
+message PairDeviceRequest {
+  string pairing_code = 1;
+  string device_name = 2;
+  string public_key = 3;
+  string platform = 4;
+  string application_version = 5;
+  // Permits a client to safely identify a retry without placing credentials in
+  // a URL. The server persists only an idempotency receipt fingerprint.
+  gremuchaya.common.v1.MutationContext context = 6;
+}
+
+message PairDeviceResponse {
+  Group group = 1;
+  Device device = 2;
+  string access_token = 3 [deprecated = true];
+  string refresh_token = 4 [deprecated = true];
+  google.protobuf.Timestamp access_token_expires_at = 5 [deprecated = true];
+  DeviceSession session = 6;
+}
+
+message RefreshDeviceSessionRequest {
+  string refresh_token = 1;
+  // Refresh rotation is destructive for the previous token, so retries need a
+  // request identifier once durable receipts are enabled.
+  gremuchaya.common.v1.MutationContext context = 2;
+}
+
+message RefreshDeviceSessionResponse {
+  DeviceSession session = 1;
+}
+
+message ListDevicesRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  gremuchaya.common.v1.PageRequest page = 2;
+}
+
+message ListDevicesResponse {
+  repeated Device devices = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
+message RevokeDeviceRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  gremuchaya.common.v1.ResourceId device_id = 3;
+}
+
+message RevokeDeviceResponse {
+  gremuchaya.common.v1.OperationResult result = 1;
+}
+
+message JoinGroupRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+}
+
+message JoinGroupResponse {
+  Group group = 1;
+}
+
+message LeaveGroupRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+}
+
+message LeaveGroupResponse {
+  gremuchaya.common.v1.OperationResult result = 1;
+}
+
+message SetDeviceRoleRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  gremuchaya.common.v1.ResourceId device_id = 3;
+  DeviceRole role = 4;
+}
+
+message SetDeviceRoleResponse {
+  Device device = 1;
+}
+
+message SetAuthorityModeRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  AuthorityMode mode = 3;
+}
+
+message SetAuthorityModeResponse {
+  Group group = 1;
+}
+
+message SetLeaderRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  gremuchaya.common.v1.ResourceId device_id = 3;
+}
+
+message SetLeaderResponse {
+  Group group = 1;
+}
+
+enum SynchronizedDocumentType {
+  SYNCHRONIZED_DOCUMENT_TYPE_UNSPECIFIED = 0;
+  SYNCHRONIZED_DOCUMENT_TYPE_LAYOUT = 1;
+  SYNCHRONIZED_DOCUMENT_TYPE_SETTINGS = 2;
+  SYNCHRONIZED_DOCUMENT_TYPE_CONTENT = 3;
+  SYNCHRONIZED_DOCUMENT_TYPE_KEYMAP = 4;
+  SYNCHRONIZED_DOCUMENT_TYPE_SIMULATION = 5;
+}
+
+message PublishDocumentDeltaRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  gremuchaya.common.v1.ResourceId document_id = 3;
+  SynchronizedDocumentType document_type = 4;
+  bytes state_vector = 5;
+  bytes delta = 6;
+  uint64 hybrid_logical_clock = 7;
+}
+
+message PublishDocumentDeltaResponse {
+  uint64 sequence = 1;
+  bytes state_vector = 2;
+}
+
+enum SessionCommandAction {
+  SESSION_COMMAND_ACTION_UNSPECIFIED = 0;
+  SESSION_COMMAND_ACTION_NAVIGATE = 1;
+  SESSION_COMMAND_ACTION_SELECT = 2;
+  SESSION_COMMAND_ACTION_PLAY = 3;
+  SESSION_COMMAND_ACTION_PAUSE = 4;
+  SESSION_COMMAND_ACTION_SEEK = 5;
+  SESSION_COMMAND_ACTION_SET_RATE = 6;
+  SESSION_COMMAND_ACTION_SET_SCENE = 7;
+}
+
+message SessionCommand {
+  uint64 epoch = 1;
+  uint64 sequence = 2;
+  SessionCommandAction action = 3;
+  string target = 4;
+  double position_seconds = 5;
+  double playback_rate = 6;
+  google.protobuf.Timestamp execute_at = 7;
+  gremuchaya.common.v1.ResourceId issued_by_device_id = 8;
+}
+
+message PublishSessionCommandRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  SessionCommand command = 3;
+}
+
+message PublishSessionCommandResponse {
+  SessionCommand command = 1;
+}
+
+message TimeSyncRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  uint64 client_send_monotonic_ms = 2;
+  google.protobuf.Timestamp client_wall_time = 3;
+}
+
+message TimeSyncResponse {
+  uint64 client_send_monotonic_ms = 1;
+  google.protobuf.Timestamp server_receive_time = 2;
+  google.protobuf.Timestamp server_send_time = 3;
+}
+
+message GetPresenceRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+}
+
+message GetPresenceResponse {
+  repeated Presence devices = 1;
+}
+
+message WatchGroupRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  uint64 after_sequence = 2;
+  bytes document_state_vector = 3;
+}
+
+enum GroupEventKind {
+  GROUP_EVENT_KIND_UNSPECIFIED = 0;
+  GROUP_EVENT_KIND_GROUP_UPDATED = 1;
+  GROUP_EVENT_KIND_DEVICE_UPDATED = 2;
+  GROUP_EVENT_KIND_PRESENCE_UPDATED = 3;
+  GROUP_EVENT_KIND_DOCUMENT_DELTA = 4;
+  GROUP_EVENT_KIND_SESSION_COMMAND = 5;
+  GROUP_EVENT_KIND_SNAPSHOT_REQUIRED = 6;
+}
+
+message GroupEvent {
+  uint64 sequence = 1;
+  GroupEventKind kind = 2;
+  Group group = 3;
+  Device device = 4;
+  Presence presence = 5;
+  gremuchaya.common.v1.ResourceId document_id = 6;
+  bytes document_delta = 7;
+  SessionCommand session_command = 8;
+  google.protobuf.Timestamp occurred_at = 9;
+}
+
+message WatchGroupResponse {
+  GroupEvent event = 1;
+}
+
+service SyncService {
+  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
+  rpc UpdateGroup(UpdateGroupRequest) returns (UpdateGroupResponse);
+  rpc CreatePairingCode(CreatePairingCodeRequest) returns (CreatePairingCodeResponse);
+  rpc PairDevice(PairDeviceRequest) returns (PairDeviceResponse);
+  rpc RefreshDeviceSession(RefreshDeviceSessionRequest) returns (RefreshDeviceSessionResponse);
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc RevokeDevice(RevokeDeviceRequest) returns (RevokeDeviceResponse);
+  rpc JoinGroup(JoinGroupRequest) returns (JoinGroupResponse);
+  rpc LeaveGroup(LeaveGroupRequest) returns (LeaveGroupResponse);
+  rpc SetDeviceRole(SetDeviceRoleRequest) returns (SetDeviceRoleResponse);
+  rpc SetAuthorityMode(SetAuthorityModeRequest) returns (SetAuthorityModeResponse);
+  rpc SetLeader(SetLeaderRequest) returns (SetLeaderResponse);
+  rpc PublishDocumentDelta(PublishDocumentDeltaRequest) returns (PublishDocumentDeltaResponse);
+  rpc PublishSessionCommand(PublishSessionCommandRequest) returns (PublishSessionCommandResponse);
+  rpc TimeSync(TimeSyncRequest) returns (TimeSyncResponse);
+  rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
+  rpc WatchGroup(WatchGroupRequest) returns (stream WatchGroupResponse);
+}

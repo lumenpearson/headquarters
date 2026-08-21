@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Уязвимость в безопасности
+    url: https://github.com/lumenpearson/headquarters/security/advisories/new
+    about: Не открывайте публичный issue. Сообщите приватно через security advisory.
+  - name: Известные ограничения релиза
+    url: https://github.com/lumenpearson/headquarters/blob/master/docs/release/known-limitations.md
+    about: Отсутствующий ключ Yandex Maps, плейсхолдеры материалов и другие осознанные ограничения.
+  - name: Порядок дня съёмки
+    url: https://github.com/lumenpearson/headquarters/blob/master/docs/release/runbook.md
+    about: Процедуры релиза, репетиции и восстановления.

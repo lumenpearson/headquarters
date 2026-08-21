@@ -1,0 +1,67 @@
+{
+  "name": "gremuchaya-hq",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.3",
+  "engines": {
+    "node": ">=24.3.0",
+    "pnpm": ">=10.12.3"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:hq": "pnpm --filter @gremuchaya/hq dev",
+    "dev:full": "turbo run dev --parallel --filter=@gremuchaya/hq --filter=@gremuchaya/file-bridge --filter=@gremuchaya/control-plane",
+    "bridge": "pnpm --filter @gremuchaya/file-bridge start",
+    "control-plane": "pnpm --filter @gremuchaya/control-plane start",
+    "build": "turbo run build",
+    "build:web": "cross-env HQ_TARGET=web turbo run build --filter=@gremuchaya/hq",
+    "build:desktop:web": "cross-env HQ_TARGET=desktop turbo run build --filter=@gremuchaya/hq",
+    "build:offline": "pnpm build:desktop:web",
+    "preview": "pnpm --filter @gremuchaya/hq start",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:ui": "turbo run test:ui --filter=@gremuchaya/hq",
+    "check:ui-boundary": "node scripts/check-ui-boundary.mjs",
+    "check:protocol-generation": "node scripts/check-protocol-generation.mjs",
+    "test:cargo": "cargo test --manifest-path apps/hq/src-tauri/Cargo.toml",
+    "check": "pnpm check:ui-boundary && pnpm check:protocol-generation && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check:release": "pnpm check && pnpm test:ui && pnpm build:offline && pnpm test:cargo",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "clean:build": "turbo run build --force",
+    "tauri": "pnpm --filter @gremuchaya/hq tauri",
+    "tauri:dev": "pnpm --filter @gremuchaya/hq tauri dev",
+    "tauri:build": "pnpm --filter @gremuchaya/hq tauri build",
+    "prepare": "husky",
+    "ui:add": "pnpm --filter @gremuchaya/hq exec shadcn add --yes && node scripts/sync-shadcn.mjs",
+    "ui:sync": "node scripts/sync-shadcn.mjs"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mts,cts}": [
+      "prettier --write",
+      "eslint --fix --max-warnings=0"
+    ],
+    "*.{js,jsx,mjs,cjs,json,jsonc,css,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.rs": [
+      "rustfmt --edition 2021"
+    ]
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.2.0",
+    "cross-env": "10.1.0",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.1",
+    "husky": "9.1.7",
+    "lint-staged": "17.3.0",
+    "prettier": "3.9.6",
+    "turbo": "2.10.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.10"
+  }
+}

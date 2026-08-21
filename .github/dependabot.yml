@@ -1,0 +1,77 @@
+version: 2
+
+updates:
+  # Версии зависимостей закреплены точно и обоснованы в docs/release/environment.md.
+  # Обновления группируются, чтобы не создавать шум и не ломать закреплённую матрицу
+  # совместимости TypeScript/ESLint (см. ADR 0007).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    commit-message:
+      prefix: build
+      include: scope
+    labels:
+      - dependencies
+    groups:
+      types:
+        patterns:
+          - '@types/*'
+      testing:
+        patterns:
+          - vitest
+          - '@vitest/*'
+          - '@playwright/test'
+          - playwright
+      linting:
+        patterns:
+          - eslint
+          - eslint-*
+          - typescript-eslint
+          - prettier
+    ignore:
+      # Закреплено ADR 0007: typescript-eslint 8.x объявляет typescript <6.1.0,
+      # а плагины eslint-config-next поддерживают только ESLint 9.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      - dependency-name: eslint
+        update-types: ['version-update:semver-major']
+      # Мажорные обновления фреймворков делаются вручную вместе с проверкой
+      # статического экспорта и оболочки Tauri.
+      - dependency-name: next
+        update-types: ['version-update:semver-major']
+      - dependency-name: react
+        update-types: ['version-update:semver-major']
+      - dependency-name: react-dom
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@tauri-apps/*'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: cargo
+    directory: /apps/hq/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: build
+      include: scope
+    labels:
+      - dependencies
+      - rust
+    ignore:
+      - dependency-name: tauri
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+      - ci
