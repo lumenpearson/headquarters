@@ -10,6 +10,7 @@ import {
   TerminalSelect,
 } from '@gremuchaya/ui/primitives';
 
+import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
 import { LocalMaterialPreview } from '@/components/operations/LocalMaterialPreview';
 import {
@@ -75,16 +76,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     setImportOpen(true);
   };
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.shiftKey && event.altKey && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        openImportDialog();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  useKeybind('files.import', openImportDialog);
 
   useEffect(() => {
     if (!importOpen) return;

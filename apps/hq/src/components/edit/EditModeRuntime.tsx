@@ -2,10 +2,15 @@
 
 import { useEffect } from 'react';
 
+import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 /**
- * Mounts the edit-mode keybind and publishes the mode onto the document root.
+ * Publishes the edit mode onto the document root and owns its toggle.
+ *
+ * The chord itself, and the guard that stops it firing while the operator is
+ * typing, are declared in the keybind registry; this component only says what
+ * happens when it fires.
  *
  * The `data-edit-mode` attribute is what edit.css keys the resize cursors off.
  * A data attribute rather than a class so a stray `className` edit elsewhere
@@ -21,26 +26,11 @@ export function EditModeRuntime() {
     };
   }, [active]);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || !event.shiftKey || event.code !== 'KeyE') return;
-      // Typing in a field must not toggle the mode out from under the operator.
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement
-      ) {
-        return;
-      }
-      event.preventDefault();
-      const state = operationsStore.getState();
-      if (state.edit.active) state.exitEditMode();
-      else state.enterEditMode();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+  useKeybind('edit.toggle', () => {
+    const state = operationsStore.getState();
+    if (state.edit.active) state.exitEditMode();
+    else state.enterEditMode();
+  });
 
   return null;
 }

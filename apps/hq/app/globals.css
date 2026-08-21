@@ -28,6 +28,7 @@
 @import '../src/styles/operations.css';
 @import '../src/styles/edit.css';
 @import '../src/styles/startup.css';
+@import '../src/styles/keybinds.css';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 /*

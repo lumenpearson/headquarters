@@ -36,9 +36,9 @@ State ownership:
   per-domain slices; a plan that assumes scene/screens/workspace/explorer/connection slices
   describes a target, not the code.
 - Scene definitions and content remain immutable configuration.
-- `localStorage` owns everything the browser persists, under five keys:
+- `localStorage` owns everything the browser persists, under six keys:
   `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
-  `gremuchaya-hq:snapshots:v1`, `hq.camera-material-assignments.v1`, and the Yandex Maps key.
+  `gremuchaya-hq:snapshots:v1`, `hq.camera-material-assignments.v1`, `hq.keybinds-intro-seen.v1`, and the Yandex Maps key.
   There is no IndexedDB and no Tauri store plugin in this repository. Media and timer handles are
   never persisted.
 - Application services perform cross-slice transitions and all IO. React components dispatch use

@@ -88,9 +88,9 @@ Desktop-сборка — статический экспорт Next.js плюс 
   доменам он не разделён; план, предполагающий срезы scene/screens/workspace/explorer/
   connection, описывает цель, а не код.
 - Определения сцен — неизменяемая конфигурация, а не состояние исполнения.
-- `localStorage` владеет всем, что сохраняет браузер, — пять ключей:
+- `localStorage` владеет всем, что сохраняет браузер, — шесть ключей:
   `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
-  `gremuchaya-hq:snapshots:v1`, `hq.camera-material-assignments.v1` и ключ Яндекс Карт.
+  `gremuchaya-hq:snapshots:v1`, `hq.camera-material-assignments.v1`, `hq.keybinds-intro-seen.v1` и ключ Яндекс Карт.
   IndexedDB и плагина нативного хранилища Tauri в репозитории нет. Медиа и таймеры
   никогда не персистятся.
 - Все операции ввода-вывода и межсрезовые переходы выполняют сервисы приложения;

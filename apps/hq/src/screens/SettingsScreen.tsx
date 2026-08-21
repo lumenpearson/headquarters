@@ -13,6 +13,7 @@ import {
 } from '@gremuchaya/ui/primitives';
 import { useMemo, useState } from 'react';
 
+import { KeybindList } from '@/components/keybinds/KeybindList';
 import { Panel } from '@/components/operations/OpsUi';
 import { categoryLabel, SchemaSetting, Setting } from '@/components/settings/SchemaSetting';
 import {
@@ -325,6 +326,13 @@ export function SettingsScreen() {
               event.currentTarget.value = '';
             }}
           />
+        </Panel>
+        <Panel
+          title="СОЧЕТАНИЯ КЛАВИШ"
+          eyebrow="KEYBINDS / НАЖМИТЕ ЛЮБОЕ"
+          className="settings-keybinds"
+        >
+          <KeybindList />
         </Panel>
         <Panel
           title="ИСТОРИЯ НАСТРОЕК"

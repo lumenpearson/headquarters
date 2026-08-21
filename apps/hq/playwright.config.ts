@@ -11,6 +11,15 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'http://127.0.0.1:3000',
+    /*
+     * Tests run as a returning operator, not as a first launch: R11 shows the
+     * keybind card the very first time the application is opened, and every
+     * test that is not about onboarding would otherwise start behind it.
+     *
+     * The onboarding test opts back out with `test.use({ storageState: ... })`,
+     * which is the one place a first launch should be simulated.
+     */
+    storageState: './tests/returning-operator.storage.json',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

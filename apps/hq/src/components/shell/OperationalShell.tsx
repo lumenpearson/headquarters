@@ -8,6 +8,7 @@ import { ModuleRenderer } from '@/components/modules/ModuleRenderer';
 import { RuntimeProvider, useRuntime } from '@/components/runtime/RuntimeProvider';
 import { SceneControl } from '@/components/operator/SceneControl';
 import { VirtualExplorer } from '@/components/explorer/VirtualExplorer';
+import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { WindowLayer } from '@/components/workspace/WindowLayer';
 import { DeveloperPanel } from '@/components/developer/DeveloperPanel';
 import { useAppStore } from '@/state/appStore';
@@ -50,37 +51,15 @@ function ShellContent({ initialSceneId }: { readonly initialSceneId?: string | u
   const windows = useAppStore((state) => state.workspace.windows);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.code === 'KeyK') {
-        event.preventDefault();
-        setPaletteOpen((current) => !current);
-      }
-      if (event.code === 'F2') {
-        event.preventDefault();
-        controller?.setSection('files');
-      }
-      if (event.code === 'F3') {
-        event.preventDefault();
-        controller?.setSection('map');
-      }
-      if (event.code === 'F7') {
-        event.preventDefault();
-        controller?.sceneService.previousCue();
-      }
-      if (event.code === 'F8') {
-        event.preventDefault();
-        controller?.sceneService.nextCue();
-      }
-      if (event.code === 'F9') {
-        event.preventDefault();
-        controller?.sceneService.resetScene();
-      }
-      if (event.code === 'Escape') setPaletteOpen(false);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [controller]);
+  // The scene operator's keys. Declared in the registry like every other
+  // keybind, but owned here: nothing outside this shell can advance a cue.
+  useKeybind('scene.commandPalette', () => setPaletteOpen((current) => !current));
+  useKeybind('scene.sectionFiles', () => controller?.setSection('files'));
+  useKeybind('scene.sectionMap', () => controller?.setSection('map'));
+  useKeybind('scene.previousCue', () => controller?.sceneService.previousCue());
+  useKeybind('scene.nextCue', () => controller?.sceneService.nextCue());
+  useKeybind('scene.resetScene', () => controller?.sceneService.resetScene());
+  useKeybind('shell.dismiss', () => setPaletteOpen(false));
 
   useEffect(() => {
     if (controller !== null && initialSceneId !== undefined)

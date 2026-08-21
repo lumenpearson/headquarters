@@ -1,0 +1,103 @@
+/*
+ * R11: the keybind list and the first-launch card.
+ *
+ * Its own file for the same reason edit.css and startup.css are: a card drawn
+ * over the shell is not part of the shell's grid.
+ */
+
+.keybind-list {
+  display: grid;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.keybind-list__group h4 {
+  margin: 0 0 var(--space-1);
+  color: var(--accent);
+  font-size: var(--font-xs);
+  letter-spacing: 0.14em;
+}
+
+.keybind-list__group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.keybind-list__row {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 2px 4px;
+  border-left: 1px solid transparent;
+}
+
+.keybind-list__row kbd {
+  border: 1px solid var(--line-2);
+  padding: 1px 6px;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+/*
+ * The highlight. Applied for as long as the row is marked fired, and animated
+ * out rather than switched off so a second press of the same chord reads as a
+ * second press.
+ */
+.keybind-list__row[data-fired='true'] {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.keybind-list__row[data-fired='true'] kbd {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.keybind-intro {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+}
+
+.keybind-intro__card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  /* R26: the card scrolls inside itself; the document never grows. */
+  width: min(760px, 92vw);
+  max-height: 82dvh;
+  padding: var(--space-4);
+  border: 1px solid var(--accent);
+  background: var(--panel-raised);
+}
+
+.keybind-intro__card > .keybind-list {
+  overflow-y: auto;
+}
+
+.keybind-intro__card header {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--accent);
+  font-size: var(--font-xs);
+  letter-spacing: 0.12em;
+}
+
+.keybind-intro__card header span {
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+}
+
+.keybind-intro__card footer {
+  display: flex;
+  justify-content: flex-end;
+}

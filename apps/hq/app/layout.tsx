@@ -6,6 +6,8 @@ import { TerminalUiProvider } from '@gremuchaya/ui/primitives';
 import { EditModeFrame } from '@/components/edit/EditModeFrame';
 import { EditModeRuntime } from '@/components/edit/EditModeRuntime';
 import { EditPanel } from '@/components/edit/EditPanel';
+import { KeybindIntro } from '@/components/keybinds/KeybindIntro';
+import { KeybindRuntime } from '@/components/keybinds/KeybindRuntime';
 import { MaterialCatalogProvider } from '@/components/settings/MaterialCatalog';
 import { StartupSequence } from '@/components/startup/StartupSequence';
 import { OperationsRuntime } from '@/simulation/OperationsRuntime';
@@ -37,7 +39,9 @@ export default function RootLayout({ children }: RootLayoutProperties) {
       <body className="terminal-theme">
         <TerminalUiProvider>
           <MaterialCatalogProvider>
+            <KeybindRuntime />
             <EditModeRuntime />
+            <KeybindIntro />
             <StartupSequence />
             <EditModeFrame />
             <OperationsRuntime>{children}</OperationsRuntime>

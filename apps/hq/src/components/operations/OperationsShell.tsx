@@ -10,6 +10,8 @@ import {
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 
+import { primaryNavigation } from '@/application/navigation';
+import { subscribeKeybind, useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { AnalyticsScreen } from '@/screens/AnalyticsScreen';
 import { ArchiveScreen } from '@/screens/ArchiveScreen';
 import { CasesScreen } from '@/screens/CasesScreen';
@@ -29,22 +31,6 @@ import { operationsStore, type OperationsRoute, useOperationsStore } from '@/sta
 import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
 import { resolveMotionDurationMs } from './ShellMotion';
-
-const navigation = [
-  ['overview', '/overview', '01', 'ОБЗОР'],
-  ['objects', '/objects', '02', 'ОБЪЕКТЫ'],
-  ['cases', '/cases', '03', 'ДЕЛА'],
-  ['map', '/map', '04', 'КАРТА'],
-  ['video', '/video', '05', 'ВИДЕО'],
-  ['communications', '/communications', '06', 'СВЯЗЬ'],
-  ['files', '/files', '07', 'ФАЙЛЫ'],
-  ['archive', '/archive', '08', 'АРХИВ'],
-  ['analytics', '/analytics', '09', 'АНАЛИТИКА'],
-  ['reports', '/reports', '10', 'ОТЧЁТЫ'],
-  ['search', '/search', '11', 'ПОИСК'],
-  ['settings', '/settings', '12', 'НАСТРОЙКИ'],
-  ['system', '/system', 'SY', 'СИСТЕМА'],
-] as const;
 
 const routePaths: Readonly<Partial<Record<OperationsRoute, string>>> = {
   overview: '/overview',
@@ -201,55 +187,45 @@ export function OperationsShell({
     }
   }, [toggleProductionPanel]);
 
+  // Any keypress means the operator has taken over. Activity detection, not a
+  // keybind: it reacts to every key, including the ones nothing is bound to,
+  // so it stays a listener of its own rather than an entry in the registry.
   useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
+    const handler = () => {
       if (operationsStore.getState().production.autoDemo) {
         operationsStore.getState().setProductionOption('autoDemo', false);
-      }
-      const target = event.target;
-      const editing =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement;
-      if ((event.ctrlKey || event.metaKey) && event.code === 'KeyK') {
-        event.preventDefault();
-        router.push('/search');
-        return;
-      }
-      if (event.ctrlKey && event.shiftKey && event.code === 'KeyP') {
-        event.preventDefault();
-        toggleProductionPanel();
-        return;
-      }
-      if (event.code === 'Escape') {
-        closeDrawer();
-        toggleProductionPanel(false);
-        return;
-      }
-      if (editing) return;
-      const digitRoute = navigation.find((item) => item[2] === event.key);
-      if (digitRoute !== undefined && Number(event.key) >= 1 && Number(event.key) <= 9) {
-        event.preventDefault();
-        router.push(digitRoute[1]);
-        return;
-      }
-      if (event.code === 'KeyF') {
-        event.preventDefault();
-        if (document.fullscreenElement === null) void document.documentElement.requestFullscreen();
-        else void document.exitFullscreen();
-        return;
-      }
-      if (
-        event.code === 'Space' &&
-        (route === 'video' || route === 'cameras' || route === 'video-archive')
-      ) {
-        event.preventDefault();
-        operationsStore.getState().toggleVideo();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [closeDrawer, route, router, toggleProductionPanel]);
+  }, []);
+
+  useKeybind('shell.search', () => router.push('/search'));
+  useKeybind('shell.productionPanel', () => toggleProductionPanel());
+  useKeybind('shell.dismiss', () => {
+    closeDrawer();
+    toggleProductionPanel(false);
+  });
+  useKeybind('shell.fullscreen', () => {
+    if (document.fullscreenElement === null) void document.documentElement.requestFullscreen();
+    else void document.exitFullscreen();
+  });
+  useKeybind('shell.togglePlayback', () => {
+    if (route === 'video' || route === 'cameras' || route === 'video-archive') {
+      operationsStore.getState().toggleVideo();
+    }
+  });
+
+  // One effect for the nine numbered routes: the rail draws a badge beside each
+  // entry, and the badge is the promise this keeps.
+  useEffect(() => {
+    const unsubscribes = primaryNavigation
+      .slice(0, 9)
+      .map((entry) => subscribeKeybind(`navigate.${entry[0]}`, () => router.push(entry[1])));
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, [router]);
 
   const disableAutoDemo = () => {
     if (operationsStore.getState().production.autoDemo) {
@@ -418,7 +394,7 @@ function OpsNavigation({ route }: { readonly route: OperationsRoute }) {
         {compact ? '[+]' : '[−]'}
       </TerminalButton>
       <div>
-        {navigation.map(([id, href, key, label]) => {
+        {primaryNavigation.map(([id, href, key, label]) => {
           const active =
             route === id ||
             (id === 'objects' && route === 'object-detail') ||

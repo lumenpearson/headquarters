@@ -3,6 +3,7 @@
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 
 import { RuntimeController } from '@/application/RuntimeController';
+import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 
 interface RuntimeContextValue {
   readonly controller: RuntimeController | null;
@@ -49,16 +50,7 @@ export function RuntimeProvider({ children }: { readonly children: ReactNode }) 
     };
   }, []);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.shiftKey && event.altKey && event.code === 'KeyD') {
-        event.preventDefault();
-        value.controller?.toggleDeveloper();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [value.controller]);
+  useKeybind('developer.toggle', () => value.controller?.toggleDeveloper());
 
   return <RuntimeContext value={value}>{children}</RuntimeContext>;
 }

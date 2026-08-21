@@ -104,9 +104,9 @@ State ownership:
   (a small `runtimeState` holder). It is not yet split into per-domain slices; treat any plan that
   assumes scene/screens/workspace/explorer/connection slices as describing a target, not the code.
 - Scene definitions (52 Zod-validated scenes) are immutable configuration, not runtime state.
-- `localStorage` owns everything the browser persists, under five keys:
+- `localStorage` owns everything the browser persists, under six keys:
   `gremuchaya-hq:operations:v3` (runtime state), `gremuchaya-hq:production-snapshots:v3`,
-  `gremuchaya-hq:snapshots:v1` (`LocalSnapshotPersistence`), `hq.camera-material-assignments.v1`,
+  `gremuchaya-hq:snapshots:v1` (`LocalSnapshotPersistence`), `hq.camera-material-assignments.v1`, `hq.keybinds-intro-seen.v1`,
   and the Yandex Maps key. There is no IndexedDB and no Tauri store plugin anywhere in this
   repository. Media and timer handles are never persisted.
 - Application services perform all IO and cross-slice transitions; React components only dispatch
