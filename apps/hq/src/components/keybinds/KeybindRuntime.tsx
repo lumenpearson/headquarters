@@ -14,6 +14,7 @@ type KeybindHandler = () => void;
  */
 const handlers = new Map<string, Set<KeybindHandler>>();
 const firedListeners = new Set<(id: string) => void>();
+const ownerListeners = new Set<() => void>();
 
 /**
  * Reports which keybind just did something.
@@ -28,13 +29,22 @@ export function subscribeKeybindFired(listener: (id: string) => void): () => voi
 }
 
 /**
- * Whether any mounted screen can act on a declared keybind right now.
+ * Reports that the set of claimed keybinds changed.
  *
- * The context menu asks this before drawing a command: an entry that looks
- * available and does nothing is worse than one that says it is unavailable.
+ * Ownership is mutable state living outside React, and a surface that draws a
+ * command as available or not has to subscribe to it. Reading the table during
+ * render instead looks pure to the compiler, which then caches the answer from
+ * the first render -- when nothing is claimed yet, because every claim is made
+ * in an effect.
  */
-export function keybindHasOwner(id: string): boolean {
-  return (handlers.get(id)?.size ?? 0) > 0;
+export function subscribeKeybindOwners(listener: () => void): () => void {
+  ownerListeners.add(listener);
+  return () => ownerListeners.delete(listener);
+}
+
+/** Every keybind some mounted screen can act on right now. */
+export function keybindOwnerIds(): readonly string[] {
+  return [...handlers.keys()].filter((id) => (handlers.get(id)?.size ?? 0) > 0);
 }
 
 /**
@@ -66,10 +76,16 @@ export function subscribeKeybind(id: string, handler: KeybindHandler): () => voi
   const existing = handlers.get(id) ?? new Set<KeybindHandler>();
   existing.add(handler);
   handlers.set(id, existing);
+  announceOwners();
   return () => {
     existing.delete(handler);
     if (existing.size === 0) handlers.delete(id);
+    announceOwners();
   };
+}
+
+function announceOwners(): void {
+  for (const listener of [...ownerListeners]) listener();
 }
 
 /**

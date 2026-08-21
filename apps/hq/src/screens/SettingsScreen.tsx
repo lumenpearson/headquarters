@@ -6,10 +6,12 @@ import {
   type SettingCategory,
 } from '@gremuchaya/settings-schema';
 import {
+  TerminalAlertDialog,
   TerminalButton,
   TerminalInput,
   TerminalSelect,
   TerminalSwitch,
+  useTerminalToast,
 } from '@gremuchaya/ui/primitives';
 import { useMemo, useState } from 'react';
 
@@ -25,6 +27,7 @@ import { useOperationsStore } from '@/state/operationsStore';
 
 export function SettingsScreen() {
   const state = useOperationsStore((value) => value);
+  const toast = useTerminalToast();
   const draft = state.personalization.draft;
   const [catalogCategory, setCatalogCategory] = useState<SettingCategory>('themes');
   const [importStatus, setImportStatus] = useState<string | null>(null);
@@ -226,13 +229,32 @@ export function SettingsScreen() {
               <dd>STATIC / OFFLINE</dd>
             </div>
           </dl>
-          <TerminalButton
-            className="ops-action ops-action--danger"
-            tone="critical"
-            onClick={() => state.resetWorld()}
-          >
-            [R] СБРОСИТЬ ОПЕРАТИВНЫЙ МИР
-          </TerminalButton>
+          {/*
+            Confirmed rather than immediate: this button used to wipe the whole
+            simulated world on a single click, and on a shoot day a misclick
+            there costs a take. The report afterwards exists because the change
+            is spread across every screen -- there is no local place for the
+            operator to see that it happened.
+          */}
+          <TerminalAlertDialog
+            trigger={
+              <TerminalButton className="ops-action ops-action--danger" tone="critical">
+                [R] СБРОСИТЬ ОПЕРАТИВНЫЙ МИР
+              </TerminalButton>
+            }
+            title="СБРОСИТЬ ОПЕРАТИВНЫЙ МИР?"
+            description="Объекты, дела, тревоги, события и связь вернутся к исходному состоянию сцены. Настройки персонализации это не затронет."
+            confirmLabel="[R] СБРОСИТЬ МИР"
+            onConfirm={() => {
+              state.resetWorld();
+              toast.notify({
+                title: 'ОПЕРАТИВНЫЙ МИР СБРОШЕН',
+                description:
+                  'Объекты, дела, тревоги и связь вернулись к исходному состоянию сцены.',
+                tone: 'warning',
+              });
+            }}
+          />
         </Panel>
         <Panel
           title="ПЕРСОНАЛИЗАЦИЯ / КАТАЛОГ"
@@ -274,9 +296,21 @@ export function SettingsScreen() {
             >
               [R] СБРОСИТЬ КАТЕГОРИЮ
             </TerminalButton>
-            <TerminalButton className="ops-action" onClick={() => state.resetAllSettings()}>
-              [RR] СБРОСИТЬ ВСЁ
-            </TerminalButton>
+            <TerminalAlertDialog
+              trigger={<TerminalButton className="ops-action">[RR] СБРОСИТЬ ВСЁ</TerminalButton>}
+              title="СБРОСИТЬ ВСЕ НАСТРОЙКИ?"
+              description="Все категории персонализации вернутся к значениям по умолчанию. Отменяется через [CTRL+Z] UNDO."
+              confirmLabel="[RR] СБРОСИТЬ ВСЁ"
+              onConfirm={() => {
+                state.resetAllSettings();
+                toast.notify({
+                  title: 'НАСТРОЙКИ СБРОШЕНЫ',
+                  description:
+                    'Все категории вернулись к значениям по умолчанию; [CTRL+Z] отменяет.',
+                  tone: 'warning',
+                });
+              }}
+            />
             <TerminalButton className="ops-action" onClick={() => state.discardSettingsDraft()}>
               [ESC] ОТМЕНИТЬ DRAFT
             </TerminalButton>

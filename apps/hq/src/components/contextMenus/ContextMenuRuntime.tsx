@@ -1,14 +1,18 @@
 'use client';
 
 import { TerminalPointerMenu, type TerminalMenuItem } from '@gremuchaya/ui/primitives';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   contextMenuFor,
   entryShortcut,
   type ContextMenuDefinition,
 } from '@/application/contextMenus/registry';
-import { fireKeybind, keybindHasOwner } from '@/components/keybinds/KeybindRuntime';
+import {
+  fireKeybind,
+  keybindOwnerIds,
+  subscribeKeybindOwners,
+} from '@/components/keybinds/KeybindRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
 type ContextMenuHandler = (subject: string | undefined) => void;
@@ -20,6 +24,46 @@ type ContextMenuHandler = (subject: string | undefined) => void;
  * one instance.
  */
 const handlers = new Map<string, Set<ContextMenuHandler>>();
+const ownerListeners = new Set<() => void>();
+
+function announceOwners(): void {
+  for (const listener of [...ownerListeners]) listener();
+}
+
+/**
+ * A stable description of everything a menu could run right now.
+ *
+ * Passed into the builder as an argument rather than read from the tables
+ * inside it, so that "which entries are available" is a visible input: the
+ * compiler may then cache a built list against it and still be correct, and a
+ * claim made or dropped produces a different string and a fresh list.
+ *
+ * `|` is safe as the separator: every id in both registries is a dotted
+ * lowercase identifier.
+ */
+function menuOwnerSnapshot(): string {
+  const claimed = [...handlers.keys()].filter((id) => (handlers.get(id)?.size ?? 0) > 0);
+  return [...keybindOwnerIds().map((id) => `k:${id}`), ...claimed.map((id) => `a:${id}`)]
+    .sort()
+    .join('|');
+}
+
+/** Subscribes a surface to both claim tables at once. */
+export function useMenuOwners(): string {
+  return useSyncExternalStore(
+    useCallback((listener: () => void) => {
+      const unsubscribeKeybinds = subscribeKeybindOwners(listener);
+      ownerListeners.add(listener);
+      return () => {
+        unsubscribeKeybinds();
+        ownerListeners.delete(listener);
+      };
+    }, []),
+    menuOwnerSnapshot,
+    // The server renders no menus; an empty claim set is the honest snapshot.
+    () => '',
+  );
+}
 
 /**
  * Claims a declared context-menu action for as long as the screen is mounted.
@@ -39,11 +83,52 @@ export function useContextMenuAction(id: string, handler: ContextMenuHandler): v
     const wrapped: ContextMenuHandler = (subject) => latest.current(subject);
     existing.add(wrapped);
     handlers.set(id, existing);
+    announceOwners();
     return () => {
       existing.delete(wrapped);
       if (existing.size === 0) handlers.delete(id);
+      announceOwners();
     };
   }, [id]);
+}
+
+/**
+ * Turns a declared menu into the items a `Terminal*` menu renders.
+ *
+ * Shared by the right-click runtime and by any visible trigger that offers the
+ * same commands, so the two cannot come to disagree about what a surface
+ * offers or about which entry is available. Read at the moment the menu is
+ * shown: ownership is a property of what is mounted right now.
+ */
+export function buildContextMenuItems(
+  definition: ContextMenuDefinition,
+  subject: string | undefined,
+  ownerSnapshot: string,
+): TerminalMenuItem[] {
+  const owners = new Set(ownerSnapshot.split('|'));
+  return definition.items.map((entry) => {
+    const owned =
+      entry.keybind === undefined
+        ? owners.has(`a:${entry.action ?? ''}`)
+        : owners.has(`k:${entry.keybind}`);
+    const shortcut = entryShortcut(entry);
+    return {
+      id: entry.id,
+      label: entry.label,
+      disabled: !owned,
+      ...(shortcut === undefined ? {} : { shortcut }),
+      ...(entry.tone === undefined ? {} : { tone: entry.tone }),
+      onSelect: () => {
+        if (entry.keybind !== undefined) {
+          fireKeybind(entry.keybind);
+          return;
+        }
+        const owners = handlers.get(entry.action ?? '');
+        if (owners === undefined) return;
+        for (const owner of [...owners]) owner(subject);
+      },
+    };
+  });
 }
 
 interface OpenMenu {
@@ -64,6 +149,7 @@ interface OpenMenu {
  */
 export function ContextMenuRuntime() {
   const [open, setOpen] = useState<OpenMenu | null>(null);
+  const owners = useMenuOwners();
   const longPressEnabled = useOperationsStore(
     (state) => state.personalization.draft.values['popups.longPress'] !== false,
   );
@@ -131,29 +217,7 @@ export function ContextMenuRuntime() {
 
   if (open === null) return null;
 
-  const items: TerminalMenuItem[] = open.definition.items.map((entry) => {
-    const owned =
-      entry.keybind === undefined
-        ? (handlers.get(entry.action ?? '')?.size ?? 0) > 0
-        : keybindHasOwner(entry.keybind);
-    const shortcut = entryShortcut(entry);
-    return {
-      id: entry.id,
-      label: entry.label,
-      disabled: !owned,
-      ...(shortcut === undefined ? {} : { shortcut }),
-      ...(entry.tone === undefined ? {} : { tone: entry.tone }),
-      onSelect: () => {
-        if (entry.keybind !== undefined) {
-          fireKeybind(entry.keybind);
-          return;
-        }
-        const owners = handlers.get(entry.action ?? '');
-        if (owners === undefined) return;
-        for (const owner of [...owners]) owner(open.subject);
-      },
-    };
-  });
+  const items = buildContextMenuItems(open.definition, open.subject, owners);
 
   return (
     <TerminalPointerMenu

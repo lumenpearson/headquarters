@@ -6,12 +6,19 @@ import { type CSSProperties, useEffect, useMemo, useState } from 'react';
 import {
   TerminalButton,
   TerminalInput,
+  TerminalMenu,
+  TerminalPopover,
   TerminalSelect,
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 
 import { primaryNavigation } from '@/application/navigation';
-import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
+import { contextMenuFor } from '@/application/contextMenus/registry';
+import {
+  buildContextMenuItems,
+  useContextMenuAction,
+  useMenuOwners,
+} from '@/components/contextMenus/ContextMenuRuntime';
 import { subscribeKeybind, useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { AnalyticsScreen } from '@/screens/AnalyticsScreen';
 import { ArchiveScreen } from '@/screens/ArchiveScreen';
@@ -380,12 +387,46 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
           <small>ALERT</small>
           <b>{String(activeAlerts.length).padStart(2, '0')}</b>
         </TerminalButton>
+        <ShellCommandsMenu />
       </div>
       <time>
         <strong>{clock}</strong>
         <span>{production.paused ? '[FREEZE]' : `[×${production.clockSpeed}]`}</span>
       </time>
     </header>
+  );
+}
+
+/**
+ * The shell's commands, reachable without knowing the gesture.
+ *
+ * The same five entries the right button opens, from the same registry: a
+ * command that exists only behind a chord and a right click is a command most
+ * operators never find. Items are rebuilt when the menu opens rather than on
+ * every render, because "can this command run right now" is answered by what
+ * is mounted at that moment.
+ */
+function ShellCommandsMenu() {
+  // Subscribed, not read during render: claims are made in effects, so a list
+  // built from a plain table read is the list from the first render, when
+  // nothing is claimed and every command draws itself disabled.
+  const owners = useMenuOwners();
+  const definition = contextMenuFor('shell');
+  if (definition === undefined) return null;
+  const items = buildContextMenuItems(definition, undefined, owners);
+  return (
+    <TerminalMenu
+      label={definition.label}
+      items={items}
+      side="bottom"
+      align="end"
+      trigger={
+        <TerminalButton className="ops-topbar__commands" aria-label="Команды штаба">
+          <small>КОМАНДЫ</small>
+          <b>[≡]</b>
+        </TerminalButton>
+      }
+    />
   );
 }
 
@@ -438,12 +479,60 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
       <span>
         NET {metrics.networkIn}/{metrics.networkOut}
       </span>
-      <span>BUS:{bus}</span>
-      <span>RPC:GRPC-WEB</span>
+      <TransportProbe bus={bus} />
       <span>AL:{Object.values(alerts).filter((alert) => alert.lifecycle === 'NEW').length}</span>
       <span>UTF-8</span>
       <span>F:FULL ^K:SEARCH ^⇧P:PROD</span>
     </footer>
+  );
+}
+
+/**
+ * The transport line, with the detail behind it.
+ *
+ * `BUS:BROADCAST` and `RPC:GRPC-WEB` were two words standing for the whole
+ * answer to "how is this session talking to the others", which is the first
+ * question on set when a screen stops following. The popover carries what the
+ * words compress -- which bus is in use and why, and what the fallback would
+ * be -- without spending a panel on it or sending the operator to another
+ * screen.
+ */
+function TransportProbe({ bus }: { readonly bus: string }) {
+  const screenId = useOperationsStore((state) => state.production.screenId);
+  return (
+    <TerminalPopover
+      side="top"
+      title="ТРАНСПОРТ СЕССИИ"
+      description="Чем этот экран синхронизируется с остальными"
+      trigger={
+        <TerminalButton className="ops-statusline__probe" aria-label="Подробности транспорта">
+          BUS:{bus} RPC:GRPC-WEB
+        </TerminalButton>
+      }
+    >
+      <dl className="ops-transport-detail">
+        <div>
+          <dt>ШИНА ЭКРАНОВ</dt>
+          <dd>
+            {bus === 'BROADCAST'
+              ? 'BroadcastChannel — вкладки одного браузера'
+              : 'storage-события — BroadcastChannel недоступен'}
+          </dd>
+        </div>
+        <div>
+          <dt>RPC</dt>
+          <dd>ConnectRPC поверх бинарного gRPC-Web</dd>
+        </div>
+        <div>
+          <dt>ЭКРАН</dt>
+          <dd>{screenId}</dd>
+        </div>
+        <div>
+          <dt>ГРУППОВАЯ СИНХРОНИЗАЦИЯ</dt>
+          <dd>Не подключена — R27, фича F10</dd>
+        </div>
+      </dl>
+    </TerminalPopover>
   );
 }
 

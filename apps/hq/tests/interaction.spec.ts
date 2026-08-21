@@ -231,3 +231,58 @@ test('R12: an element that owns its menu keeps it, and does not also get the she
   // Two menus for one click is two places deciding what the right button does.
   await expect(page.getByRole('menu', { name: 'Команды штаба' })).toHaveCount(0);
 });
+
+test('R12: the shell commands are reachable from a visible menu, not only a gesture', async ({
+  page,
+}) => {
+  await page.goto('/overview');
+
+  await page.getByRole('button', { name: 'Команды штаба' }).click();
+  const menu = page.getByRole('menu', { name: 'Команды штаба' });
+  await expect(menu).toBeVisible();
+  // The same registry the right button reads, so the two lists cannot diverge.
+  await expect(menu.locator('kbd', { hasText: 'Ctrl + Shift + E' })).toBeVisible();
+  // Built when the menu opened, not on first render: ownership is claimed in
+  // effects, and a list frozen at mount would draw every command disabled.
+  await expect(menu.getByRole('menuitem', { name: 'Полный экран' })).toBeEnabled();
+
+  await menu.getByRole('menuitem', { name: 'Сочетания клавиш' }).click();
+  await expect(page.getByRole('dialog', { name: 'Сочетания клавиш' })).toBeVisible();
+});
+
+test('R12: the status line carries the transport detail behind a popover', async ({ page }) => {
+  await page.goto('/overview');
+
+  const probe = page.getByRole('button', { name: 'Подробности транспорта' });
+  await expect(probe).toContainText('BUS:BROADCAST');
+  await probe.click();
+
+  const popover = page.getByRole('dialog', { name: 'ТРАНСПОРТ СЕССИИ' });
+  await expect(popover).toBeVisible();
+  await expect(popover).toContainText('BroadcastChannel');
+  await expect(popover).toContainText('gRPC-Web');
+});
+
+test('R12: a destructive reset asks first and reports that it happened', async ({ page }) => {
+  await page.goto('/settings');
+
+  // Nothing is reset by opening the question.
+  await page.getByRole('button', { name: '[R] СБРОСИТЬ ОПЕРАТИВНЫЙ МИР' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'СБРОСИТЬ ОПЕРАТИВНЫЙ МИР?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'ОТМЕНА' }).click();
+  await expect(ask).toHaveCount(0);
+  await expect(page.locator('.terminal-toast')).toHaveCount(0);
+
+  await page.getByRole('button', { name: '[R] СБРОСИТЬ ОПЕРАТИВНЫЙ МИР' }).click();
+  await page
+    .getByRole('alertdialog', { name: 'СБРОСИТЬ ОПЕРАТИВНЫЙ МИР?' })
+    .getByRole('button', { name: '[R] СБРОСИТЬ МИР' })
+    .click();
+
+  // The change is spread across every screen, so the report is the only place
+  // the operator sees that it landed.
+  await expect(
+    page.locator('.terminal-toast').filter({ hasText: 'ОПЕРАТИВНЫЙ МИР СБРОШЕН' }),
+  ).toBeVisible();
+});

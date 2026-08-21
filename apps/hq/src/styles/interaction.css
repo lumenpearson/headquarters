@@ -141,3 +141,48 @@ body.terminal-theme textarea:focus {
 .ops-shell .ops-table tbody tr[data-interactive='true'] {
   cursor: pointer;
 }
+
+/*
+ * R12: the two popup triggers the shell itself carries.
+ *
+ * Both sit inside strips whose children are laid out by `.ops-topbar` and
+ * `.ops-statusline`, so they take those strips' geometry rather than the
+ * default control chrome -- a bordered button in a status line would read as a
+ * dialog dropped into a text row.
+ */
+.ops-topbar__commands b {
+  color: var(--ops-orange-bright);
+}
+
+.ops-statusline__probe {
+  align-self: stretch;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.ops-statusline__probe:hover {
+  border: 0;
+  background: none;
+  color: var(--ops-orange-bright);
+}
+
+.ops-transport-detail {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.ops-transport-detail dt {
+  color: var(--text-2);
+  font-size: var(--font-xs);
+  letter-spacing: 0.1em;
+}
+
+.ops-transport-detail dd {
+  margin: 0;
+  color: var(--text-0);
+  font-size: var(--font-sm);
+}
