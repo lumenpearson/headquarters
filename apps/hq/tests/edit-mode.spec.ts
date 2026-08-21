@@ -46,3 +46,32 @@ test('an operator opens edit mode, docks the panel and edits without the page sc
   await expect(page.locator('.edit-mode-frame')).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('data-edit-mode', 'off');
 });
+
+test('R17: state changes land instantly while edit mode is on, and ease again once it is off', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const shell = page.locator('.ops-shell');
+  await expect(shell).toBeVisible();
+
+  const motionDuration = () =>
+    shell.evaluate((element) =>
+      getComputedStyle(element).getPropertyValue('--ops-motion-duration').trim(),
+    );
+
+  // Read rather than hard-code: the duration is derived from the operator's
+  // animation intensity, which persists across sessions. What R17 asserts is
+  // the relationship between the two modes, not one particular number.
+  const configured = await motionDuration();
+  expect(configured).not.toBe('0ms');
+
+  await page.keyboard.press('Control+Shift+E');
+  await expect(page.locator('.edit-mode-frame')).toBeVisible();
+  await expect.poll(motionDuration).toBe('0ms');
+
+  await page.keyboard.press('Control+Shift+E');
+  await expect(page.locator('.edit-mode-frame')).toHaveCount(0);
+  // Leaving edit mode restores exactly what the operator configured; the
+  // suppression is borrowed for the session, not written into the settings.
+  await expect.poll(motionDuration).toBe(configured);
+});

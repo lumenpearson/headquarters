@@ -27,6 +27,7 @@ import { VideoScreen } from '@/screens/VideoScreen';
 import { operationsStore, type OperationsRoute, useOperationsStore } from '@/state/operationsStore';
 
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
+import { resolveMotionDurationMs } from './ShellMotion';
 
 const navigation = [
   ['overview', '/overview', '01', 'ОБЗОР'],
@@ -146,6 +147,7 @@ export function OperationsShell({
   const selectObject = useOperationsStore((state) => state.selectObject);
   const selectCase = useOperationsStore((state) => state.selectCase);
   const personalization = useOperationsStore((state) => state.personalization);
+  const editActive = useOperationsStore((state) => state.edit.active);
   const theme = settingString(personalization.draft.values['themes.id'], 'terminal-red');
   const density = settingString(personalization.draft.values['layout.density'], 'dense');
   const background = settingString(
@@ -251,7 +253,7 @@ export function OperationsShell({
       style={
         {
           '--ops-type-scale': Math.min(1.25, Math.max(0.85, typographyScale * sizeScale)),
-          '--ops-motion-duration': `${Math.round(80 + animationIntensity * 180)}ms`,
+          '--ops-motion-duration': `${resolveMotionDurationMs(animationIntensity, editActive)}ms`,
           '--ops-background-duration': `${Math.round(30_000 - animationIntensity * 18_000)}ms`,
         } as CSSProperties
       }
