@@ -26,6 +26,6 @@
     "@bufbuild/buf": "1.72.0",
     "@bufbuild/protoc-gen-es": "2.14.0",
     "typescript": "6.0.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }
