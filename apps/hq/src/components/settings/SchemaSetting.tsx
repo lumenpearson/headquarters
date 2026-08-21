@@ -7,7 +7,10 @@ import {
   TerminalSelect,
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+
+import { useMaterialCatalog } from './MaterialCatalog';
+import { materialOptionsFor, unsetMaterialOption } from './MaterialOptions';
 
 /**
  * Shared between `SettingsScreen` and the edit-mode floating panel, which both
@@ -28,6 +31,16 @@ export function SchemaSetting({
 }) {
   const label = settingLabel(definition.id);
   const editor = definition.editor;
+
+  // Called unconditionally, as a hook must be, but the catalogue only loads
+  // when a picker over it is actually on screen.
+  const catalog = useMaterialCatalog();
+  const needsMaterials = editor.kind === 'material';
+  const requestMaterials = catalog.request;
+  useEffect(() => {
+    if (needsMaterials) requestMaterials();
+  }, [needsMaterials, requestMaterials]);
+
   const control = (() => {
     switch (editor.kind) {
       case 'boolean':
@@ -68,6 +81,20 @@ export function SchemaSetting({
             }}
           />
         );
+      case 'material': {
+        const chosen = typeof value === 'string' ? value : '';
+        const options = materialOptionsFor(catalog.materials, editor.accept, chosen);
+        return (
+          <TerminalSelect
+            label={label}
+            value={chosen === '' ? unsetMaterialOption : chosen}
+            onValueChange={(nextValue) =>
+              onValueChange(nextValue === unsetMaterialOption ? '' : nextValue)
+            }
+            options={options}
+          />
+        );
+      }
       case 'string-list':
         return (
           <TerminalInput

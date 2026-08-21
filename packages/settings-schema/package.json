@@ -18,6 +18,9 @@
     "lint": "eslint src",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@gremuchaya/domain": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "6.0.3",
     "vitest": "4.1.11"

@@ -1,3 +1,4 @@
+import { isMaterialId } from '@gremuchaya/domain';
 const protocolVersion = 1 as const;
 const defaultGroupId = 'local-browser';
 const defaultExecutionDelayMs = 40;
@@ -283,7 +284,7 @@ function isPlaybackSyncTarget(value: unknown): value is PlaybackSyncTarget {
   }
   return candidate.sourceKind === 'DEMO_VIDEO'
     ? candidate.materialId === undefined
-    : typeof candidate.materialId === 'string' && isUuid(candidate.materialId);
+    : typeof candidate.materialId === 'string' && isMaterialId(candidate.materialId);
 }
 
 function compareCommands(left: PlaybackSyncCommand, right: PlaybackSyncCommand): number {
@@ -332,8 +333,4 @@ function isNonNegativeFinite(value: unknown): value is number {
 
 function isPositiveFinite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 }

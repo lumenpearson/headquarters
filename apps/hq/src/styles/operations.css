@@ -3618,12 +3618,56 @@ button.is-active {
 /* Media backgrounds require a material binding from the storage phase. Until then
    they deliberately fall back to a deterministic terminal field rather than
    loading an arbitrary path or URL. */
+/*
+ * The `image` and `video` kinds with nothing chosen yet. A wider grid than the
+ * default reads as "a picture belongs here", and it is what the shell falls
+ * back to when a chosen material cannot be read.
+ */
 .ops-shell[data-background-kind='image'],
 .ops-shell[data-background-kind='video'] {
   background-image:
     linear-gradient(rgb(115 184 133 / 3%) 1px, transparent 1px),
     linear-gradient(90deg, rgb(115 184 133 / 3%) 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+/*
+ * A chosen still image, once its material has actually resolved. Keyed off a
+ * separate attribute rather than a `var()` fallback because the sizing differs:
+ * a photograph covers the viewport, the placeholder grid tiles at 24px.
+ *
+ * Named for the image specifically. The `video` kind is a real element layered
+ * behind the shell, not a CSS background, so an attribute called "source"
+ * would read as absent while a clip was plainly playing.
+ *
+ * The URL only ever comes from `URL.createObjectURL` or a bridge playback
+ * grant. Operator input reaches this rule as a material identifier and nothing
+ * else, so no text an operator can type ever becomes CSS.
+ */
+.ops-shell[data-background-image='material'] {
+  background-image: var(--ops-background-source);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+/*
+ * The video background. Behind everything the shell draws and inert to the
+ * pointer, so it changes how the application looks and nothing about how it
+ * behaves.
+ */
+.ops-shell__background-video {
+  position: absolute;
+  z-index: var(--z-base);
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ops-shell__background-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .ops-shell[data-style-mode='dense-mainframe'] {

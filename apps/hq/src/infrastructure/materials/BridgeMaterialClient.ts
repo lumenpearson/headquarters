@@ -1,3 +1,4 @@
+import { isMaterialId } from '@gremuchaya/domain';
 import { createClient } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
 import { FileBridgeService } from '@gremuchaya/protocol';
@@ -273,7 +274,7 @@ export class BridgeMaterialClient {
   }
 
   async revokePlaybackGrant(grantId: string, signal?: AbortSignal): Promise<boolean> {
-    if (!isUuid(grantId)) return false;
+    if (!isMaterialId(grantId)) return false;
     const response = await this.#client.revokeMaterialPlaybackGrant({ grantId }, options(signal));
     return response.revoked;
   }
@@ -351,7 +352,8 @@ function toMaterialPlaybackGrant(
   grant: BridgeMaterialPlaybackGrant,
   material: MaterialEntry,
 ): MaterialPlaybackGrant {
-  if (!isUuid(grant.grantId)) throw new Error('Bridge returned a malformed playback grant ID.');
+  if (!isMaterialId(grant.grantId))
+    throw new Error('Bridge returned a malformed playback grant ID.');
   if (grant.byteSize !== material.byteSize || grant.mimeType !== material.mimeType) {
     throw new Error('Playback grant metadata differs from the selected material.');
   }
@@ -387,10 +389,6 @@ export function normalizePlaybackGrantUrl(value: string, grantId: string): strin
   } catch {
     throw new Error('Bridge returned an unsafe material playback URL.');
   }
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

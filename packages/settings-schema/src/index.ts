@@ -1,3 +1,5 @@
+import { isMaterialId } from '@gremuchaya/domain';
+
 export const settingCategories = [
   'general',
   'information',
@@ -52,7 +54,14 @@ export type SettingEditor =
       readonly maximum: number;
       readonly step: number;
     }
-  | { readonly kind: 'string-list'; readonly delimiter: ',' };
+  | { readonly kind: 'string-list'; readonly delimiter: ',' }
+  /**
+   * A file chosen from the material catalogue. `accept` lists the media-type
+   * prefixes the picker may offer, so the operator selects material the
+   * application already holds rather than naming a location. The stored value
+   * is an opaque identifier -- never a path, a URL, or CSS.
+   */
+  | { readonly kind: 'material'; readonly accept: readonly string[] };
 
 export interface SettingDefinition {
   readonly id: string;
@@ -119,6 +128,21 @@ const oneOf = <const Values extends readonly string[]>(values: Values): SettingV
     { kind: 'enum', options: values },
     (value): value is Values[number] =>
       typeof value === 'string' && values.includes(value as Values[number]),
+  );
+
+/**
+ * Accepts an identifier the material bridge issued, or the empty string, which
+ * is how an operator clears the choice.
+ *
+ * `isMaterialId` is reused rather than re-expressed as a pattern here. That
+ * same shape check had already been written out three separate times in the
+ * application, and a fourth copy in another package is how the four begin to
+ * disagree about what a valid reference is.
+ */
+const materialOf = (accept: readonly string[]): SettingValidator =>
+  withEditor(
+    { kind: 'material', accept },
+    (value): value is string => typeof value === 'string' && (value === '' || isMaterialId(value)),
   );
 
 const isBoolean = withEditor(
@@ -248,6 +272,22 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
       'image',
       'video',
     ]),
+  ),
+  definition(
+    'backgrounds.imageSource',
+    'backgrounds',
+    '',
+    'device',
+    'Material shown by the `image` background. Empty means no material chosen.',
+    materialOf(['image/']),
+  ),
+  definition(
+    'backgrounds.videoSource',
+    'backgrounds',
+    '',
+    'device',
+    'Material played by the `video` background. Empty means no material chosen.',
+    materialOf(['video/']),
   ),
   definition(
     'patterns.focus',

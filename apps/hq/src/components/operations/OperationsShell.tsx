@@ -26,6 +26,7 @@ import { UiGalleryScreen } from '@/screens/UiGalleryScreen';
 import { VideoScreen } from '@/screens/VideoScreen';
 import { operationsStore, type OperationsRoute, useOperationsStore } from '@/state/operationsStore';
 
+import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
 import { resolveMotionDurationMs } from './ShellMotion';
 
@@ -155,6 +156,14 @@ export function OperationsShell({
     'terminal-grid',
   );
   const focusPattern = settingString(personalization.draft.values['patterns.focus'], 'brackets');
+  const backgroundImageSource = settingString(
+    personalization.draft.values['backgrounds.imageSource'],
+    '',
+  );
+  const backgroundVideoSource = settingString(
+    personalization.draft.values['backgrounds.videoSource'],
+    '',
+  );
   const typographyScale = settingNumber(personalization.draft.values['typography.scale'], 1);
   const sizeScale = settingNumber(personalization.draft.values['sizes.scale'], 1);
   const styleMode = settingString(personalization.draft.values['styles.mode'], 'strict-terminal');
@@ -168,6 +177,15 @@ export function OperationsShell({
     personalization.draft.values['accessibility.reducedMotion'],
     false,
   );
+
+  // Only the selected kind resolves a material; the other resolves nothing.
+  const backgroundImageUrl = useBackgroundMaterialUrl(
+    background === 'image' ? backgroundImageSource : '',
+  );
+  const backgroundVideoUrl = useBackgroundMaterialUrl(
+    background === 'video' ? backgroundVideoSource : '',
+  );
+  const motionAllowed = production.animations && draftAnimations && !reducedMotion;
 
   useEffect(() => {
     setRoute(route);
@@ -241,11 +259,12 @@ export function OperationsShell({
 
   return (
     <div
-      className={`ops-shell ${compact ? 'ops-shell--compact' : ''} ${production.cameraSafe ? 'ops-shell--camera-safe' : ''} ${production.animations && draftAnimations && !reducedMotion ? '' : 'ops-shell--no-motion'} ops-cursor--${production.cursorMode}`}
+      className={`ops-shell ${compact ? 'ops-shell--compact' : ''} ${production.cameraSafe ? 'ops-shell--camera-safe' : ''} ${motionAllowed ? '' : 'ops-shell--no-motion'} ops-cursor--${production.cursorMode}`}
       data-transport="grpc-web"
       data-theme={theme}
       data-layout-density={density}
       data-background-kind={background}
+      data-background-image={backgroundImageUrl === null ? 'none' : 'material'}
       data-focus-pattern={focusPattern}
       data-style-mode={styleMode}
       data-accent={accent}
@@ -255,9 +274,17 @@ export function OperationsShell({
           '--ops-type-scale': Math.min(1.25, Math.max(0.85, typographyScale * sizeScale)),
           '--ops-motion-duration': `${resolveMotionDurationMs(animationIntensity, editActive)}ms`,
           '--ops-background-duration': `${Math.round(30_000 - animationIntensity * 18_000)}ms`,
+          // Quoted: an object URL is machine-made, but url() without quotes is
+          // a place where a stray character would become syntax.
+          ...(backgroundImageUrl === null
+            ? {}
+            : { '--ops-background-source': `url("${backgroundImageUrl}")` }),
         } as CSSProperties
       }
     >
+      {backgroundVideoUrl === null ? null : (
+        <BackgroundVideoLayer source={backgroundVideoUrl} paused={!motionAllowed} />
+      )}
       <pre className="ops-shell__ascii" aria-hidden="true">
         {asciiSignalField}
       </pre>

@@ -1,3 +1,4 @@
+import { isMaterialId } from '@gremuchaya/domain';
 import type { MaterialEntry } from '../materials/BridgeMaterialClient';
 
 export const cameraMaterialAssignmentsStorageKey = 'hq.camera-material-assignments.v1';
@@ -47,7 +48,7 @@ export function setCameraMaterialAssignment(
     delete next[cameraId];
     return next;
   }
-  if (validMaterialId(materialId)) next[cameraId] = materialId;
+  if (isMaterialId(materialId)) next[cameraId] = materialId;
   return next;
 }
 
@@ -62,7 +63,7 @@ export function isAssignableCameraMaterial(material: MaterialEntry): boolean {
 export function normalizeCameraMaterialAssignments(value: unknown): CameraMaterialAssignments {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
   const normalized = Object.entries(value).flatMap(([cameraId, materialId]) =>
-    validCameraId(cameraId) && typeof materialId === 'string' && validMaterialId(materialId)
+    validCameraId(cameraId) && typeof materialId === 'string' && isMaterialId(materialId)
       ? [[cameraId, materialId] as const]
       : [],
   );
@@ -73,8 +74,4 @@ export function normalizeCameraMaterialAssignments(value: unknown): CameraMateri
 
 function validCameraId(value: string): boolean {
   return /^[A-Za-z0-9_-]{1,128}$/u.test(value);
-}
-
-function validMaterialId(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 }

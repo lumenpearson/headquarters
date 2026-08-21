@@ -131,3 +131,52 @@ describe('safe settings draft schema', () => {
     });
   });
 });
+
+describe('background source settings', () => {
+  const patch = (id: string, value: unknown) =>
+    applyDraftPatch(createSettingsDraft(createFactorySnapshot()), [{ id, value }], event('bg-1'));
+
+  it('declares a picker over the material catalogue, not a free-text field', () => {
+    // The editor catalogue is the whole of what the safe editor may render. A
+    // source that arrived as typed text would be a new trust boundary; naming
+    // the accepted media instead keeps the operator choosing from material the
+    // application already holds.
+    expect(getSettingDefinition('backgrounds.imageSource')?.editor).toEqual({
+      kind: 'material',
+      accept: ['image/'],
+    });
+    expect(getSettingDefinition('backgrounds.videoSource')?.editor).toEqual({
+      kind: 'material',
+      accept: ['video/'],
+    });
+  });
+
+  it('belongs to the backgrounds category, so its reset button is the one for backgrounds', () => {
+    // R5 applies to it for free precisely because it is a declared setting and
+    // not a registry off to one side.
+    expect(
+      getSettingsDefinitionsForCategory('backgrounds').map((definition) => definition.id),
+    ).toEqual(['backgrounds.kind', 'backgrounds.imageSource', 'backgrounds.videoSource']);
+  });
+
+  it('starts unset, and the empty string is how an operator clears it', () => {
+    expect(getSettingDefinition('backgrounds.imageSource')?.defaultValue).toBe('');
+    expect(patch('backgrounds.imageSource', '').values['backgrounds.imageSource']).toBe('');
+  });
+
+  it('accepts a material identifier', () => {
+    const id = '018f0f1a-8000-7000-8000-000000000000';
+    expect(patch('backgrounds.imageSource', id).values['backgrounds.imageSource']).toBe(id);
+  });
+
+  it.each([
+    ['a filesystem path', '/Материалы/Фон.jpg'],
+    ['a URL, which is the thing this must never become', 'https://example.test/a.jpg'],
+    ['a data URL', 'data:image/png;base64,AAAA'],
+    ['a CSS fragment', 'url(evil.png)'],
+    ['the nil UUID', '00000000-0000-0000-0000-000000000000'],
+    ['a number', 3],
+  ])('rejects %s', (_reason, value) => {
+    expect(() => patch('backgrounds.imageSource', value)).toThrow(InvalidSettingValueError);
+  });
+});
