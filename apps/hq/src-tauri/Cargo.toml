@@ -17,7 +17,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
-getrandom = "=0.3.4"
+getrandom = "=0.4.3"
 hex = "=0.4.3"
 notify = "8.2.0"
 prost = "0.14.4"

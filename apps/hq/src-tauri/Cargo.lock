@@ -1247,7 +1247,7 @@ name = "gremuchaya-hq"
 version = "0.5.0"
 dependencies = [
  "axum",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "hex",
  "notify",
  "prost",
