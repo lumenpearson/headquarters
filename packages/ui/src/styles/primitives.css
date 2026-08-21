@@ -377,8 +377,21 @@ body.terminal-theme {
   background: var(--bg-0);
 }
 
+/*
+ * R23: the control keeps the pointer at rest and takes a grabbing cursor while
+ * the value is actually being moved.
+ *
+ * `[data-adjusting]` comes from TerminalSlider, not from Base UI. The previous
+ * selector here was `[data-dragging]`, which Base UI 1.7.0 never sets -- so
+ * this highlight had never once fired, and the drag looked identical to a
+ * resting slider.
+ */
+.terminal-slider[data-adjusting] .terminal-slider__control {
+  cursor: grabbing;
+}
+
 .terminal-slider__thumb:focus-within,
-.terminal-slider__thumb[data-dragging] {
+.terminal-slider[data-adjusting] .terminal-slider__thumb {
   background: var(--accent);
 }
 

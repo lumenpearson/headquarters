@@ -70,3 +70,57 @@ test('R12: the selection colour follows the theme the operator chose', async ({ 
   // painted an `--accent-strong` from `:root` that no theme ever touches.
   expect(light.accent).not.toBe(dark.accent);
 });
+
+test('R23: a row that selects a record says so, a row that only reports does not', async ({
+  page,
+}) => {
+  await page.goto('/objects');
+  const selectable = page.locator('.ops-table tbody tr').first();
+  await expect(selectable).toHaveCSS('cursor', 'pointer');
+
+  await page.goto('/system');
+  // The node table only reports; a pointer there would promise a click that
+  // does nothing.
+  await expect(page.locator('.ops-table tbody tr').first()).toHaveCSS('cursor', 'default');
+});
+
+test('R23: a field is a pointer at rest and a caret while it is being changed', async ({
+  page,
+}) => {
+  await page.goto('/search');
+  const input = page.locator('.search-command input');
+
+  await expect(input).toHaveCSS('cursor', 'pointer');
+  await input.click();
+  await expect(input).toBeFocused();
+  await expect(input).toHaveCSS('cursor', 'text');
+});
+
+test('R23: the slider takes a cursor of its own while the value is being moved', async ({
+  page,
+}) => {
+  await page.goto('/dev/ui');
+  const slider = page.locator('.terminal-slider').first();
+  const control = slider.locator('.terminal-slider__control');
+  const thumb = slider.locator('.terminal-slider__thumb');
+  await expect(control).toHaveCSS('cursor', 'pointer');
+
+  // The gallery is taller than the viewport and raw mouse coordinates do not
+  // scroll: without this the drag lands on nothing and the test passes for the
+  // wrong reason.
+  await control.scrollIntoViewIfNeeded();
+  const box = (await thumb.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 48, box.y + box.height / 2, { steps: 8 });
+
+  // Base UI 1.7.0 declares `data-dragging` but never renders it; this
+  // attribute is the one TerminalSlider publishes from the library's own
+  // change/commit pair, and the cursor and the thumb highlight both hang on it.
+  await expect(slider).toHaveAttribute('data-adjusting');
+  await expect(control).toHaveCSS('cursor', 'grabbing');
+
+  await page.mouse.up();
+  await expect(control).toHaveCSS('cursor', 'pointer');
+  expect(await slider.evaluate((element) => element.hasAttribute('data-adjusting'))).toBe(false);
+});

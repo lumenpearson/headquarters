@@ -82,6 +82,7 @@ export function ReportsScreen() {
                   <tr
                     key={report.id}
                     className={selected?.id === report.id ? 'is-selected' : ''}
+                    data-interactive="true"
                     onClick={() => setSelectedId(report.id)}
                   >
                     <td>{report.id}</td>

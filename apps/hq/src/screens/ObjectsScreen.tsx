@@ -105,6 +105,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
                     <tr
                       key={object.id}
                       className={object.id === selected?.id ? 'is-selected' : ''}
+                      data-interactive="true"
                       onClick={() => state.selectObject(object.id)}
                       onDoubleClick={() => router.push(`/objects/${object.id}`)}
                     >

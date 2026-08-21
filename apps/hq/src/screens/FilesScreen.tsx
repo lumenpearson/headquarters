@@ -246,6 +246,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                     <tr
                       key={file.id}
                       className={file.id === selected?.id ? 'is-selected' : ''}
+                      data-interactive="true"
                       onClick={() => state.selectFile(file.id)}
                       onDoubleClick={() => state.openDrawer('file', file.id)}
                     >

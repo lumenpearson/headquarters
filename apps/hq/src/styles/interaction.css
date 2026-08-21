@@ -82,3 +82,62 @@ html[data-edit-mode='on'] body.terminal-theme {
   background: var(--accent-strong);
   color: var(--text-inverse);
 }
+
+/*
+ * R23: the pointer on everything the operator can act on.
+ *
+ * `operations.css` already covers `button`, `a`, `select` and
+ * `input[type='range']`; measured across every route, fields and bound labels
+ * are what it leaves on the default arrow -- checkboxes, radios, file and date
+ * pickers on the plain arrow, text fields on the caret. Written on `body`
+ * rather than `.ops-shell` so the portalled dialogs and menus get them too.
+ *
+ * Every field, including the text ones: R23 asks for the pointer on "every
+ * interactive element, tile and field" and for a cursor of its own while a
+ * field is being changed. An idle field is a click target like any other; the
+ * caret belongs to the moment the operator is inside it, below.
+ */
+body.terminal-theme input,
+body.terminal-theme textarea,
+body.terminal-theme label[for],
+body.terminal-theme summary {
+  cursor: pointer;
+}
+
+/*
+ * R23: and the caret once the operator is actually typing into one.
+ *
+ * The exclusions are the input types where focus does not mean "a caret sits
+ * in text" -- a focused checkbox is still a click target, not a text run.
+ */
+body.terminal-theme
+  input:not(
+    [type='checkbox'],
+    [type='radio'],
+    [type='range'],
+    [type='file'],
+    [type='color'],
+    [type='date'],
+    [type='time'],
+    [type='month'],
+    [type='week'],
+    [type='button'],
+    [type='submit'],
+    [type='reset'],
+    [type='image']
+  ):focus,
+body.terminal-theme textarea:focus {
+  cursor: text;
+}
+
+/*
+ * R23: a table row that selects something says so.
+ *
+ * `.ops-table tr` in operations.css sets `default`, which is right for the
+ * rows that only display -- the system node table, for one. The rows that
+ * select or open a record declare themselves, so a row added later without a
+ * handler cannot inherit a promise it does not keep.
+ */
+.ops-shell .ops-table tbody tr[data-interactive='true'] {
+  cursor: pointer;
+}

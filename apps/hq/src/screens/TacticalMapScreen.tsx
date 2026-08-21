@@ -272,7 +272,11 @@ export function TacticalMapScreen() {
               {Object.values(state.channels)
                 .slice(0, 6)
                 .map((channel) => (
-                  <tr key={channel.id} onClick={() => state.openDrawer('channel', channel.id)}>
+                  <tr
+                    key={channel.id}
+                    data-interactive="true"
+                    onClick={() => state.openDrawer('channel', channel.id)}
+                  >
                     <td>{channel.id}</td>
                     <td>{channel.encryption}</td>
                     <td>{channel.load}%</td>

@@ -171,6 +171,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                     <tr
                       key={caseFile.id}
                       className={caseFile.id === selectedCase?.id ? 'is-selected' : ''}
+                      data-interactive="true"
                       onClick={() => state.selectCase(caseFile.id)}
                       onDoubleClick={() => router.push(`/cases/${caseFile.id}`)}
                     >
