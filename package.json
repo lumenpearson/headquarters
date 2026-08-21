@@ -22,7 +22,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "test:ui": "pnpm --filter @gremuchaya/hq test:ui",
+    "test:ui": "turbo run test:ui --filter=@gremuchaya/hq",
     "check:ui-boundary": "node scripts/check-ui-boundary.mjs",
     "check:protocol-generation": "node scripts/check-protocol-generation.mjs",
     "test:cargo": "cargo test --manifest-path apps/hq/src-tauri/Cargo.toml",

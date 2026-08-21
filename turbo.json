@@ -23,6 +23,7 @@
       "outputs": ["coverage/**"]
     },
     "test:ui": {
+      "dependsOn": ["^build"],
       "cache": false,
       "outputs": ["playwright-report/**", "test-results/**"]
     },
