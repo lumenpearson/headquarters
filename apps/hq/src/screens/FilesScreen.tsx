@@ -441,7 +441,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
             </span>
           </div>
         </header>
-        <TileGrid tiles={tiles} columns={12} className="files-layout" />
+        <TileGrid tiles={tiles} columns={12} className="files-layout" screen="files" />
       </div>
       <TerminalDialog
         title="ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ"

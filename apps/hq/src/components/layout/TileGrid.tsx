@@ -72,10 +72,20 @@ export function TileGrid({
   tiles,
   columns,
   className,
+  screen,
 }: {
   readonly tiles: readonly ScreenTile[];
   readonly columns: number;
   readonly className: string;
+  /**
+   * Names the screen these tiles belong to.
+   *
+   * The arrangement settings are one list for the whole application, and tile
+   * ids are only unique within a screen: `registry` is the table on four of
+   * them. Without this, resizing the case registry also resized the object,
+   * report and file registries -- measured, all four moved together.
+   */
+  readonly screen: string;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -110,13 +120,13 @@ export function TileGrid({
   }, []);
 
   const visible = useMemo(
-    () => tiles.filter((tile) => !hiddenIds.includes(tile.descriptor.id)),
-    [hiddenIds, tiles],
+    () => tiles.filter((tile) => !hiddenIds.includes(`${screen}:${tile.descriptor.id}`)),
+    [hiddenIds, screen, tiles],
   );
 
   const arranged = useMemo(
-    () => visible.map((tile) => applyOperatorArrangement(tile.descriptor, order, spans)),
-    [order, spans, visible],
+    () => visible.map((tile) => applyOperatorArrangement(tile.descriptor, screen, order, spans)),
+    [order, screen, spans, visible],
   );
 
   const layout = useMemo(() => {
@@ -186,9 +196,11 @@ export function TileGrid({
       const next = resizedSpan(drag, event, cell, columns, Math.max(1, layout.usedRows));
       operationsStore
         .getState()
-        .applySettingsPatch([{ id: 'tiles.spans', value: withSpan(spans, drag.id, next) }]);
+        .applySettingsPatch([
+          { id: 'tiles.spans', value: withSpan(spans, `${screen}:${drag.id}`, next) },
+        ]);
     },
-    [columns, drag, layout.usedRows, spans],
+    [columns, drag, layout.usedRows, screen, spans],
   );
 
   const handlePointerUp = useCallback(
@@ -212,17 +224,21 @@ export function TileGrid({
          */
         const ranking = [...arranged]
           .sort((left, right) => right.priority - left.priority)
-          .map((tile) => tile.id);
+          .map((tile) => `${screen}:${tile.id}`);
         state.applySettingsPatch([
           {
             id: 'tiles.order',
-            value: reordered(order.length > 0 ? order : ranking, drag.id, drag.overId),
+            value: reordered(
+              order.length > 0 ? order : ranking,
+              `${screen}:${drag.id}`,
+              `${screen}:${drag.overId}`,
+            ),
           },
         ]);
       }
       setDrag(null);
     },
-    [arranged, drag, order],
+    [arranged, drag, order, screen],
   );
 
   return (
@@ -322,11 +338,13 @@ export function TileGrid({
  */
 function applyOperatorArrangement(
   descriptor: TileDescriptor,
+  screen: string,
   order: readonly string[],
   spans: readonly string[],
 ): TileDescriptor {
-  const position = order.indexOf(descriptor.id);
-  const span = readSpan(spans, descriptor.id);
+  const key = `${screen}:${descriptor.id}`;
+  const position = order.indexOf(key);
+  const span = readSpan(spans, key);
   const variants = span === null ? descriptor.variants : withOperatorVariant(descriptor, span);
   return {
     ...descriptor,

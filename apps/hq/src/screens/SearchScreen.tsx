@@ -236,7 +236,7 @@ export function SearchScreen() {
           {query.length === 0 ? 'ВВЕДИТЕ ЗАПРОС' : `${hits.length} СОВПАДЕНИЙ / LOCAL INDEX`}
         </small>
       </header>
-      <TileGrid tiles={tiles} columns={12} className="search-layout" />
+      <TileGrid tiles={tiles} columns={12} className="search-layout" screen="search" />
     </div>
   );
 }

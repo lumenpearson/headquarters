@@ -604,7 +604,7 @@ export function OverviewScreen() {
         </div>
       </header>
 
-      <TileGrid tiles={tiles} columns={4} className="overview-layout" />
+      <TileGrid tiles={tiles} columns={4} className="overview-layout" screen="overview" />
     </div>
   );
 }

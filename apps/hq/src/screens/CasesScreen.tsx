@@ -394,7 +394,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
           </span>
         </div>
       </header>
-      <TileGrid tiles={tiles} columns={12} className="cases-layout" />
+      <TileGrid tiles={tiles} columns={12} className="cases-layout" screen="cases" />
     </div>
   );
 }

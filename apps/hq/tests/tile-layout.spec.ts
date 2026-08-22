@@ -126,7 +126,15 @@ test('R10: no screen can be left blank by a size the operator is allowed to set'
   await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
   await page
     .getByRole('textbox', { name: 'TILES / SPANS' })
-    .fill('registry=12x1,results=12x1,detail=12x1,preview=12x1');
+    .fill(
+      [
+        'cases:registry=12x1',
+        'objects:registry=12x1',
+        'reports:registry=12x1',
+        'files:registry=12x1',
+        'search:results=12x1',
+      ].join(','),
+    );
 
   // The shortest grid the runtime can produce: one row.
   await page.setViewportSize({ width: 1280, height: 400 });
@@ -137,6 +145,30 @@ test('R10: no screen can be left blank by a size the operator is allowed to set'
   }
 
   expect(failures).toEqual([]);
+});
+
+test('R3: a tile hidden on one screen stays on the screens that share its name', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/settings');
+  await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('cases:registry');
+
+  /*
+   * `registry` is the record table on four screens. While the settings were
+   * keyed by the bare id, hiding it on one hid it on all four and resizing it
+   * on one resized all four -- measured, not supposed.
+   */
+  await page.goto('/cases');
+  await expect(page.locator('[data-tile="tree"]')).toBeVisible();
+  await expect(page.locator('[data-tile="registry"]')).toHaveCount(0);
+
+  for (const route of ['/objects', '/reports', '/files']) {
+    await page.goto(route);
+    await expect(page.locator('[data-tile="registry"]')).toBeVisible();
+  }
 });
 
 test('R10: a tile that does not fit goes to the screen of its own', async ({ page }) => {
@@ -199,7 +231,7 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('evidence');
+  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('overview:evidence');
 
   await page.goto('/overview');
   /*

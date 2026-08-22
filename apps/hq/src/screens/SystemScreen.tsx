@@ -249,7 +249,7 @@ export function SystemScreen() {
           {nodes.length} УЗЛОВ В НОРМЕ
         </div>
       </header>
-      <TileGrid tiles={tiles} columns={3} className="system-layout" />
+      <TileGrid tiles={tiles} columns={3} className="system-layout" screen="system" />
     </div>
   );
 }

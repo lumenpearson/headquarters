@@ -290,7 +290,7 @@ export function AnalyticsScreen() {
         </div>
       </header>
 
-      <TileGrid tiles={tiles} columns={3} className="analytics-layout" />
+      <TileGrid tiles={tiles} columns={3} className="analytics-layout" screen="analytics" />
     </div>
   );
 }

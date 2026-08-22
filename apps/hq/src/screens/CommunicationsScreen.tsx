@@ -298,7 +298,12 @@ export function CommunicationsScreen() {
           </span>
         </div>
       </header>
-      <TileGrid tiles={tiles} columns={3} className="communications-layout" />
+      <TileGrid
+        tiles={tiles}
+        columns={3}
+        className="communications-layout"
+        screen="communications"
+      />
     </div>
   );
 }

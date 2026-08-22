@@ -57,7 +57,8 @@ test('R7: dragging a tile onto another moves that tile and leaves the rest in or
   // The claim that separates a reorder from a reshuffle: every tile the
   // operator did not touch keeps the order it had.
   expect(after.filter((id) => id !== 'brief')).toEqual(before.filter((id) => id !== 'brief'));
-  expect(await settingValue(page, 'tiles.order')).toEqual(after);
+  // Stored qualified by screen, because `registry` is a tile on four of them.
+  expect(await settingValue(page, 'tiles.order')).toEqual(after.map((id) => `overview:${id}`));
 });
 
 test('R7: while a tile is being carried, the places it can go say so', async ({ page }) => {
@@ -143,7 +144,7 @@ test('R23: a tile is resized by the handle whose cursor says so', async ({ page 
         .evaluate((element) => (element as HTMLElement).style.gridRow),
     )
     .not.toBe(before);
-  expect(await settingValue(page, 'tiles.spans')).toEqual(['brief=1x3']);
+  expect(await settingValue(page, 'tiles.spans')).toEqual(['overview:brief=1x3']);
 
   // Dragged past the far corner of the grid, the size stops at the grid
   // rather than following the pointer into a span nothing could place.
@@ -173,7 +174,7 @@ test('R23: a tile is resized by the handle whose cursor says so', async ({ page 
       });
       return { spans: await settingValue(page, 'tiles.spans'), bounds };
     })
-    .toEqual({ spans: ['brief=4x8'], bounds: { columns: 4, rows: 8 } });
+    .toEqual({ spans: ['overview:brief=4x8'], bounds: { columns: 4, rows: 8 } });
 });
 
 test('R7: a press that does not travel selects the tile instead of moving it', async ({ page }) => {

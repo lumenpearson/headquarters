@@ -295,7 +295,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
           ))}
         </div>
       </header>
-      <TileGrid tiles={tiles} columns={12} className="objects-layout" />
+      <TileGrid tiles={tiles} columns={12} className="objects-layout" screen="objects" />
     </div>
   );
 }

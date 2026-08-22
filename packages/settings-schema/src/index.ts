@@ -165,7 +165,7 @@ const isStringList = withEditor(
   (value): value is readonly string[] =>
     Array.isArray(value) && value.every((item) => typeof item === 'string'),
 );
-const spanEntry = /^[a-z][a-z0-9-]*=[1-9][0-9]?x[1-9][0-9]?$/;
+const spanEntry = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*=[1-9][0-9]?x[1-9][0-9]?$/;
 const isSpanList = withEditor(
   { kind: 'string-list', delimiter: ',' },
   (value): value is readonly string[] =>
@@ -207,7 +207,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'tiles',
     [],
     'device',
-    'Tile IDs explicitly hidden by the operator.',
+    'Tiles hidden by the operator, as `screen:tile` -- `registry` exists on four screens.',
     isStringList,
   ),
   definition(
@@ -215,7 +215,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'tiles',
     [],
     'device',
-    'Tile IDs in the order the operator arranged them, richest first.',
+    'Tiles in the order the operator arranged them, as `screen:tile`, richest first.',
     isStringList,
   ),
   definition(
@@ -223,7 +223,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'tiles',
     [],
     'device',
-    'Tile sizes the operator set, as `tile=columnsXrows` entries.',
+    'Tile sizes the operator set, as `screen:tile=columnsXrows` entries.',
     isSpanList,
   ),
   definition(

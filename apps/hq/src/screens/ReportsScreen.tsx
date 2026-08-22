@@ -251,7 +251,7 @@ export function ReportsScreen() {
           [N] СФОРМИРОВАТЬ СВОДКУ
         </TerminalButton>
       </header>
-      <TileGrid tiles={tiles} columns={12} className="reports-layout" />
+      <TileGrid tiles={tiles} columns={12} className="reports-layout" screen="reports" />
     </div>
   );
 }
