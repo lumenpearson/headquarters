@@ -36,9 +36,33 @@ function gridOccupancy(page: Page) {
         if (!occupied.has(`${row}:${column}`)) holes.push(`r${row}c${column}`);
       }
     }
-    return { rows, columns, placed: grid.querySelectorAll('.tile-grid__cell').length, holes };
+    /*
+     * Grid coordinates alone cannot see a tile that under-fills the cell it
+     * was given: the cell is occupied, and the empty space is inside it. A
+     * panel capped at a fixed height does exactly that, so the panel is
+     * measured against its cell rather than trusted to fill it.
+     */
+    const shortfalls: string[] = [];
+    for (const cell of Array.from(grid.querySelectorAll('.tile-grid__cell')) as HTMLElement[]) {
+      const panel = cell.querySelector('.ops-panel');
+      if (panel === null) continue;
+      const missing = Math.round(
+        cell.getBoundingClientRect().height - panel.getBoundingClientRect().height,
+      );
+      if (missing > 2) shortfalls.push(`${cell.dataset['tile'] ?? '?'}:${missing}`);
+    }
+    return {
+      rows,
+      columns,
+      placed: grid.querySelectorAll('.tile-grid__cell').length,
+      holes,
+      shortfalls,
+    };
   });
 }
+
+/** Every route the resolver lays out. Screens it deliberately does not are listed in the plan. */
+const resolvedRoutes = ['/overview', '/system', '/analytics', '/communications'] as const;
 
 for (const viewport of [
   { width: 1024, height: 600 },
@@ -46,18 +70,24 @@ for (const viewport of [
   { width: 1920, height: 1080 },
   { width: 2560, height: 1440 },
 ]) {
-  test(`R10: the overview leaves no empty cell at ${viewport.width}x${viewport.height}`, async ({
+  test(`R10: no resolved screen leaves an empty cell at ${viewport.width}x${viewport.height}`, async ({
     page,
   }) => {
     await page.setViewportSize(viewport);
-    await page.goto('/overview');
-    await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+    for (const route of resolvedRoutes) {
+      await page.goto(route);
+      await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
 
-    const occupancy = await gridOccupancy(page);
-    // Stated so the assertion cannot pass on an empty grid: a screen that
-    // placed nothing also has no holes.
-    expect(occupancy.placed).toBeGreaterThan(0);
-    expect(occupancy.holes).toEqual([]);
+      const occupancy = await gridOccupancy(page);
+      // Stated so the assertion cannot pass on an empty grid: a screen that
+      // placed nothing also has no holes.
+      expect({
+        route,
+        placed: occupancy.placed > 0,
+        holes: occupancy.holes,
+        shortfalls: occupancy.shortfalls,
+      }).toEqual({ route, placed: true, holes: [], shortfalls: [] });
+    }
   });
 }
 
