@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { LayoutOverflowError, resolveGridLayout, type GridLayoutRequest } from './index.js';
+import {
+  LayoutOverflowError,
+  resolveGridLayout,
+  type GridLayoutRequest,
+  type PlacedTile,
+} from './index.js';
 
 describe('deterministic tile layout resolver', () => {
   it('keeps a stable priority-first compact layout and stretches an available final gap', () => {
@@ -95,3 +100,108 @@ describe('deterministic tile layout resolver', () => {
     ).toThrow(LayoutOverflowError);
   });
 });
+
+describe('no empty cell in a bounded grid', () => {
+  /**
+   * Reproduces the hole the operations overview showed at 2560x1440: the only
+   * tile touching the empty cell sat above it and had asked to be stretched
+   * horizontally, not vertically, so the stretch pass could not reach it.
+   */
+  it('grows a neighbour downwards into a cell its own stretch flags would not reach', () => {
+    const result = resolveGridLayout({
+      columns: 2,
+      maximumRows: 2,
+      tiles: [
+        { id: 'wide', priority: 100, variants: [{ presentation: 'full', columns: 2, rows: 1 }] },
+        {
+          id: 'corner',
+          priority: 90,
+          variants: [{ presentation: 'full', columns: 1, rows: 1 }],
+          canStretchHorizontally: true,
+        },
+        {
+          id: 'filler',
+          priority: 80,
+          variants: [{ presentation: 'full', columns: 1, rows: 1 }],
+        },
+      ],
+    });
+
+    expect(occupiedCells(result, 2)).toBe(4);
+  });
+
+  it('grows a neighbour left and up, which the stretch pass never does', () => {
+    const result = resolveGridLayout({
+      columns: 2,
+      maximumRows: 2,
+      tiles: [
+        {
+          id: 'only',
+          priority: 100,
+          variants: [{ presentation: 'full', columns: 1, rows: 1 }],
+        },
+      ],
+    });
+
+    // One tile in a 2x1 grid: `usedRows` is 1, so the empty cell beside it is
+    // the whole gap, and closing it is the only way the row is full.
+    expect(result.usedRows).toBe(1);
+    expect(result.placed).toEqual([
+      { id: 'only', x: 0, y: 0, columns: 2, rows: 1, presentation: 'full' },
+    ]);
+  });
+
+  it('leaves the cell empty rather than growing a tile past its declared maximum', () => {
+    const result = resolveGridLayout({
+      columns: 2,
+      maximumRows: 1,
+      tiles: [
+        {
+          id: 'fixed-aspect',
+          priority: 100,
+          variants: [{ presentation: 'full', columns: 1, rows: 1 }],
+          maximum: { columns: 1, rows: 1 },
+        },
+      ],
+    });
+
+    expect(result.placed).toEqual([
+      { id: 'fixed-aspect', x: 0, y: 0, columns: 1, rows: 1, presentation: 'full' },
+    ]);
+    expect(occupiedCells(result, 2)).toBe(1);
+  });
+
+  it('stays deterministic once gaps are closed', () => {
+    const request: GridLayoutRequest = {
+      columns: 3,
+      maximumRows: 3,
+      tiles: [
+        { id: 'a', priority: 30, variants: [{ presentation: 'full', columns: 2, rows: 2 }] },
+        { id: 'b', priority: 20, variants: [{ presentation: 'full', columns: 1, rows: 1 }] },
+        { id: 'c', priority: 10, variants: [{ presentation: 'full', columns: 1, rows: 1 }] },
+      ],
+    };
+
+    expect(resolveGridLayout(request)).toEqual(resolveGridLayout(request));
+    expect(occupiedCells(resolveGridLayout(request), 3)).toBe(
+      3 * resolveGridLayout(request).usedRows,
+    );
+  });
+});
+
+function occupiedCells(
+  result: { readonly placed: readonly PlacedTile[] },
+  columns: number,
+): number {
+  const cells = new Set<string>();
+  for (const tile of result.placed) {
+    expect(tile.x + tile.columns).toBeLessThanOrEqual(columns);
+    for (let y = tile.y; y < tile.y + tile.rows; y += 1) {
+      for (let x = tile.x; x < tile.x + tile.columns; x += 1) {
+        expect(cells.has(`${x}:${y}`)).toBe(false);
+        cells.add(`${x}:${y}`);
+      }
+    }
+  }
+  return cells.size;
+}

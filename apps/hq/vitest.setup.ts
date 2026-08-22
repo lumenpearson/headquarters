@@ -13,3 +13,21 @@ import { afterEach } from 'vitest';
 afterEach(() => {
   if (typeof document !== 'undefined') cleanup();
 });
+
+/*
+ * jsdom implements no layout and therefore no `ResizeObserver`, which
+ * `TileGrid` uses to learn how much room a screen was given. Without a stub
+ * every component test that renders a resolver-laid-out screen dies on the
+ * constructor rather than on anything it set out to check.
+ *
+ * The stub observes nothing on purpose. A version that reported a made-up box
+ * would have component tests asserting a layout jsdom never performed, and the
+ * layout is proven against a real engine in `tests/tile-layout.spec.ts`.
+ */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  } as unknown as typeof ResizeObserver;
+}

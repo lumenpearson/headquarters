@@ -983,36 +983,7 @@ button.is-active {
 }
 .overview-layout {
   display: grid;
-  grid-template-columns: 1.25fr 0.8fr 1fr 0.8fr;
-  grid-auto-rows: minmax(135px, auto);
   gap: 7px;
-}
-.overview-brief {
-  grid-area: span 2 / span 2;
-}
-.overview-readiness {
-  grid-row: span 2;
-}
-.overview-timeline {
-  grid-column: span 4;
-}
-.overview-objectives {
-  grid-row: span 2;
-}
-.overview-sector {
-  grid-column: span 2;
-}
-.overview-milestones {
-  grid-row: span 2;
-}
-.overview-events {
-  grid-column: span 2;
-}
-.overview-directions {
-  grid-column: span 2;
-}
-.overview-threats {
-  grid-column: span 2;
 }
 .overview-brief p {
   margin: 0 0 8px;
@@ -3912,10 +3883,6 @@ button.is-active {
   align-content: stretch;
 }
 
-.overview-layout {
-  grid-auto-rows: minmax(0, 1fr);
-}
-
 .analytics-layout {
   grid-auto-rows: minmax(0, 1fr);
 }
@@ -5447,10 +5414,6 @@ button.is-active {
   align-content: stretch;
 }
 
-.overview-layout {
-  grid-auto-rows: minmax(0, 1fr);
-}
-
 .analytics-layout {
   grid-auto-rows: minmax(0, 1fr);
 }
@@ -6067,4 +6030,68 @@ button.is-active {
 
 .archive-timeline {
   flex: 0 0 auto;
+}
+
+/*
+ * R3/R10: a screen laid out by `@gremuchaya/layout-engine`.
+ *
+ * The rows and columns arrive as inline styles because only the resolver
+ * knows them -- it is given the measured box and answers with a placement, so
+ * a stylesheet stating the same tracks could only contradict it. What stays
+ * here is what the resolver has no opinion about: the gap, and the fact that
+ * a cell is a bounded box like every other panel container.
+ */
+.tile-grid {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.tile-grid__cell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tile-grid__cell > .ops-panel {
+  width: 100%;
+}
+
+/*
+ * What did not fit. A tile that moved to its own screen is a link to that
+ * screen; a tile that has none is named without one, because a link to a
+ * route that shows something else would be worse than admitting there is
+ * nowhere to go.
+ */
+.tile-grid__displaced {
+  display: flex;
+  min-height: 0;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 0;
+  color: var(--ops-muted);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+
+.tile-grid__displaced button {
+  padding: 2px 6px;
+  border: 1px solid var(--ops-line);
+  color: var(--ops-green);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.tile-grid__displaced button:hover {
+  border-color: var(--ops-line-strong);
+  color: var(--ops-green-bright);
+}
+
+.tile-grid__displaced b {
+  padding: 2px 6px;
+  border: 1px dashed var(--ops-line);
+  color: var(--ops-dim);
+  font-weight: 400;
 }

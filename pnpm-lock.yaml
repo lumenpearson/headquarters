@@ -145,6 +145,9 @@ importers:
       '@gremuchaya/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@gremuchaya/layout-engine':
+        specifier: workspace:*
+        version: link:../../packages/layout-engine
       '@gremuchaya/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
