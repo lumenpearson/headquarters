@@ -107,3 +107,86 @@
 [data-edit-mode='on'] .editable-tile[data-resize='corner'] {
   cursor: nwse-resize;
 }
+
+/*
+ * R7: rearranging tiles by dragging them.
+ *
+ * The prompt asks for three things at once on an available place -- a
+ * highlight, a dashed line along its edges, and a smooth accent glow -- so
+ * they are one state here rather than three classes that could disagree. The
+ * dashed edge is an inset outline drawn with `outline`, which does not take
+ * part in layout, so a tile does not shift by a pixel when it becomes a
+ * target.
+ */
+[data-edit-mode='on'] .tile-grid__cell {
+  position: relative;
+}
+
+[data-edit-mode='on'] .tile-grid__cell[data-drop-target='true'] {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * The glow is an overlay rather than an inset shadow on the cell: the panel
+ * fills its cell exactly, so a shadow on the cell would be painted under the
+ * panel and never seen. `color-mix` rather than relative colour syntax --
+ * `rgb(from var(--accent) ...)` computed to nothing here, measured in the
+ * browser rather than assumed to work.
+ */
+[data-edit-mode='on'] .tile-grid__cell[data-drop-target='true']::after {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  content: '';
+  pointer-events: none;
+  transition: background var(--motion-standard) ease;
+}
+
+[data-edit-mode='on'] .tile-grid__cell[data-drop-active='true'] {
+  outline-style: solid;
+}
+
+[data-edit-mode='on'] .tile-grid__cell[data-drop-active='true']::after {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* The tile being carried reads as lifted rather than as a target for itself. */
+[data-edit-mode='on'] .tile-grid__cell[data-drag-source='true'] {
+  opacity: 0.55;
+  outline: 1px solid var(--accent-strong);
+  outline-offset: -2px;
+}
+
+[data-edit-mode='on'] .tile-grid__cell[data-selected='true'] {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * R23: the resize affordances. `.editable-tile` already carried the cursors
+ * and had no renderer (C11); these are the elements that wear them.
+ */
+[data-edit-mode='on'] .tile-grid__handle {
+  position: absolute;
+  z-index: 3;
+  background: transparent;
+}
+
+[data-edit-mode='on'] .tile-grid__handle[data-resize='horizontal'] {
+  inset: 0 0 8px auto;
+  width: 8px;
+}
+
+[data-edit-mode='on'] .tile-grid__handle[data-resize='vertical'] {
+  inset: auto 8px 0 0;
+  height: 8px;
+}
+
+[data-edit-mode='on'] .tile-grid__handle[data-resize='corner'] {
+  inset: auto 0 0 auto;
+  width: 8px;
+  height: 8px;
+  background: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
+}

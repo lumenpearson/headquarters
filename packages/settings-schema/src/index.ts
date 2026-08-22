@@ -165,6 +165,12 @@ const isStringList = withEditor(
   (value): value is readonly string[] =>
     Array.isArray(value) && value.every((item) => typeof item === 'string'),
 );
+const spanEntry = /^[a-z][a-z0-9-]*=[1-9][0-9]?x[1-9][0-9]?$/;
+const isSpanList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) && value.every((item) => typeof item === 'string' && spanEntry.test(item)),
+);
 const oneOfNumbers = (values: readonly number[]) =>
   withEditor(
     { kind: 'enum', options: values.map(String) },
@@ -203,6 +209,22 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Tile IDs explicitly hidden by the operator.',
     isStringList,
+  ),
+  definition(
+    'tiles.order',
+    'tiles',
+    [],
+    'device',
+    'Tile IDs in the order the operator arranged them, richest first.',
+    isStringList,
+  ),
+  definition(
+    'tiles.spans',
+    'tiles',
+    [],
+    'device',
+    'Tile sizes the operator set, as `tile=columnsXrows` entries.',
+    isSpanList,
   ),
   definition(
     'themes.id',
