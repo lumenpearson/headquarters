@@ -119,7 +119,7 @@ body.terminal-theme {
 }
 
 .terminal-combobox__positioner {
-  z-index: calc(var(--z-modal) + 4);
+  z-index: var(--z-popup);
 }
 
 .terminal-combobox__popup {
@@ -508,7 +508,7 @@ body.terminal-theme {
 }
 
 .terminal-popover__positioner {
-  z-index: calc(var(--z-modal) + 4);
+  z-index: var(--z-popup);
 }
 
 .terminal-popover {
@@ -689,7 +689,7 @@ body.terminal-theme {
 }
 
 .terminal-select__positioner {
-  z-index: calc(var(--z-modal) + 4);
+  z-index: var(--z-popup);
 }
 
 .terminal-select__popup {
@@ -859,7 +859,7 @@ body.terminal-theme {
 
 .terminal-menu__positioner,
 .terminal-tooltip__positioner {
-  z-index: calc(var(--z-modal) + 4);
+  z-index: var(--z-popup);
   outline: none;
 }
 
@@ -943,7 +943,7 @@ body.terminal-theme {
 
 .terminal-toast__viewport {
   position: fixed;
-  z-index: calc(var(--z-modal) + 6);
+  z-index: calc(var(--z-popup) + 1);
   right: var(--space-4);
   bottom: var(--space-4);
   display: flex;

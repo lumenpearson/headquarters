@@ -169,6 +169,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     () => [
       {
         title: 'КАТЕГОРИИ',
+        category: 'navigation',
         descriptor: {
           id: 'categories',
           priority: 80,
@@ -205,6 +206,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       },
       {
         title: 'РЕЕСТР ФАЙЛОВ',
+        category: 'records',
         descriptor: {
           id: 'registry',
           priority: 100,
@@ -321,6 +323,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       },
       {
         title: 'ПРЕДПРОСМОТР',
+        category: 'detail',
         descriptor: {
           id: 'preview',
           priority: 90,

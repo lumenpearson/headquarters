@@ -11,7 +11,11 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 
+import type { TileCategory } from '@gremuchaya/settings-schema';
+
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
+
+import { publishScreenTiles } from './tileRegistry';
 
 /**
  * The structural floor of a panel, measured rather than chosen: a 42px header
@@ -37,8 +41,20 @@ export interface ScreenTile {
   readonly descriptor: TileDescriptor;
   /** Shown in the relocation notice, so the operator can name what moved. */
   readonly title: string;
+  /**
+   * The group this tile belongs to, so an operator can switch off a kind of
+   * panel across the application instead of naming each one on each screen.
+   */
+  readonly category: TileCategory;
   readonly render: (presentation: TilePresentation) => ReactNode;
 }
+
+/** Richest first, which is the order the resolver evaluates variants in. */
+const presentationRank: Readonly<Record<TilePresentation, number>> = {
+  full: 3,
+  compact: 2,
+  minimal: 1,
+};
 
 type ResizeAxis = 'horizontal' | 'vertical' | 'corner';
 
@@ -102,6 +118,13 @@ export function TileGrid({
   const spans = useOperationsStore((state) =>
     stringList(state.personalization.draft.values['tiles.spans']),
   );
+  const hiddenCategories = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values['tiles.hiddenCategories']),
+  );
+  const presentationCap = useOperationsStore((state) => {
+    const value = state.personalization.draft.values['tiles.presentation'];
+    return value === 'full' || value === 'compact' || value === 'minimal' ? value : null;
+  });
 
   /*
    * The grid is measured, not derived from `100dvh`. The shell chrome around
@@ -119,14 +142,37 @@ export function TileGrid({
     return () => observer.disconnect();
   }, []);
 
+  /*
+   * Published before hiding, not after: a surface that offers to bring a tile
+   * back has to know about the tiles that are switched off.
+   */
+  useEffect(() => {
+    publishScreenTiles(
+      tiles.map((tile) => ({
+        key: `${screen}:${tile.descriptor.id}`,
+        id: tile.descriptor.id,
+        title: tile.title,
+        category: tile.category,
+      })),
+    );
+  }, [screen, tiles]);
+
   const visible = useMemo(
-    () => tiles.filter((tile) => !hiddenIds.includes(`${screen}:${tile.descriptor.id}`)),
-    [hiddenIds, screen, tiles],
+    () =>
+      tiles.filter(
+        (tile) =>
+          !hiddenIds.includes(`${screen}:${tile.descriptor.id}`) &&
+          !hiddenCategories.includes(tile.category),
+      ),
+    [hiddenCategories, hiddenIds, screen, tiles],
   );
 
   const arranged = useMemo(
-    () => visible.map((tile) => applyOperatorArrangement(tile.descriptor, screen, order, spans)),
-    [order, screen, spans, visible],
+    () =>
+      visible.map((tile) =>
+        applyOperatorArrangement(tile.descriptor, screen, order, spans, presentationCap),
+      ),
+    [order, presentationCap, screen, spans, visible],
   );
 
   const layout = useMemo(() => {
@@ -341,16 +387,38 @@ function applyOperatorArrangement(
   screen: string,
   order: readonly string[],
   spans: readonly string[],
+  presentationCap: TilePresentation | null,
 ): TileDescriptor {
   const key = `${screen}:${descriptor.id}`;
   const position = order.indexOf(key);
   const span = readSpan(spans, key);
-  const variants = span === null ? descriptor.variants : withOperatorVariant(descriptor, span);
+  const variants = capPresentation(
+    span === null ? descriptor.variants : withOperatorVariant(descriptor, span),
+    presentationCap,
+  );
   return {
     ...descriptor,
     variants,
     ...(position === -1 ? {} : { priority: order.length * 1000 - position * 1000 }),
   };
+}
+
+/**
+ * Drops the variants richer than the operator allows.
+ *
+ * The last variant survives whatever the cap: a tile with nothing left to
+ * offer cannot be placed at all, and a setting about how much a tile shows is
+ * not a setting that removes it.
+ */
+function capPresentation(
+  variants: readonly TileVariant[],
+  cap: TilePresentation | null,
+): readonly TileVariant[] {
+  if (cap === null) return variants;
+  const allowed = variants.filter(
+    (variant) => presentationRank[variant.presentation] <= presentationRank[cap],
+  );
+  return allowed.length > 0 ? allowed : variants.slice(-1);
 }
 
 /**

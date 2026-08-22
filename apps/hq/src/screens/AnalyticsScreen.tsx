@@ -57,6 +57,7 @@ export function AnalyticsScreen() {
     () => [
       {
         title: 'ИНДЕКС ОПЕРАЦИОННОЙ ОБСТАНОВКИ',
+        category: 'summary',
         descriptor: {
           id: 'index',
           priority: 100,
@@ -94,6 +95,7 @@ export function AnalyticsScreen() {
       },
       {
         title: 'КЛЮЧЕВЫЕ ВЫВОДЫ',
+        category: 'summary',
         descriptor: {
           id: 'insights',
           priority: 95,
@@ -128,6 +130,7 @@ export function AnalyticsScreen() {
       },
       {
         title: 'МАТРИЦА СЕКТОРОВ',
+        category: 'geo',
         descriptor: {
           id: 'matrix',
           priority: 90,
@@ -166,6 +169,7 @@ export function AnalyticsScreen() {
       },
       {
         title: 'КОРРЕЛЯЦИЯ СОБЫТИЙ',
+        category: 'events',
         descriptor: {
           id: 'correlation',
           priority: 85,
@@ -217,6 +221,7 @@ export function AnalyticsScreen() {
       },
       {
         title: 'ПРОГНОЗ РИСКОВ',
+        category: 'telemetry',
         descriptor: {
           id: 'forecast',
           priority: 80,
@@ -243,6 +248,7 @@ export function AnalyticsScreen() {
       },
       {
         title: 'НАДЁЖНОСТЬ ДАННЫХ',
+        category: 'telemetry',
         descriptor: {
           id: 'confidence',
           priority: 75,

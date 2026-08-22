@@ -36,6 +36,20 @@ test('an operator opens edit mode, docks the panel and edits without the page sc
   await page.mouse.up();
   await expect(panel).toHaveAttribute('data-edge', 'left');
 
+  /*
+   * A press on the header that does not travel is a click, not a drag. Without
+   * that distinction the panel re-docked under the operator every time they
+   * touched it -- which is how its own category select became unusable with a
+   * pointer: the panel moved out from under the popup it had just opened.
+   */
+  const header = page.locator('.edit-panel__header');
+  const headerBox = await header.boundingBox();
+  if (headerBox === null) throw new Error('the edit panel header has no layout box');
+  await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y + headerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(panel).toHaveAttribute('data-edge', 'left');
+
   // Undo is disabled until an edit exists, and the issue draft with it.
   const undo = page.getByRole('button', { name: 'ОТМЕНИТЬ' });
   await expect(undo).toBeDisabled();

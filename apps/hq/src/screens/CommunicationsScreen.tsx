@@ -24,6 +24,7 @@ export function CommunicationsScreen() {
     () => [
       {
         title: 'АКТИВНЫЕ КАНАЛЫ',
+        category: 'records',
         descriptor: {
           id: 'channels',
           priority: 100,
@@ -61,6 +62,7 @@ export function CommunicationsScreen() {
       },
       {
         title: 'АКТИВНЫЙ КАНАЛ',
+        category: 'detail',
         descriptor: {
           id: 'active',
           priority: 95,
@@ -156,6 +158,7 @@ export function CommunicationsScreen() {
       },
       {
         title: 'ТРАНСКРИПТ',
+        category: 'detail',
         descriptor: {
           id: 'transcript',
           priority: 85,
@@ -179,6 +182,7 @@ export function CommunicationsScreen() {
       },
       {
         title: 'ТРАФИК / ЗАДЕРЖКА',
+        category: 'telemetry',
         descriptor: {
           id: 'traffic',
           priority: 80,
@@ -229,6 +233,7 @@ export function CommunicationsScreen() {
       },
       {
         title: 'ЖУРНАЛ СООБЩЕНИЙ',
+        category: 'events',
         descriptor: {
           id: 'log',
           priority: 75,

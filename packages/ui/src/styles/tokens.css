@@ -63,6 +63,13 @@
   --z-modal: 40;
   --z-devtools: 100;
   --z-dialog: 110;
+  /*
+   * Above every surface that can open one. A popup used to sit at
+   * `--z-modal + 4`, below `--z-dialog`, so the floating edit panel covered
+   * the option list of its own selects: the category could be changed with
+   * the keyboard and not with a pointer.
+   */
+  --z-popup: 120;
 
   --motion-micro: 100ms;
   --motion-standard: 160ms;

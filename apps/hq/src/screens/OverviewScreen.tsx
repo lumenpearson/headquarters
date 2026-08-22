@@ -84,6 +84,7 @@ export function OverviewScreen() {
     () => [
       {
         title: 'ОБЗОР ОПЕРАЦИИ',
+        category: 'summary',
         descriptor: {
           id: 'brief',
           priority: 100,
@@ -135,6 +136,7 @@ export function OverviewScreen() {
       },
       {
         title: 'ХРОНОЛОГИЯ ОПЕРАЦИИ',
+        category: 'events',
         descriptor: {
           id: 'timeline',
           priority: 80,
@@ -180,6 +182,7 @@ export function OverviewScreen() {
       },
       {
         title: 'ГОТОВНОСТЬ К МИССИИ',
+        category: 'telemetry',
         descriptor: {
           id: 'readiness',
           priority: 75,
@@ -210,6 +213,7 @@ export function OverviewScreen() {
       },
       {
         title: 'УРОВЕНЬ УГРОЗЫ ПО СЕКТОРАМ',
+        category: 'geo',
         descriptor: {
           id: 'threats',
           priority: 95,
@@ -263,6 +267,7 @@ export function OverviewScreen() {
       },
       {
         title: 'ПОСЛЕДНИЕ ОБНОВЛЕНИЯ',
+        category: 'events',
         descriptor: {
           id: 'events',
           priority: 85,
@@ -298,6 +303,7 @@ export function OverviewScreen() {
       },
       {
         title: 'ЦЕЛИ ОПЕРАЦИИ',
+        category: 'records',
         descriptor: {
           id: 'objectives',
           priority: 70,
@@ -338,6 +344,7 @@ export function OverviewScreen() {
       },
       {
         title: 'КЛЮЧЕВЫЕ ВЕХИ',
+        category: 'events',
         descriptor: {
           id: 'milestones',
           priority: 65,
@@ -374,6 +381,7 @@ export function OverviewScreen() {
       },
       {
         title: 'СЕКТОР ОПЕРАЦИИ',
+        category: 'geo',
         descriptor: {
           id: 'sector',
           priority: 60,
@@ -411,6 +419,7 @@ export function OverviewScreen() {
       },
       {
         title: 'ПРОГРЕСС ПО НАПРАВЛЕНИЯМ',
+        category: 'telemetry',
         descriptor: {
           id: 'directions',
           priority: 55,
@@ -453,6 +462,7 @@ export function OverviewScreen() {
       },
       {
         title: 'СОБРАННЫЕ ДОКАЗАТЕЛЬСТВА',
+        category: 'records',
         descriptor: {
           id: 'evidence',
           priority: 50,
@@ -489,6 +499,7 @@ export function OverviewScreen() {
       },
       {
         title: 'ЦЕЛИ',
+        category: 'records',
         descriptor: {
           id: 'targets',
           priority: 90,
@@ -538,6 +549,7 @@ export function OverviewScreen() {
       },
       {
         title: 'АКТИВНЫЕ ЗАДАЧИ',
+        category: 'records',
         descriptor: {
           id: 'tasks',
           priority: 45,

@@ -165,6 +165,31 @@ const isStringList = withEditor(
   (value): value is readonly string[] =>
     Array.isArray(value) && value.every((item) => typeof item === 'string'),
 );
+/**
+ * The groups a tile can belong to, so an operator can switch off a kind of
+ * panel rather than naming each one. Declared here with the rest of the
+ * vocabulary the safe editor is allowed to offer -- the same way theme ids and
+ * accent names are.
+ */
+export const tileCategories = [
+  'summary',
+  'records',
+  'detail',
+  'navigation',
+  'telemetry',
+  'events',
+  'geo',
+] as const;
+
+export type TileCategory = (typeof tileCategories)[number];
+
+const isTileCategoryList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every((item) => (tileCategories as readonly string[]).includes(item as string)),
+);
+
 const spanEntry = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*=[1-9][0-9]?x[1-9][0-9]?$/;
 const isSpanList = withEditor(
   { kind: 'string-list', delimiter: ',' },
@@ -225,6 +250,22 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Tile sizes the operator set, as `screen:tile=columnsXrows` entries.',
     isSpanList,
+  ),
+  definition(
+    'tiles.hiddenCategories',
+    'tiles',
+    [],
+    'device',
+    `Tile groups the operator switched off: ${tileCategories.join(', ')}.`,
+    isTileCategoryList,
+  ),
+  definition(
+    'tiles.presentation',
+    'tiles',
+    'auto',
+    'device',
+    'Cap on how rich a tile may be drawn; auto leaves the choice to the layout.',
+    oneOf(['auto', 'full', 'compact', 'minimal']),
   ),
   definition(
     'themes.id',

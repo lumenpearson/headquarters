@@ -106,6 +106,7 @@ export function SearchScreen() {
     () => [
       {
         title: 'РЕЗУЛЬТАТЫ',
+        category: 'records',
         descriptor: {
           id: 'results',
           priority: 100,
@@ -169,6 +170,7 @@ export function SearchScreen() {
       },
       {
         title: 'ИНДЕКС',
+        category: 'summary',
         descriptor: {
           id: 'index',
           priority: 80,

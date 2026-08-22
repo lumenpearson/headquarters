@@ -190,3 +190,22 @@
   height: 8px;
   background: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
 }
+
+/* R3: switching tiles and groups off, on the screen in front of the operator. */
+.edit-tiles {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+}
+
+.edit-tiles > header {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: var(--space-2);
+  border-bottom: 1px solid var(--line-2);
+  color: var(--accent);
+  font-size: var(--font-xs);
+  letter-spacing: 0.12em;
+}

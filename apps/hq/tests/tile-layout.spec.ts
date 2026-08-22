@@ -171,6 +171,88 @@ test('R3: a tile hidden on one screen stays on the screens that share its name',
   }
 });
 
+test('R3: switching a group off takes every tile in it, on every screen', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto('/overview');
+  await expect(page.locator('[data-tile="threats"]')).toBeVisible();
+  await expect(page.locator('[data-tile="sector"]')).toBeVisible();
+
+  await page.goto('/settings');
+  await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('textbox', { name: 'TILES / HIDDEN CATEGORIES' }).fill('geo');
+
+  await page.goto('/overview');
+  await expect(page.locator('[data-tile="brief"]')).toBeVisible();
+  // Both overview tiles in the group, not just the one that happened to be first.
+  await expect(page.locator('[data-tile="threats"]')).toHaveCount(0);
+  await expect(page.locator('[data-tile="sector"]')).toHaveCount(0);
+
+  // A group is a property of the tile, not of the screen: analytics has one too.
+  await page.goto('/analytics');
+  await expect(page.locator('[data-tile="index"]')).toBeVisible();
+  await expect(page.locator('[data-tile="matrix"]')).toHaveCount(0);
+});
+
+test('R3: the operator can cap how rich a tile is drawn', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto('/overview');
+  await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-presentation', 'full');
+
+  await page.goto('/settings');
+  await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('combobox', { name: 'TILES / PRESENTATION' }).click();
+  await page.getByRole('option', { name: 'MINIMAL', exact: true }).click();
+
+  await page.goto('/overview');
+  const brief = page.locator('[data-tile="brief"]');
+  await expect(brief).toBeVisible();
+  await expect(brief).toHaveAttribute('data-presentation', 'minimal');
+
+  /*
+   * A tile with no variant at or below the cap keeps its last one. The cap is
+   * about how much a tile shows; a tile that vanished because it could not be
+   * drawn small enough would be a different setting.
+   */
+  await expect(page.locator('[data-tile="readiness"]')).toBeVisible();
+  await expect(page.locator('[data-tile="readiness"]')).toHaveAttribute(
+    'data-presentation',
+    'compact',
+  );
+});
+
+test('R3: edit mode offers the tiles by name instead of asking for identifiers', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto('/overview');
+  await expect(page.locator('[data-tile="evidence"]')).toBeVisible();
+  await page.keyboard.press('Control+Shift+E');
+  await expect(page.locator('.edit-mode-frame')).toBeVisible();
+
+  const panel = page.locator('.edit-panel');
+  await panel.getByRole('combobox', { name: 'Категория' }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+
+  const list = panel.locator('.edit-tiles');
+  await expect(list).toBeVisible();
+  // Named as the panel is titled, not as the setting keys it.
+  const evidence = list.getByRole('switch', { name: 'СОБРАННЫЕ ДОКАЗАТЕЛЬСТВА' });
+  await expect(evidence).toBeChecked();
+
+  await evidence.click();
+  await expect(page.locator('[data-tile="evidence"]')).toHaveCount(0);
+  await expect(page.locator('[data-tile="brief"]')).toBeVisible();
+
+  // Switching the group off disables the individual switch: the tile is gone
+  // for a reason that toggle cannot undo.
+  const geo = list.getByRole('switch', { name: 'ГЕОГРАФИЯ' });
+  await geo.click();
+  await expect(page.locator('[data-tile="threats"]')).toHaveCount(0);
+  await expect(list.getByRole('switch', { name: 'УРОВЕНЬ УГРОЗЫ ПО СЕКТОРАМ' })).toBeDisabled();
+});
+
 test('R10: a tile that does not fit goes to the screen of its own', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/overview');

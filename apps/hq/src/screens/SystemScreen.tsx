@@ -25,6 +25,7 @@ export function SystemScreen() {
     () => [
       {
         title: 'РЕСУРСЫ РАБОЧЕЙ СТАНЦИИ',
+        category: 'telemetry',
         descriptor: {
           id: 'resources',
           priority: 100,
@@ -86,6 +87,7 @@ export function SystemScreen() {
       },
       {
         title: 'СИСТЕМНЫЕ УЗЛЫ',
+        category: 'records',
         descriptor: {
           id: 'nodes',
           priority: 95,
@@ -139,6 +141,7 @@ export function SystemScreen() {
       },
       {
         title: 'СЕТЕВЫЕ КАНАЛЫ',
+        category: 'telemetry',
         descriptor: {
           id: 'network',
           priority: 90,
@@ -175,6 +178,7 @@ export function SystemScreen() {
       },
       {
         title: 'ЖУРНАЛ АУДИТА',
+        category: 'events',
         descriptor: {
           id: 'audit',
           priority: 85,
@@ -206,6 +210,7 @@ export function SystemScreen() {
       },
       {
         title: 'КОНТУР ХРАНЕНИЯ',
+        category: 'telemetry',
         descriptor: {
           id: 'storage',
           priority: 80,

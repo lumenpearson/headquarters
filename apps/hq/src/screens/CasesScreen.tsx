@@ -103,6 +103,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
     () => [
       {
         title: 'СТРУКТУРА ХРАНИЛИЩА',
+        category: 'navigation',
         descriptor: {
           id: 'tree',
           priority: 80,
@@ -145,6 +146,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
       },
       {
         title: 'РЕЕСТР ДЕЛ',
+        category: 'records',
         descriptor: {
           id: 'registry',
           priority: 100,
@@ -237,6 +239,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
       },
       {
         title: 'КАРТОЧКА ДОСЬЕ',
+        category: 'detail',
         descriptor: {
           id: 'dossier',
           priority: 90,

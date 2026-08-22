@@ -48,6 +48,7 @@ export function ReportsScreen() {
     () => [
       {
         title: 'ТИПЫ ОТЧЁТОВ',
+        category: 'navigation',
         descriptor: {
           id: 'kinds',
           priority: 80,
@@ -90,6 +91,7 @@ export function ReportsScreen() {
       },
       {
         title: 'РЕЕСТР ОТЧЁТОВ',
+        category: 'records',
         descriptor: {
           id: 'registry',
           priority: 100,
@@ -168,6 +170,7 @@ export function ReportsScreen() {
       },
       {
         title: 'ПРЕДПРОСМОТР ДОКУМЕНТА',
+        category: 'detail',
         descriptor: {
           id: 'preview',
           priority: 90,

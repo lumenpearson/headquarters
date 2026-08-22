@@ -3,7 +3,7 @@
 import { getSettingsDefinitionsForCategory, settingCategories } from '@gremuchaya/settings-schema';
 import type { SettingCategory } from '@gremuchaya/settings-schema';
 import { TerminalButton, TerminalScrollArea, TerminalSelect } from '@gremuchaya/ui/primitives';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
 import { buildIssueDraftUrl } from '@/application/edit/issueDraft';
@@ -11,6 +11,7 @@ import { categoryLabel, SchemaSetting } from '@/components/settings/SchemaSettin
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { resolveDockEdge } from './EditPanelDock';
+import { TileVisibility } from './TileVisibility';
 
 /**
  * The repository the issue draft points at, read from `git remote` rather than
@@ -19,6 +20,8 @@ import { resolveDockEdge } from './EditPanelDock';
  */
 const repository = 'lumenpearson/headquarters';
 const dockThresholdPx = 120;
+/** Below this the press on the header was a click, not a drag. */
+const dragThresholdPx = 6;
 
 const categoryOptions = settingCategories.map((category) => ({
   value: category,
@@ -41,8 +44,17 @@ export function EditPanel() {
   const canUndo = useOperationsStore((state) => state.personalization.undoStack.length > 0);
   const [category, setCategory] = useState<SettingCategory>('layout');
   const [dragging, setDragging] = useState(false);
+  const origin = useRef<{ readonly x: number; readonly y: number } | null>(null);
 
   /*
+   * The drag starts on the panel header and nowhere else.
+   *
+   * It used to start anywhere inside the panel, which made every press on a
+   * control a drag: clicking the category select re-docked the panel from the
+   * right edge to the top, the popup's anchor moved with it, and the click on
+   * an option landed on nothing. Measured, not deduced -- the category could
+   * not be changed with a pointer at all, only with the keyboard.
+   *
    * Pointer capture is what makes the drag work at all. A drag ends with the
    * pointer somewhere else on screen -- that is the point of it -- so without
    * capture the release lands on whatever is under the cursor and this handler
@@ -51,17 +63,28 @@ export function EditPanel() {
    * of where the pointer went.
    */
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!(event.target as HTMLElement).closest('.edit-panel__header')) return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    origin.current = { x: event.clientX, y: event.clientY };
     setDragging(true);
   }, []);
 
   // Actions are read off the vanilla store instead of subscribed to, so the
   // panel does not re-render when an action identity changes.
   const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = origin.current;
+    origin.current = null;
+    if (start === null) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     setDragging(false);
+    // A press on the header that never travelled is not a drag, and re-docking
+    // the panel under the operator because they clicked its title would be a
+    // surprise rather than a gesture.
+    if (Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) < dragThresholdPx) {
+      return;
+    }
     operationsStore
       .getState()
       .dockEditPanel(
@@ -99,6 +122,7 @@ export function EditPanel() {
       />
 
       <TerminalScrollArea className="edit-panel__settings">
+        {category === 'tiles' ? <TileVisibility /> : null}
         {definitions.map((definition) => (
           <SchemaSetting
             key={definition.id}

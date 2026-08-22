@@ -80,6 +80,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
     () => [
       {
         title: 'ОБЪЕКТЫ',
+        category: 'records',
         descriptor: {
           id: 'registry',
           priority: 100,
@@ -205,6 +206,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
       },
       {
         title: 'КАРТОЧКА ОБЪЕКТА',
+        category: 'detail',
         descriptor: {
           id: 'detail',
           priority: 90,
