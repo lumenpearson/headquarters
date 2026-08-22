@@ -1966,7 +1966,6 @@ button.is-active {
 /* Registries, files and dossiers */
 .objects-layout {
   display: grid;
-  grid-template-columns: minmax(700px, 1.55fr) minmax(330px, 0.8fr);
   gap: 7px;
 }
 .objects-registry,
@@ -1977,7 +1976,6 @@ button.is-active {
 .case-registry .ops-panel__body {
   display: flex;
   flex-direction: column;
-  height: calc(100% - 31px);
 }
 .object-kind-metrics {
   display: grid;
@@ -2079,7 +2077,6 @@ button.is-active {
 }
 .cases-layout {
   display: grid;
-  grid-template-columns: 180px minmax(590px, 1.4fr) minmax(350px, 0.85fr);
   gap: 7px;
 }
 .case-tree-panel,
@@ -2152,7 +2149,6 @@ button.is-active {
 }
 .files-layout {
   display: grid;
-  grid-template-columns: 180px minmax(620px, 1.45fr) minmax(330px, 0.75fr);
   gap: 7px;
 }
 .file-categories .ops-panel__body {
@@ -2687,7 +2683,6 @@ button.is-active {
 }
 .reports-layout {
   display: grid;
-  grid-template-columns: 180px minmax(500px, 1.1fr) minmax(380px, 0.9fr);
   gap: 7px;
 }
 .reports-kinds .ops-panel__body {
@@ -2787,7 +2782,6 @@ button.is-active {
 }
 .search-layout {
   display: grid;
-  grid-template-columns: minmax(700px, 1fr) 240px;
   gap: 7px;
 }
 .search-hit-list {

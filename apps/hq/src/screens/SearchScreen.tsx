@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
 import { EmptyState, Panel, SeverityBadge, StatusBadge } from '@/components/operations/OpsUi';
+import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useOperationsStore } from '@/state/operationsStore';
 
 type SearchHit = {
@@ -81,11 +82,140 @@ export function SearchScreen() {
     ].slice(0, 80);
   }, [query, state.alerts, state.attachments, state.cases, state.events, state.objects]);
 
-  const openHit = (hit: SearchHit) => {
-    if (hit.kind === 'file') state.selectFile(hit.id);
-    if (hit.kind === 'event' || hit.kind === 'alert') state.openDrawer(hit.kind, hit.id);
-    if (hit.href !== undefined) router.push(hit.href);
-  };
+  // Stable, because the tiles depend on it: redefined every render it would
+  // rebuild both panels on every keystroke in the search field.
+  const openHit = useCallback(
+    (hit: SearchHit) => {
+      if (hit.kind === 'file') state.selectFile(hit.id);
+      if (hit.kind === 'event' || hit.kind === 'alert') state.openDrawer(hit.kind, hit.id);
+      if (hit.href !== undefined) router.push(hit.href);
+    },
+    [router, state],
+  );
+
+  /*
+   * Priority here expresses the arrangement, not the order tiles would be
+   * given up in. On a master-detail screen the tiles total exactly twelve
+   * columns, so every one of them is placed even in a single-row grid --
+   * measured at 1024x768 through 2560x1440, nothing is ever displaced -- and
+   * the drop order priority also encodes is unreachable. What the operator
+   * does notice is the reading order, and the resolver places the highest
+   * priority leftmost.
+   */
+  const tiles: readonly ScreenTile[] = useMemo(
+    () => [
+      {
+        title: 'РЕЗУЛЬТАТЫ',
+        descriptor: {
+          id: 'results',
+          priority: 100,
+          variants: [
+            { presentation: 'full', columns: 9, rows: 1 },
+            { presentation: 'compact', columns: 7, rows: 1 },
+          ],
+          canStretchHorizontally: true,
+          canStretchVertically: true,
+        },
+        render: () => (
+          <Panel
+            title="РЕЗУЛЬТАТЫ"
+            eyebrow="UNIFIED SEARCH / ALL ENTITIES"
+            className="search-results"
+          >
+            {query.length === 0 ? (
+              <div className="search-help">
+                <strong>БЫСТРЫЙ ПОИСК</strong>
+                <p>
+                  Попробуйте:{' '}
+                  <TerminalButton onClick={() => state.setSearchQuery('K-17')}>K-17</TerminalButton>{' '}
+                  <TerminalButton onClick={() => state.setSearchQuery('S-03')}>S-03</TerminalButton>{' '}
+                  <TerminalButton onClick={() => state.setSearchQuery('сигнал')}>
+                    СИГНАЛ
+                  </TerminalButton>{' '}
+                  <TerminalButton onClick={() => state.setSearchQuery('альфа')}>
+                    АЛЬФА
+                  </TerminalButton>
+                </p>
+                <span>CTRL+K — ОТКРЫТЬ ПОИСК ИЗ ЛЮБОГО РАЗДЕЛА</span>
+              </div>
+            ) : hits.length === 0 ? (
+              <EmptyState>СОВПАДЕНИЙ НЕ НАЙДЕНО</EmptyState>
+            ) : (
+              <div className="search-hit-list">
+                {hits.map((hit, index) => (
+                  <TerminalButton
+                    key={`${hit.kind}-${hit.id}-${index}`}
+                    onClick={() => openHit(hit)}
+                  >
+                    <i>[{hit.kind.slice(0, 3).toUpperCase()}]</i>
+                    <span>
+                      <strong>{hit.title}</strong>
+                      <small>{hit.detail}</small>
+                    </span>
+                    {hit.status === undefined ? (
+                      hit.severity === undefined ? null : (
+                        <SeverityBadge severity={hit.severity} />
+                      )
+                    ) : (
+                      <StatusBadge status={hit.status} />
+                    )}
+                    <b>ENTER ›</b>
+                  </TerminalButton>
+                ))}
+              </div>
+            )}
+          </Panel>
+        ),
+      },
+      {
+        title: 'ИНДЕКС',
+        descriptor: {
+          id: 'index',
+          priority: 80,
+          variants: [
+            { presentation: 'full', columns: 3, rows: 1 },
+            { presentation: 'minimal', columns: 2, rows: 1 },
+          ],
+          canStretchVertically: true,
+          hideWhenOverflow: true,
+        },
+        render: () => (
+          <Panel title="ИНДЕКС" eyebrow="LOCAL DATASET" className="search-index">
+            <dl>
+              <div>
+                <dt>ОБЪЕКТЫ</dt>
+                <dd>{Object.keys(state.objects).length}</dd>
+              </div>
+              <div>
+                <dt>ДЕЛА</dt>
+                <dd>{Object.keys(state.cases).length}</dd>
+              </div>
+              <div>
+                <dt>МАТЕРИАЛЫ</dt>
+                <dd>{Object.keys(state.attachments).length}</dd>
+              </div>
+              <div>
+                <dt>СОБЫТИЯ</dt>
+                <dd>{state.events.length}</dd>
+              </div>
+              <div>
+                <dt>ТРЕВОГИ</dt>
+                <dd>{Object.keys(state.alerts).length}</dd>
+              </div>
+            </dl>
+            <footer>
+              INDEX: READY
+              <br />
+              STORAGE: LOCAL
+              <br />
+              NETWORK: NOT REQUIRED
+            </footer>
+          </Panel>
+        ),
+      },
+    ],
+    [hits, openHit, query, state],
+  );
 
   return (
     <div className="ops-screen search-screen">
@@ -106,82 +236,7 @@ export function SearchScreen() {
           {query.length === 0 ? 'ВВЕДИТЕ ЗАПРОС' : `${hits.length} СОВПАДЕНИЙ / LOCAL INDEX`}
         </small>
       </header>
-      <div className="search-layout">
-        <Panel
-          title="РЕЗУЛЬТАТЫ"
-          eyebrow="UNIFIED SEARCH / ALL ENTITIES"
-          className="search-results"
-        >
-          {query.length === 0 ? (
-            <div className="search-help">
-              <strong>БЫСТРЫЙ ПОИСК</strong>
-              <p>
-                Попробуйте:{' '}
-                <TerminalButton onClick={() => state.setSearchQuery('K-17')}>K-17</TerminalButton>{' '}
-                <TerminalButton onClick={() => state.setSearchQuery('S-03')}>S-03</TerminalButton>{' '}
-                <TerminalButton onClick={() => state.setSearchQuery('сигнал')}>
-                  СИГНАЛ
-                </TerminalButton>{' '}
-                <TerminalButton onClick={() => state.setSearchQuery('альфа')}>АЛЬФА</TerminalButton>
-              </p>
-              <span>CTRL+K — ОТКРЫТЬ ПОИСК ИЗ ЛЮБОГО РАЗДЕЛА</span>
-            </div>
-          ) : hits.length === 0 ? (
-            <EmptyState>СОВПАДЕНИЙ НЕ НАЙДЕНО</EmptyState>
-          ) : (
-            <div className="search-hit-list">
-              {hits.map((hit, index) => (
-                <TerminalButton key={`${hit.kind}-${hit.id}-${index}`} onClick={() => openHit(hit)}>
-                  <i>[{hit.kind.slice(0, 3).toUpperCase()}]</i>
-                  <span>
-                    <strong>{hit.title}</strong>
-                    <small>{hit.detail}</small>
-                  </span>
-                  {hit.status === undefined ? (
-                    hit.severity === undefined ? null : (
-                      <SeverityBadge severity={hit.severity} />
-                    )
-                  ) : (
-                    <StatusBadge status={hit.status} />
-                  )}
-                  <b>ENTER ›</b>
-                </TerminalButton>
-              ))}
-            </div>
-          )}
-        </Panel>
-        <Panel title="ИНДЕКС" eyebrow="LOCAL DATASET" className="search-index">
-          <dl>
-            <div>
-              <dt>ОБЪЕКТЫ</dt>
-              <dd>{Object.keys(state.objects).length}</dd>
-            </div>
-            <div>
-              <dt>ДЕЛА</dt>
-              <dd>{Object.keys(state.cases).length}</dd>
-            </div>
-            <div>
-              <dt>МАТЕРИАЛЫ</dt>
-              <dd>{Object.keys(state.attachments).length}</dd>
-            </div>
-            <div>
-              <dt>СОБЫТИЯ</dt>
-              <dd>{state.events.length}</dd>
-            </div>
-            <div>
-              <dt>ТРЕВОГИ</dt>
-              <dd>{Object.keys(state.alerts).length}</dd>
-            </div>
-          </dl>
-          <footer>
-            INDEX: READY
-            <br />
-            STORAGE: LOCAL
-            <br />
-            NETWORK: NOT REQUIRED
-          </footer>
-        </Panel>
-      </div>
+      <TileGrid tiles={tiles} columns={12} className="search-layout" />
     </div>
   );
 }

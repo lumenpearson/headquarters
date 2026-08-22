@@ -22,6 +22,7 @@ import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRunti
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { RecordPagination } from '@/components/operations/RecordPagination';
+import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useOperationsStore } from '@/state/operationsStore';
 
 type FileSort = 'title' | 'createdAt' | 'kind' | 'sizeLabel';
@@ -155,30 +156,30 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     }
   };
 
-  return (
-    <>
-      <div className="ops-screen files-screen">
-        <header className="ops-screen__title">
-          <div>
-            <span>{archive ? 'HISTORICAL MATERIALS' : 'LOCAL EVIDENCE STORE'} / READ ONLY</span>
-            <h1>{archive ? 'АРХИВНЫЕ МАТЕРИАЛЫ' : 'ФАЙЛЫ И МАТЕРИАЛЫ'}</h1>
-          </div>
-          <div className="files-summary">
-            <span>
-              <small>FILES</small>
-              <strong>{filePage.total}</strong>
-            </span>
-            <span>
-              <small>STORAGE</small>
-              <strong>72%</strong>
-            </span>
-            <span>
-              <small>INTEGRITY</small>
-              <strong>OK</strong>
-            </span>
-          </div>
-        </header>
-        <div className="files-layout">
+  /*
+   * Priority here expresses the arrangement, not the order tiles would be
+   * given up in. On a master-detail screen the tiles total exactly twelve
+   * columns, so every one of them is placed even in a single-row grid --
+   * measured at 1024x768 through 2560x1440, nothing is ever displaced -- and
+   * the drop order priority also encodes is unreachable. What the operator
+   * does notice is the reading order, and the resolver places the highest
+   * priority leftmost.
+   */
+  const tiles: readonly ScreenTile[] = useMemo(
+    () => [
+      {
+        title: 'КАТЕГОРИИ',
+        descriptor: {
+          id: 'categories',
+          priority: 80,
+          variants: [
+            { presentation: 'full', columns: 2, rows: 1 },
+            { presentation: 'minimal', columns: 1, rows: 1 },
+          ],
+          canStretchVertically: true,
+          hideWhenOverflow: true,
+        },
+        render: () => (
           <Panel title="КАТЕГОРИИ" eyebrow="FILTER / INDEX" className="file-categories">
             <TerminalButton
               className={state.ui.fileKindFilter === 'all' ? 'is-active' : ''}
@@ -200,6 +201,21 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
               </TerminalButton>
             ))}
           </Panel>
+        ),
+      },
+      {
+        title: 'РЕЕСТР ФАЙЛОВ',
+        descriptor: {
+          id: 'registry',
+          priority: 100,
+          variants: [
+            { presentation: 'full', columns: 6, rows: 1 },
+            { presentation: 'compact', columns: 4, rows: 1 },
+          ],
+          canStretchHorizontally: true,
+          canStretchVertically: true,
+        },
+        render: () => (
           <Panel
             title={archive ? 'АРХИВНЫЙ ИНДЕКС' : 'МАТЕРИАЛЫ'}
             eyebrow={`${filePage.total} RECORDS / LOCAL`}
@@ -301,6 +317,22 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
               <span>SELECTED: {selected?.id ?? '—'}</span>
             </RecordPagination>
           </Panel>
+        ),
+      },
+      {
+        title: 'ПРЕДПРОСМОТР',
+        descriptor: {
+          id: 'preview',
+          priority: 90,
+          variants: [
+            { presentation: 'full', columns: 4, rows: 1 },
+            { presentation: 'compact', columns: 3, rows: 1 },
+          ],
+          canStretchHorizontally: true,
+          canStretchVertically: true,
+          hideWhenOverflow: true,
+        },
+        render: () => (
           <Panel
             title="ПРЕДПРОСМОТР"
             eyebrow={selected?.id ?? 'NO SELECTION'}
@@ -368,7 +400,48 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
               </>
             )}
           </Panel>
-        </div>
+        ),
+      },
+    ],
+    [
+      allFiles,
+      archive,
+      filePage,
+      files,
+      goToPage,
+      materialClient,
+      query,
+      selected,
+      selectedMaterial,
+      sort,
+      state,
+    ],
+  );
+
+  return (
+    <>
+      <div className="ops-screen files-screen">
+        <header className="ops-screen__title">
+          <div>
+            <span>{archive ? 'HISTORICAL MATERIALS' : 'LOCAL EVIDENCE STORE'} / READ ONLY</span>
+            <h1>{archive ? 'АРХИВНЫЕ МАТЕРИАЛЫ' : 'ФАЙЛЫ И МАТЕРИАЛЫ'}</h1>
+          </div>
+          <div className="files-summary">
+            <span>
+              <small>FILES</small>
+              <strong>{filePage.total}</strong>
+            </span>
+            <span>
+              <small>STORAGE</small>
+              <strong>72%</strong>
+            </span>
+            <span>
+              <small>INTEGRITY</small>
+              <strong>OK</strong>
+            </span>
+          </div>
+        </header>
+        <TileGrid tiles={tiles} columns={12} className="files-layout" />
       </div>
       <TerminalDialog
         title="ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ"

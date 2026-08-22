@@ -9,6 +9,7 @@ import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
 import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
+import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useOperationsStore } from '@/state/operationsStore';
 
 type ObjectKindFilter = 'all' | 'person' | 'vehicle' | 'device' | 'group';
@@ -66,6 +67,216 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   });
   const objects = objectPage.items;
 
+  /*
+   * Priority here expresses the arrangement, not the order tiles would be
+   * given up in. On a master-detail screen the tiles total exactly twelve
+   * columns, so every one of them is placed even in a single-row grid --
+   * measured at 1024x768 through 2560x1440, nothing is ever displaced -- and
+   * the drop order priority also encodes is unreachable. What the operator
+   * does notice is the reading order, and the resolver places the highest
+   * priority leftmost.
+   */
+  const tiles: readonly ScreenTile[] = useMemo(
+    () => [
+      {
+        title: 'ОБЪЕКТЫ',
+        descriptor: {
+          id: 'registry',
+          priority: 100,
+          variants: [
+            { presentation: 'full', columns: 8, rows: 1 },
+            { presentation: 'compact', columns: 6, rows: 1 },
+          ],
+          canStretchHorizontally: true,
+          canStretchVertically: true,
+        },
+        render: () => (
+          <Panel
+            title="ОБЪЕКТЫ"
+            eyebrow={`REGISTRY / ${objectPage.total}`}
+            className="objects-registry"
+          >
+            <div className="ops-filterbar">
+              <label>
+                <span>/</span>
+                <TerminalInput
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  aria-label="Поиск объектов"
+                  placeholder="ID / ИМЯ / ПОЗЫВНОЙ / СЕКТОР"
+                />
+              </label>
+              <TerminalSelect
+                value={kind}
+                options={objectKindOptions}
+                onValueChange={setKind}
+                label="Тип объекта"
+              />
+            </div>
+            {objects.length === 0 ? (
+              <EmptyState>СОВПАДЕНИЙ НЕ ОБНАРУЖЕНО</EmptyState>
+            ) : (
+              <div className="ops-table-wrap">
+                <table className="ops-table">
+                  <thead>
+                    <tr>
+                      {(
+                        [
+                          ['id', 'ID'],
+                          ['name', 'NAME / CALLSIGN'],
+                        ] as const
+                      ).map(([column, caption]) => (
+                        <th key={column}>
+                          <TerminalButton
+                            onClick={() => {
+                              setDescending(sortKey === column ? !descending : false);
+                              setSortKey(column);
+                            }}
+                          >
+                            {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
+                          </TerminalButton>
+                        </th>
+                      ))}
+                      <th>TYPE</th>
+                      <th>STATUS</th>
+                      <th>SECTOR</th>
+                      {(
+                        [
+                          ['lastSeenAt', 'LAST SEEN'],
+                          ['threat', 'THREAT'],
+                        ] as const
+                      ).map(([column, caption]) => (
+                        <th key={column}>
+                          <TerminalButton
+                            onClick={() => {
+                              setDescending(sortKey === column ? !descending : true);
+                              setSortKey(column);
+                            }}
+                          >
+                            {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
+                          </TerminalButton>
+                        </th>
+                      ))}
+                      <th>CASES</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {objects.map((object) => (
+                      <tr
+                        key={object.id}
+                        className={object.id === selected?.id ? 'is-selected' : ''}
+                        data-interactive="true"
+                        data-context-menu="record"
+                        data-context-subject={object.id}
+                        onClick={() => state.selectObject(object.id)}
+                        onDoubleClick={() => router.push(`/objects/${object.id}`)}
+                      >
+                        <td>
+                          <strong>{object.id}</strong>
+                        </td>
+                        <td>
+                          {object.name}
+                          <small>{object.callsign}</small>
+                        </td>
+                        <td>{object.kind.toUpperCase()}</td>
+                        <td>
+                          <StatusBadge status={object.status} />
+                        </td>
+                        <td>{object.sectorId}</td>
+                        <td>{new Date(object.lastSeenAt).toLocaleTimeString('ru-RU')}</td>
+                        <td>
+                          <ProgressBar
+                            value={object.threat}
+                            tone={object.threat > 70 ? 'critical' : 'warning'}
+                          />
+                        </td>
+                        <td>{object.linkedCaseIds.length}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <RecordPagination page={objectPage} onPage={goToPage} label="Страницы реестра объектов">
+              <span>SELECTED: {selected?.id ?? '—'}</span>
+            </RecordPagination>
+          </Panel>
+        ),
+      },
+      {
+        title: 'КАРТОЧКА ОБЪЕКТА',
+        descriptor: {
+          id: 'detail',
+          priority: 90,
+          variants: [
+            { presentation: 'full', columns: 4, rows: 1 },
+            { presentation: 'compact', columns: 3, rows: 1 },
+          ],
+          canStretchHorizontally: true,
+          canStretchVertically: true,
+          hideWhenOverflow: true,
+        },
+        render: () => (
+          <Panel
+            title="КАРТОЧКА ОБЪЕКТА"
+            eyebrow={selected?.id ?? 'NO OBJECT'}
+            className="object-detail-panel"
+          >
+            {selected === undefined ? (
+              <EmptyState>ОБЪЕКТ НЕ ВЫБРАН</EmptyState>
+            ) : (
+              <>
+                <header className="object-detail-header">
+                  <div className={`object-symbol object-symbol--${selected.kind}`}>
+                    [{selected.kind.slice(0, 3).toUpperCase()}]
+                  </div>
+                  <div>
+                    <span>{selected.callsign}</span>
+                    <strong>{selected.name}</strong>
+                    <StatusBadge status={selected.status} />
+                  </div>
+                  <b>
+                    THREAT
+                    <br />
+                    <strong>{selected.threat}</strong>
+                  </b>
+                </header>
+                <nav className="object-tabs">
+                  {(['summary', 'activity', 'relations', 'files', 'map', 'video'] as const).map(
+                    (value) => (
+                      <TerminalButton
+                        key={value}
+                        className={tab === value ? 'is-active' : ''}
+                        onClick={() => setTab(value)}
+                      >
+                        {value.toUpperCase()}
+                      </TerminalButton>
+                    ),
+                  )}
+                </nav>
+                <ObjectTab tab={tab} objectId={selected.id} />
+                <footer className="object-actions">
+                  <TerminalButton onClick={() => router.push('/map')}>
+                    [04] ПОКАЗАТЬ НА КАРТЕ
+                  </TerminalButton>
+                  <TerminalButton onClick={() => router.push('/video')}>
+                    [05] ОТКРЫТЬ ВИДЕО
+                  </TerminalButton>
+                  <TerminalButton
+                    onClick={() => router.push(`/cases/${selected.linkedCaseIds[0] ?? 'CASE-01'}`)}
+                  >
+                    [03] СВЯЗАННОЕ ДЕЛО
+                  </TerminalButton>
+                </footer>
+              </>
+            )}
+          </Panel>
+        ),
+      },
+    ],
+    [descending, goToPage, kind, objectPage, objects, query, router, selected, sortKey, state, tab],
+  );
+
   return (
     <div className="ops-screen objects-screen">
       <header className="ops-screen__title">
@@ -84,172 +295,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
           ))}
         </div>
       </header>
-      <div className="objects-layout">
-        <Panel
-          title="ОБЪЕКТЫ"
-          eyebrow={`REGISTRY / ${objectPage.total}`}
-          className="objects-registry"
-        >
-          <div className="ops-filterbar">
-            <label>
-              <span>/</span>
-              <TerminalInput
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label="Поиск объектов"
-                placeholder="ID / ИМЯ / ПОЗЫВНОЙ / СЕКТОР"
-              />
-            </label>
-            <TerminalSelect
-              value={kind}
-              options={objectKindOptions}
-              onValueChange={setKind}
-              label="Тип объекта"
-            />
-          </div>
-          {objects.length === 0 ? (
-            <EmptyState>СОВПАДЕНИЙ НЕ ОБНАРУЖЕНО</EmptyState>
-          ) : (
-            <div className="ops-table-wrap">
-              <table className="ops-table">
-                <thead>
-                  <tr>
-                    {(
-                      [
-                        ['id', 'ID'],
-                        ['name', 'NAME / CALLSIGN'],
-                      ] as const
-                    ).map(([column, caption]) => (
-                      <th key={column}>
-                        <TerminalButton
-                          onClick={() => {
-                            setDescending(sortKey === column ? !descending : false);
-                            setSortKey(column);
-                          }}
-                        >
-                          {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
-                        </TerminalButton>
-                      </th>
-                    ))}
-                    <th>TYPE</th>
-                    <th>STATUS</th>
-                    <th>SECTOR</th>
-                    {(
-                      [
-                        ['lastSeenAt', 'LAST SEEN'],
-                        ['threat', 'THREAT'],
-                      ] as const
-                    ).map(([column, caption]) => (
-                      <th key={column}>
-                        <TerminalButton
-                          onClick={() => {
-                            setDescending(sortKey === column ? !descending : true);
-                            setSortKey(column);
-                          }}
-                        >
-                          {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
-                        </TerminalButton>
-                      </th>
-                    ))}
-                    <th>CASES</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {objects.map((object) => (
-                    <tr
-                      key={object.id}
-                      className={object.id === selected?.id ? 'is-selected' : ''}
-                      data-interactive="true"
-                      data-context-menu="record"
-                      data-context-subject={object.id}
-                      onClick={() => state.selectObject(object.id)}
-                      onDoubleClick={() => router.push(`/objects/${object.id}`)}
-                    >
-                      <td>
-                        <strong>{object.id}</strong>
-                      </td>
-                      <td>
-                        {object.name}
-                        <small>{object.callsign}</small>
-                      </td>
-                      <td>{object.kind.toUpperCase()}</td>
-                      <td>
-                        <StatusBadge status={object.status} />
-                      </td>
-                      <td>{object.sectorId}</td>
-                      <td>{new Date(object.lastSeenAt).toLocaleTimeString('ru-RU')}</td>
-                      <td>
-                        <ProgressBar
-                          value={object.threat}
-                          tone={object.threat > 70 ? 'critical' : 'warning'}
-                        />
-                      </td>
-                      <td>{object.linkedCaseIds.length}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <RecordPagination page={objectPage} onPage={goToPage} label="Страницы реестра объектов">
-            <span>SELECTED: {selected?.id ?? '—'}</span>
-          </RecordPagination>
-        </Panel>
-        <Panel
-          title="КАРТОЧКА ОБЪЕКТА"
-          eyebrow={selected?.id ?? 'NO OBJECT'}
-          className="object-detail-panel"
-        >
-          {selected === undefined ? (
-            <EmptyState>ОБЪЕКТ НЕ ВЫБРАН</EmptyState>
-          ) : (
-            <>
-              <header className="object-detail-header">
-                <div className={`object-symbol object-symbol--${selected.kind}`}>
-                  [{selected.kind.slice(0, 3).toUpperCase()}]
-                </div>
-                <div>
-                  <span>{selected.callsign}</span>
-                  <strong>{selected.name}</strong>
-                  <StatusBadge status={selected.status} />
-                </div>
-                <b>
-                  THREAT
-                  <br />
-                  <strong>{selected.threat}</strong>
-                </b>
-              </header>
-              <nav className="object-tabs">
-                {(['summary', 'activity', 'relations', 'files', 'map', 'video'] as const).map(
-                  (value) => (
-                    <TerminalButton
-                      key={value}
-                      className={tab === value ? 'is-active' : ''}
-                      onClick={() => setTab(value)}
-                    >
-                      {value.toUpperCase()}
-                    </TerminalButton>
-                  ),
-                )}
-              </nav>
-              <ObjectTab tab={tab} objectId={selected.id} />
-              <footer className="object-actions">
-                <TerminalButton onClick={() => router.push('/map')}>
-                  [04] ПОКАЗАТЬ НА КАРТЕ
-                </TerminalButton>
-                <TerminalButton onClick={() => router.push('/video')}>
-                  [05] ОТКРЫТЬ ВИДЕО
-                </TerminalButton>
-                <TerminalButton
-                  onClick={() => router.push(`/cases/${selected.linkedCaseIds[0] ?? 'CASE-01'}`)}
-                >
-                  [03] СВЯЗАННОЕ ДЕЛО
-                </TerminalButton>
-              </footer>
-            </>
-          )}
-        </Panel>
-      </div>
+      <TileGrid tiles={tiles} columns={12} className="objects-layout" />
     </div>
   );
 }

@@ -62,7 +62,18 @@ function gridOccupancy(page: Page) {
 }
 
 /** Every route the resolver lays out. Screens it deliberately does not are listed in the plan. */
-const resolvedRoutes = ['/overview', '/system', '/analytics', '/communications'] as const;
+const resolvedRoutes = [
+  '/overview',
+  '/system',
+  '/analytics',
+  '/communications',
+  '/objects',
+  '/cases',
+  '/reports',
+  '/files',
+  '/search',
+  '/archive',
+] as const;
 
 for (const viewport of [
   { width: 1024, height: 600 },
@@ -90,6 +101,43 @@ for (const viewport of [
     }
   });
 }
+
+test('R10: no screen can be left blank by a size the operator is allowed to set', async ({
+  page,
+}) => {
+  /*
+   * The resolver fails closed: a tile it cannot place, and which declares no
+   * way to leave, throws. That is the right contract for the engine and the
+   * wrong thing to meet on a shoot -- the throw escapes render and the route
+   * shows nothing at all.
+   *
+   * It was reachable. Dragging a registry's corner writes `tiles.spans`, and
+   * `registry=10x1` on a window short enough for a single row left `/cases`
+   * with no room for the third tile: measured, `Tile dossier cannot fit in
+   * 12x1 grid and has no overflow policy` and an empty screen. Every tile
+   * below the top priority now declares how it leaves, and this holds that.
+   */
+  const failures: string[] = [];
+  page.on('pageerror', (error) => failures.push(error.message));
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings');
+  await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'TILES / SPANS' })
+    .fill('registry=12x1,results=12x1,detail=12x1,preview=12x1');
+
+  // The shortest grid the runtime can produce: one row.
+  await page.setViewportSize({ width: 1280, height: 400 });
+  for (const route of resolvedRoutes) {
+    await page.goto(route);
+    await expect(page.locator('.ops-screen')).toBeVisible();
+    await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+  }
+
+  expect(failures).toEqual([]);
+});
 
 test('R10: a tile that does not fit goes to the screen of its own', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
