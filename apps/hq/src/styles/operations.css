@@ -308,7 +308,8 @@
   grid-area: 2 / 2 / 3 / 3;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  /* R26: the workspace is the page. It clips; panels resolve their own overflow. */
+  overflow: hidden;
   background: rgb(2 5 3 / 52%);
 }
 
@@ -346,7 +347,8 @@
 
 .ops-screen {
   min-width: 1180px;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   padding: 8px;
   background: linear-gradient(
     90deg,
@@ -1764,7 +1766,6 @@ button.is-active {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
-  max-height: calc(100dvh - 245px);
   overflow: auto;
 }
 .camera-grid > button {
@@ -2380,8 +2381,7 @@ button.is-active {
   font-size: 7px;
 }
 .archive-screen {
-  min-width: 1180px;
-  min-height: 100%;
+  min-height: 0;
 }
 .archive-timeline {
   display: flex;
@@ -2532,10 +2532,6 @@ button.is-active {
 .analytics-confidence {
   grid-column: 3;
   grid-row: 2;
-}
-.overview-layout .ops-panel__body,
-.analytics-layout .ops-panel__body {
-  overflow: auto;
 }
 .analytics-index__readout {
   display: grid;
@@ -3410,11 +3406,6 @@ button.is-active {
   }
 }
 
-/* Settings may contain many categories: only its own content pane may scroll. */
-.ops-workspace[data-route='settings'] {
-  overflow: hidden;
-}
-
 .settings-screen {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -3788,50 +3779,18 @@ button.is-active {
   }
 }
 
-/* Viewport-density correction after measured 720p/1080p layout validation. */
-
-.overview-layout,
-.analytics-layout,
-.settings-layout,
-.ui-gallery-layout {
-  height: max(620px, calc(100dvh - 244px)) !important;
-  flex: 0 0 auto !important;
-}
-
-.overview-layout {
-  grid-template-rows: repeat(7, minmax(108px, 1fr)) !important;
-  grid-auto-rows: unset !important;
-}
-
-.analytics-layout {
-  grid-auto-rows: minmax(150px, 1fr);
-}
-
-.objects-layout,
-.cases-layout,
-.files-layout,
-.communications-layout,
-.system-layout,
-.reports-layout,
-.search-layout {
-  height: max(590px, calc(100dvh - 244px)) !important;
-  min-height: 0 !important;
-  flex: 0 0 auto !important;
-}
-
-.map-layout {
-  height: max(660px, calc(100dvh - 244px)) !important;
-  min-height: 0 !important;
-  flex: 0 0 auto !important;
-  grid-template-rows: minmax(0, 1fr) minmax(138px, 0.38fr) auto !important;
-}
-
-.video-layout {
-  height: max(760px, calc(100dvh - 244px)) !important;
-  min-height: 0 !important;
-  flex: 0 0 auto !important;
-  grid-template-rows: minmax(0, 1fr) minmax(205px, 0.4fr) !important;
-}
+/*
+ * R26: the layout region is bounded by what is left in the screen, not by
+ * viewport arithmetic.
+ *
+ * This block used to pin every layout to `max(620px, calc(100dvh - 244px))`
+ * with `!important`. 244px stands for the shell chrome, but the chrome is
+ * `clamp()`-sized and therefore viewport-dependent: the constant was correct
+ * at one viewport and short everywhere else, which is what put a scrollbar on
+ * the workspace at 55 of 64 measured route/viewport pairs. The height is now
+ * the remaining space in a bounded flex column, so there is no constant left
+ * to be wrong.
+ */
 
 .video-primary-column,
 .camera-grid-panel,
@@ -3842,46 +3801,6 @@ button.is-active {
 
 .video-side-stack {
   overflow-y: auto !important;
-}
-
-@media (min-width: 2500px) {
-  .overview-layout,
-  .analytics-layout,
-  .settings-layout,
-  .ui-gallery-layout,
-  .objects-layout,
-  .cases-layout,
-  .files-layout,
-  .communications-layout,
-  .system-layout,
-  .reports-layout,
-  .search-layout,
-  .map-layout,
-  .video-layout {
-    height: calc(100dvh - 284px) !important;
-  }
-}
-
-@media (max-height: 820px) {
-  .overview-layout,
-  .analytics-layout,
-  .settings-layout,
-  .ui-gallery-layout,
-  .objects-layout,
-  .cases-layout,
-  .files-layout,
-  .communications-layout,
-  .system-layout,
-  .reports-layout,
-  .search-layout,
-  .map-layout,
-  .video-layout {
-    height: 590px !important;
-  }
-
-  .video-layout {
-    height: 760px !important;
-  }
 }
 
 /*
@@ -3940,14 +3859,14 @@ button.is-active {
 .ops-workspace {
   container-name: operations-workspace;
   container-type: inline-size;
-  overflow: auto;
 }
 
 .ops-screen {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
   padding: clamp(8px, 0.8vw, 24px);
 }
@@ -3988,17 +3907,17 @@ button.is-active {
   width: 100%;
   height: auto;
   min-height: 0;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   gap: clamp(6px, 0.55vw, 14px);
   align-content: stretch;
 }
 
 .overview-layout {
-  grid-auto-rows: minmax(clamp(135px, 10vw, 245px), 1fr);
+  grid-auto-rows: minmax(0, 1fr);
 }
 
 .analytics-layout {
-  grid-auto-rows: minmax(clamp(180px, 13vw, 330px), 1fr);
+  grid-auto-rows: minmax(0, 1fr);
 }
 
 .settings-layout,
@@ -4006,14 +3925,10 @@ button.is-active {
   grid-auto-rows: minmax(230px, 1fr);
 }
 
-.objects-layout,
-.cases-layout,
-.files-layout,
-.communications-layout,
-.system-layout,
-.reports-layout,
-.search-layout {
-  min-height: max(590px, calc(100dvh - 178px));
+.ui-gallery-layout {
+  min-height: 0;
+  overflow: auto;
+  align-content: start;
 }
 
 .ops-drawer {
@@ -4031,8 +3946,7 @@ button.is-active {
 
 .map-layout {
   grid-template-columns: clamp(178px, 12vw, 270px) minmax(0, 1fr) clamp(230px, 16vw, 360px);
-  grid-template-rows: minmax(330px, 1fr) minmax(150px, 0.42fr) auto;
-  min-height: max(660px, calc(100dvh - 178px));
+  grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr) auto;
 }
 
 .map-layers,
@@ -4169,21 +4083,20 @@ button.is-active {
 .video-layout {
   display: grid;
   grid-template-columns: minmax(500px, 1.48fr) minmax(330px, 0.92fr) minmax(250px, 0.68fr);
-  grid-template-rows: minmax(500px, 1fr) minmax(225px, 0.42fr);
-  min-height: max(760px, calc(100dvh - 178px));
+  grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr);
 }
 
 .video-primary-column {
   display: grid;
   grid-column: 1;
   grid-row: 1;
-  grid-template-rows: minmax(300px, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: clamp(6px, 0.55vw, 14px);
 }
 
 .video-main-feed {
   grid-column: auto;
-  min-height: 300px;
+  min-height: 0;
   background: #030303;
 }
 
@@ -4326,7 +4239,6 @@ button.is-active {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 6px;
-  height: calc(100% - 42px);
   overflow: hidden;
 }
 
@@ -4339,11 +4251,6 @@ button.is-active {
 
 .camera-grid-toolbar > * {
   min-width: 0;
-}
-
-.camera-grid-panel .ops-panel__body {
-  height: calc(100% - 42px);
-  overflow: hidden;
 }
 
 .camera-grid {
@@ -4545,7 +4452,7 @@ button.is-active {
 
   .video-layout {
     grid-template-columns: minmax(900px, 1.5fr) minmax(540px, 0.92fr) minmax(400px, 0.68fr);
-    grid-template-rows: minmax(800px, 1fr) minmax(360px, 0.42fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr);
   }
 
   .camera-thumb {
@@ -5506,7 +5413,8 @@ button.is-active {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
   padding: clamp(8px, 0.8vw, 24px);
 }
@@ -5534,33 +5442,22 @@ button.is-active {
   width: 100%;
   height: auto;
   min-height: 0;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   gap: clamp(6px, 0.55vw, 14px);
   align-content: stretch;
 }
 
 .overview-layout {
-  grid-auto-rows: minmax(clamp(135px, 10vw, 245px), 1fr);
+  grid-auto-rows: minmax(0, 1fr);
 }
 
 .analytics-layout {
-  grid-auto-rows: minmax(clamp(180px, 13vw, 330px), 1fr);
-}
-
-.objects-layout,
-.cases-layout,
-.files-layout,
-.communications-layout,
-.system-layout,
-.reports-layout,
-.search-layout {
-  min-height: max(590px, calc(100dvh - 178px));
+  grid-auto-rows: minmax(0, 1fr);
 }
 
 .map-layout {
   grid-template-columns: clamp(178px, 12vw, 270px) minmax(0, 1fr) clamp(230px, 16vw, 360px);
-  grid-template-rows: minmax(330px, 1fr) minmax(150px, 0.42fr) auto;
-  min-height: max(660px, calc(100dvh - 178px));
+  grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr) auto;
 }
 
 .map-layers,
@@ -5577,8 +5474,7 @@ button.is-active {
 .video-layout {
   display: grid;
   grid-template-columns: minmax(500px, 1.48fr) minmax(330px, 0.92fr) minmax(250px, 0.68fr);
-  grid-template-rows: minmax(500px, 1fr) minmax(225px, 0.42fr);
-  min-height: max(760px, calc(100dvh - 178px));
+  grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr);
 }
 
 .video-primary-column {
@@ -5620,7 +5516,7 @@ button.is-active {
   grid-auto-rows: minmax(64px, 1fr);
   height: auto;
   max-height: none;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .camera-grid > button {
@@ -5807,7 +5703,7 @@ button.is-active {
 
   .video-layout {
     grid-template-columns: minmax(900px, 1.5fr) minmax(540px, 0.92fr) minmax(400px, 0.68fr);
-    grid-template-rows: minmax(800px, 1fr) minmax(360px, 0.42fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr);
   }
 }
 
@@ -6123,4 +6019,52 @@ button.is-active {
   .settings-history-filters {
     grid-template-columns: 1fr;
   }
+}
+
+/*
+ * R26/R30: where overflow is allowed to land.
+ *
+ * One decision, applied last so nothing above can contradict it: the document
+ * and the workspace clip, and a panel that cannot show all of its content
+ * scrolls its own body. The settings screen already worked this way -- a
+ * bounded grid whose content pane scrolls -- and this generalises that one
+ * screen's arrangement to every panel on every route instead of leaving it a
+ * special case with its own `data-route` selector.
+ *
+ * `.ops-panel` was already `overflow: hidden`, so content past the panel edge
+ * was clipped and unreachable rather than scrolled. Making the panel a column
+ * gives the body a definite share of the panel to scroll inside.
+ */
+
+.ops-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.ops-panel__header {
+  flex: 0 0 auto;
+}
+
+.ops-panel__body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  /* A panel that reaches its end does not hand the gesture to the shell. */
+  overscroll-behavior: contain;
+}
+
+/*
+ * `/archive` is the one screen that nests another: an `.ops-screen` under its
+ * own period bar. The nested screen takes the space the bar leaves rather than
+ * the full height it would claim on a route of its own.
+ */
+.archive-screen {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.archive-timeline {
+  flex: 0 0 auto;
 }
