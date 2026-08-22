@@ -1,5 +1,7 @@
 import type { Camera } from '@gremuchaya/domain';
 
+import { queryRecords } from '@/application/records/query';
+
 export type CameraStreamTransport = 'DEMO_VIDEO' | 'LOCAL_MATERIAL' | 'WEBCAM' | 'RTSP_GATEWAY';
 export type CameraRegistryFilter = 'all' | 'online' | 'alert' | 'lost';
 export type CameraRegistrySort = 'registry' | 'id' | 'signal' | 'sector';
@@ -114,26 +116,24 @@ export function queryCameraRegistry(
   registry: Readonly<Record<string, CameraStreamDescriptor>>,
   query: CameraRegistryQuery,
 ): CameraRegistryPage {
-  const pageSize = Math.max(1, Math.floor(query.pageSize));
-  const filtered = cameras.filter((camera) => matchesFilter(camera, query.filter));
-  const sorted =
-    query.sort === 'registry' ? [...filtered] : [...filtered].sort(cameraComparator(query.sort));
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const page = Math.min(totalPages, Math.max(1, Math.floor(query.page)));
-  const start = (page - 1) * pageSize;
-  const items = sorted
-    .slice(start, start + pageSize)
-    .flatMap((camera): readonly CameraRegistryEntry[] => {
-      const stream = registry[camera.id];
-      return stream === undefined ? [] : [{ camera, stream }];
-    });
+  const page = queryRecords(cameras, {
+    page: query.page,
+    pageSize: query.pageSize,
+    filters: [(camera) => matchesFilter(camera, query.filter)],
+    // `registry` is the declared order, which is the input order: no
+    // comparator rather than one that reproduces it.
+    ...(query.sort === 'registry' ? {} : { comparator: cameraComparator(query.sort) }),
+  });
 
   return {
-    items,
-    page,
-    pageSize,
-    totalItems: sorted.length,
-    totalPages,
+    items: page.items.flatMap((camera): readonly CameraRegistryEntry[] => {
+      const stream = registry[camera.id];
+      return stream === undefined ? [] : [{ camera, stream }];
+    }),
+    page: page.page,
+    pageSize: page.pageSize,
+    totalItems: page.total,
+    totalPages: page.pageCount,
   };
 }
 

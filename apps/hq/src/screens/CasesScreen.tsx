@@ -4,7 +4,10 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
+import { useRecordPage } from '@/application/records/useRecordPage';
+import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
+import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
@@ -56,27 +59,30 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
       : selectedCase.attachmentIds.flatMap((id) =>
           state.attachments[id] === undefined ? [] : [state.attachments[id]],
         );
-  const cases = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase('ru-RU');
-    return Object.values(state.cases)
-      .filter((caseFile) => statusFilter === 'all' || caseFile.status === statusFilter)
-      .filter(
-        (caseFile) =>
-          normalizedQuery === '' ||
-          `${caseFile.code} ${caseFile.title} ${caseFile.tags.join(' ')}`
-            .toLocaleLowerCase('ru-RU')
-            .includes(normalizedQuery),
-      )
-      .sort((left, right) => {
-        const a = left[sortKey];
-        const b = right[sortKey];
-        const result =
-          typeof a === 'number' && typeof b === 'number'
-            ? a - b
-            : String(a).localeCompare(String(b), 'ru-RU');
-        return descending ? -result : result;
-      });
-  }, [descending, query, sortKey, state.cases, statusFilter]);
+  const pageSize = useTablePageSize();
+  const allCases = useMemo(() => Object.values(state.cases), [state.cases]);
+  const normalizedQuery = query.trim().toLocaleLowerCase('ru-RU');
+  const { page: casePage, goToPage } = useRecordPage(allCases, {
+    pageSize,
+    filters: [
+      (caseFile) => statusFilter === 'all' || caseFile.status === statusFilter,
+      (caseFile) =>
+        normalizedQuery === '' ||
+        `${caseFile.code} ${caseFile.title} ${caseFile.tags.join(' ')}`
+          .toLocaleLowerCase('ru-RU')
+          .includes(normalizedQuery),
+    ],
+    comparator: (left, right) => {
+      const a = left[sortKey];
+      const b = right[sortKey];
+      const result =
+        typeof a === 'number' && typeof b === 'number'
+          ? a - b
+          : String(a).localeCompare(String(b), 'ru-RU');
+      return descending ? -result : result;
+    },
+  });
+  const cases = casePage.items;
 
   return (
     <div className="ops-screen cases-screen">
@@ -129,7 +135,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
 
         <Panel
           title="РЕЕСТР ДЕЛ"
-          eyebrow={`${selectedFolder} / ${cases.length} RECORDS`}
+          eyebrow={`${selectedFolder} / ${casePage.total} RECORDS`}
           className="case-registry"
         >
           <div className="ops-filterbar">
@@ -200,14 +206,9 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
               </table>
             </div>
           )}
-          <footer className="registry-pagination">
-            <span>СТРАНИЦА 01 / 02</span>
-            <TerminalButton>[◀] PREV</TerminalButton>
-            <TerminalButton className="is-active">01</TerminalButton>
-            <TerminalButton>02</TerminalButton>
-            <TerminalButton>NEXT [▶]</TerminalButton>
+          <RecordPagination page={casePage} onPage={goToPage} label="Страницы реестра дел">
             <span>SELECTED: {selectedCase?.id ?? '—'}</span>
-          </footer>
+          </RecordPagination>
         </Panel>
 
         <Panel

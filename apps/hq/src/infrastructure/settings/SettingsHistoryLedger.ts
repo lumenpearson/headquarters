@@ -1,5 +1,7 @@
 import type { SettingCategory, SettingsDraftCheckpoint } from '@gremuchaya/settings-schema';
 
+import { queryRecords } from '@/application/records/query';
+
 export const settingsHistoryOperations = [
   'patch',
   'reset-category',
@@ -57,29 +59,26 @@ export function querySettingsHistory(
   entries: readonly SettingsHistoryEntry[],
   query: SettingsHistoryQuery,
 ): SettingsHistoryPage {
-  const normalizedPageSize = Math.min(50, Math.max(1, Math.trunc(query.pageSize)));
-  const filtered = entries
-    .filter((entry) => query.operation === undefined || entry.operation === query.operation)
-    .filter((entry) => query.category === undefined || entry.category === query.category)
-    .filter(
+  const settingId = query.settingId?.toLowerCase();
+  const page = queryRecords(entries, {
+    page: query.page,
+    // The ledger's own bound, kept: it is a dense list in a side panel, not a
+    // table with a page-size control.
+    pageSize: Math.min(50, query.pageSize),
+    filters: [
+      (entry) => query.operation === undefined || entry.operation === query.operation,
+      (entry) => query.category === undefined || entry.category === query.category,
       (entry) =>
-        query.settingId === undefined ||
-        entry.changedIds.some((id) => id.toLowerCase().includes(query.settingId!.toLowerCase())),
-    )
-    .filter((entry) => query.date === undefined || entry.at.startsWith(query.date!))
-    .sort((left, right) => {
+        settingId === undefined ||
+        entry.changedIds.some((id) => id.toLowerCase().includes(settingId)),
+      (entry) => query.date === undefined || entry.at.startsWith(query.date),
+    ],
+    comparator: (left, right) => {
       const comparison = left.at.localeCompare(right.at) || left.id.localeCompare(right.id);
       return query.order === 'oldest' ? comparison : -comparison;
-    });
-  const pageCount = Math.max(1, Math.ceil(filtered.length / normalizedPageSize));
-  const page = Math.min(Math.max(1, Math.trunc(query.page)), pageCount);
-  const start = (page - 1) * normalizedPageSize;
-  return {
-    items: filtered.slice(start, start + normalizedPageSize),
-    page,
-    pageCount,
-    total: filtered.length,
-  };
+    },
+  });
+  return { items: page.items, page: page.page, pageCount: page.pageCount, total: page.total };
 }
 
 export function cloneSettingsHistoryEntry(entry: SettingsHistoryEntry): SettingsHistoryEntry {

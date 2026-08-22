@@ -2106,13 +2106,25 @@ button.is-active {
 }
 .registry-pagination {
   display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 3px;
   padding-top: 5px;
 }
+.registry-pagination > span {
+  color: var(--ops-muted);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
 .registry-pagination button {
   min-width: 26px;
   min-height: 24px;
+  padding-inline: 5px;
+  font-size: 7px;
 }
 .dossier-photo {
   display: grid;
@@ -5466,27 +5478,6 @@ button.is-active {
 
 .camera-grid-query-summary p b {
   color: var(--ops-green-bright);
-}
-
-.camera-grid-pagination {
-  display: grid;
-  grid-template-columns: minmax(62px, 1fr) auto minmax(62px, 1fr);
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-.camera-grid-pagination > span {
-  color: var(--ops-muted);
-  font-size: 7px;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
-}
-
-.camera-grid-pagination .terminal-button {
-  min-height: 24px;
-  padding-inline: 5px;
-  font-size: 7px;
 }
 
 .ops-drawer {

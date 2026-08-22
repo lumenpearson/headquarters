@@ -4,7 +4,10 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
+import { useRecordPage } from '@/application/records/useRecordPage';
+import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
+import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
@@ -37,17 +40,31 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   );
   const selectedId = detailId ?? state.ui.selectedObjectId;
   const selected = state.objects[selectedId] ?? Object.values(state.objects)[0];
-  const objects = useMemo(
-    () =>
-      Object.values(state.objects).filter(
-        (object) =>
-          (kind === 'all' || object.kind === kind) &&
-          `${object.id} ${object.name} ${object.callsign} ${object.sectorId}`
-            .toLocaleLowerCase('ru-RU')
-            .includes(query.toLocaleLowerCase('ru-RU')),
-      ),
-    [kind, query, state.objects],
-  );
+  const pageSize = useTablePageSize();
+  const allObjects = useMemo(() => Object.values(state.objects), [state.objects]);
+  const [sortKey, setSortKey] = useState<'id' | 'name' | 'threat' | 'lastSeenAt'>('id');
+  const [descending, setDescending] = useState(false);
+  const normalizedQuery = query.toLocaleLowerCase('ru-RU');
+  const { page: objectPage, goToPage } = useRecordPage(allObjects, {
+    pageSize,
+    filters: [
+      (object) => kind === 'all' || object.kind === kind,
+      (object) =>
+        `${object.id} ${object.name} ${object.callsign} ${object.sectorId}`
+          .toLocaleLowerCase('ru-RU')
+          .includes(normalizedQuery),
+    ],
+    comparator: (left, right) => {
+      const a = left[sortKey];
+      const b = right[sortKey];
+      const result =
+        typeof a === 'number' && typeof b === 'number'
+          ? a - b
+          : String(a).localeCompare(String(b), 'ru-RU');
+      return descending ? -result : result;
+    },
+  });
+  const objects = objectPage.items;
 
   return (
     <div className="ops-screen objects-screen">
@@ -70,7 +87,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
       <div className="objects-layout">
         <Panel
           title="ОБЪЕКТЫ"
-          eyebrow={`REGISTRY / ${objects.length}`}
+          eyebrow={`REGISTRY / ${objectPage.total}`}
           className="objects-registry"
         >
           <div className="ops-filterbar">
@@ -97,13 +114,43 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
               <table className="ops-table">
                 <thead>
                   <tr>
-                    <th>ID</th>
-                    <th>NAME / CALLSIGN</th>
+                    {(
+                      [
+                        ['id', 'ID'],
+                        ['name', 'NAME / CALLSIGN'],
+                      ] as const
+                    ).map(([column, caption]) => (
+                      <th key={column}>
+                        <TerminalButton
+                          onClick={() => {
+                            setDescending(sortKey === column ? !descending : false);
+                            setSortKey(column);
+                          }}
+                        >
+                          {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
+                        </TerminalButton>
+                      </th>
+                    ))}
                     <th>TYPE</th>
                     <th>STATUS</th>
                     <th>SECTOR</th>
-                    <th>LAST SEEN</th>
-                    <th>THREAT</th>
+                    {(
+                      [
+                        ['lastSeenAt', 'LAST SEEN'],
+                        ['threat', 'THREAT'],
+                      ] as const
+                    ).map(([column, caption]) => (
+                      <th key={column}>
+                        <TerminalButton
+                          onClick={() => {
+                            setDescending(sortKey === column ? !descending : true);
+                            setSortKey(column);
+                          }}
+                        >
+                          {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
+                        </TerminalButton>
+                      </th>
+                    ))}
                     <th>CASES</th>
                   </tr>
                 </thead>
@@ -144,6 +191,9 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
               </table>
             </div>
           )}
+          <RecordPagination page={objectPage} onPage={goToPage} label="Страницы реестра объектов">
+            <span>SELECTED: {selected?.id ?? '—'}</span>
+          </RecordPagination>
         </Panel>
         <Panel
           title="КАРТОЧКА ОБЪЕКТА"

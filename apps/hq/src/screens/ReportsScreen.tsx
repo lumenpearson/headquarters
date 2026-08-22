@@ -3,7 +3,10 @@
 import { useMemo, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { useRecordPage } from '@/application/records/useRecordPage';
+import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
+import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
@@ -16,10 +19,19 @@ export function ReportsScreen() {
   useContextMenuAction('record.select', (subject) => {
     if (subject !== undefined) setSelectedId(subject);
   });
-  const reports = useMemo(
-    () => Object.values(state.reports).filter((report) => kind === 'all' || report.kind === kind),
-    [kind, state.reports],
-  );
+  const pageSize = useTablePageSize();
+  const [sortKey, setSortKey] = useState<'id' | 'title' | 'kind' | 'createdAt'>('createdAt');
+  const [descending, setDescending] = useState(true);
+  const allReports = useMemo(() => Object.values(state.reports), [state.reports]);
+  const { page: reportPage, goToPage } = useRecordPage(allReports, {
+    pageSize,
+    filters: [(report) => kind === 'all' || report.kind === kind],
+    comparator: (left, right) => {
+      const result = String(left[sortKey]).localeCompare(String(right[sortKey]), 'ru-RU');
+      return descending ? -result : result;
+    },
+  });
+  const reports = reportPage.items;
   const selected = state.reports[selectedId] ?? reports[0];
 
   return (
@@ -67,7 +79,7 @@ export function ReportsScreen() {
         </Panel>
         <Panel
           title="РЕЕСТР ОТЧЁТОВ"
-          eyebrow={`${reports.length} RECORDS / VERIFIED`}
+          eyebrow={`${reportPage.total} RECORDS / VERIFIED`}
           className="reports-registry"
         >
           {reports.length === 0 ? (
@@ -76,10 +88,25 @@ export function ReportsScreen() {
             <table className="ops-table">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>NAME</th>
-                  <th>TYPE</th>
-                  <th>CREATED</th>
+                  {(
+                    [
+                      ['id', 'ID'],
+                      ['title', 'NAME'],
+                      ['kind', 'TYPE'],
+                      ['createdAt', 'CREATED'],
+                    ] as const
+                  ).map(([column, caption]) => (
+                    <th key={column}>
+                      <TerminalButton
+                        onClick={() => {
+                          setDescending(sortKey === column ? !descending : column === 'createdAt');
+                          setSortKey(column);
+                        }}
+                      >
+                        {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
+                      </TerminalButton>
+                    </th>
+                  ))}
                   <th>STATUS</th>
                 </tr>
               </thead>
@@ -107,6 +134,9 @@ export function ReportsScreen() {
               </tbody>
             </table>
           )}
+          <RecordPagination page={reportPage} onPage={goToPage} label="Страницы реестра отчётов">
+            <span>SELECTED: {selected?.id ?? '—'}</span>
+          </RecordPagination>
         </Panel>
         <Panel
           title="ПРЕДПРОСМОТР ДОКУМЕНТА"

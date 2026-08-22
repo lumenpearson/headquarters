@@ -117,8 +117,8 @@ test('pages and filters the complete camera registry without decoding hidden fee
   await page.goto('/video/cameras');
 
   await expect(page.locator('.camera-grid > button')).toHaveCount(12);
-  await expect(page.locator('.camera-grid-pagination')).toContainText('PAGE 01 / 02');
-  await page.getByRole('button', { name: '[→] NEXT', exact: true }).click();
+  await expect(page.locator('.registry-pagination')).toContainText('СТРАНИЦА 01 / 02');
+  await page.getByRole('button', { name: 'NEXT [▶]', exact: true }).click();
   await expect(page.locator('.camera-grid > button')).toHaveCount(4);
   await expect(page.locator('.camera-grid')).toContainText('CAM-15');
 
@@ -127,7 +127,7 @@ test('pages and filters the complete camera registry without decoding hidden fee
   await page.getByRole('option', { name: 'ПОТЕРЯ СИГНАЛА', exact: true }).click();
   await expect(page.locator('.camera-grid > button')).toHaveCount(1);
   await expect(page.locator('.camera-grid')).toContainText('CAM-14');
-  await expect(page.locator('.camera-grid-pagination')).toContainText('PAGE 01 / 01');
+  await expect(page.locator('.registry-pagination')).toContainText('СТРАНИЦА 01 / 01');
   await expect(page.locator('.camera-grid-query-summary')).toContainText('HIDDEN FEEDS');
   await page.getByRole('button', { name: /Камера CAM-14:/ }).click();
   await expect(page.locator('.video-channel-info')).toContainText('CAM-14');

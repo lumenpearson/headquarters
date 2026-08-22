@@ -48,6 +48,7 @@ import {
   type PlaybackSyncCommand,
   type PlaybackSyncTarget,
 } from '@/infrastructure/media/PlaybackSyncCoordinator';
+import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useOperationsStore } from '@/state/operationsStore';
 
 const cameraPageSize = 12;
@@ -1223,26 +1224,22 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               </aside>
             )}
           </div>
-          <nav className="camera-grid-pagination" aria-label="Страницы реестра камер">
-            <TerminalButton
-              disabled={cameraPage.page <= 1}
-              onClick={() => setCameraPageIndex((page) => Math.max(1, page - 1))}
-            >
-              [←] PREV
-            </TerminalButton>
-            <span>
-              PAGE {String(cameraPage.page).padStart(2, '0')} /{' '}
-              {String(cameraPage.totalPages).padStart(2, '0')}
-            </span>
-            <TerminalButton
-              disabled={cameraPage.page >= cameraPage.totalPages}
-              onClick={() =>
-                setCameraPageIndex((page) => Math.min(cameraPage.totalPages, page + 1))
-              }
-            >
-              [→] NEXT
-            </TerminalButton>
-          </nav>
+          {/*
+            The same control the registries use. It was a second hand-written
+            pair of buttons with its own counter, which is how the two drifted
+            into disagreeing about what a page is (C22).
+          */}
+          <RecordPagination
+            page={{
+              items: cameraPage.items,
+              page: cameraPage.page,
+              pageSize: cameraPage.pageSize,
+              pageCount: cameraPage.totalPages,
+              total: cameraPage.totalItems,
+            }}
+            onPage={setCameraPageIndex}
+            label="Страницы реестра камер"
+          />
         </Panel>
 
         <aside className="video-side-stack">

@@ -19,6 +19,9 @@ import {
   type MaterialImportProgress,
 } from '@/infrastructure/materials/BridgeMaterialClient';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
+import { useRecordPage } from '@/application/records/useRecordPage';
+import { useTablePageSize } from '@/application/records/useTablePageSize';
+import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useOperationsStore } from '@/state/operationsStore';
 
 type FileSort = 'title' | 'createdAt' | 'kind' | 'sizeLabel';
@@ -59,23 +62,21 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   );
   const selected = allFiles.find((file) => file.id === state.ui.selectedFileId);
   const selectedMaterial = bridgeMaterials.find((material) => material.materialId === selected?.id);
-  const files = useMemo(
-    () =>
-      allFiles
-        .filter((file) =>
-          archive ? file.status === 'ARCHIVED' || file.createdAt < '2026-09-12' : true,
-        )
-        .filter(
-          (file) => state.ui.fileKindFilter === 'all' || file.kind === state.ui.fileKindFilter,
-        )
-        .filter((file) =>
-          `${file.id} ${file.title} ${file.tags.join(' ')} ${file.source}`
-            .toLocaleLowerCase('ru-RU')
-            .includes(query.toLocaleLowerCase('ru-RU')),
-        )
-        .sort((left, right) => String(left[sort]).localeCompare(String(right[sort]), 'ru-RU')),
-    [allFiles, archive, query, sort, state.ui.fileKindFilter],
-  );
+  const pageSize = useTablePageSize();
+  const normalizedQuery = query.toLocaleLowerCase('ru-RU');
+  const { page: filePage, goToPage } = useRecordPage(allFiles, {
+    pageSize,
+    filters: [
+      (file) => (archive ? file.status === 'ARCHIVED' || file.createdAt < '2026-09-12' : true),
+      (file) => state.ui.fileKindFilter === 'all' || file.kind === state.ui.fileKindFilter,
+      (file) =>
+        `${file.id} ${file.title} ${file.tags.join(' ')} ${file.source}`
+          .toLocaleLowerCase('ru-RU')
+          .includes(normalizedQuery),
+    ],
+    comparator: (left, right) => String(left[sort]).localeCompare(String(right[sort]), 'ru-RU'),
+  });
+  const files = filePage.items;
 
   const openImportDialog = () => {
     setBridgeStatus('loading');
@@ -165,7 +166,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           <div className="files-summary">
             <span>
               <small>FILES</small>
-              <strong>{files.length}</strong>
+              <strong>{filePage.total}</strong>
             </span>
             <span>
               <small>STORAGE</small>
@@ -201,7 +202,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           </Panel>
           <Panel
             title={archive ? 'АРХИВНЫЙ ИНДЕКС' : 'МАТЕРИАЛЫ'}
-            eyebrow={`${files.length} RECORDS / LOCAL`}
+            eyebrow={`${filePage.total} RECORDS / LOCAL`}
             className="file-registry"
           >
             <div className="ops-filterbar">
@@ -296,6 +297,9 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 ))}
               </div>
             )}
+            <RecordPagination page={filePage} onPage={goToPage} label="Страницы реестра файлов">
+              <span>SELECTED: {selected?.id ?? '—'}</span>
+            </RecordPagination>
           </Panel>
           <Panel
             title="ПРЕДПРОСМОТР"
