@@ -90,9 +90,15 @@ export async function startControlPlane(
     publishGroupEvent: (event: GroupEventPublication) => realtime.publish(event),
     close: async () => {
       await realtime.close();
-      await new Promise<void>((resolveClose, rejectClose) =>
+      const closed = new Promise<void>((resolveClose, rejectClose) =>
         server.close((error) => (error === undefined ? resolveClose() : rejectClose(error))),
       );
+      // `server.close` alone waits for every open connection, and `WatchGroup`
+      // is a stream that by design never ends. Without this a control plane
+      // with one watcher attached could not be shut down at all — which on a
+      // shoot day means it cannot be restarted either.
+      server.closeAllConnections();
+      await closed;
     },
   };
 }
