@@ -287,6 +287,43 @@ describeIntegration('durable group administration against real PostgreSQL', () =
   );
 
   it(
+    'replays a publication with its author, its clock and its snapshot',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const events = new DurableRealtimeEventStore({ database });
+      const documentId = crypto.randomUUID();
+
+      await events.appendAuthorized({
+        groupId: owner.groupId,
+        actorDeviceId: owner.authenticated.device.id,
+        kind: syncV1.GroupEventKind.DOCUMENT_DELTA,
+        documentId,
+        documentType: syncV1.SynchronizedDocumentType.SETTINGS,
+        documentDelta: Uint8Array.from([7, 7, 7]),
+        stateVector: Uint8Array.from([4, 2]),
+        hybridLogicalClock: 1234n,
+      });
+
+      const replay = await events.replay({
+        groupId: owner.groupId,
+        afterSequence: 0n,
+        limit: 10,
+      });
+      const event = replay.events[0];
+      expect(event?.actorDeviceId?.value).toBe(owner.authenticated.device.id);
+      expect(event?.hybridLogicalClock).toBe(1234n);
+      expect(event?.documentId?.value).toBe(documentId);
+
+      const snapshot = await events.readDocumentSnapshot(owner.groupId, documentId);
+      expect(snapshot?.sequence).toBe(1n);
+      expect(snapshot?.documentType).toBe(syncV1.SynchronizedDocumentType.SETTINGS);
+      expect([...(snapshot?.stateVector ?? [])]).toEqual([4, 2]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'refuses a publication from a viewer and writes nothing',
     async () => {
       const runtime = createRuntime();

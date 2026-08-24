@@ -309,6 +309,30 @@ message GroupEvent {
   bytes document_delta = 7;
   SessionCommand session_command = 8;
   google.protobuf.Timestamp occurred_at = 9;
+  // Who caused the event. `device` names the device an event is *about*, which
+  // for a role change is not the administrator who made it. Without this a
+  // subscriber cannot recognise the echo of its own publication.
+  gremuchaya.common.v1.ResourceId actor_device_id = 10;
+  // The publisher's hybrid logical clock. It is stored per event and has to
+  // reach subscribers for a CRDT to order concurrent deltas.
+  uint64 hybrid_logical_clock = 11;
+}
+
+// The document state a client falls back to when its resume point is no longer
+// retained. Both `ResyncRequired` and `GROUP_EVENT_KIND_SNAPSHOT_REQUIRED` tell
+// a client it needs one; this is how it asks.
+message GetDocumentSnapshotRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  gremuchaya.common.v1.ResourceId document_id = 2;
+}
+
+message GetDocumentSnapshotResponse {
+  bytes snapshot = 1;
+  bytes state_vector = 2;
+  // The event sequence the snapshot was taken at. A client resumes the log from
+  // here, so a snapshot with no sequence would leave it unable to catch up.
+  uint64 sequence = 3;
+  SynchronizedDocumentType document_type = 4;
 }
 
 message WatchGroupResponse {
@@ -333,4 +357,5 @@ service SyncService {
   rpc TimeSync(TimeSyncRequest) returns (TimeSyncResponse);
   rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
   rpc WatchGroup(WatchGroupRequest) returns (stream WatchGroupResponse);
+  rpc GetDocumentSnapshot(GetDocumentSnapshotRequest) returns (GetDocumentSnapshotResponse);
 }

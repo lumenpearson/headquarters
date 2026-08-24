@@ -411,6 +411,31 @@ export function createPairedDeviceSyncService(
       };
     },
 
+    async getDocumentSnapshot(request, context) {
+      return withRuntimeErrors(async () => {
+        const events = requireEventStore(options.eventStore);
+        const authenticated = await authenticateRequest(options.runtime, context);
+        const groupId = requireResourceId(request.groupId?.value, 'group_id');
+        assertAuthenticatedGroup(authenticated, groupId);
+        const snapshot = await events.readDocumentSnapshot(
+          groupId,
+          requireResourceId(request.documentId?.value, 'document_id'),
+        );
+        if (snapshot === undefined) {
+          throw new PairedDeviceRuntimeError(
+            'NOT_FOUND',
+            'No snapshot has been recorded for this document.',
+          );
+        }
+        return {
+          snapshot: snapshot.snapshot,
+          stateVector: snapshot.stateVector,
+          sequence: snapshot.sequence,
+          documentType: snapshot.documentType,
+        };
+      });
+    },
+
     async *watchGroup(request, context) {
       const hub = requireHub(options.hub);
       const authenticated = await authenticateRequest(options.runtime, context);

@@ -19,6 +19,14 @@ export interface RealtimeEventStore {
   replay(input: RealtimeReplayInput): Promise<RealtimeReplay>;
 }
 
+/** The document state a client falls back to when its resume point has been pruned. */
+export interface DocumentSnapshot {
+  readonly snapshot: Uint8Array;
+  readonly stateVector: Uint8Array;
+  readonly sequence: bigint;
+  readonly documentType: syncV1.SynchronizedDocumentType;
+}
+
 export interface GroupEventDraft {
   readonly groupId: string;
   readonly kind: syncV1.GroupEventKind;
@@ -427,6 +435,39 @@ export class DurableRealtimeEventStore implements RealtimeEventStore {
     return guard;
   }
 
+  /**
+   * The newest snapshot recorded for a document.
+   *
+   * This is the other half of the resync contract: `ResyncRequired` tells a
+   * client its resume point is gone, and without a way to fetch a snapshot that
+   * message would be a dead end. The bytes are whatever the publisher sent —
+   * this process runs no CRDT and merges nothing — so the sequence is what makes
+   * them usable: the client applies the snapshot and resumes the log from there.
+   */
+  async readDocumentSnapshot(
+    groupId: string,
+    documentId: string,
+  ): Promise<DocumentSnapshot | undefined> {
+    const rows = await this.#database.query<Record<string, unknown>>(
+      sql(
+        `SELECT snapshot, state_vector, sequence, document_type
+         FROM sync_snapshots
+         WHERE group_id = $1 AND document_id = $2
+         ORDER BY sequence DESC
+         LIMIT 1`,
+        [groupId, documentId],
+      ),
+    );
+    const row = rows[0];
+    if (row === undefined) return undefined;
+    return {
+      snapshot: readBytes(row.snapshot),
+      stateVector: readBytes(row.state_vector),
+      sequence: readSequence(row.sequence),
+      documentType: documentTypeOf(row.document_type),
+    };
+  }
+
   private async prune(groupId: string, latestSequence: bigint): Promise<void> {
     const oldestRetained = latestSequence - BigInt(this.#historyLimit);
     if (oldestRetained <= 0n) return;
@@ -453,6 +494,8 @@ function buildGroupEvent(
     ...(draft.documentId === undefined ? {} : { documentId: { value: draft.documentId } }),
     ...(draft.documentDelta === undefined ? {} : { documentDelta: draft.documentDelta }),
     ...(draft.sessionCommand === undefined ? {} : { sessionCommand: draft.sessionCommand }),
+    ...(draft.actorDeviceId === undefined ? {} : { actorDeviceId: { value: draft.actorDeviceId } }),
+    hybridLogicalClock: draft.hybridLogicalClock ?? 0n,
     occurredAt: timestampFromDate(occurredAt),
   });
 }
@@ -504,6 +547,23 @@ function documentTypeName(type: syncV1.SynchronizedDocumentType | undefined): st
       return 'SIMULATION';
     default:
       return 'UNSPECIFIED';
+  }
+}
+
+function documentTypeOf(value: unknown): syncV1.SynchronizedDocumentType {
+  switch (value) {
+    case 'LAYOUT':
+      return syncV1.SynchronizedDocumentType.LAYOUT;
+    case 'SETTINGS':
+      return syncV1.SynchronizedDocumentType.SETTINGS;
+    case 'CONTENT':
+      return syncV1.SynchronizedDocumentType.CONTENT;
+    case 'KEYMAP':
+      return syncV1.SynchronizedDocumentType.KEYMAP;
+    case 'SIMULATION':
+      return syncV1.SynchronizedDocumentType.SIMULATION;
+    default:
+      return syncV1.SynchronizedDocumentType.UNSPECIFIED;
   }
 }
 
