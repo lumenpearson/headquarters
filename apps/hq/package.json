@@ -31,7 +31,7 @@
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-fs": "2.5.1",
     "@vidstack/react": "1.15.6",
-    "next": "16.3.1",
+    "next": "16.3.2",
     "postcss": "^8.5.26",
     "react": "19.2.8",
     "react-dom": "19.2.8",
