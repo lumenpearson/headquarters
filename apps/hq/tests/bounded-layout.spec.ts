@@ -142,6 +142,76 @@ test('R30: a panel too small for its content scrolls itself, not the page', asyn
   });
 });
 
+test('R30: the video surface keeps its shape and is not squeezed by its own controls', async ({
+  page,
+}) => {
+  /*
+   * `stacked` is the narrow case, where the layout collapses into one column.
+   * It is included because that is where the collapse was worst -- 2px of
+   * video -- and where the row sizing of the stacked column is the only thing
+   * holding the surface open. A wide-only loop cannot see it.
+   */
+  for (const viewport of [
+    { width: 1024, height: 600, stacked: true },
+    { width: 1024, height: 768, stacked: true },
+    { width: 1280, height: 720, stacked: false },
+    { width: 1920, height: 1080, stacked: false },
+    { width: 2560, height: 1440, stacked: false },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/video');
+    await expect(page.locator('.video-main-feed')).toBeVisible();
+
+    const measured = await page.evaluate(() => {
+      const surface = document.querySelector('.video-main-feed') as HTMLElement;
+      const transport = document.querySelector('.video-transport') as HTMLElement;
+      const clipped: string[] = [];
+      for (const element of Array.from(
+        document.querySelectorAll('.ops-workspace *'),
+      ) as HTMLElement[]) {
+        const styles = getComputedStyle(element);
+        if (styles.clipPath === 'inset(50%)') continue;
+        if (element.clientHeight <= 1 && element.clientWidth <= 1) continue;
+        const by = element.scrollHeight - element.clientHeight;
+        if (by > 2 && (styles.overflowY === 'hidden' || styles.overflowY === 'clip')) {
+          clipped.push(element.className.toString().split(' ').filter(Boolean)[0] ?? '?');
+        }
+      }
+      return {
+        ratio: getComputedStyle(surface).aspectRatio,
+        feed: Math.round(surface.getBoundingClientRect().height),
+        transport: Math.round(transport.getBoundingClientRect().height),
+        clipped: Array.from(new Set(clipped)),
+      };
+    });
+
+    /*
+     * The feed is the one surface in the application with a shape of its own.
+     * Without it the element had no intrinsic height at all and a row sized to
+     * its content gave it none: 2px of video under 242px of transport
+     * controls, measured at 1024x600.
+     */
+    const label = `${viewport.width}x${viewport.height}`;
+    expect({
+      label,
+      ratio: measured.ratio,
+      feedOverTransport: measured.feed > measured.transport,
+    }).toEqual({ label, ratio: '16 / 9', feedOverTransport: true });
+
+    /*
+     * A window one column wide has less room than four stacked regions need,
+     * so panels clip there for the reason every panel does -- 42px of header
+     * plus 24px of padding is a floor. What must not happen is the surface
+     * collapsing to nothing.
+     */
+    expect({ label, collapsed: measured.feed < 40 }).toEqual({ label, collapsed: false });
+    if (!viewport.stacked) {
+      expect({ label, clipped: measured.clipped }).toEqual({ label, clipped: [] });
+      expect(measured.feed).toBeGreaterThan(200);
+    }
+  }
+});
+
 test('R26: the camera matrix scrolls its own records', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/video/cameras');

@@ -1549,6 +1549,21 @@ button.is-active {
 .video-main-feed {
   position: relative;
   grid-column: 1 / 3;
+  /*
+   * The one surface in the application with a shape of its own. Without it the
+   * feed has no intrinsic height at all, and a row sized to its content gives
+   * it none: measured at 1024x600, the video was 2px tall while the transport
+   * panel beneath it took 242px of a 357px column.
+   */
+  aspect-ratio: 16 / 9;
+  /*
+   * Bounded by the row it is in, not only by its ratio: the ratio alone made
+   * the feed 561px tall in a row that had none, and the column clipped all of
+   * it. Letterboxing inside the row is what a video surface does.
+   */
+  max-height: 100%;
+  min-height: 0;
+  margin-inline: auto;
   overflow: hidden;
   border: 1px solid var(--ops-line-strong);
   background: #080b08;
@@ -3975,7 +3990,7 @@ button.is-active {
   display: grid;
   grid-column: 1;
   grid-row: 1;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
   gap: clamp(6px, 0.55vw, 14px);
 }
 
@@ -4279,7 +4294,7 @@ button.is-active {
   .search-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: auto;
+    grid-auto-rows: minmax(0, 1fr);
     min-height: 0;
   }
 
@@ -4300,10 +4315,6 @@ button.is-active {
 
   .video-layout {
     grid-template-rows: auto;
-  }
-
-  .video-primary-column {
-    min-height: 620px;
   }
 
   .camera-grid-panel .ops-panel__body {
@@ -5489,7 +5500,7 @@ button.is-active {
   .search-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: auto;
+    grid-auto-rows: minmax(0, 1fr);
     min-height: 0;
   }
 
