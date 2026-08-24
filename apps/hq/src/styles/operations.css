@@ -1270,7 +1270,6 @@ button.is-active {
 }
 .map-layout {
   display: grid;
-  grid-template: minmax(450px, 1fr) auto auto / 190px minmax(600px, 1fr) 250px;
   gap: 7px;
 }
 .map-layers {
@@ -3172,9 +3171,6 @@ button.is-active {
   .reports-layout {
     gap: 10px;
   }
-  .map-layout {
-    grid-template-columns: 270px minmax(900px, 1fr) 360px;
-  }
   .video-layout {
     grid-template-columns: minmax(820px, 1.5fr) 360px 370px;
   }
@@ -3843,16 +3839,6 @@ button.is-active {
 
 /* Real Yandex Maps API 2.1 surface. */
 
-.map-layout {
-  grid-template-columns: clamp(178px, 12vw, 270px) minmax(0, 1fr) clamp(230px, 16vw, 360px);
-  grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr) auto;
-}
-
-.map-layers,
-.yandex-tactical-map {
-  grid-row: 1 / 3;
-}
-
 .yandex-tactical-map {
   position: relative;
   isolation: isolate;
@@ -4312,11 +4298,6 @@ button.is-active {
     grid-row: auto;
   }
 
-  .yandex-tactical-map {
-    grid-row: 1;
-    min-height: 520px;
-  }
-
   .video-layout {
     grid-template-rows: auto;
   }
@@ -4343,10 +4324,6 @@ button.is-active {
 @media (min-width: 2500px) {
   .ops-screen {
     min-width: 0;
-  }
-
-  .map-layout {
-    grid-template-columns: clamp(250px, 12vw, 430px) minmax(0, 1fr) clamp(340px, 16vw, 560px);
   }
 
   .video-layout {
@@ -5335,16 +5312,6 @@ button.is-active {
   align-content: stretch;
 }
 
-.map-layout {
-  grid-template-columns: clamp(178px, 12vw, 270px) minmax(0, 1fr) clamp(230px, 16vw, 360px);
-  grid-template-rows: minmax(0, 1fr) minmax(0, 0.42fr) auto;
-}
-
-.map-layers,
-.yandex-tactical-map {
-  grid-row: 1 / 3;
-}
-
 .map-routes-panel,
 .map-sensors-panel,
 .map-channels-panel {
@@ -5541,11 +5508,6 @@ button.is-active {
     grid-row: auto;
   }
 
-  .yandex-tactical-map {
-    grid-row: 1;
-    min-height: 520px;
-  }
-
   .video-side-stack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5554,10 +5516,6 @@ button.is-active {
 @media (min-width: 2500px) {
   .ops-screen {
     min-width: 0;
-  }
-
-  .map-layout {
-    grid-template-columns: clamp(250px, 12vw, 430px) minmax(0, 1fr) clamp(340px, 16vw, 560px);
   }
 
   .video-layout {

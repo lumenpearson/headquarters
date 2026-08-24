@@ -154,3 +154,36 @@ test('R9: every data screen carries the same pagination control', async ({ page 
     await expect(pagination).toContainText(/СТРАНИЦА \d\d \/ \d\d · \d+/);
   }
 });
+
+test('R9: the tactical map sorts its channel table', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto('/map');
+
+  const latencies = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll('.map-channels-panel .ops-table tbody tr')).map((row) =>
+        Number.parseInt(row.querySelector('td:nth-child(5)')?.textContent?.trim() ?? '', 10),
+      ),
+    );
+
+  await expect(page.locator('.map-channels-panel .ops-table tbody tr').first()).toBeVisible();
+  const unsorted = await latencies();
+  expect(unsorted.length).toBeGreaterThan(2);
+  expect(unsorted.every((value) => Number.isFinite(value))).toBe(true);
+
+  // This screen had no filter, sort or pagination at all -- the last of the
+  // data screens with none of the three.
+  await page.getByRole('button', { name: /^LAT/ }).click();
+  const ascending = await latencies();
+  expect(ascending).toEqual([...ascending].sort((left, right) => left - right));
+
+  await page.getByRole('button', { name: /^LAT/ }).click();
+  const descending = await latencies();
+  expect(descending).toEqual([...descending].sort((left, right) => right - left));
+  /*
+   * The pair is what makes this non-vacuous, not a comparison with the
+   * starting order: the channels happen to arrive in ascending latency, so
+   * the first click can legitimately change nothing. The second must.
+   */
+  expect(descending).not.toEqual(ascending);
+});

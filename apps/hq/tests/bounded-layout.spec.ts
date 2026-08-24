@@ -25,12 +25,19 @@ const routes = [
 ] as const;
 
 /**
- * The four shapes the shoot is expected to run on: the smallest supported
- * laptop, the two 720p-class panels, a 1080p monitor and a 1440p one. The
- * defect this suite locks out was invisible at exactly one of them, because
- * the height it assumed was written as a constant.
+ * The shapes the shoot is expected to run on: a short window, the smallest
+ * supported laptop, the two 720p-class panels, a 1080p monitor and a 1440p
+ * one. The defect this suite first locked out was invisible at exactly one of
+ * them, because the height it assumed was written as a constant.
  */
 const viewports = [
+  /*
+   * The short window comes first because it is the one the matrix was missing.
+   * Every height here was 768 or taller, and `/map` overflowed the workspace
+   * by 109px at 1024x600 for as long as that was true: the stacked layout gave
+   * the map surface a 520px minimum in a column shorter than that.
+   */
+  { width: 1024, height: 600 },
   { width: 1024, height: 768 },
   { width: 1280, height: 720 },
   { width: 1920, height: 1080 },

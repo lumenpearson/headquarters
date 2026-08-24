@@ -73,6 +73,7 @@ const resolvedRoutes = [
   '/files',
   '/search',
   '/archive',
+  '/map',
 ] as const;
 
 for (const viewport of [
