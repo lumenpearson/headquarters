@@ -36,6 +36,11 @@ import { UiGalleryScreen } from '@/screens/UiGalleryScreen';
 import { VideoScreen } from '@/screens/VideoScreen';
 import { operationsStore, type OperationsRoute, useOperationsStore } from '@/state/operationsStore';
 
+import {
+  resolvePresentation,
+  type ResolvedPresentation,
+} from '@/application/personalization/presentation';
+
 import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
 import { resolveMotionDurationMs } from './ShellMotion';
@@ -143,13 +148,18 @@ export function OperationsShell({
   const selectCase = useOperationsStore((state) => state.selectCase);
   const personalization = useOperationsStore((state) => state.personalization);
   const editActive = useOperationsStore((state) => state.edit.active);
-  const theme = settingString(personalization.draft.values['themes.id'], 'terminal-red');
-  const density = settingString(personalization.draft.values['layout.density'], 'dense');
+  // Every setting that becomes an attribute or a custom property comes from one
+  // table, so a new one is added by declaring it rather than by editing this
+  // JSX — and a definition that reaches nothing is caught by a test instead of
+  // by a hand recount (C20, C31).
+  const presentation = useMemo(
+    () => resolvePresentation(personalization.draft.values),
+    [personalization.draft.values],
+  );
   const background = settingString(
     personalization.draft.values['backgrounds.kind'],
     'terminal-grid',
   );
-  const focusPattern = settingString(personalization.draft.values['patterns.focus'], 'brackets');
   const backgroundImageSource = settingString(
     personalization.draft.values['backgrounds.imageSource'],
     '',
@@ -158,10 +168,6 @@ export function OperationsShell({
     personalization.draft.values['backgrounds.videoSource'],
     '',
   );
-  const typographyScale = settingNumber(personalization.draft.values['typography.scale'], 1);
-  const sizeScale = settingNumber(personalization.draft.values['sizes.scale'], 1);
-  const styleMode = settingString(personalization.draft.values['styles.mode'], 'strict-terminal');
-  const accent = settingString(personalization.draft.values['colors.accent'], 'orange');
   const animationIntensity = settingNumber(
     personalization.draft.values['animations.intensity'],
     0.65,
@@ -253,17 +259,24 @@ export function OperationsShell({
       className={`ops-shell ${compact ? 'ops-shell--compact' : ''} ${production.cameraSafe ? 'ops-shell--camera-safe' : ''} ${motionAllowed ? '' : 'ops-shell--no-motion'} ops-cursor--${production.cursorMode}`}
       data-transport="grpc-web"
       data-context-menu="shell"
-      data-theme={theme}
-      data-layout-density={density}
-      data-background-kind={background}
+      {...presentation.attributes}
       data-background-image={backgroundImageUrl === null ? 'none' : 'material'}
-      data-focus-pattern={focusPattern}
-      data-style-mode={styleMode}
-      data-accent={accent}
       onPointerDownCapture={disableAutoDemo}
       style={
         {
-          '--ops-type-scale': Math.min(1.25, Math.max(0.85, typographyScale * sizeScale)),
+          ...presentation.customProperties,
+          // The product of the two scale settings, bounded. Typography and
+          // element size are separate controls and either alone stays inside
+          // the interface; together they can leave it, which R19 asks the
+          // bounds to prevent.
+          '--ops-type-scale': Math.min(
+            1.25,
+            Math.max(
+              0.85,
+              scaleOf(presentation, '--ops-type-scale-setting') *
+                scaleOf(presentation, '--ops-size-scale-setting'),
+            ),
+          ),
           '--ops-motion-duration': `${resolveMotionDurationMs(animationIntensity, editActive)}ms`,
           '--ops-background-duration': `${Math.round(30_000 - animationIntensity * 18_000)}ms`,
           // Quoted: an object URL is machine-made, but url() without quotes is
@@ -291,6 +304,12 @@ export function OperationsShell({
       <ProductionPanel />
     </div>
   );
+}
+
+/** A custom property is a string by the time it reaches the style object. */
+function scaleOf(presentation: ResolvedPresentation, property: string): number {
+  const parsed = Number(presentation.customProperties[property]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
 function settingString(value: unknown, fallback: string): string {
@@ -352,7 +371,10 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
       <div className="ops-topbar__route">
         <span>[ROUTE_INDEX]</span>
         <strong>{routeLabels[route]}</strong>
-        <small>
+        {/* Operation and sector are the context `information.showOperationalContext`
+            governs. They are marked rather than conditionally rendered so the
+            setting changes the shell without remounting the header. */}
+        <small data-operational-context="operation">
           {operation.code} / ФАЗА {operation.currentPhase}
         </small>
       </div>
@@ -361,7 +383,7 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
           <small>ДАТА</small>
           <b>12.09.2026 / СБ</b>
         </span>
-        <span>
+        <span data-operational-context="sector">
           <small>СЕКТОР</small>
           <b>S-03 / ТУ</b>
         </span>
@@ -472,17 +494,21 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
   const bus = typeof BroadcastChannel === 'undefined' ? 'FALLBACK' : 'BROADCAST';
   return (
     <footer className="ops-statusline">
+      {/* Each entry declares the verbosity it belongs to, and the shell hides
+          the tiers above the chosen one. Tiering in CSS rather than in this
+          list keeps the status line one row of markup at every level, so a
+          change of verbosity cannot reflow the shell. */}
       <strong>[ SYSTEM:READY ]</strong>
       <span>~/{route}</span>
-      <span>CPU {metrics.cpu}%</span>
-      <span>RAM {metrics.ram}%</span>
-      <span>
+      <span data-detail="standard">CPU {metrics.cpu}%</span>
+      <span data-detail="standard">RAM {metrics.ram}%</span>
+      <span data-detail="verbose">
         NET {metrics.networkIn}/{metrics.networkOut}
       </span>
       <TransportProbe bus={bus} />
       <span>AL:{Object.values(alerts).filter((alert) => alert.lifecycle === 'NEW').length}</span>
-      <span>UTF-8</span>
-      <span>F:FULL ^K:SEARCH ^⇧P:PROD</span>
+      <span data-detail="verbose">UTF-8</span>
+      <span data-detail="standard">F:FULL ^K:SEARCH ^⇧P:PROD</span>
     </footer>
   );
 }

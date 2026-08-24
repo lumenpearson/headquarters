@@ -5960,3 +5960,49 @@ button.is-active {
   color: var(--ops-dim);
   font-weight: 400;
 }
+
+/* ---------------------------------------------------------------------------
+ * Settings that reach the document through the presentation bridge.
+ *
+ * Each rule below is the consumer of one `SettingDefinition`. Before F7 the
+ * three settings in this block were declared, drawn in the catalogue, validated
+ * and saved, and read by nothing at all — the class of defect C20 named and C31
+ * recounted. The bridge puts the value on the shell root; these rules are what
+ * make choosing it do something.
+ * ------------------------------------------------------------------------ */
+
+/* `information.showOperationalContext` — operation and sector in the header. */
+.ops-shell[data-operational-context='off'] [data-operational-context] {
+  display: none;
+}
+
+/* `diagnostics.verbosity` — how much of the status line is spent on detail.
+   Hidden rather than absent so the row keeps one shape at every level. */
+.ops-shell[data-diagnostics-verbosity='minimal'] .ops-statusline [data-detail],
+.ops-shell[data-diagnostics-verbosity='standard'] .ops-statusline [data-detail='verbose'] {
+  display: none;
+}
+
+/* `cameras.gridDensity` — how many camera tiles share a row.
+   `adaptive` deliberately emits no rule. It is the default, and the screen
+   already carries column counts tuned per viewport; a rule for it would have
+   higher specificity than those and would win everywhere, which is exactly
+   what it did: `/video` came back with three clipped elements because an
+   `auto-fit` track replaced the two-column layout that fits a short window. */
+.ops-shell[data-camera-density='2x2'] .camera-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.ops-shell[data-camera-density='3x3'] .camera-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.ops-shell[data-camera-density='3x4'] .camera-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* `tiles.presentation` — the ceiling on how rich a tile may be drawn. TileGrid
+   already applies it to what it renders; the attribute lets a tile's own styles
+   answer the same ceiling without threading a prop through every screen. */
+.ops-shell[data-tile-presentation='minimal'] .ops-panel__body > .ops-detail,
+.ops-shell[data-tile-presentation='minimal'] .ops-panel__body > .ops-sparkline {
+  display: none;
+}
