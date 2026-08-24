@@ -3,7 +3,15 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { timestampNow } from '@bufbuild/protobuf/wkt';
 import { cors, type ConnectRouter, type ServiceImpl } from '@connectrpc/connect';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
-import { ControlPlaneService, SyncService, controlV1 } from '@gremuchaya/protocol';
+import {
+  ControlPlaneService,
+  IntegrationService,
+  MaterialService,
+  SettingsService,
+  SyncService,
+  TelemetryService,
+  controlV1,
+} from '@gremuchaya/protocol';
 import type { syncV1 } from '@gremuchaya/protocol';
 
 import { loadControlPlaneConfig, type ControlPlaneConfig } from './config.js';
@@ -40,6 +48,10 @@ export interface RunningControlPlane {
 
 interface ResolvedControlPlaneCollaborators {
   readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
+  readonly settingsService?: Partial<ServiceImpl<typeof SettingsService>>;
+  readonly materialService?: Partial<ServiceImpl<typeof MaterialService>>;
+  readonly telemetryService?: Partial<ServiceImpl<typeof TelemetryService>>;
+  readonly integrationService?: Partial<ServiceImpl<typeof IntegrationService>>;
   readonly realtime?: RealtimeTransportOptions;
   /**
    * Present only when a durable event log was built. `getCapabilities` reports
@@ -135,8 +147,12 @@ function registerControlPlaneRoutes(
           { name: 'control.health', version: 'v1', enabled: true },
           { name: 'transport.connect', version: 'v1', enabled: true },
           { name: 'transport.grpc-web', version: 'v1', enabled: true },
-          { name: 'materials', version: 'v1', enabled: false },
-          { name: 'settings', version: 'v1', enabled: false },
+          {
+            name: 'materials',
+            version: 'v1',
+            enabled: collaborators.materialService !== undefined,
+          },
+          { name: 'settings', version: 'v1', enabled: collaborators.settingsService !== undefined },
           {
             name: 'sync.device-lifecycle',
             version: 'v1',
@@ -148,14 +164,30 @@ function registerControlPlaneRoutes(
           // startup that injects the deterministic pairing runtime alone still
           // answers those methods `unimplemented`.
           { name: 'sync', version: 'v1', enabled: collaborators.eventStore !== undefined },
-          { name: 'telemetry', version: 'v1', enabled: false },
-          { name: 'integration', version: 'v1', enabled: false },
+          {
+            name: 'telemetry',
+            version: 'v1',
+            enabled: collaborators.telemetryService !== undefined,
+          },
+          {
+            name: 'integration',
+            version: 'v1',
+            enabled: collaborators.integrationService !== undefined,
+          },
         ],
       };
     },
   });
   if (collaborators.syncService !== undefined)
     router.service(SyncService, collaborators.syncService);
+  if (collaborators.settingsService !== undefined)
+    router.service(SettingsService, collaborators.settingsService);
+  if (collaborators.materialService !== undefined)
+    router.service(MaterialService, collaborators.materialService);
+  if (collaborators.telemetryService !== undefined)
+    router.service(TelemetryService, collaborators.telemetryService);
+  if (collaborators.integrationService !== undefined)
+    router.service(IntegrationService, collaborators.integrationService);
 }
 
 async function resolveControlPlaneCollaborators(
@@ -194,6 +226,10 @@ async function resolveControlPlaneCollaborators(
 
   return {
     syncService: lifecycle.syncService,
+    settingsService: lifecycle.settingsService,
+    materialService: lifecycle.materialService,
+    telemetryService: lifecycle.telemetryService,
+    integrationService: lifecycle.integrationService,
     eventStore: lifecycle.eventStore,
     dependencies: [
       {

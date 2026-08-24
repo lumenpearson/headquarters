@@ -1,6 +1,10 @@
 import type { ControlPlaneConfig } from '../config.js';
 import { createNeonDatabase, type SqlClient, type SqlClientFactory } from '../db/database.js';
 import { runMigrations, type MigrationRunResult } from '../db/migrations.js';
+import { DurableIntegrationStore } from '../integration/store.js';
+import { createIntegrationService } from '../integration/service.js';
+import { DurableMaterialStore } from '../material/store.js';
+import { createMaterialService } from '../material/service.js';
 import { DurableRealtimeEventStore } from '../realtime/eventStore.js';
 import { RealtimeHub } from '../realtime/hub.js';
 import type { RealtimeTransportOptions } from '../realtime/server.js';
@@ -16,6 +20,10 @@ import { DurablePresenceStore } from './presence-store.js';
 import type { PresenceStore } from './presence-store.js';
 import { createPairedDeviceRealtimeAdmission } from './realtime-admission.js';
 import { createPairedDeviceSyncService } from './service.js';
+import { DurableSettingsStore } from '../settings/store.js';
+import { createSettingsService } from '../settings/service.js';
+import { DurableSimulationProfileStore } from '../telemetry/store.js';
+import { createTelemetryService } from '../telemetry/service.js';
 
 export type MigrationRunner = (database: SqlClient) => Promise<MigrationRunResult>;
 
@@ -47,6 +55,10 @@ export interface ConfiguredPairedDeviceLifecycle {
   readonly coordination: UpstashCoordination;
   readonly hub: RealtimeHub;
   readonly syncService: ReturnType<typeof createPairedDeviceSyncService>;
+  readonly settingsService: ReturnType<typeof createSettingsService>;
+  readonly materialService: ReturnType<typeof createMaterialService>;
+  readonly telemetryService: ReturnType<typeof createTelemetryService>;
+  readonly integrationService: ReturnType<typeof createIntegrationService>;
   readonly realtime: RealtimeTransportOptions;
   readonly migrations: MigrationRunResult;
 }
@@ -105,6 +117,14 @@ export async function createConfiguredPairedDeviceLifecycle(
     ? new CoordinatedPresenceStore(durablePresence, coordination)
     : durablePresence;
   const hub = new RealtimeHub({ store: eventStore });
+  // Every store shares the runtime's own receipt guard rather than building its
+  // own: one request identifier has to mean the same thing whichever service
+  // received it, and two guards with two hashers would not agree.
+  const receipts = runtime.receiptGuard;
+  const settingsStore = new DurableSettingsStore({ database, receipts });
+  const materialStore = new DurableMaterialStore({ database, receipts });
+  const simulationProfiles = new DurableSimulationProfileStore({ database, receipts });
+  const integrationStore = new DurableIntegrationStore({ database, receipts });
 
   return {
     runtime,
@@ -122,6 +142,14 @@ export async function createConfiguredPairedDeviceLifecycle(
       hub,
       coordination,
     }),
+    // No storage grant issuer and no GitHub gateway are configured here: both
+    // need deployment secrets this composition root does not hold, so the RPCs
+    // that spend them answer `FAILED_PRECONDITION` naming what is missing while
+    // everything else works. That is the honest reduced mode, not a stub.
+    settingsService: createSettingsService({ runtime, store: settingsStore }),
+    materialService: createMaterialService({ runtime, store: materialStore }),
+    telemetryService: createTelemetryService({ runtime, profiles: simulationProfiles }),
+    integrationService: createIntegrationService({ runtime, store: integrationStore }),
     realtime: {
       admission: createPairedDeviceRealtimeAdmission(runtime),
       hub,
