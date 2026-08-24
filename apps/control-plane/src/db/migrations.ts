@@ -680,6 +680,134 @@ const groupEventSequencesAndRemainingScopes: Migration = {
   ],
 };
 
+/**
+ * Makes the documents the four F6 services own addressable, and gives their
+ * mutations a receipt shape.
+ *
+ * Migration 0001 created `settings_documents`, `layout_documents`,
+ * `simulation_profiles` and `translation_proposals` with a surrogate primary key
+ * and nothing else. That is enough to insert rows and not enough to ever find
+ * one again: "the settings document of this group" was not addressable, so an
+ * upsert had no conflict target and two concurrent writers would each create
+ * their own document.
+ *
+ * The uniqueness is expressed as partial indexes rather than one constraint
+ * because `group_id` and `device_id` are independently nullable and NULLs do not
+ * collide in a plain unique index — a single index over both would let a group
+ * accumulate an unbounded number of "the group's document".
+ *
+ * `mutation_receipts` grows `resource_id` and one outcome shape for all four
+ * services. Their mutations do not produce a device or a session, so the earlier
+ * scope-specific columns cannot describe them; what every one of them does
+ * produce is the identity of the row it wrote.
+ */
+const serviceDocumentsAndReceiptScopes: Migration = {
+  id: '0008_service_documents_and_receipt_scopes',
+  statements: [
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS settings_documents_shared_scope_idx
+      ON settings_documents (scope_type)
+      WHERE group_id IS NULL AND device_id IS NULL`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS settings_documents_group_scope_idx
+      ON settings_documents (scope_type, group_id)
+      WHERE group_id IS NOT NULL AND device_id IS NULL`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS settings_documents_device_scope_idx
+      ON settings_documents (scope_type, device_id)
+      WHERE device_id IS NOT NULL AND group_id IS NULL`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS settings_documents_group_device_scope_idx
+      ON settings_documents (scope_type, group_id, device_id)
+      WHERE group_id IS NOT NULL AND device_id IS NOT NULL`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS layout_documents_group_screen_idx
+      ON layout_documents (group_id, screen_id)
+      WHERE group_id IS NOT NULL AND device_id IS NULL`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS layout_documents_device_screen_idx
+      ON layout_documents (device_id, screen_id)
+      WHERE device_id IS NOT NULL`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS simulation_profiles_group_name_idx
+      ON simulation_profiles (group_id, name)`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS translation_proposals_key_idx
+      ON translation_proposals (group_id, locale, translation_key)`),
+    sql(`CREATE INDEX IF NOT EXISTS conversion_jobs_lease_idx
+      ON conversion_jobs (state, lease_expires_at)`),
+    sql(`CREATE INDEX IF NOT EXISTS integration_jobs_group_state_idx
+      ON integration_jobs (group_id, state, created_at DESC)`),
+    sql(`CREATE INDEX IF NOT EXISTS material_tag_links_tag_idx
+      ON material_tag_links (group_id, tag_value)`),
+    sql(`CREATE INDEX IF NOT EXISTS upload_sessions_group_state_idx
+      ON upload_sessions (group_id, state, expires_at)`),
+    sql('ALTER TABLE mutation_receipts ADD COLUMN IF NOT EXISTS resource_id uuid'),
+    sql('ALTER TABLE mutation_receipts DROP CONSTRAINT IF EXISTS mutation_receipts_scope_check'),
+    sql('ALTER TABLE mutation_receipts DROP CONSTRAINT IF EXISTS mutation_receipts_outcome_check'),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_scope_check
+      CHECK (scope IN (
+        'CREATE_GROUP',
+        'CREATE_PAIRING_CODE',
+        'PAIR_DEVICE',
+        'REFRESH_DEVICE_SESSION',
+        'REVOKE_DEVICE',
+        'UPDATE_GROUP',
+        'JOIN_GROUP',
+        'LEAVE_GROUP',
+        'SET_DEVICE_ROLE',
+        'SET_AUTHORITY_MODE',
+        'SET_LEADER',
+        'PUBLISH_DOCUMENT_DELTA',
+        'PUBLISH_SESSION_COMMAND',
+        'APPLY_SETTINGS_PATCH',
+        'PUBLISH_SETTINGS_DRAFT',
+        'DISCARD_SETTINGS_DRAFT',
+        'RESET_SETTINGS',
+        'IMPORT_SETTINGS',
+        'REVERT_SETTINGS_VERSION',
+        'BEGIN_MATERIAL_UPLOAD',
+        'COMPLETE_MATERIAL_UPLOAD',
+        'CANCEL_MATERIAL_UPLOAD',
+        'CREATE_MATERIAL_VERSION',
+        'UPDATE_MATERIAL_METADATA',
+        'TRASH_MATERIAL',
+        'RESTORE_MATERIAL',
+        'PURGE_MATERIAL',
+        'PUT_SIMULATION_PROFILE',
+        'DELETE_SIMULATION_PROFILE',
+        'ENQUEUE_INTEGRATION_JOB',
+        'PUT_GITHUB_INSTALLATION',
+        'PROPOSE_TRANSLATION',
+        'UPDATE_TRANSLATION_PROPOSAL'
+      ))`),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_outcome_check
+      CHECK (
+        CASE
+          WHEN completed_at IS NULL THEN
+            group_id IS NULL
+            AND device_id IS NULL
+            AND session_id IS NULL
+            AND resource_hash IS NULL
+            AND revision IS NULL
+            AND sequence IS NULL
+            AND resource_id IS NULL
+          WHEN scope IN ('CREATE_GROUP', 'PAIR_DEVICE') THEN
+            group_id IS NOT NULL AND device_id IS NOT NULL AND session_id IS NOT NULL
+          WHEN scope = 'REFRESH_DEVICE_SESSION' THEN
+            session_id IS NOT NULL
+          WHEN scope = 'CREATE_PAIRING_CODE' THEN
+            group_id IS NOT NULL AND resource_hash IS NOT NULL
+          WHEN scope IN ('REVOKE_DEVICE', 'SET_DEVICE_ROLE', 'JOIN_GROUP', 'LEAVE_GROUP') THEN
+            group_id IS NOT NULL AND device_id IS NOT NULL AND revision IS NOT NULL
+          WHEN scope IN ('UPDATE_GROUP', 'SET_AUTHORITY_MODE', 'SET_LEADER') THEN
+            group_id IS NOT NULL AND revision IS NOT NULL
+          WHEN scope IN ('PUBLISH_DOCUMENT_DELTA', 'PUBLISH_SESSION_COMMAND') THEN
+            group_id IS NOT NULL AND sequence IS NOT NULL
+          -- Everything a service mutation produces is a row it can name. One
+          -- shape covers all four services because none of them mints a
+          -- credential, and a receipt that recorded no resource could not
+          -- answer a retry at all.
+          ELSE group_id IS NOT NULL AND resource_id IS NOT NULL
+        END
+      )`),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -688,6 +816,7 @@ export const migrations: readonly Migration[] = [
   mutationIdempotencyReceipts,
   mutationReceiptsForRemainingMutations,
   groupEventSequencesAndRemainingScopes,
+  serviceDocumentsAndReceiptScopes,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

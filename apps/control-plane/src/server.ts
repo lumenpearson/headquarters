@@ -47,6 +47,19 @@ interface ResolvedControlPlaneCollaborators {
    * startup cannot advertise methods it answers `unimplemented`.
    */
   readonly eventStore?: unknown;
+  /**
+   * What the health endpoint reports. It is captured at startup and never
+   * probed: a health check that opened a network connection to Upstash would
+   * make this endpoint fail for a reason that has nothing to do with whether
+   * the control plane is serving.
+   */
+  readonly dependencies?: readonly DependencyReport[];
+}
+
+interface DependencyReport {
+  readonly name: string;
+  readonly configured: boolean;
+  readonly detail: string;
 }
 
 export async function startControlPlane(
@@ -100,7 +113,14 @@ function registerControlPlaneRoutes(
         status: controlV1.ServingStatus.SERVING,
         startedAt,
         checkedAt: timestampNow(),
-        dependencies: [],
+        dependencies: (collaborators.dependencies ?? []).map((dependency) => ({
+          name: dependency.name,
+          status: dependency.configured
+            ? controlV1.ServingStatus.SERVING
+            : controlV1.ServingStatus.NOT_SERVING,
+          latencyMs: 0,
+          detail: dependency.detail,
+        })),
       };
     },
     getCapabilities() {
@@ -169,6 +189,20 @@ async function resolveControlPlaneCollaborators(
   return {
     syncService: lifecycle.syncService,
     eventStore: lifecycle.eventStore,
+    dependencies: [
+      {
+        name: 'database',
+        configured: true,
+        detail: 'Neon PostgreSQL; migrations applied before this endpoint began serving',
+      },
+      {
+        name: 'redis',
+        configured: lifecycle.coordination.configured,
+        detail: lifecycle.coordination.configured
+          ? 'Upstash coordination for presence liveness and mutation rate limiting'
+          : 'not configured; presence reports the last recorded state and mutations are unlimited',
+      },
+    ],
     realtime: {
       ...lifecycle.realtime,
       ...(options.realtime?.hub === undefined ? {} : { hub: options.realtime.hub }),

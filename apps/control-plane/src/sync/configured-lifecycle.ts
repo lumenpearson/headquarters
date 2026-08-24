@@ -4,9 +4,16 @@ import { runMigrations, type MigrationRunResult } from '../db/migrations.js';
 import { DurableRealtimeEventStore } from '../realtime/eventStore.js';
 import { RealtimeHub } from '../realtime/hub.js';
 import type { RealtimeTransportOptions } from '../realtime/server.js';
+import {
+  createUpstashCoordination,
+  type CoordinationClientFactory,
+  type UpstashCoordination,
+} from '../redis/coordination.js';
 
+import { CoordinatedPresenceStore } from './coordinated-presence-store.js';
 import { DurablePairedDeviceRuntime } from './durable-runtime.js';
 import { DurablePresenceStore } from './presence-store.js';
+import type { PresenceStore } from './presence-store.js';
 import { createPairedDeviceRealtimeAdmission } from './realtime-admission.js';
 import { createPairedDeviceSyncService } from './service.js';
 
@@ -26,12 +33,18 @@ export interface ConfiguredPairedDeviceLifecycleOptions {
   readonly migrationRunner?: MigrationRunner;
   readonly now?: () => Date;
   readonly randomBytes?: (size: number) => Uint8Array;
+  /**
+   * Optional Upstash driver seam, so a test can exercise the coordinated
+   * presence path without a cloud connection.
+   */
+  readonly coordinationFactory?: CoordinationClientFactory;
 }
 
 export interface ConfiguredPairedDeviceLifecycle {
   readonly runtime: DurablePairedDeviceRuntime;
   readonly eventStore: DurableRealtimeEventStore;
-  readonly presence: DurablePresenceStore;
+  readonly presence: PresenceStore;
+  readonly coordination: UpstashCoordination;
   readonly hub: RealtimeHub;
   readonly syncService: ReturnType<typeof createPairedDeviceSyncService>;
   readonly realtime: RealtimeTransportOptions;
@@ -81,10 +94,16 @@ export async function createConfiguredPairedDeviceLifecycle(
     receipts: runtime.receiptGuard,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
-  const presence = new DurablePresenceStore({
+  const durablePresence = new DurablePresenceStore({
     database,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
+  // Lazy by construction: nothing reaches Upstash until the first coordinated
+  // call, so an unreachable Redis cannot hold up startup or a health check.
+  const coordination = createUpstashCoordination(config.redis, options.coordinationFactory);
+  const presence: PresenceStore = coordination.configured
+    ? new CoordinatedPresenceStore(durablePresence, coordination)
+    : durablePresence;
   const hub = new RealtimeHub({ store: eventStore });
 
   return {
@@ -92,6 +111,7 @@ export async function createConfiguredPairedDeviceLifecycle(
     migrations,
     eventStore,
     presence,
+    coordination,
     hub,
     syncService: createPairedDeviceSyncService({
       runtime,
@@ -100,6 +120,7 @@ export async function createConfiguredPairedDeviceLifecycle(
       presence,
       eventStore,
       hub,
+      coordination,
     }),
     realtime: {
       admission: createPairedDeviceRealtimeAdmission(runtime),

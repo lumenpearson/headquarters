@@ -42,6 +42,7 @@ describe('control-plane migrations', () => {
         '0005_mutation_idempotency_receipts',
         '0006_mutation_receipts_for_remaining_mutations',
         '0007_group_event_sequences_and_remaining_scopes',
+        '0008_service_documents_and_receipt_scopes',
       ],
       skipped: [],
     });
@@ -137,6 +138,7 @@ describe('control-plane migrations', () => {
       '0005_mutation_idempotency_receipts',
       '0006_mutation_receipts_for_remaining_mutations',
       '0007_group_event_sequences_and_remaining_scopes',
+      '0008_service_documents_and_receipt_scopes',
     ]);
     const authenticationSql = migrations[1].statements
       .map((statement) => statement.text)
@@ -166,6 +168,7 @@ describe('control-plane migrations', () => {
           { id: migrations[4].id, applied: true },
           { id: migrations[5].id, applied: true },
           { id: migrations[6].id, applied: true },
+          { id: migrations[7].id, applied: true },
         ]);
       },
     };
@@ -178,6 +181,7 @@ describe('control-plane migrations', () => {
         '0005_mutation_idempotency_receipts',
         '0006_mutation_receipts_for_remaining_mutations',
         '0007_group_event_sequences_and_remaining_scopes',
+        '0008_service_documents_and_receipt_scopes',
       ],
       skipped: ['0001_control_plane_foundation'],
     });

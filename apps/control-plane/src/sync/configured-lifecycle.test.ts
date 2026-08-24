@@ -132,6 +132,45 @@ describe('configured paired-device lifecycle', () => {
     expect(database.queries).toHaveLength(0);
   });
 
+  it('leaves presence on the durable store and reports Redis unconfigured when no Redis is set', async () => {
+    const database = new RecordingSqlClient();
+
+    const configured = await createConfiguredPairedDeviceLifecycle(authenticatedConfig(), {
+      database,
+      migrationRunner: async () => emptyMigrationResult(),
+    });
+
+    expect(configured?.coordination.configured).toBe(false);
+    // Merely constructing the coordination client must not reach Upstash, or a
+    // deployment without Redis could not start at all.
+    expect(configured?.coordination.initialized).toBe(false);
+  });
+
+  it('coordinates presence through Redis once the pair is configured', async () => {
+    const database = new RecordingSqlClient();
+    const coordinationFactory = vi.fn(() => {
+      throw new Error('the coordination client must stay lazy until it is used');
+    });
+
+    const configured = await createConfiguredPairedDeviceLifecycle(
+      {
+        ...authenticatedConfig(),
+        redis: { restUrl: 'https://example.upstash.io', restToken: 'token-value' },
+      },
+      {
+        database,
+        migrationRunner: async () => emptyMigrationResult(),
+        coordinationFactory,
+      },
+    );
+
+    expect(configured?.coordination.configured).toBe(true);
+    expect(coordinationFactory).not.toHaveBeenCalled();
+    // The decorator is what turns a stale durable row into an OFFLINE reading,
+    // so choosing it is the observable difference Redis makes here.
+    expect(configured?.presence.constructor.name).toBe('CoordinatedPresenceStore');
+  });
+
   it('rejects manually constructed auth configuration without a database URL', async () => {
     await expect(
       createConfiguredPairedDeviceLifecycle({

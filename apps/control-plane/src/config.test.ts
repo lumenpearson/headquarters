@@ -181,3 +181,25 @@ describe('control-plane configuration', () => {
     ).toThrow('HQ_CONTROL_PLANE_REDIS_REST_URL');
   });
 });
+
+describe('redis configuration', () => {
+  it('trims the pair it accepts, so padding never reaches Upstash', () => {
+    const config = loadControlPlaneConfig({
+      HQ_CONTROL_PLANE_REDIS_REST_URL: '  https://example.upstash.io  ',
+      HQ_CONTROL_PLANE_REDIS_REST_TOKEN: '  token-value  ',
+    });
+
+    // The presence checks read the trimmed value, so an untrimmed return let a
+    // padded token pass validation and then fail authentication with no hint.
+    expect(config.redis).toEqual({
+      restUrl: 'https://example.upstash.io',
+      restToken: 'token-value',
+    });
+  });
+
+  it('refuses half a pair', () => {
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_REDIS_REST_URL: 'https://example.upstash.io' }),
+    ).toThrow('must be set together');
+  });
+});

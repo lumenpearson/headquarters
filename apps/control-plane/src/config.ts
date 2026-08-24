@@ -127,7 +127,10 @@ function parseRedis(
   if (url.protocol !== 'https:' || url.hostname.length === 0) {
     throw new Error('HQ_CONTROL_PLANE_REDIS_REST_URL must be an HTTPS Upstash REST URL');
   }
-  return { restUrl, restToken };
+  // Trimmed on the way out, not only on the way in: the presence checks above
+  // read the trimmed value, so a token written as `"  x  "` passed them and then
+  // reached Upstash with its padding, failing authentication with no hint why.
+  return { restUrl: restUrl.trim(), restToken: restToken.trim() };
 }
 
 function parseAuth(

@@ -9,6 +9,8 @@ import type { SyncService } from '@gremuchaya/protocol';
 import type { DurableRealtimeEventStore } from '../realtime/eventStore.js';
 import type { RealtimeHub } from '../realtime/hub.js';
 
+import type { UpstashCoordination } from '../redis/coordination.js';
+
 import type { GroupAdministration } from './group-administration.js';
 import type { PresenceSnapshot, PresenceStore } from './presence-store.js';
 
@@ -46,6 +48,11 @@ export interface PairedDeviceServiceOptions {
   readonly presence?: PresenceStore;
   readonly eventStore?: DurableRealtimeEventStore;
   readonly hub?: RealtimeHub;
+  /**
+   * Present only when Upstash is configured. It bounds the two RPCs that append
+   * to an unbounded log; every other mutation is bounded by the row it changes.
+   */
+  readonly coordination?: UpstashCoordination;
 }
 
 /**
@@ -333,6 +340,7 @@ export function createPairedDeviceSyncService(
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
         assertEditor(authenticated);
+        await assertPublicationAllowed(options, groupId, authenticated.device.id, 'document');
         const mutation = toMutationReceiptContext(request.context?.requestId);
         const appended = await events.appendAuthorized(
           {
@@ -361,6 +369,7 @@ export function createPairedDeviceSyncService(
         assertAuthenticatedGroup(authenticated, groupId);
         assertEditor(authenticated);
         assertSessionAuthority(authenticated);
+        await assertPublicationAllowed(options, groupId, authenticated.device.id, 'session');
         const mutation = toMutationReceiptContext(request.context?.requestId);
         // `epoch` and `sequence` are server facts: the epoch is the group
         // revision the command was issued against, and the sequence is the one
@@ -753,6 +762,31 @@ function assertSessionAuthority(authenticated: AuthenticatedDevice): void {
       'Only the group leader can issue session commands while the group is under leader authority.',
     );
   }
+}
+
+/**
+ * Bounds the only two RPCs that append to a log with no natural ceiling.
+ *
+ * Every other mutation writes a row that already exists and is bounded by it; a
+ * publication adds one. Without a limiter an editor can fill `sync_events`
+ * faster than retention prunes it and push every other device's resume point
+ * off the end. When Redis is absent no limit is applied — which is stated in the
+ * health response rather than assumed.
+ */
+async function assertPublicationAllowed(
+  options: PairedDeviceServiceOptions,
+  groupId: string,
+  deviceId: string,
+  category: string,
+): Promise<void> {
+  const coordination = options.coordination;
+  if (coordination === undefined || !coordination.configured) return;
+  const decision = await coordination.limitMutation(groupId, deviceId, category);
+  if (decision.allowed) return;
+  throw new ConnectError(
+    'The group publication rate limit has been reached; retry after the window resets.',
+    Code.ResourceExhausted,
+  );
 }
 
 async function publishGroupUpdate(

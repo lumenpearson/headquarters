@@ -29,6 +29,7 @@ export interface StoredMutationReceipt {
   readonly resourceHash: string | undefined;
   readonly revision: bigint | undefined;
   readonly sequence: bigint | undefined;
+  readonly resourceId: string | undefined;
 }
 
 export interface MutationReceiptGuardOptions {
@@ -139,7 +140,8 @@ export class MutationReceiptGuard {
            receipt.session_id AS receipt_session_id,
            receipt.resource_hash AS receipt_resource_hash,
            receipt.revision AS receipt_revision,
-           receipt.sequence AS receipt_sequence
+           receipt.sequence AS receipt_sequence,
+           receipt.resource_id AS receipt_resource_id
          FROM mutation_receipts AS receipt
          WHERE receipt.scope = $1
            AND receipt.request_id_hash = $2
@@ -164,6 +166,7 @@ export class MutationReceiptGuard {
       resourceHash: readOptionalText(row.receipt_resource_hash),
       revision: readNullableBigInt(row.receipt_revision, 'receipt_revision'),
       sequence: readNullableBigInt(row.receipt_sequence, 'receipt_sequence'),
+      resourceId: readOptionalText(row.receipt_resource_id),
     };
   }
 
