@@ -26,7 +26,15 @@ export type MutationScope =
   | 'CREATE_PAIRING_CODE'
   | 'PAIR_DEVICE'
   | 'REFRESH_DEVICE_SESSION'
-  | 'REVOKE_DEVICE';
+  | 'REVOKE_DEVICE'
+  | 'UPDATE_GROUP'
+  | 'JOIN_GROUP'
+  | 'LEAVE_GROUP'
+  | 'SET_DEVICE_ROLE'
+  | 'SET_AUTHORITY_MODE'
+  | 'SET_LEADER'
+  | 'PUBLISH_DOCUMENT_DELTA'
+  | 'PUBLISH_SESSION_COMMAND';
 
 /**
  * The subset of `gremuchaya.common.v1.MutationContext` that reaches the

@@ -102,9 +102,14 @@ export function attachRealtimeTransport(
     let admissionInput: RealtimeAdmissionInput | undefined;
     let revalidationTimer: ReturnType<typeof setInterval> | undefined;
     let periodicRevalidationPending = false;
+    // Bumped by every teardown. Subscribing is asynchronous now, so a close that
+    // lands inside `hub.subscribe` would otherwise be followed by the resolved
+    // unsubscribe being stored on a connection nobody will ever tear down again.
+    let admissionGeneration = 0;
     const enqueue = createSerializedWorkQueue();
 
     const clearAdmission = () => {
+      admissionGeneration += 1;
       unsubscribe?.();
       unsubscribe = undefined;
       subscribedGroupId = undefined;
@@ -160,12 +165,18 @@ export function attachRealtimeTransport(
       invalidateAdmission: clearAdmission,
       startPeriodicRevalidation,
       subscribe: async (groupId, afterSequence) => {
-        unsubscribe = await hub.subscribe({
+        const generation = admissionGeneration;
+        const release = await hub.subscribe({
           groupId,
           afterSequence,
           send: (serverFrame) =>
             enqueueSafely(() => deliverAuthorizedFrame(connectionContext, serverFrame)),
         });
+        if (generation !== admissionGeneration) {
+          release();
+          return;
+        }
+        unsubscribe = release;
       },
     };
 

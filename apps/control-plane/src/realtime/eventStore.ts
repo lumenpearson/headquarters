@@ -3,6 +3,9 @@ import { timestampFromDate } from '@bufbuild/protobuf/wkt';
 import { syncV1 } from '@gremuchaya/protocol';
 
 import type { SqlClient, SqlParameter, SqlStatement } from '../db/database.js';
+import type { MutationReceiptClaim, MutationReceiptGuard } from '../sync/receipt-guard.js';
+import type { MutationReceiptContext, MutationScope } from '../sync/receipts.js';
+import { PairedDeviceRuntimeError } from '../sync/runtime.js';
 
 /**
  * The replay store behind the realtime hub.
@@ -92,8 +95,34 @@ export class InMemoryRealtimeEventStore implements RealtimeEventStore {
   }
 }
 
+/**
+ * A publication that came from a client rather than from the server itself.
+ *
+ * It carries the acting device, because everything a client publishes has to be
+ * checked against that device's membership at the moment of the write; a
+ * server-originated event such as a rename has no such actor.
+ */
+export interface AuthorizedGroupEventDraft extends GroupEventDraft {
+  readonly actorDeviceId: string;
+  /** Present only for document deltas: the publisher's CRDT state vector. */
+  readonly stateVector?: Uint8Array;
+  readonly documentType?: syncV1.SynchronizedDocumentType;
+}
+
+export interface AuthorizedAppendResult {
+  readonly event: syncV1.GroupEvent;
+  /** The state vector the group now knows for this document, if it is one. */
+  readonly stateVector: Uint8Array;
+}
+
 export interface DurableRealtimeEventStoreOptions {
   readonly database: SqlClient;
+  /**
+   * Supplied when the store must answer retried client publications. Without
+   * it, `appendAuthorized` rejects a request that carries a request id rather
+   * than silently appending a second event for it.
+   */
+  readonly receipts?: MutationReceiptGuard;
   /**
    * How many events a group retains. Older events are pruned as new ones are
    * appended, which is what turns an unbounded log into a resume window with a
@@ -118,11 +147,13 @@ export class DurableRealtimeEventStore implements RealtimeEventStore {
   readonly #database: SqlClient;
   readonly #historyLimit: number;
   readonly #now: () => Date;
+  readonly #receipts: MutationReceiptGuard | undefined;
 
   constructor(options: DurableRealtimeEventStoreOptions) {
     this.#database = options.database;
     this.#historyLimit = requireHistoryLimit(options.historyLimit ?? defaultRealtimeHistoryLimit);
     this.#now = options.now ?? (() => new Date());
+    this.#receipts = options.receipts;
   }
 
   async append(draft: GroupEventDraft): Promise<syncV1.GroupEvent> {
@@ -204,6 +235,198 @@ export class DurableRealtimeEventStore implements RealtimeEventStore {
     };
   }
 
+  /**
+   * Appends what a client published, in one statement.
+   *
+   * Authorization, sequence allocation, the event row, the document snapshot,
+   * retention and receipt completion all ride one CTE chain because the Neon
+   * HTTP driver offers no interactive transaction: a read-then-write would let
+   * a device revoked between the two publish anyway, and would let two retries
+   * of one request each take a sequence.
+   */
+  async appendAuthorized(
+    draft: AuthorizedGroupEventDraft,
+    mutation?: MutationReceiptContext,
+  ): Promise<AuthorizedAppendResult> {
+    const scope: MutationScope =
+      draft.kind === syncV1.GroupEventKind.SESSION_COMMAND
+        ? 'PUBLISH_SESSION_COMMAND'
+        : 'PUBLISH_DOCUMENT_DELTA';
+    const guard = this.#receipts;
+    const receipt =
+      mutation === undefined
+        ? undefined
+        : await this.requireGuard(guard).claim(scope, mutation, this.#now(), [
+            ['group_id', draft.groupId],
+            ['actor_device_id', draft.actorDeviceId],
+            ['document_id', draft.documentId ?? ''],
+            ['kind', eventKindName(draft.kind)],
+            ['payload', hexOf(draft.documentDelta)],
+          ]);
+    if (receipt?.claimed === false) return this.replayAuthorizedAppend(receipt);
+
+    const occurredAt = this.#now();
+    const envelope = toBinary(syncV1.GroupEventSchema, buildGroupEvent(draft, 0n, occurredAt));
+    const stateVector = draft.stateVector ?? new Uint8Array();
+    const rows = await this.#database.query<Record<string, unknown>>(
+      sql(
+        `WITH locked_receipt AS MATERIALIZED (
+           SELECT receipt.request_id_hash
+           FROM mutation_receipts AS receipt
+           WHERE receipt.scope = $9
+             AND receipt.request_id_hash = $10
+             AND receipt.completed_at IS NULL
+           FOR UPDATE OF receipt
+         ),
+         mutation_gate AS MATERIALIZED (
+           SELECT 1 AS open FROM locked_receipt
+           UNION ALL
+           SELECT 1 AS open WHERE $10::text IS NULL
+         ),
+         authorized_actor AS MATERIALIZED (
+           SELECT membership.group_id, membership.device_id
+           FROM group_memberships AS membership
+           JOIN devices ON devices.id = membership.device_id
+           CROSS JOIN mutation_gate
+           WHERE membership.group_id = $1
+             AND membership.device_id = $7
+             AND membership.revoked_at IS NULL
+             AND membership.role IN ('EDITOR', 'ADMIN')
+             AND devices.status <> 'REVOKED'
+           FOR UPDATE OF membership
+         ),
+         allocated AS (
+           INSERT INTO group_event_sequences (group_id, last_sequence, updated_at)
+           SELECT authorized_actor.group_id, 1, $2 FROM authorized_actor
+           ON CONFLICT (group_id) DO UPDATE
+             SET last_sequence = group_event_sequences.last_sequence + 1,
+                 updated_at = EXCLUDED.updated_at
+           RETURNING group_id, last_sequence
+         ),
+         appended AS (
+           INSERT INTO sync_events (
+             id, group_id, sequence, kind, document_id, payload,
+             hybrid_logical_clock, actor_device_id, occurred_at
+           )
+           SELECT gen_random_uuid(), allocated.group_id, allocated.last_sequence,
+                  $3, $4, $5, $6, $7, $2
+           FROM allocated
+           RETURNING sequence
+         ),
+         recorded_snapshot AS (
+           INSERT INTO sync_snapshots (
+             id, group_id, document_id, document_type, sequence, state_vector, snapshot
+           )
+           SELECT gen_random_uuid(), allocated.group_id, $4::uuid, $8,
+                  allocated.last_sequence, $11, $5
+           FROM allocated
+           WHERE $4::uuid IS NOT NULL
+           RETURNING sequence
+         ),
+         pruned AS (
+           DELETE FROM sync_events
+           WHERE group_id = (SELECT allocated.group_id FROM allocated)
+             AND sequence <= (SELECT allocated.last_sequence FROM allocated) - $12::bigint
+           RETURNING 1
+         ),
+         completed_receipt AS (
+           UPDATE mutation_receipts AS receipt
+           SET group_id = allocated.group_id,
+               sequence = allocated.last_sequence,
+               completed_at = $2
+           FROM allocated
+           WHERE receipt.scope = $9
+             AND receipt.request_id_hash = $10
+           RETURNING receipt.request_id_hash
+         )
+         SELECT
+           EXISTS (SELECT 1 FROM mutation_gate) AS receipt_claimed,
+           (SELECT appended.sequence FROM appended) AS sequence`,
+        [
+          draft.groupId,
+          occurredAt,
+          eventKindName(draft.kind),
+          draft.documentId ?? null,
+          envelope,
+          (draft.hybridLogicalClock ?? 0n).toString(),
+          draft.actorDeviceId,
+          documentTypeName(draft.documentType),
+          receipt?.scope ?? null,
+          receipt?.requestIdHash ?? null,
+          stateVector,
+          this.#historyLimit.toString(),
+        ],
+      ),
+    );
+    const row = rows[0];
+    if (row === undefined) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The group event could not be published.',
+      );
+    }
+    if (receipt !== undefined && row.receipt_claimed !== true) {
+      return this.replayAuthorizedAppend(receipt);
+    }
+    if (row.sequence === null || row.sequence === undefined) {
+      throw new PairedDeviceRuntimeError(
+        'PERMISSION_DENIED',
+        'Only an active group editor can publish a group event.',
+      );
+    }
+    return {
+      event: buildGroupEvent(draft, readSequence(row.sequence), occurredAt),
+      stateVector,
+    };
+  }
+
+  /**
+   * Answers a retried publication with the sequence the original allocated.
+   *
+   * Appending is the least idempotent operation in this package: a second run
+   * takes a second number and every subscriber sees the same fact twice.
+   */
+  private async replayAuthorizedAppend(
+    receipt: MutationReceiptClaim,
+  ): Promise<AuthorizedAppendResult> {
+    const outcome = await this.requireGuard(this.#receipts).resolveRefused(
+      receipt,
+      new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The group event could not be published.',
+      ),
+    );
+    if (outcome.sequence === undefined || outcome.groupId === undefined) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The recorded publication is missing its sequence and cannot be replayed.',
+      );
+    }
+    const replay = await this.replay({
+      groupId: outcome.groupId,
+      afterSequence: outcome.sequence - 1n,
+      limit: 1,
+    });
+    const event = replay.events[0];
+    if (event === undefined || event.sequence !== outcome.sequence) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The recorded publication is no longer retained and cannot be replayed.',
+      );
+    }
+    return { event, stateVector: new Uint8Array() };
+  }
+
+  private requireGuard(guard: MutationReceiptGuard | undefined): MutationReceiptGuard {
+    if (guard === undefined) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'This control plane cannot answer retried publications: no receipt guard is configured.',
+      );
+    }
+    return guard;
+  }
+
   private async prune(groupId: string, latestSequence: bigint): Promise<void> {
     const oldestRetained = latestSequence - BigInt(this.#historyLimit);
     if (oldestRetained <= 0n) return;
@@ -260,6 +483,32 @@ function eventKindName(kind: syncV1.GroupEventKind): string {
     default:
       return 'UNSPECIFIED';
   }
+}
+
+/**
+ * `sync_snapshots.document_type` is free text. Naming the enum member keeps the
+ * column readable to an operator and keeps an unknown future value from being
+ * stored as a bare number nobody can interpret.
+ */
+function documentTypeName(type: syncV1.SynchronizedDocumentType | undefined): string {
+  switch (type) {
+    case syncV1.SynchronizedDocumentType.LAYOUT:
+      return 'LAYOUT';
+    case syncV1.SynchronizedDocumentType.SETTINGS:
+      return 'SETTINGS';
+    case syncV1.SynchronizedDocumentType.CONTENT:
+      return 'CONTENT';
+    case syncV1.SynchronizedDocumentType.KEYMAP:
+      return 'KEYMAP';
+    case syncV1.SynchronizedDocumentType.SIMULATION:
+      return 'SIMULATION';
+    default:
+      return 'UNSPECIFIED';
+  }
+}
+
+function hexOf(bytes: Uint8Array | undefined): string {
+  return bytes === undefined ? '' : Buffer.from(bytes).toString('hex');
 }
 
 function requireHistoryLimit(value: number): number {

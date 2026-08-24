@@ -41,6 +41,12 @@ export interface RunningControlPlane {
 interface ResolvedControlPlaneCollaborators {
   readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
   readonly realtime?: RealtimeTransportOptions;
+  /**
+   * Present only when a durable event log was built. `getCapabilities` reports
+   * the `sync` surface from this rather than from a constant, so a reduced
+   * startup cannot advertise methods it answers `unimplemented`.
+   */
+  readonly eventStore?: unknown;
 }
 
 export async function startControlPlane(
@@ -111,9 +117,11 @@ function registerControlPlaneRoutes(
             enabled: pairedDeviceLifecycleEnabled,
           },
           { name: 'sync.realtime-admission', version: 'v1', enabled: authenticatedRealtimeEnabled },
-          // The complete CRDT/event/presence synchronization surface is still
-          // intentionally unavailable even when device lifecycle is injected.
-          { name: 'sync', version: 'v1', enabled: false },
+          // The group-event, presence and session-command surface is reachable
+          // only when the composition root supplied a durable event log; a
+          // startup that injects the deterministic pairing runtime alone still
+          // answers those methods `unimplemented`.
+          { name: 'sync', version: 'v1', enabled: collaborators.eventStore !== undefined },
           { name: 'telemetry', version: 'v1', enabled: false },
           { name: 'integration', version: 'v1', enabled: false },
         ],
@@ -160,6 +168,7 @@ async function resolveControlPlaneCollaborators(
 
   return {
     syncService: lifecycle.syncService,
+    eventStore: lifecycle.eventStore,
     realtime: {
       ...lifecycle.realtime,
       ...(options.realtime?.hub === undefined ? {} : { hub: options.realtime.hub }),

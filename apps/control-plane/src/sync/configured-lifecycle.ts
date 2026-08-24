@@ -1,9 +1,12 @@
 import type { ControlPlaneConfig } from '../config.js';
 import { createNeonDatabase, type SqlClient, type SqlClientFactory } from '../db/database.js';
 import { runMigrations, type MigrationRunResult } from '../db/migrations.js';
+import { DurableRealtimeEventStore } from '../realtime/eventStore.js';
+import { RealtimeHub } from '../realtime/hub.js';
 import type { RealtimeTransportOptions } from '../realtime/server.js';
 
 import { DurablePairedDeviceRuntime } from './durable-runtime.js';
+import { DurablePresenceStore } from './presence-store.js';
 import { createPairedDeviceRealtimeAdmission } from './realtime-admission.js';
 import { createPairedDeviceSyncService } from './service.js';
 
@@ -27,6 +30,9 @@ export interface ConfiguredPairedDeviceLifecycleOptions {
 
 export interface ConfiguredPairedDeviceLifecycle {
   readonly runtime: DurablePairedDeviceRuntime;
+  readonly eventStore: DurableRealtimeEventStore;
+  readonly presence: DurablePresenceStore;
+  readonly hub: RealtimeHub;
   readonly syncService: ReturnType<typeof createPairedDeviceSyncService>;
   readonly realtime: RealtimeTransportOptions;
   readonly migrations: MigrationRunResult;
@@ -67,15 +73,37 @@ export async function createConfiguredPairedDeviceLifecycle(
     ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
   });
 
+  // The event store shares the runtime's own receipt guard rather than building
+  // a second one: a retry must be recognised as a retry no matter which module
+  // received it, and two guards with two hashers would not agree.
+  const eventStore = new DurableRealtimeEventStore({
+    database,
+    receipts: runtime.receiptGuard,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  const presence = new DurablePresenceStore({
+    database,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  const hub = new RealtimeHub({ store: eventStore });
+
   return {
     runtime,
     migrations,
+    eventStore,
+    presence,
+    hub,
     syncService: createPairedDeviceSyncService({
       runtime,
       verifyBootstrapSecret: auth.verifyBootstrapSecret,
+      administration: runtime,
+      presence,
+      eventStore,
+      hub,
     }),
     realtime: {
       admission: createPairedDeviceRealtimeAdmission(runtime),
+      hub,
     },
   };
 }

@@ -1,6 +1,11 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
 import type { SqlClient } from '../db/database.js';
+import {
+  groupMutationEpilogue,
+  groupMutationProjection,
+  groupMutationPrologue,
+} from './group-mutations.js';
 import type { FingerprintField, MutationReceiptContext, MutationScope } from './receipts.js';
 import {
   MutationReceiptGuard,
@@ -25,6 +30,7 @@ import {
 import { PairedDeviceRuntimeError } from './runtime.js';
 import type {
   AuthenticatedDevice,
+  AuthorityMode,
   CreateGroupInput,
   DeviceRole,
   Page,
@@ -130,6 +136,9 @@ type LifecycleRow = Record<string, unknown> & {
   readonly receipt_resource_hash?: unknown;
   readonly receipt_revision?: unknown;
   readonly receipt_claimed?: unknown;
+  readonly receipt_sequence?: unknown;
+  readonly group_present?: unknown;
+  readonly leader_is_active?: unknown;
 };
 
 /**
@@ -1655,6 +1664,473 @@ export class DurablePairedDeviceRuntime {
    * retries, so it returns `undefined` and every receipt parameter is bound to
    * NULL, leaving the pre-receipt statement semantics unchanged.
    */
+  /**
+   * Renames a group.
+   *
+   * The rename rides the shared spine's single `UPDATE groups`, so the new name
+   * and the revision bump are one row write. Only an active administrator may
+   * issue it, and the receipt records the revision the rename produced so a
+   * retry answers with that number rather than whatever the group drifted to.
+   */
+  async updateGroup(
+    authenticated: AuthenticatedDevice,
+    groupId: string,
+    name: string,
+    mutation?: MutationReceiptContext,
+  ): Promise<{ readonly group: PairedGroup }> {
+    const normalizedGroupId = requireText(groupId, 'group_id');
+    const normalizedName = requireText(name.trim(), 'name');
+    this.requireSameGroup(authenticated, normalizedGroupId);
+    const now = this.currentTime();
+    const receipt = await this.claimReceipt('UPDATE_GROUP', mutation, now, [
+      ['group_id', normalizedGroupId],
+      ['name', normalizedName],
+      ['actor_device_id', authenticated.device.id],
+    ]);
+    if (receipt?.claimed === false) return this.replayGroupMutation(receipt);
+
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `${groupMutationPrologue},
+         applied AS (
+           SELECT
+             locked_group.id AS group_id,
+             NULL::uuid AS device_id,
+             $6::text AS next_name,
+             NULL::text AS next_authority_mode,
+             NULL::uuid AS next_leader_device_id
+           FROM actor
+           CROSS JOIN locked_group
+           WHERE actor.role = 'ADMIN'
+         )${groupMutationEpilogue}
+         ${groupMutationProjection}`,
+        [
+          normalizedGroupId,
+          authenticated.device.id,
+          now,
+          receipt?.scope ?? null,
+          receipt?.requestIdHash ?? null,
+          normalizedName,
+        ],
+      ),
+    );
+    const row = requireOneRow(rows, 'Unable to rename the group.');
+    if (receipt !== undefined && !readBoolean(row.receipt_claimed, 'receipt_claimed')) {
+      return this.replayGroupMutation(receipt);
+    }
+    this.requireActingAdministrator(
+      row,
+      'Only an active group administrator can rename the group.',
+    );
+    return { group: this.requireMutatedGroup(row) };
+  }
+
+  /**
+   * Switches a group between single-leader and multi-authority operation.
+   *
+   * Switching *to* `LEADER` while the group names no active leader would leave
+   * a mode nobody can act in, so it is refused rather than silently accepted:
+   * the caller sets a leader first.
+   */
+  async setAuthorityMode(
+    authenticated: AuthenticatedDevice,
+    groupId: string,
+    mode: AuthorityMode,
+    mutation?: MutationReceiptContext,
+  ): Promise<{ readonly group: PairedGroup }> {
+    const normalizedGroupId = requireText(groupId, 'group_id');
+    this.requireSameGroup(authenticated, normalizedGroupId);
+    const now = this.currentTime();
+    const receipt = await this.claimReceipt('SET_AUTHORITY_MODE', mutation, now, [
+      ['group_id', normalizedGroupId],
+      ['authority_mode', mode],
+      ['actor_device_id', authenticated.device.id],
+    ]);
+    if (receipt?.claimed === false) return this.replayGroupMutation(receipt);
+
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `${groupMutationPrologue},
+         leader_is_active AS (
+           SELECT EXISTS (
+             SELECT 1
+             FROM group_memberships AS membership
+             JOIN locked_group ON locked_group.id = membership.group_id
+             WHERE membership.device_id = locked_group.leader_device_id
+               AND membership.revoked_at IS NULL
+           ) AS value
+         ),
+         applied AS (
+           SELECT
+             locked_group.id AS group_id,
+             NULL::uuid AS device_id,
+             NULL::text AS next_name,
+             $6::text AS next_authority_mode,
+             NULL::uuid AS next_leader_device_id
+           FROM actor
+           CROSS JOIN locked_group
+           CROSS JOIN leader_is_active
+           WHERE actor.role = 'ADMIN'
+             AND ($6::text <> 'LEADER' OR leader_is_active.value)
+         )${groupMutationEpilogue}
+         ${groupMutationProjection},
+           (SELECT leader_is_active.value FROM leader_is_active) AS leader_is_active`,
+        [
+          normalizedGroupId,
+          authenticated.device.id,
+          now,
+          receipt?.scope ?? null,
+          receipt?.requestIdHash ?? null,
+          mode,
+        ],
+      ),
+    );
+    const row = requireOneRow(rows, 'Unable to change the group authority mode.');
+    if (receipt !== undefined && !readBoolean(row.receipt_claimed, 'receipt_claimed')) {
+      return this.replayGroupMutation(receipt);
+    }
+    this.requireActingAdministrator(
+      row,
+      'Only an active group administrator can change the authority mode.',
+    );
+    if (mode === 'LEADER' && !readBoolean(row.leader_is_active, 'leader_is_active')) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'Set an active group leader before switching the group to leader authority.',
+      );
+    }
+    return { group: this.requireMutatedGroup(row) };
+  }
+
+  /**
+   * Moves group leadership to another active member.
+   *
+   * The membership check is made here rather than left to
+   * `groups_leader_membership_fk`: that constraint is deferred, so a device id
+   * that names no active member would surface at commit as a driver error whose
+   * message says nothing about leadership.
+   */
+  async setLeader(
+    authenticated: AuthenticatedDevice,
+    groupId: string,
+    deviceId: string,
+    mutation?: MutationReceiptContext,
+  ): Promise<{ readonly group: PairedGroup }> {
+    const normalizedGroupId = requireText(groupId, 'group_id');
+    const normalizedDeviceId = requireText(deviceId, 'device_id');
+    this.requireSameGroup(authenticated, normalizedGroupId);
+    const now = this.currentTime();
+    const receipt = await this.claimReceipt('SET_LEADER', mutation, now, [
+      ['group_id', normalizedGroupId],
+      ['device_id', normalizedDeviceId],
+      ['actor_device_id', authenticated.device.id],
+    ]);
+    if (receipt?.claimed === false) return this.replayGroupMutation(receipt);
+
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `${groupMutationPrologue},
+         target AS MATERIALIZED (
+           SELECT membership.group_id, membership.device_id, membership.role
+           FROM group_memberships AS membership
+           JOIN devices ON devices.id = membership.device_id
+           JOIN locked_group ON locked_group.id = membership.group_id
+           WHERE membership.device_id = $6
+             AND membership.revoked_at IS NULL
+             AND devices.status <> 'REVOKED'
+           FOR UPDATE OF membership
+         ),
+         applied AS (
+           SELECT
+             locked_group.id AS group_id,
+             NULL::uuid AS device_id,
+             NULL::text AS next_name,
+             NULL::text AS next_authority_mode,
+             target.device_id AS next_leader_device_id
+           FROM actor
+           CROSS JOIN locked_group
+           CROSS JOIN target
+           WHERE actor.role = 'ADMIN'
+         )${groupMutationEpilogue}
+         ${groupMutationProjection},
+           EXISTS (SELECT 1 FROM target) AS target_active`,
+        [
+          normalizedGroupId,
+          authenticated.device.id,
+          now,
+          receipt?.scope ?? null,
+          receipt?.requestIdHash ?? null,
+          normalizedDeviceId,
+        ],
+      ),
+    );
+    const row = requireOneRow(rows, 'Unable to change the group leader.');
+    if (receipt !== undefined && !readBoolean(row.receipt_claimed, 'receipt_claimed')) {
+      return this.replayGroupMutation(receipt);
+    }
+    this.requireActingAdministrator(
+      row,
+      'Only an active group administrator can change the group leader.',
+    );
+    if (!readBoolean(row.target_active, 'target_active')) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'Group leadership can only be given to an active member of the group.',
+      );
+    }
+    return { group: this.requireMutatedGroup(row) };
+  }
+
+  /**
+   * Changes what a member of the group may do.
+   *
+   * Two invariants are enforced under the membership lock rather than by a
+   * read-then-write: a group never loses its last administrator, and the leader
+   * of a `LEADER`-mode group is never demoted out of `ADMIN`. Both are exactly
+   * the races a structural test cannot observe.
+   */
+  async setDeviceRole(
+    authenticated: AuthenticatedDevice,
+    groupId: string,
+    deviceId: string,
+    role: DeviceRole,
+    mutation?: MutationReceiptContext,
+  ): Promise<{ readonly group: PairedGroup; readonly device: PairedDevice }> {
+    const normalizedGroupId = requireText(groupId, 'group_id');
+    const normalizedDeviceId = requireText(deviceId, 'device_id');
+    this.requireSameGroup(authenticated, normalizedGroupId);
+    const now = this.currentTime();
+    const receipt = await this.claimReceipt('SET_DEVICE_ROLE', mutation, now, [
+      ['group_id', normalizedGroupId],
+      ['device_id', normalizedDeviceId],
+      ['role', role],
+      ['actor_device_id', authenticated.device.id],
+    ]);
+    if (receipt?.claimed === false) return this.replayRoleChange(receipt);
+
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `${groupMutationPrologue},
+         target AS MATERIALIZED (
+           SELECT
+             membership.group_id,
+             membership.device_id,
+             membership.role,
+             devices.name AS device_name,
+             devices.public_key AS device_public_key,
+             devices.platform AS device_platform,
+             devices.application_version AS device_application_version,
+             devices.status AS device_status,
+             devices.created_at AS device_created_at,
+             devices.last_seen_at AS device_last_seen_at,
+             (
+               locked_group.authority_mode = 'LEADER'
+               AND locked_group.leader_device_id = membership.device_id
+             ) AS target_is_leader
+           FROM group_memberships AS membership
+           JOIN devices ON devices.id = membership.device_id
+           JOIN locked_group ON locked_group.id = membership.group_id
+           WHERE membership.device_id = $6
+             AND membership.revoked_at IS NULL
+           FOR UPDATE OF membership
+         ),
+         eligible_target AS (
+           SELECT target.group_id, target.device_id
+           FROM actor
+           CROSS JOIN target
+           CROSS JOIN active_admin_count
+           WHERE actor.role = 'ADMIN'
+             AND NOT (
+               target.role = 'ADMIN'
+               AND $7::text <> 'ADMIN'
+               AND active_admin_count.value = 1
+             )
+             AND NOT (target.target_is_leader AND $7::text <> 'ADMIN')
+         ),
+         changed_membership AS (
+           UPDATE group_memberships AS membership
+           SET role = $7
+           FROM eligible_target
+           WHERE membership.group_id = eligible_target.group_id
+             AND membership.device_id = eligible_target.device_id
+             AND membership.revoked_at IS NULL
+           RETURNING membership.group_id, membership.device_id, membership.role
+         ),
+         applied AS (
+           SELECT
+             changed_membership.group_id AS group_id,
+             changed_membership.device_id AS device_id,
+             NULL::text AS next_name,
+             NULL::text AS next_authority_mode,
+             NULL::uuid AS next_leader_device_id
+           FROM changed_membership
+         )${groupMutationEpilogue}
+         ${groupMutationProjection},
+           EXISTS (SELECT 1 FROM target) AS target_active,
+           (SELECT target.role FROM target LIMIT 1) AS target_role,
+           COALESCE((SELECT target.target_is_leader FROM target LIMIT 1), false) AS target_is_leader,
+           (
+             SELECT jsonb_build_object(
+               'device_id', target.device_id,
+               'device_name', target.device_name,
+               'device_public_key', target.device_public_key,
+               'device_platform', target.device_platform,
+               'device_application_version', target.device_application_version,
+               'device_status', target.device_status,
+               'device_created_at', target.device_created_at,
+               'device_last_seen_at', target.device_last_seen_at,
+               'role', changed_membership.role
+             )
+             FROM target
+             JOIN changed_membership
+               ON changed_membership.group_id = target.group_id
+              AND changed_membership.device_id = target.device_id
+           ) AS device`,
+        [
+          normalizedGroupId,
+          authenticated.device.id,
+          now,
+          receipt?.scope ?? null,
+          receipt?.requestIdHash ?? null,
+          normalizedDeviceId,
+          role,
+        ],
+      ),
+    );
+    const row = requireOneRow(rows, 'Unable to change the paired device role.');
+    if (receipt !== undefined && !readBoolean(row.receipt_claimed, 'receipt_claimed')) {
+      return this.replayRoleChange(receipt);
+    }
+    this.requireActingAdministrator(
+      row,
+      'Only an active group administrator can change a paired device role.',
+    );
+    if (!readBoolean(row.target_active, 'target_active')) {
+      throw new PairedDeviceRuntimeError('NOT_FOUND', 'The paired device does not exist.');
+    }
+    if (role !== 'ADMIN' && readBoolean(row.target_is_leader, 'target_is_leader')) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'Transfer group leadership before demoting the current leader.',
+      );
+    }
+    if (
+      role !== 'ADMIN' &&
+      row.target_role === 'ADMIN' &&
+      readBigInt(row.active_admin_count, 'active_admin_count') === 1n
+    ) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'A group must retain at least one active administrator.',
+      );
+    }
+    const device = readJsonObject(row.device, 'device');
+    if (Object.keys(device).length === 0) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The paired device role could not be changed because its state changed concurrently.',
+      );
+    }
+    return { group: this.requireMutatedGroup(row), device: toDevice(device) };
+  }
+
+  private requireSameGroup(authenticated: AuthenticatedDevice, groupId: string): void {
+    if (authenticated.group.id !== groupId) {
+      throw new PairedDeviceRuntimeError(
+        'PERMISSION_DENIED',
+        'The authenticated device does not belong to the requested group.',
+      );
+    }
+  }
+
+  private requireActingAdministrator(row: LifecycleRow, message: string): void {
+    if (!readBoolean(row.group_present, 'group_present')) {
+      throw new PairedDeviceRuntimeError('NOT_FOUND', 'The group does not exist.');
+    }
+    if (!readBoolean(row.actor_active, 'actor_active') || row.actor_role !== 'ADMIN') {
+      throw new PairedDeviceRuntimeError('PERMISSION_DENIED', message);
+    }
+  }
+
+  private requireMutatedGroup(row: LifecycleRow): PairedGroup {
+    const group = readJsonObject(row.group, 'group');
+    if (Object.keys(group).length === 0) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The group could not be updated because its state changed concurrently.',
+      );
+    }
+    return toGroup(group);
+  }
+
+  /**
+   * Answers a retried group mutation with the revision the original produced.
+   *
+   * None of these mutations is naturally idempotent — each bumps the revision —
+   * so re-running one would move the group a second time. The recorded revision
+   * is returned instead of the group's current one.
+   */
+  private async replayGroupMutation(
+    receipt: MutationReceiptClaim,
+  ): Promise<{ readonly group: PairedGroup }> {
+    const outcome = await this.resolveRefusedClaim(receipt, replayNoLongerAuthorized());
+    const recordedGroupId = requireOutcomeField(outcome.groupId, 'group_id');
+    if (outcome.revision === undefined) throw replayNoLongerAuthorized();
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `SELECT
+           groups.id AS group_id,
+           groups.name AS group_name,
+           groups.authority_mode AS group_authority_mode,
+           groups.leader_device_id AS group_leader_device_id,
+           $2::bigint AS group_revision,
+           groups.created_at AS group_created_at,
+           groups.updated_at AS group_updated_at
+         FROM groups
+         WHERE groups.id = $1`,
+        [recordedGroupId, outcome.revision.toString()],
+      ),
+    );
+    return { group: toGroup(requireOneRow(rows, 'The recorded group no longer exists.')) };
+  }
+
+  private async replayRoleChange(
+    receipt: MutationReceiptClaim,
+  ): Promise<{ readonly group: PairedGroup; readonly device: PairedDevice }> {
+    const outcome = await this.resolveRefusedClaim(receipt, replayNoLongerAuthorized());
+    const recordedGroupId = requireOutcomeField(outcome.groupId, 'group_id');
+    const recordedDeviceId = requireOutcomeField(outcome.deviceId, 'device_id');
+    if (outcome.revision === undefined) throw replayNoLongerAuthorized();
+    const rows = await this.query<LifecycleRow>(
+      sql(
+        `SELECT
+           groups.id AS group_id,
+           groups.name AS group_name,
+           groups.authority_mode AS group_authority_mode,
+           groups.leader_device_id AS group_leader_device_id,
+           $3::bigint AS group_revision,
+           groups.created_at AS group_created_at,
+           groups.updated_at AS group_updated_at,
+           devices.id AS device_id,
+           devices.name AS device_name,
+           devices.public_key AS device_public_key,
+           devices.platform AS device_platform,
+           devices.application_version AS device_application_version,
+           devices.status AS device_status,
+           devices.created_at AS device_created_at,
+           devices.last_seen_at AS device_last_seen_at,
+           membership.role AS role
+         FROM groups
+         JOIN group_memberships AS membership ON membership.group_id = groups.id
+         JOIN devices ON devices.id = membership.device_id
+         WHERE groups.id = $1 AND membership.device_id = $2`,
+        [recordedGroupId, recordedDeviceId, outcome.revision.toString()],
+      ),
+    );
+    const row = requireOneRow(rows, 'The recorded membership no longer exists.');
+    return { group: toGroup(row), device: toDevice(row) };
+  }
+
   /**
    * Receipt handling is delegated whole.
    *
