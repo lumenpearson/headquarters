@@ -5,6 +5,7 @@ import { realtimeV1, syncV1 } from '@gremuchaya/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
+import type { GroupEventPublication } from './hub.js';
 import { startControlPlane } from '../server.js';
 import { createPairedDeviceRealtimeAdmission } from '../sync/realtime-admission.js';
 import { PairedDeviceRuntime } from '../sync/runtime.js';
@@ -34,16 +35,16 @@ describe('binary realtime WebSocket transport', () => {
 
     const first = await openRealtime(baseUrl, 0n);
     expect((await first.next()).payload.case).toBe('ready');
-    running.publishGroupEvent({ groupId: 'group-01', event: groupEvent(1n) });
+    await running.publishGroupEvent(groupEvent('group-01'));
     expectGroupSequence(await first.next(), 1n);
     await first.close();
 
-    running.publishGroupEvent({ groupId: 'group-01', event: groupEvent(2n) });
+    await running.publishGroupEvent(groupEvent('group-01'));
     const reconnected = await openRealtime(baseUrl, 1n);
     expect((await reconnected.next()).payload.case).toBe('ready');
     expectGroupSequence(await reconnected.next(), 2n);
 
-    running.publishGroupEvent({ groupId: 'group-01', event: groupEvent(3n) });
+    await running.publishGroupEvent(groupEvent('group-01'));
     expectGroupSequence(await reconnected.next(), 3n);
     await reconnected.close();
   });
@@ -125,7 +126,7 @@ describe('binary realtime WebSocket transport', () => {
     expect((await editorStream.next()).payload.case).toBe('ready');
 
     runtime.revokeDevice(ownerAuthenticated, owner.group.id, editor.device.id);
-    running.publishGroupEvent({ groupId: owner.group.id, event: groupEvent(1n) });
+    await running.publishGroupEvent(groupEvent(owner.group.id));
 
     const closed = await closeWithin(editorStream);
     expect(closed.code).toBe(1008);
@@ -178,7 +179,7 @@ describe('binary realtime WebSocket transport', () => {
     expect(() => runtime.refreshDeviceSession(editor.session.refreshToken)).toThrow(
       'refresh token is invalid',
     );
-    running.publishGroupEvent({ groupId: owner.group.id, event: groupEvent(1n) });
+    await running.publishGroupEvent(groupEvent(owner.group.id));
 
     expect((await closeWithin(stream)).code).toBe(1008);
     expect(stream.receivedFrames().some(isGroupEventFrame)).toBe(false);
@@ -222,7 +223,7 @@ describe('binary realtime WebSocket transport', () => {
     expect((await stream.next()).payload.case).toBe('ready');
 
     now = new Date(now.getTime() + 50);
-    running.publishGroupEvent({ groupId: owner.group.id, event: groupEvent(1n) });
+    await running.publishGroupEvent(groupEvent(owner.group.id));
 
     expect((await closeWithin(stream)).code).toBe(1008);
     expect(stream.receivedFrames().some(isGroupEventFrame)).toBe(false);
@@ -286,7 +287,7 @@ describe('binary realtime WebSocket transport', () => {
       { accessToken: 'opaque-access-token', groupId: 'group-01', deviceId: 'device-01' },
     ]);
 
-    running.publishGroupEvent({ groupId: 'group-01', event: groupEvent(1n) });
+    await running.publishGroupEvent(groupEvent('group-01'));
     expectGroupSequence(await stream.next(), 1n);
     await waitFor(() => validations.length === 2);
 
@@ -326,7 +327,7 @@ describe('binary realtime WebSocket transport', () => {
     expect((await stream.next()).payload.case).toBe('ready');
 
     allowed = false;
-    running.publishGroupEvent({ groupId: 'group-01', event: groupEvent(1n) });
+    await running.publishGroupEvent(groupEvent('group-01'));
 
     expect((await closeWithin(stream)).code).toBe(1008);
     expect(stream.receivedFrames().some(isGroupEventFrame)).toBe(false);
@@ -351,7 +352,7 @@ describe('binary realtime WebSocket transport', () => {
     closeControlPlane = running.close;
     const baseUrl = realtimeBaseUrl(running.server.address() as AddressInfo);
     for (let sequence = 1n; sequence <= 513n; sequence += 1n) {
-      running.publishGroupEvent({ groupId: 'group-01', event: groupEvent(sequence) });
+      await running.publishGroupEvent(groupEvent('group-01'));
     }
 
     const stream = await openRealtime(baseUrl, 0n);
@@ -582,11 +583,8 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
   }
 }
 
-function groupEvent(sequence: bigint): syncV1.GroupEvent {
-  return create(syncV1.GroupEventSchema, {
-    sequence,
-    kind: syncV1.GroupEventKind.DOCUMENT_DELTA,
-  });
+function groupEvent(groupId: string): GroupEventPublication {
+  return { groupId, kind: syncV1.GroupEventKind.DOCUMENT_DELTA };
 }
 
 function isGroupEventFrame(frame: realtimeV1.RealtimeServerFrame): boolean {

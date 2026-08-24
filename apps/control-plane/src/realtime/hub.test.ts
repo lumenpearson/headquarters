@@ -1,44 +1,44 @@
-import { create } from '@bufbuild/protobuf';
 import { syncV1 } from '@gremuchaya/protocol';
 import type { realtimeV1 } from '@gremuchaya/protocol';
 import { describe, expect, it } from 'vitest';
 
+import { InMemoryRealtimeEventStore } from './eventStore.js';
 import { RealtimeHub } from './hub.js';
 
 describe('realtime subscription hub', () => {
-  it('replays missed events after reconnect and continues with live events', () => {
+  it('replays missed events after reconnect and continues with live events', async () => {
     const hub = new RealtimeHub();
-    hub.publish({ groupId: 'group-01', event: event(1n) });
-    hub.publish({ groupId: 'group-01', event: event(2n) });
+    await hub.publish(publication());
+    await hub.publish(publication());
 
     const received: realtimeV1.RealtimeServerFrame[] = [];
-    const unsubscribe = hub.subscribe({
+    const unsubscribe = await hub.subscribe({
       groupId: 'group-01',
       afterSequence: 1n,
       connectionId: 'connection-01',
       send: (frame) => received.push(frame),
     });
-    hub.publish({ groupId: 'group-01', event: event(3n) });
+    await hub.publish(publication());
     unsubscribe();
-    hub.publish({ groupId: 'group-01', event: event(4n) });
+    await hub.publish(publication());
 
     expect(received.map((frame) => frame.payload.case)).toEqual([
       'ready',
       'groupEvent',
       'groupEvent',
     ]);
-    expect(received[1].payload.value.event?.sequence).toBe(2n);
-    expect(received[2].payload.value.event?.sequence).toBe(3n);
+    expect(sequenceOf(received[1])).toBe(2n);
+    expect(sequenceOf(received[2])).toBe(3n);
   });
 
-  it('requires a snapshot when the bounded replay history has expired', () => {
-    const hub = new RealtimeHub(2);
-    hub.publish({ groupId: 'group-01', event: event(1n) });
-    hub.publish({ groupId: 'group-01', event: event(2n) });
-    hub.publish({ groupId: 'group-01', event: event(3n) });
+  it('requires a snapshot when the bounded replay history has expired', async () => {
+    const hub = new RealtimeHub({ store: new InMemoryRealtimeEventStore(2) });
+    await hub.publish(publication());
+    await hub.publish(publication());
+    await hub.publish(publication());
 
     const received: realtimeV1.RealtimeServerFrame[] = [];
-    hub.subscribe({
+    await hub.subscribe({
       groupId: 'group-01',
       afterSequence: 0n,
       connectionId: 'connection-01',
@@ -46,25 +46,51 @@ describe('realtime subscription hub', () => {
     });
 
     expect(received.map((frame) => frame.payload.case)).toEqual(['ready', 'resyncRequired']);
-    expect(received[1].payload).toMatchObject({
+    expect(received[1]?.payload).toMatchObject({
       case: 'resyncRequired',
       value: { requestedAfterSequence: 0n, earliestAvailableSequence: 2n },
     });
   });
 
-  it('rejects a duplicate or out-of-order group sequence', () => {
+  it('allocates the sequence itself so no caller can reuse or skip one', async () => {
     const hub = new RealtimeHub();
-    hub.publish({ groupId: 'group-01', event: event(2n) });
 
-    expect(() => hub.publish({ groupId: 'group-01', event: event(2n) })).toThrow(
-      'Realtime sequence must advance',
-    );
+    const first = await hub.publish(publication());
+    const second = await hub.publish(publication());
+    const otherGroup = await hub.publish({ ...publication(), groupId: 'group-02' });
+
+    expect([first.sequence, second.sequence]).toEqual([1n, 2n]);
+    expect(otherGroup.sequence).toBe(1n);
+  });
+
+  it('delivers a live event to every subscriber of the same group and to no other group', async () => {
+    const hub = new RealtimeHub();
+    const subscribed: realtimeV1.RealtimeServerFrame[] = [];
+    const otherGroup: realtimeV1.RealtimeServerFrame[] = [];
+    await hub.subscribe({
+      groupId: 'group-01',
+      afterSequence: 0n,
+      connectionId: 'connection-01',
+      send: (frame) => subscribed.push(frame),
+    });
+    await hub.subscribe({
+      groupId: 'group-02',
+      afterSequence: 0n,
+      connectionId: 'connection-02',
+      send: (frame) => otherGroup.push(frame),
+    });
+
+    await hub.publish(publication());
+
+    expect(subscribed.map((frame) => frame.payload.case)).toEqual(['ready', 'groupEvent']);
+    expect(otherGroup.map((frame) => frame.payload.case)).toEqual(['ready']);
   });
 });
 
-function event(sequence: bigint): syncV1.GroupEvent {
-  return create(syncV1.GroupEventSchema, {
-    sequence,
-    kind: syncV1.GroupEventKind.DOCUMENT_DELTA,
-  });
+function publication() {
+  return { groupId: 'group-01', kind: syncV1.GroupEventKind.DOCUMENT_DELTA } as const;
+}
+
+function sequenceOf(frame: realtimeV1.RealtimeServerFrame | undefined): bigint | undefined {
+  return frame?.payload.case === 'groupEvent' ? frame.payload.value.event?.sequence : undefined;
 }

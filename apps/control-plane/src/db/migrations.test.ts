@@ -41,6 +41,7 @@ describe('control-plane migrations', () => {
         '0004_paired_device_pairing_issuer_binding',
         '0005_mutation_idempotency_receipts',
         '0006_mutation_receipts_for_remaining_mutations',
+        '0007_group_event_sequences_and_remaining_scopes',
       ],
       skipped: [],
     });
@@ -135,6 +136,7 @@ describe('control-plane migrations', () => {
       '0004_paired_device_pairing_issuer_binding',
       '0005_mutation_idempotency_receipts',
       '0006_mutation_receipts_for_remaining_mutations',
+      '0007_group_event_sequences_and_remaining_scopes',
     ]);
     const authenticationSql = migrations[1].statements
       .map((statement) => statement.text)
@@ -163,6 +165,7 @@ describe('control-plane migrations', () => {
           { id: migrations[3].id, applied: true },
           { id: migrations[4].id, applied: true },
           { id: migrations[5].id, applied: true },
+          { id: migrations[6].id, applied: true },
         ]);
       },
     };
@@ -174,6 +177,7 @@ describe('control-plane migrations', () => {
         '0004_paired_device_pairing_issuer_binding',
         '0005_mutation_idempotency_receipts',
         '0006_mutation_receipts_for_remaining_mutations',
+        '0007_group_event_sequences_and_remaining_scopes',
       ],
       skipped: ['0001_control_plane_foundation'],
     });

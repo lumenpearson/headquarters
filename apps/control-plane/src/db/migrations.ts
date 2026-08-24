@@ -598,6 +598,88 @@ const mutationReceiptsForRemainingMutations: Migration = {
   ],
 };
 
+/**
+ * Gives group events a durable home and a server-owned sequence.
+ *
+ * Until this migration the realtime hub kept its replay history in a process
+ * `Map`, so a restarted control plane answered every resume with an empty
+ * history and a client could not tell a fresh server from a group with no
+ * events. `sync_events` already existed and was written by nothing; the piece
+ * it lacked was an allocator, because `MAX(sequence) + 1` over the same table
+ * lets two concurrent publishes read the same maximum.
+ *
+ * `group_event_sequences` is that allocator. One upsert both claims the next
+ * number and takes the row lock that serializes the claim, which keeps
+ * allocation inside a single statement — the Neon HTTP driver offers no
+ * interactive transaction to hold a lock across two.
+ *
+ * It is a table of its own rather than a column on `groups` so that publishing
+ * an event does not contend with renaming a group or moving its leader.
+ *
+ * `mutation_receipts` grows `sequence` and eight scopes for the same reason the
+ * five earlier scopes exist: each new mutation either changes what a device may
+ * do or appends an event, and a retry that re-executes it cannot be undone by
+ * the caller. `sequence` records what a publish allocated, so a replay answers
+ * with the number the caller's own mutation produced instead of allocating a
+ * second one.
+ */
+const groupEventSequencesAndRemainingScopes: Migration = {
+  id: '0007_group_event_sequences_and_remaining_scopes',
+  statements: [
+    sql(`CREATE TABLE IF NOT EXISTS group_event_sequences (
+      group_id uuid PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+      last_sequence bigint NOT NULL DEFAULT 0 CHECK (last_sequence >= 0),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`),
+    sql('ALTER TABLE mutation_receipts ADD COLUMN IF NOT EXISTS sequence bigint'),
+    sql('ALTER TABLE mutation_receipts DROP CONSTRAINT IF EXISTS mutation_receipts_scope_check'),
+    sql('ALTER TABLE mutation_receipts DROP CONSTRAINT IF EXISTS mutation_receipts_outcome_check'),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_scope_check
+      CHECK (scope IN (
+        'CREATE_GROUP',
+        'CREATE_PAIRING_CODE',
+        'PAIR_DEVICE',
+        'REFRESH_DEVICE_SESSION',
+        'REVOKE_DEVICE',
+        'UPDATE_GROUP',
+        'JOIN_GROUP',
+        'LEAVE_GROUP',
+        'SET_DEVICE_ROLE',
+        'SET_AUTHORITY_MODE',
+        'SET_LEADER',
+        'PUBLISH_DOCUMENT_DELTA',
+        'PUBLISH_SESSION_COMMAND'
+      ))`),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_outcome_check
+      CHECK (
+        CASE
+          WHEN completed_at IS NULL THEN
+            group_id IS NULL
+            AND device_id IS NULL
+            AND session_id IS NULL
+            AND resource_hash IS NULL
+            AND revision IS NULL
+            AND sequence IS NULL
+          WHEN scope IN ('CREATE_GROUP', 'PAIR_DEVICE') THEN
+            group_id IS NOT NULL AND device_id IS NOT NULL AND session_id IS NOT NULL
+          WHEN scope = 'REFRESH_DEVICE_SESSION' THEN
+            session_id IS NOT NULL
+          WHEN scope = 'CREATE_PAIRING_CODE' THEN
+            group_id IS NOT NULL AND resource_hash IS NOT NULL
+          WHEN scope IN ('REVOKE_DEVICE', 'SET_DEVICE_ROLE', 'JOIN_GROUP', 'LEAVE_GROUP') THEN
+            group_id IS NOT NULL AND device_id IS NOT NULL AND revision IS NOT NULL
+          WHEN scope IN ('UPDATE_GROUP', 'SET_AUTHORITY_MODE', 'SET_LEADER') THEN
+            group_id IS NOT NULL AND revision IS NOT NULL
+          WHEN scope IN ('PUBLISH_DOCUMENT_DELTA', 'PUBLISH_SESSION_COMMAND') THEN
+            group_id IS NOT NULL AND sequence IS NOT NULL
+          ELSE false
+        END
+      )`),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -605,6 +687,7 @@ export const migrations: readonly Migration[] = [
   pairedDevicePairingIssuerBinding,
   mutationIdempotencyReceipts,
   mutationReceiptsForRemainingMutations,
+  groupEventSequencesAndRemainingScopes,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

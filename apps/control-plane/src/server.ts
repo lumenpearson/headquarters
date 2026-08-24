@@ -4,6 +4,7 @@ import { timestampNow } from '@bufbuild/protobuf/wkt';
 import { cors, type ConnectRouter, type ServiceImpl } from '@connectrpc/connect';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import { ControlPlaneService, SyncService, controlV1 } from '@gremuchaya/protocol';
+import type { syncV1 } from '@gremuchaya/protocol';
 
 import { loadControlPlaneConfig, type ControlPlaneConfig } from './config.js';
 import { attachRealtimeTransport } from './realtime/server.js';
@@ -31,6 +32,12 @@ export interface ControlPlaneStartOptions {
   readonly pairedDeviceLifecycle?: ConfiguredPairedDeviceLifecycleOptions;
 }
 
+export interface RunningControlPlane {
+  readonly server: ReturnType<typeof createServer>;
+  publishGroupEvent(event: GroupEventPublication): Promise<syncV1.GroupEvent>;
+  close(): Promise<void>;
+}
+
 interface ResolvedControlPlaneCollaborators {
   readonly syncService?: Partial<ServiceImpl<typeof SyncService>>;
   readonly realtime?: RealtimeTransportOptions;
@@ -39,7 +46,7 @@ interface ResolvedControlPlaneCollaborators {
 export async function startControlPlane(
   config: ControlPlaneConfig,
   options: ControlPlaneStartOptions = {},
-) {
+): Promise<RunningControlPlane> {
   const collaborators = await resolveControlPlaneCollaborators(config, options);
   const startedAt = timestampNow();
   const rpcHandler = connectNodeAdapter({

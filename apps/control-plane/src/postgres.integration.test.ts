@@ -2,12 +2,8 @@ import { randomBytes } from 'node:crypto';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createNeonDatabase, type SqlClient } from './db/database.js';
-import {
-  describesSameDatabase,
-  disposableDatabaseName,
-  sweepDisposableDatabases,
-} from './db/disposableDatabases.js';
+import type { SqlClient } from './db/database.js';
+import { DisposableDatabasePool, liveTestDatabaseUrl } from './db/liveDatabase.js';
 import { migrations, runMigrations } from './db/migrations.js';
 import { DurablePairedDeviceRuntime } from './sync/durable-runtime.js';
 import type { AuthenticatedDevice } from './sync/runtime.js';
@@ -25,61 +21,41 @@ import type { AuthenticatedDevice } from './sync/runtime.js';
  * URL must point at a disposable database — the suite creates and drops its
  * own databases and is destructive by design.
  */
-const testDatabaseUrl = process.env.HQ_CONTROL_PLANE_TEST_DATABASE_URL;
-const deploymentDatabaseUrl = process.env.HQ_CONTROL_PLANE_DATABASE_URL;
-
 // This suite drops databases. Refusing to start beats warning in a comment:
 // with both URLs configured, the two must not resolve to the same database.
-if (
-  testDatabaseUrl !== undefined &&
-  deploymentDatabaseUrl !== undefined &&
-  describesSameDatabase(testDatabaseUrl, deploymentDatabaseUrl)
-) {
-  throw new Error(
-    'HQ_CONTROL_PLANE_TEST_DATABASE_URL must not address the same database as ' +
-      'HQ_CONTROL_PLANE_DATABASE_URL: this suite creates and drops databases.',
-  );
-}
+// `liveTestDatabaseUrl` throws rather than skipping when they collide.
+const testDatabaseUrl = liveTestDatabaseUrl();
 
 const describeIntegration = testDatabaseUrl === undefined ? describe.skip : describe;
 const networkTimeoutMs = 120_000;
-// One hour is far beyond the whole suite's worst case (18 scenarios, 120 s
-// each), so a sweep can never reach a run that is still in flight.
-const staleDatabaseAfterMs = 3_600_000;
 const tokenPepper = 'integration-token-pepper-with-at-least-thirty-two-characters';
 
 describeIntegration('durable paired-device lifecycle against real PostgreSQL', () => {
-  const baseUrl = testDatabaseUrl ?? '';
-  const admin = createNeonDatabase(baseUrl);
-  const createdDatabases: string[] = [];
+  const pool = new DisposableDatabasePool(testDatabaseUrl ?? '');
   let database: SqlClient;
 
   beforeAll(async () => {
     // Sweep first: a previous run killed before `afterAll` leaves its database
     // behind, and the instant in the name is what makes that safe to decide.
-    const swept = await sweepDisposableDatabases(admin, Date.now(), staleDatabaseAfterMs);
+    const swept = await pool.sweep();
     if (swept.dropped.length > 0) {
       // Raw stderr, not console.warn: Vitest's reporter intercepts console
       // output from hooks and never prints it, and a sweep that removes a
       // database has to be visible to whoever ran the suite.
       process.stderr.write(`Swept abandoned test databases: ${swept.dropped.join(', ')}\n`);
     }
-    database = await createIsolatedDatabase();
+    database = await pool.create();
     await runMigrations(database);
   }, networkTimeoutMs);
 
   afterAll(async () => {
-    for (const name of createdDatabases) {
-      // FORCE is required: the pooled endpoint keeps short-lived connections
-      // that would otherwise make DROP DATABASE fail.
-      await admin.query({ text: `DROP DATABASE IF EXISTS ${name} WITH (FORCE)` });
-    }
+    await pool.dropAll();
   }, networkTimeoutMs);
 
   it(
     'applies each immutable migration exactly once under simultaneous runners',
     async () => {
-      const contended = await createIsolatedDatabase();
+      const contended = await pool.create();
 
       const [first, second] = await Promise.all([
         runMigrations(contended),
@@ -650,15 +626,6 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
       platform: 'windows',
       applicationVersion: '0.1.0',
     };
-  }
-
-  async function createIsolatedDatabase(): Promise<SqlClient> {
-    const name = disposableDatabaseName(Date.now(), uniqueSuffix());
-    await admin.query({ text: `CREATE DATABASE ${name}` });
-    createdDatabases.push(name);
-    const url = new URL(baseUrl);
-    url.pathname = `/${name}`;
-    return createNeonDatabase(url.toString());
   }
 });
 

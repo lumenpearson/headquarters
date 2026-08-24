@@ -59,7 +59,7 @@ export interface RealtimeTransportOptions {
 }
 
 export interface RealtimeTransport {
-  publish(event: GroupEventPublication): void;
+  publish(event: GroupEventPublication): Promise<syncV1.GroupEvent>;
   close(): Promise<void>;
 }
 
@@ -159,8 +159,8 @@ export function attachRealtimeTransport(
       },
       invalidateAdmission: clearAdmission,
       startPeriodicRevalidation,
-      subscribe: (groupId, afterSequence) => {
-        unsubscribe = hub.subscribe({
+      subscribe: async (groupId, afterSequence) => {
+        unsubscribe = await hub.subscribe({
           groupId,
           afterSequence,
           send: (serverFrame) =>
@@ -202,7 +202,7 @@ interface RealtimeConnectionContext {
   readonly setAdmissionInput: (input: RealtimeAdmissionInput | undefined) => void;
   readonly invalidateAdmission: () => void;
   readonly startPeriodicRevalidation: () => void;
-  readonly subscribe: (groupId: string, afterSequence: bigint) => void;
+  readonly subscribe: (groupId: string, afterSequence: bigint) => Promise<void>;
 }
 
 interface RealtimeMessageContext extends RealtimeConnectionContext {
@@ -344,7 +344,7 @@ async function handleHello(
     // closure that owns it. It is never exposed through the hub or logs.
     context.setAdmissionInput(context.admission === undefined ? undefined : admissionInput);
     context.setState({ subscribedGroupId: groupId, helloPending: false, admitted: true });
-    context.subscribe(groupId, hello.afterSequence);
+    await context.subscribe(groupId, hello.afterSequence);
     context.startPeriodicRevalidation();
   } finally {
     const after = context.getState();
@@ -353,10 +353,9 @@ async function handleHello(
 }
 
 /**
- * The hub is synchronous, while authorization may require I/O. Each delivery
- * is therefore queued per connection: a later frame cannot overtake its
- * revalidation, and a denial removes the subscription before any group event
- * is handed to the WebSocket.
+ * Both the hub and authorization require I/O. Each delivery is therefore queued
+ * per connection: a later frame cannot overtake its revalidation, and a denial
+ * removes the subscription before any group event is handed to the WebSocket.
  */
 async function deliverAuthorizedFrame(
   context: RealtimeConnectionContext,

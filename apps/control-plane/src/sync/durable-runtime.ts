@@ -1,14 +1,27 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
-import type { SqlClient, SqlParameter, SqlStatement } from '../db/database.js';
+import type { SqlClient } from '../db/database.js';
+import type { FingerprintField, MutationReceiptContext, MutationScope } from './receipts.js';
 import {
-  encodeFingerprintPayload,
-  encodeRequestIdPayload,
-  normalizeRequestId,
-  type FingerprintField,
-  type MutationReceiptContext,
-  type MutationScope,
-} from './receipts.js';
+  MutationReceiptGuard,
+  replayNoLongerAuthorized,
+  requireOutcomeField,
+  type MutationReceiptClaim,
+  type StoredMutationReceipt,
+} from './receipt-guard.js';
+import {
+  hex,
+  isRecord,
+  normalizeDatabaseError,
+  readBigInt,
+  readBoolean,
+  readDate,
+  readJsonArray,
+  readJsonObject,
+  readText,
+  requireOneRow,
+  sql,
+} from './rows.js';
 import { PairedDeviceRuntimeError } from './runtime.js';
 import type {
   AuthenticatedDevice,
@@ -119,25 +132,6 @@ type LifecycleRow = Record<string, unknown> & {
   readonly receipt_claimed?: unknown;
 };
 
-/** The receipt identity of one mutation attempt, resolved before its statement runs. */
-interface MutationReceiptClaim {
-  readonly scope: MutationScope;
-  readonly requestIdHash: string;
-  readonly fingerprint: string;
-  readonly expiresAt: Date;
-  /** False when a completed receipt already owns this identity, so this is a retry. */
-  readonly claimed: boolean;
-}
-
-/** A completed receipt as stored, before any scope-specific reading of it. */
-interface StoredMutationReceipt {
-  readonly groupId: string | undefined;
-  readonly deviceId: string | undefined;
-  readonly sessionId: string | undefined;
-  readonly resourceHash: string | undefined;
-  readonly revision: bigint | undefined;
-}
-
 /**
  * PostgreSQL-backed counterpart to `PairedDeviceRuntime`.
  *
@@ -172,6 +166,7 @@ export class DurablePairedDeviceRuntime {
   readonly #refreshTokenLifetimeMs: number;
   readonly #pairingCodeLifetimeMs: number;
   readonly #mutationReceiptLifetimeMs: number;
+  readonly #receipts: MutationReceiptGuard;
 
   constructor(options: DurablePairedDeviceRuntimeOptions) {
     this.#database = options.database;
@@ -208,6 +203,18 @@ export class DurablePairedDeviceRuntime {
       options.mutationReceiptLifetimeMs ?? defaultMutationReceiptLifetimeMs,
       'mutationReceiptLifetimeMs',
     );
+    this.#receipts = new MutationReceiptGuard({
+      database: this.#database,
+      hashReceipt: (payload) => this.#hashCredential('receipt', payload),
+      tokenHashVersion: this.#tokenHashVersion,
+      receiptLifetimeMs: this.#mutationReceiptLifetimeMs,
+      now: () => this.currentTime(),
+    });
+  }
+
+  /** The receipt guard this runtime already configured, for collaborators that share its identity. */
+  get receiptGuard(): MutationReceiptGuard {
+    return this.#receipts;
   }
 
   async createGroup(input: CreateGroupInput): Promise<{
@@ -1649,7 +1656,7 @@ export class DurablePairedDeviceRuntime {
    * NULL, leaving the pre-receipt statement semantics unchanged.
    */
   /**
-   * Claims the idempotency identity of one mutation, in a statement of its own.
+   * Receipt handling is delegated whole.
    *
    * The claim cannot travel inside the mutation statement. PostgreSQL runs
    * every data-modifying CTE against the same pre-statement snapshot, so a CTE
@@ -1658,102 +1665,25 @@ export class DurablePairedDeviceRuntime {
    * retry re-ran the mutation. Committing the claim first is what makes the
    * receipt row visible to the mutation statement that has to complete it.
    *
-   * An absent request id is the proto3 default for a client that has not opted
-   * into retries, so it returns `undefined` and no statement is issued at all.
+   * The statement itself now lives in `MutationReceiptGuard`, because the
+   * realtime event store and the four F6 services issue the identical claim and
+   * a second copy of it is the one thing that could make two retries of one
+   * request disagree about whether they are retries.
    */
-  private async claimReceipt(
+  private claimReceipt(
     scope: MutationScope,
     mutation: MutationReceiptContext | undefined,
     now: Date,
     fields: readonly FingerprintField[],
   ): Promise<MutationReceiptClaim | undefined> {
-    const requestId = normalizeRequestId(mutation?.requestId);
-    if (requestId === undefined) return undefined;
-    const identity = {
-      scope,
-      requestIdHash: this.hashToken('receipt', encodeRequestIdPayload(scope, requestId)),
-      fingerprint: this.hashToken('receipt', encodeFingerprintPayload(scope, fields)),
-      expiresAt: new Date(now.getTime() + this.#mutationReceiptLifetimeMs),
-    };
-    const rows = await this.query<LifecycleRow>(
-      sql(
-        `INSERT INTO mutation_receipts (
-           scope, request_id_hash, hash_version, request_fingerprint, claimed_at, expires_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (scope, request_id_hash) DO UPDATE
-           SET claimed_at = EXCLUDED.claimed_at,
-               expires_at = EXCLUDED.expires_at,
-               request_fingerprint = EXCLUDED.request_fingerprint
-           -- A completed receipt refuses the claim; an unfinished one belongs
-           -- to an attempt that never committed and carries no authority, so
-           -- it is taken over rather than treated as a conflict.
-           WHERE mutation_receipts.completed_at IS NULL
-         RETURNING request_id_hash AS receipt_claimed`,
-        [
-          identity.scope,
-          identity.requestIdHash,
-          this.#tokenHashVersion,
-          identity.fingerprint,
-          now,
-          identity.expiresAt,
-        ],
-      ),
-    );
-    return { ...identity, claimed: rows.length > 0 };
+    return this.#receipts.claim(scope, mutation, now, fields);
   }
 
-  /**
-   * Explains a mutation statement that produced no row while a receipt claim
-   * was in play. The claim is refused only by a committed receipt, so a
-   * completed row means a previous attempt already performed this exact
-   * mutation and the caller is retrying it.
-   *
-   * An incomplete row is this attempt's own claim: the mutation genuinely
-   * failed, and the operation's real error is raised so a retry is not
-   * disguised as success.
-   */
-  private async resolveRefusedClaim(
+  private resolveRefusedClaim(
     receipt: MutationReceiptClaim,
     mutationFailure: PairedDeviceRuntimeError,
   ): Promise<StoredMutationReceipt> {
-    const rows = await this.query<LifecycleRow>(
-      sql(
-        `SELECT
-           receipt.request_fingerprint AS receipt_fingerprint,
-           receipt.completed_at AS receipt_completed_at,
-           receipt.group_id AS receipt_group_id,
-           receipt.device_id AS receipt_device_id,
-           receipt.session_id AS receipt_session_id,
-           receipt.resource_hash AS receipt_resource_hash,
-           receipt.revision AS receipt_revision
-         FROM mutation_receipts AS receipt
-         WHERE receipt.scope = $1
-           AND receipt.request_id_hash = $2
-           AND receipt.expires_at > $3`,
-        [receipt.scope, receipt.requestIdHash, this.currentTime()],
-      ),
-    );
-    const row = rows[0];
-    if (row?.receipt_completed_at === undefined || row.receipt_completed_at === null) {
-      throw mutationFailure;
-    }
-    if (readText(row.receipt_fingerprint, 'receipt_fingerprint') !== receipt.fingerprint) {
-      throw new PairedDeviceRuntimeError(
-        'ALREADY_EXISTS',
-        'The mutation request identifier was already used with a different request payload.',
-      );
-    }
-    return {
-      groupId: readOptionalText(row.receipt_group_id),
-      deviceId: readOptionalText(row.receipt_device_id),
-      sessionId: readOptionalText(row.receipt_session_id),
-      resourceHash: readOptionalText(row.receipt_resource_hash),
-      revision:
-        row.receipt_revision === null || row.receipt_revision === undefined
-          ? undefined
-          : readBigInt(row.receipt_revision, 'receipt_revision'),
-    };
+    return this.#receipts.resolveRefused(receipt, mutationFailure);
   }
 
   /**
@@ -1918,7 +1848,7 @@ export class DurablePairedDeviceRuntime {
   }
 
   private async query<Row extends Record<string, unknown>>(
-    statement: SqlStatement,
+    statement: ReturnType<typeof sql>,
   ): Promise<readonly Row[]> {
     try {
       return await this.#database.query<Row>(statement);
@@ -2011,38 +1941,6 @@ export class DurablePairedDeviceRuntime {
  * the field its own scope requires means the stored outcome cannot be trusted,
  * so replay refuses rather than guessing.
  */
-function replayNoLongerAuthorized(): PairedDeviceRuntimeError {
-  return new PairedDeviceRuntimeError(
-    'UNAUTHENTICATED',
-    'The recorded mutation can no longer issue credentials.',
-  );
-}
-
-function requireOutcomeField(value: string | undefined, field: string): string {
-  if (value === undefined) {
-    throw new PairedDeviceRuntimeError(
-      'UNAUTHENTICATED',
-      `The recorded mutation is missing ${field} and can no longer be replayed.`,
-    );
-  }
-  return value;
-}
-
-function readOptionalText(value: unknown): string | undefined {
-  if (value === null || value === undefined) return undefined;
-  if (typeof value !== 'string' || value.length === 0) return undefined;
-  return value;
-}
-
-function sql(text: string, values: readonly SqlParameter[]): SqlStatement {
-  return { text, values };
-}
-
-function requireOneRow(rows: readonly LifecycleRow[], message: string): LifecycleRow {
-  const row = rows[0];
-  if (row === undefined) throw new PairedDeviceRuntimeError('FAILED_PRECONDITION', message);
-  return row;
-}
 
 function normalizeDeviceInput(input: {
   readonly name: string;
@@ -2149,67 +2047,6 @@ function readDeviceStatus(value: unknown): PairedDevice['status'] {
   throw new Error('Unexpected device status returned by the database.');
 }
 
-function readText(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new Error(`The database returned an invalid ${field}.`);
-  }
-  return value;
-}
-
-function readDate(value: unknown, field: string): Date {
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(String(value));
-  if (Number.isNaN(date.getTime())) throw new Error(`The database returned an invalid ${field}.`);
-  return date;
-}
-
-function readBigInt(value: unknown, field: string): bigint {
-  try {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') {
-      if (!Number.isSafeInteger(value)) throw new Error('unsafe integer');
-      return BigInt(value);
-    }
-    if (typeof value === 'string' && /^-?\d+$/u.test(value)) return BigInt(value);
-  } catch {
-    // Normalized error below keeps driver-specific conversion details out of responses.
-  }
-  throw new Error(`The database returned an invalid ${field}.`);
-}
-
-function readBoolean(value: unknown, field: string): boolean {
-  if (typeof value === 'boolean') return value;
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  throw new Error(`The database returned an invalid ${field}.`);
-}
-
-function readJsonArray(value: unknown, field: string): readonly Record<string, unknown>[] {
-  const decoded = readJson(value, field);
-  if (!Array.isArray(decoded) || !decoded.every(isRecord)) {
-    throw new Error(`The database returned an invalid ${field}.`);
-  }
-  return decoded;
-}
-
-function readJsonObject(value: unknown, field: string): Record<string, unknown> {
-  const decoded = readJson(value, field);
-  if (!isRecord(decoded)) throw new Error(`The database returned an invalid ${field}.`);
-  return decoded;
-}
-
-function readJson(value: unknown, field: string): unknown {
-  if (typeof value !== 'string') return value;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    throw new Error(`The database returned invalid JSON for ${field}.`);
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function encodeCursor(device: PairedDevice): string {
   return Buffer.from(
     JSON.stringify({ createdAt: device.createdAt.toISOString(), deviceId: device.id }),
@@ -2238,36 +2075,4 @@ function decodeCursor(
   } catch {
     throw new PairedDeviceRuntimeError('INVALID_ARGUMENT', 'The page cursor is invalid.');
   }
-}
-
-function normalizeDatabaseError(error: unknown): Error {
-  if (error instanceof PairedDeviceRuntimeError) return error;
-  if (isPostgresError(error, '40P01') || isPostgresError(error, '40001')) {
-    return new PairedDeviceRuntimeError(
-      'ABORTED',
-      'The lifecycle mutation conflicted with a concurrent operation. Retry after refreshing state.',
-    );
-  }
-  if (isPostgresError(error, '23505')) {
-    return new PairedDeviceRuntimeError(
-      'ALREADY_EXISTS',
-      'A record with the supplied unique identifier already exists.',
-    );
-  }
-  if (isPostgresError(error, '23503')) {
-    return new PairedDeviceRuntimeError(
-      'FAILED_PRECONDITION',
-      'The requested lifecycle state is no longer available.',
-    );
-  }
-  if (error instanceof Error) return error;
-  return new Error('The database rejected the paired-device operation.');
-}
-
-function isPostgresError(error: unknown, expectedCode: string): boolean {
-  return isRecord(error) && error.code === expectedCode;
-}
-
-function hex(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('hex');
 }
