@@ -150,8 +150,13 @@ export function createIntegrationService(
       });
     },
 
-    openPrefilledIssue(request) {
-      return withRuntimeErrors(() => {
+    async openPrefilledIssue(request, context) {
+      return withRuntimeErrors(async () => {
+        // Authenticated like every other method. It spends no credential and
+        // writes nothing, but it composes an outbound address from client text,
+        // and an unauthenticated endpoint that does that is a redirector anyone
+        // can point at this control plane's name.
+        await authenticate(options, context);
         const draft = request.draft;
         if (draft === undefined) {
           throw new PairedDeviceRuntimeError('INVALID_ARGUMENT', 'draft must not be empty.');
@@ -599,27 +604,42 @@ function buildPrefilledIssueUrl(repository: string, draft: integrationV1.IssueDr
   const parameters = new URLSearchParams();
   parameters.set('title', draft.title);
   if (draft.labels.length > 0) parameters.set('labels', draft.labels.join(','));
+  // Measured against what is actually built. The budget used to be computed
+  // with `encodeURIComponent` while the address was assembled by
+  // `URLSearchParams`, which encodes a space as `+` and leaves several
+  // characters alone — so a body that fitted the estimate could still overrun
+  // the address that was sent.
   const withoutBody = `${base}?${parameters.toString()}`;
   const budget = maxPrefilledIssueUrlLength - withoutBody.length - '&body='.length;
   parameters.set('body', fitEncoded(draft.bodyMarkdown, budget));
   return `${base}?${parameters.toString()}`;
 }
 
+/** How long this value grows once `URLSearchParams` has encoded it. */
+function encodedLength(value: string): number {
+  return new URLSearchParams({ body: value }).toString().length - 'body='.length;
+}
+
 /**
- * Trims markdown until its percent-encoded form fits the remaining budget.
+ * Trims markdown until its encoded form fits the remaining budget.
+ *
  * Cutting the raw string is not enough: one Cyrillic character becomes nine
- * encoded bytes, so a body that looks short can still overrun the address.
+ * encoded bytes, so a body that looks short can still overrun the address. The
+ * cut is made on code points rather than UTF-16 units — slicing between a
+ * surrogate pair produced a lone half, and encoding one throws `URIError`
+ * inside the loop condition, so a report containing a single emoji crashed the
+ * call rather than being shortened.
  */
 function fitEncoded(body: string, budget: number): string {
   if (budget <= 0) return '';
-  if (encodeURIComponent(body).length <= budget) return body;
+  if (encodedLength(body) <= budget) return body;
   const marker = truncationMarker;
-  const markerCost = encodeURIComponent(marker).length;
-  let kept = body;
-  while (kept.length > 0 && encodeURIComponent(kept).length + markerCost > budget) {
+  const markerCost = encodedLength(marker);
+  let kept = [...body];
+  while (kept.length > 0 && encodedLength(kept.join('')) + markerCost > budget) {
     kept = kept.slice(0, Math.max(0, Math.floor(kept.length * 0.9) - 1));
   }
-  return `${kept}${marker}`;
+  return `${kept.join('')}${marker}`;
 }
 
 function assertAttachmentBudget(attachments: readonly integrationV1.IssueAttachment[]): void {

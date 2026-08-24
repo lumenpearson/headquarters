@@ -1,6 +1,7 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
 import type { SqlClient } from '../db/database.js';
+import { normalizePageSize as boundPageSize } from './paging.js';
 import {
   groupMutationEpilogue,
   groupMutationProjection,
@@ -1271,7 +1272,7 @@ export class DurablePairedDeviceRuntime {
         'The authenticated device does not belong to the requested group.',
       );
     }
-    const pageSize = normalizePageSize(requestedPageSize);
+    const pageSize = boundPageSize(requestedPageSize, { defaultPageSize, maxPageSize });
     const decodedCursor = decodeCursor(cursor);
     const rows = await this.query<LifecycleRow>(
       sql(
@@ -2458,21 +2459,6 @@ function requireTokenHashVersion(value: string): string {
     throw new Error('tokenHashVersion must be a non-empty stable identifier');
   }
   return normalized;
-}
-
-function normalizePageSize(requestedPageSize: number): number {
-  if (requestedPageSize === 0) return defaultPageSize;
-  if (
-    !Number.isSafeInteger(requestedPageSize) ||
-    requestedPageSize < 1 ||
-    requestedPageSize > maxPageSize
-  ) {
-    throw new PairedDeviceRuntimeError(
-      'INVALID_ARGUMENT',
-      `page_size must be between 1 and ${maxPageSize}.`,
-    );
-  }
-  return requestedPageSize;
 }
 
 function toGroup(row: Record<string, unknown>): PairedGroup {

@@ -712,6 +712,42 @@ describeIntegration('durable settings storage against real PostgreSQL', () => {
     networkTimeoutMs,
   );
 
+  it(
+    'keeps the schema a document was written under when a later patch declares another',
+    async () => {
+      const runtime = createRuntime();
+      const store = createStore(runtime);
+      const owner = await bootstrapGroup(runtime);
+      await store.applyDraftPatch({
+        actor: owner.actor,
+        scope: owner.scope,
+        operations: [setting('appearance.theme', 'dark')],
+        schemaVersion,
+        correlationId: '',
+      });
+
+      // A client running an older build declares its own schema on every
+      // request. Adopting it relabelled the group's document as that build's
+      // schema, so the next reader could not tell which one the values were
+      // written against.
+      await store.applyDraftPatch({
+        actor: owner.actor,
+        scope: owner.scope,
+        operations: [setting('appearance.theme', 'light')],
+        schemaVersion: 'ancient-build',
+        correlationId: '',
+      });
+
+      const stored = await database.query<{ schema_version: string }>({
+        text: `SELECT schema_version FROM settings_documents
+               WHERE group_id = $1 AND scope_type = 'GROUP_DRAFT'`,
+        values: [owner.groupId],
+      });
+      expect(stored[0]?.schema_version).toBe(schemaVersion);
+    },
+    networkTimeoutMs,
+  );
+
   function createRuntime(): DurablePairedDeviceRuntime {
     return new DurablePairedDeviceRuntime({ database, tokenPepper });
   }

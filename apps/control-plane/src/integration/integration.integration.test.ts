@@ -658,6 +658,7 @@ describeIntegration('durable integration store against real PostgreSQL', () => {
     'builds a prefilled issue address that stays inside an address bar',
     async () => {
       const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
       const service = createIntegrationService({ runtime, issueRepository: 'gremuchaya/hq' });
 
       const opened = await callMethod(service.openPrefilledIssue, 'openPrefilledIssue')(
@@ -665,13 +666,16 @@ describeIntegration('durable integration store against real PostgreSQL', () => {
           draft: {
             title: 'Карта пуста',
             // Cyrillic costs nine bytes per character once encoded, which is
-            // exactly the case a raw length check would let through.
-            bodyMarkdown: 'Сектор не отрисован. '.repeat(2000),
+            // exactly the case a raw length check would let through. The emoji
+            // is the other case: cutting between its two UTF-16 units left a
+            // lone surrogate, and encoding one throws inside the loop that was
+            // meant to shorten the body.
+            bodyMarkdown: `Сектор не отрисован 🛰. `.repeat(2000),
             labels: ['hq'],
             repository: 'gremuchaya/hq',
           },
         }),
-        handlerContext(''),
+        handlerContext(owner.accessToken),
       );
 
       const url = opened.url ?? '';

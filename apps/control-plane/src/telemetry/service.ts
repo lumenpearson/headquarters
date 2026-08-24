@@ -60,6 +60,8 @@ const maxPreviewSampleCount = 512;
 const defaultUpdateIntervalMs = 1_000;
 const defaultPeriodSeconds = 60;
 const maxProfileNameLength = 120;
+/** The names `ApplySimulationPreset` owns; an operator profile may not take one. */
+const reservedProfileNamePrefix = 'preset:';
 const maxChannelsPerProfile = 64;
 const maxCurvePoints = 512;
 const maxPeriodSeconds = 86_400;
@@ -191,6 +193,7 @@ export function createTelemetryService(
             timeScale: shape.timeScale,
           }),
           groupId,
+          { reservedNameAllowed: true },
         );
         const written = await options.profiles.applyPreset({
           groupId,
@@ -304,7 +307,7 @@ function presetShape(preset: telemetryV1.SimulationPresetKind): PresetShape {
  * preset's.
  */
 function presetProfileName(preset: telemetryV1.SimulationPresetKind): string {
-  return `preset:${presetKindName(preset)}`;
+  return `${reservedProfileNamePrefix}${presetKindName(preset)}`;
 }
 
 function requireAppliablePreset(
@@ -378,6 +381,9 @@ interface AuthoredProfile {
 function readAuthoredProfile(
   profile: telemetryV1.SimulationProfile,
   groupId: string,
+  // `ApplySimulationPreset` composes the reserved name itself and is the only
+  // caller entitled to it.
+  options: { readonly reservedNameAllowed?: boolean } = {},
 ): AuthoredProfile {
   const name = profile.name.trim();
   if (name.length === 0) {
@@ -390,6 +396,17 @@ function readAuthoredProfile(
     throw new PairedDeviceRuntimeError(
       'INVALID_ARGUMENT',
       `A simulation profile name must not exceed ${maxProfileNameLength.toString()} characters.`,
+    );
+  }
+  // `ApplySimulationPreset` writes `preset:<KIND>` and upserts on
+  // `(group_id, name)`. An operator who authored a profile under that exact
+  // name would have it replaced by the preset's channels without being told, so
+  // the prefix is reserved rather than merely conventional.
+  if (options.reservedNameAllowed !== true && name.startsWith(reservedProfileNamePrefix)) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      `A simulation profile name must not start with "${reservedProfileNamePrefix}": ` +
+        'that namespace belongs to the presets.',
     );
   }
   if (profile.presetKind === telemetryV1.SimulationPresetKind.UNSPECIFIED) {

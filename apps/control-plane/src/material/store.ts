@@ -10,6 +10,7 @@ import {
   readBoolean,
   readDate,
   readJson,
+  readJsonArray,
   readJsonObject,
   readOptionalDate,
   readOptionalText,
@@ -17,6 +18,7 @@ import {
   requireOneRow,
   sql,
 } from '../sync/rows.js';
+import { normalizePageSize as boundPageSize } from '../sync/paging.js';
 import { PairedDeviceRuntimeError, type AuthenticatedDevice } from '../sync/runtime.js';
 
 /**
@@ -545,7 +547,7 @@ export class DurableMaterialStore {
     cursor: string,
   ): Promise<MaterialVersionPage> {
     const normalizedId = requireIdentifier(materialId, 'material_id');
-    const pageSize = normalizePageSize(requestedPageSize);
+    const pageSize = boundPageSize(requestedPageSize, { defaultPageSize, maxPageSize });
     const decoded = decodeVersionCursor(cursor);
     const rows = await this.query(
       sql(
@@ -589,7 +591,7 @@ export class DurableMaterialStore {
     );
     const row = requireOneRow(rows, 'Unable to list material versions.');
     this.assertMember(row);
-    const items = readObjectArray(row.items, 'items').map(toVersion);
+    const items = readJsonArray(row.items, 'items').map(toVersion);
     const hasMore = items.length > pageSize;
     const visible = hasMore ? items.slice(0, pageSize) : items;
     const last = visible.at(-1);
@@ -786,7 +788,7 @@ export class DurableMaterialStore {
     );
     const row = requireOneRow(rows, 'Unable to read material events.');
     this.assertMember(row);
-    return readObjectArray(row.events, 'events').map(toMaterialEvent);
+    return readJsonArray(row.events, 'events').map(toMaterialEvent);
   }
 
   // ------------------------------------------------------------ mutations
@@ -842,7 +844,7 @@ export class DurableMaterialStore {
            -- The presence of this row is the deduplication decision. FOR UPDATE
            -- holds it so a concurrent purge cannot drop the object between the
            -- decision and the reference the next CTE adds to it.
-           SELECT object.group_id, object.content_hash, object.storage_key
+           SELECT object.group_id, object.content_hash, object.storage_key, object.byte_size
            FROM material_objects AS object
            JOIN editor ON editor.group_id = object.group_id
            WHERE object.content_hash = $7
@@ -865,7 +867,14 @@ export class DurableMaterialStore {
              status, current_version_id, metadata, revision, created_at, updated_at
            )
            SELECT
-             $6, claimed_object.group_id, $10, $11, $12, $8::bigint, claimed_object.content_hash,
+             $6, claimed_object.group_id, $10, $11, $12,
+             -- On the deduplicated path the size is the one the stored object
+             -- already records, not the one the request declared. The bytes
+             -- exist and their length is a fact; taking the caller's number let
+             -- a second upload of the same content publish a material whose
+             -- declared size did not match what a download would return.
+             COALESCE((SELECT existing.byte_size FROM locked_object AS existing), $8::bigint),
+             claimed_object.content_hash,
              CASE WHEN EXISTS (SELECT 1 FROM locked_object) THEN 'READY' ELSE 'UPLOADING' END,
              -- Written here rather than by a follow-up UPDATE: a second
              -- sub-statement cannot see the row this one inserts, and
@@ -990,7 +999,7 @@ export class DurableMaterialStore {
     return {
       material: toMaterial(readJsonObject(material, 'material')),
       session: toSession(readJsonObject(session, 'session')),
-      parts: readObjectArray(row.parts, 'parts').map(toPart),
+      parts: readJsonArray(row.parts, 'parts').map(toPart),
       storageKey: readText(row.storage_key, 'storage_key'),
       deduplicated: readBoolean(row.deduplicated, 'deduplicated'),
     };
@@ -1504,7 +1513,7 @@ export class DurableMaterialStore {
       material: toMaterial(readJsonObject(material, 'material')),
       version: toVersion(readJsonObject(version, 'version')),
       session: toSession(readJsonObject(session, 'session')),
-      parts: readObjectArray(row.parts, 'parts').map(toPart),
+      parts: readJsonArray(row.parts, 'parts').map(toPart),
       storageKey: readOptionalText(row.claimed_key) ?? storageKey,
     };
   }
@@ -1938,7 +1947,7 @@ export class DurableMaterialStore {
   ): Promise<MaterialPage> {
     const normalizedGroupId = requireIdentifier(groupId, 'group_id');
     this.assertAuthenticatedGroup(authenticated, normalizedGroupId);
-    const pageSize = normalizePageSize(requestedPageSize);
+    const pageSize = boundPageSize(requestedPageSize, { defaultPageSize, maxPageSize });
     const decoded = decodeMaterialCursor(cursor);
     const rows = await this.query(
       sql(
@@ -1981,7 +1990,7 @@ export class DurableMaterialStore {
     );
     const row = requireOneRow(rows, 'Unable to list materials.');
     this.assertMember(row);
-    const items = readObjectArray(row.items, 'items').map(toMaterial);
+    const items = readJsonArray(row.items, 'items').map(toMaterial);
     const hasMore = items.length > pageSize;
     const visible = hasMore ? items.slice(0, pageSize) : items;
     const last = visible.at(-1);
@@ -2351,21 +2360,6 @@ function chunkSizeFor(totalSize: bigint, preferredChunkSize: number): number {
   return Number(required);
 }
 
-function normalizePageSize(requestedPageSize: number): number {
-  if (requestedPageSize === 0) return defaultPageSize;
-  if (
-    !Number.isSafeInteger(requestedPageSize) ||
-    requestedPageSize < 1 ||
-    requestedPageSize > maxPageSize
-  ) {
-    throw new PairedDeviceRuntimeError(
-      'INVALID_ARGUMENT',
-      `page_size must be between 1 and ${maxPageSize.toString()}.`,
-    );
-  }
-  return requestedPageSize;
-}
-
 function requireIdentifier(value: string, field: string): string {
   const normalized = value.trim();
   if (normalized.length === 0) {
@@ -2639,14 +2633,6 @@ function readNumberArray(value: unknown, field: string): readonly number[] {
     throw new Error(`The database returned an invalid ${field}.`);
   }
   return decoded as readonly number[];
-}
-
-function readObjectArray(value: unknown, field: string): readonly Record<string, unknown>[] {
-  const decoded = readJson(value, field);
-  if (!Array.isArray(decoded) || !decoded.every(isRecord)) {
-    throw new Error(`The database returned an invalid ${field}.`);
-  }
-  return decoded;
 }
 
 /** A receipt that recorded no resource cannot answer the retry it was written for. */

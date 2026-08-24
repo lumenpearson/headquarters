@@ -500,6 +500,39 @@ describeIntegration('durable material library against real PostgreSQL', () => {
   );
 
   it(
+    'takes a deduplicated material’s size from the bytes, not from the request',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const store = createStore(runtime);
+      const contentHash = uniqueContentHash();
+      await beginUpload(store, owner, contentHash, 'Съёмка A');
+
+      const second = await store.beginUpload(owner.authenticated, {
+        groupId: owner.groupId,
+        displayName: 'Съёмка B',
+        originalFileName: 'take-02.mp4',
+        category: 'VIDEO',
+        mimeType: 'video/mp4',
+        // A number the caller made up. The bytes already exist and their length
+        // is a fact; publishing the declared one gave a material a size a
+        // download would contradict.
+        totalSize: 999_999n,
+        contentHash,
+      });
+
+      expect(second.deduplicated).toBe(true);
+      expect(second.material.byteSize).toBe(1024n);
+      const stored = await database.query<{ byte_size: string }>({
+        text: 'SELECT byte_size::text AS byte_size FROM materials WHERE id = $1',
+        values: [second.material.id],
+      });
+      expect(stored[0]?.byte_size).toBe('1024');
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'keeps a replaced version’s content alive and releases every hold on purge',
     async () => {
       const runtime = createRuntime();

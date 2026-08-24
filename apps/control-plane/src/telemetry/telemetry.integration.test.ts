@@ -435,6 +435,42 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
   );
 
   it(
+    'refuses an operator profile in the namespace the presets own',
+    async () => {
+      const runtime = createRuntime();
+      const store = createStore(runtime);
+      const service = createTelemetryService({ runtime, profiles: store });
+      const owner = await bootstrapGroup(runtime);
+
+      // `ApplySimulationPreset` upserts on (group_id, name). A profile authored
+      // under the preset's own name would be replaced by it, channels and all,
+      // with nothing said about the loss.
+      await expect(
+        requireMethod(service.createSimulationProfile)(
+          create(telemetryV1.CreateSimulationProfileRequestSchema, {
+            profile: {
+              groupId: { value: owner.groupId },
+              name: 'preset:NETWORK_ATTACK',
+              presetKind: telemetryV1.SimulationPresetKind.NETWORK_ATTACK,
+              periodSeconds: 60,
+              updateIntervalMs: 1000,
+              timeScale: 1,
+            },
+          }),
+          bearer(owner.accessToken),
+        ),
+      ).rejects.toMatchObject({ name: 'ConnectError' });
+
+      const stored = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM simulation_profiles WHERE group_id = $1',
+        values: [owner.groupId],
+      });
+      expect(stored[0]?.n).toBe(0);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'settles a preset onto one profile however often it is applied',
     async () => {
       const runtime = createRuntime();

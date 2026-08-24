@@ -701,6 +701,9 @@ export class DurableSettingsStore implements SettingsStore {
       ...input,
       receiptScope: 'IMPORT_SETTINGS',
       operation: 'IMPORT_SETTINGS',
+      // The payload names the schema it was exported under; that is the one
+      // case where a caller's schema version is a fact about the document.
+      adoptsSchemaVersion: true,
       writesDraft: true,
       operations: [],
       insertValues: '$15::jsonb',
@@ -917,6 +920,8 @@ export class DurableSettingsStore implements SettingsStore {
     readonly missingSource?: () => PairedDeviceRuntimeError;
     readonly category?: string;
     readonly elementId?: string;
+    /** True only for the mutations whose payload declares a schema of its own. */
+    readonly adoptsSchemaVersion?: boolean;
     readonly extraParameters?: readonly SqlParameter[];
   }): Promise<SettingsDocumentRecord> {
     if (input.scope.kind !== 'GROUP' && input.scope.kind !== 'DEVICE') {
@@ -956,7 +961,16 @@ export class DurableSettingsStore implements SettingsStore {
            FROM ${input.writtenFrom ?? 'authorized_actor'}
            ON CONFLICT ${shape.conflictTarget} DO UPDATE
              SET document = jsonb_build_object('values', ${input.updateValues}),
-                 schema_version = EXCLUDED.schema_version,
+                 -- The stored schema version is kept unless the mutation is one
+                 -- that carries a schema with it. Every patch used to overwrite
+                 -- it with whatever the caller declared, so one client running
+                 -- an older build quietly relabelled the group's document as
+                 -- that build's schema.
+                 schema_version = ${
+                   input.adoptsSchemaVersion === true
+                     ? 'EXCLUDED.schema_version'
+                     : 'settings_documents.schema_version'
+                 },
                  -- The revision is derived from the row the upsert just locked,
                  -- never from a value this process read earlier. That is the
                  -- whole reason two concurrent writers produce N and N+1

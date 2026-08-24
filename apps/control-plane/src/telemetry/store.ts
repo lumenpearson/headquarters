@@ -15,6 +15,7 @@ import {
   requireOneRow,
   sql,
 } from '../sync/rows.js';
+import { normalizePageSize as boundPageSize } from '../sync/paging.js';
 import { PairedDeviceRuntimeError } from '../sync/runtime.js';
 import type { Page } from '../sync/runtime.js';
 
@@ -260,7 +261,7 @@ export class DurableSimulationProfileStore {
    * is allowed to read what drives it.
    */
   async list(input: ListSimulationProfilesInput): Promise<Page<SimulationProfileRecord>> {
-    const pageSize = normalizePageSize(input.pageSize);
+    const pageSize = boundPageSize(input.pageSize, { defaultPageSize, maxPageSize });
     const cursor = decodeCursor(input.cursor);
     const rows = await this.query(
       sql(
@@ -815,11 +816,6 @@ function noSuchProfile(): PairedDeviceRuntimeError {
     'NOT_FOUND',
     'The group has no simulation profile with this identifier.',
   );
-}
-
-function normalizePageSize(requested: number): number {
-  if (!Number.isFinite(requested) || requested <= 0) return defaultPageSize;
-  return Math.min(Math.floor(requested), maxPageSize);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
+import { normalizePageSize as boundPageSize } from './paging.js';
 import {
   encodeFingerprintPayload,
   encodeRequestIdPayload,
@@ -653,7 +654,7 @@ export class PairedDeviceRuntime {
   ): Page<PairedDevice> {
     const group = this.requireGroup(groupId);
     this.requireSameGroup(authenticated, group.id);
-    const pageSize = normalizePageSize(requestedPageSize);
+    const pageSize = boundPageSize(requestedPageSize, { defaultPageSize, maxPageSize });
     const members = [...this.#memberships.values()]
       .filter((membership) => membership.groupId === group.id && membership.revokedAt === undefined)
       .sort((left, right) => {
@@ -1243,21 +1244,6 @@ function resolveCursor(memberships: readonly MembershipRecord[], cursor: string)
   if (index < 0)
     throw new PairedDeviceRuntimeError('INVALID_ARGUMENT', 'The page cursor is invalid.');
   return index + 1;
-}
-
-function normalizePageSize(requestedPageSize: number): number {
-  if (requestedPageSize === 0) return defaultPageSize;
-  if (
-    !Number.isSafeInteger(requestedPageSize) ||
-    requestedPageSize < 1 ||
-    requestedPageSize > maxPageSize
-  ) {
-    throw new PairedDeviceRuntimeError(
-      'INVALID_ARGUMENT',
-      `page_size must be between 1 and ${maxPageSize}.`,
-    );
-  }
-  return requestedPageSize;
 }
 
 function copyDate(value: Date): Date {
