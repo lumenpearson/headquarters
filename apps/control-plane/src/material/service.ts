@@ -471,7 +471,7 @@ export function createMaterialService(
             continue;
           }
           deliveredAtCursor.add(event.materialId);
-          yield { event: toProtocolEvent(event, request.groupId?.value ?? '') };
+          yield { event: toProtocolEvent(event) };
         }
         if (context.signal.aborted) return;
         await sleep(pollIntervalMs, context.signal);
@@ -728,14 +728,22 @@ function toProtocolSession(session: UploadSessionRecord) {
   };
 }
 
-function toProtocolEvent(event: MaterialEventRecord, correlationId: string) {
+/**
+ * `correlation_id` is left empty rather than filled with the group id.
+ *
+ * It exists so a client can recognise the echo of a request it made, and
+ * `materials` records no correlation for a watched change. Putting the group id
+ * there gave every event on the stream the same non-correlation, which a client
+ * matching on it would read as "all of these are mine".
+ */
+function toProtocolEvent(event: MaterialEventRecord) {
   return {
     sequence: event.sequence,
     kind: toEventKindEnum(event.kind),
     materialId: { value: event.materialId },
     revision: { number: event.revision, etag: revisionEtag(event.materialId, event.revision) },
     occurredAt: timestampFromDate(event.occurredAt),
-    correlationId,
+    correlationId: '',
   };
 }
 
