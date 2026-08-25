@@ -8,6 +8,11 @@
   --ops-bg-1: #080c09;
   --ops-bg-2: #0c120e;
   --ops-panel: #08100c;
+  /* The panel surface as channels, so a panel can carry both a theme's colour
+     and the operator's opacity. `.ops-panel` used to hardcode `rgb(7 13 9)`,
+     which no theme could reach: both light themes turned their text dark and
+     left it on a near-black panel. */
+  --ops-panel-surface: 7 13 9;
   --ops-panel-alt: #0b1510;
   --ops-text: #b9d4c0;
   --ops-text-strong: #e1efe4;
@@ -431,7 +436,7 @@
      this file outranks every responsive and per-screen variant above it, so a
      "default" copy of this declaration silently replaced all of them. */
   border: var(--ops-border-width, 1px) solid var(--ops-line);
-  background: rgb(7 13 9 / var(--ops-panel-opacity, 92%));
+  background: rgb(var(--ops-panel-surface, 7 13 9) / var(--ops-panel-opacity, 92%));
   color: var(--ops-text);
   text-align: left;
 }
@@ -3417,6 +3422,7 @@ button.is-active {
   --ops-bg-1: #000;
   --ops-bg-2: #000;
   --ops-panel: #000;
+  --ops-panel-surface: 0 0 0;
   --ops-text: #f1f1f1;
   --ops-text-strong: #fff;
   --ops-muted: #bdbdbd;
@@ -3431,6 +3437,7 @@ button.is-active {
   --ops-bg-1: #fff;
   --ops-bg-2: #f6f6f6;
   --ops-panel: #fff;
+  --ops-panel-surface: 255 255 255;
   --ops-text: #1e1e1e;
   --ops-text-strong: #000;
   --ops-muted: #454545;
@@ -3445,6 +3452,7 @@ button.is-active {
   --ops-bg-1: #ffffff;
   --ops-bg-2: #f4f6f3;
   --ops-panel: #ffffff;
+  --ops-panel-surface: 255 255 255;
   --ops-text: #172119;
   --ops-text-strong: #08100a;
   --ops-muted: #48604d;
@@ -4820,11 +4828,16 @@ button.is-active {
   letter-spacing: -0.015em;
 }
 
+/* A second, later declaration of the panel surface. It is kept because it also
+   sets `position` and `border-color`, but its background now goes through the
+   same theme token as the first: hardcoding `rgb(6 6 6)` here is what made both
+   light themes draw dark text on a near-black panel however the earlier
+   declaration was themed. */
 .ops-panel {
   position: relative;
   overflow: hidden;
-  border-color: #222;
-  background: rgb(6 6 6 / 93%);
+  border-color: var(--ops-line);
+  background: rgb(var(--ops-panel-surface, 6 6 6) / var(--ops-panel-opacity, 93%));
 }
 
 .ops-panel::after {
