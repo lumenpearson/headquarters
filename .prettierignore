@@ -10,3 +10,4 @@ apps/hq/next-env.d.ts
 packages/protocol/src/gen
 playwright-report
 test-results
+.claude/worktrees

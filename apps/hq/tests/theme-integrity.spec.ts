@@ -139,6 +139,42 @@ test('R14: every declared theme leaves the interface bounded, legible and unmove
   }
 });
 
+/**
+ * R14: a setting must not be able to break a theme, and outline opacity could.
+ *
+ * `colors.lineOpacity` reached a custom property nothing read until it was
+ * wired to `--ops-line`. Live, its schema floor of 0.3 composites a control
+ * outline down to roughly 1.45:1 against the panel behind it — under the 3:1
+ * WCAG 1.4.11 asks of a component boundary, on the two themes named for
+ * contrast. Those two now declare the colour outright, which outranks the
+ * composed value; the operator's slider still governs the other six.
+ */
+for (const theme of ['high-contrast-dark', 'high-contrast-light'] as const) {
+  test(`R14: ${theme} keeps its outlines opaque at the lowest line opacity`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await seed(page, { 'themes.id': theme, 'colors.lineOpacity': 0.3 });
+    await page.goto('/overview');
+    await expect(page.locator('.ops-shell')).toHaveAttribute('data-theme', theme);
+
+    const outlines = await page.locator('.ops-shell').evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        line: styles.getPropertyValue('--ops-line').trim(),
+        strong: styles.getPropertyValue('--ops-line-strong').trim(),
+        opacity: styles.getPropertyValue('--ops-line-opacity').trim(),
+      };
+    });
+
+    // The setting really did arrive — otherwise this passes for the wrong
+    // reason, which is how the property stayed dead for so long.
+    expect(outlines.opacity).toBe('0.3');
+    // ...and the theme ignored it. Any alpha at all would appear as a fourth
+    // component here, so this fails the moment the composed value wins.
+    expect(outlines.line, `${theme} composited its outline`).not.toContain('/');
+    expect(outlines.strong, `${theme} composited its strong outline`).not.toContain('/');
+  });
+}
+
 test('R14: every accent and every style leaves the interface bounded and unmoved', async ({
   page,
 }) => {

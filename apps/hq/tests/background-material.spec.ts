@@ -103,9 +103,12 @@ test('paints a chosen material as the application background, and lets go of it'
     await page.getByRole('option', { name: '[ФАЙЛ] background-plate.webp', exact: true }).click();
 
     await expect(shell).toHaveAttribute('data-background-image', 'material');
+    // `contains`, not `startsWith`: the wash `backgrounds.overlayOpacity` draws
+    // rides in the same stack, ahead of the photograph, so the computed value
+    // opens with the gradient and the material follows it.
     await expect
       .poll(() =>
-        shell.evaluate((element) => getComputedStyle(element).backgroundImage.startsWith('url(')),
+        shell.evaluate((element) => getComputedStyle(element).backgroundImage.includes('url(')),
       )
       .toBe(true);
     // The material is read into a blob, not linked from disk: no filesystem

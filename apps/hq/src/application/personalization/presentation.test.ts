@@ -1,11 +1,64 @@
 import { getSettingDefinition, settingsDefinitions } from '@gremuchaya/settings-schema';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
   presentationBindings,
   resolvePresentation,
+  settingsReadElsewhere,
   settingsWithoutPresentation,
 } from './presentation';
+
+/** `apps/hq/src`, from this file rather than from the working directory. */
+const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+function everySourceFile(directory: string): readonly string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const path = join(directory, entry);
+    if (statSync(path).isDirectory()) return everySourceFile(path);
+    return /\.(css|ts|tsx)$/.test(entry) ? [path] : [];
+  });
+}
+
+/**
+ * Prose cannot consume a custom property, so prose is removed before the
+ * search.
+ *
+ * Without this the fixture counts the comment that *explains* a binding as
+ * though it were the rule that reads it — and a rule explained well enough is
+ * exactly the rule most likely to be deleted by someone who trusts the
+ * explanation. Both block comments and line comments go; `//` is only treated
+ * as one when it opens the line, so a `https://` inside a string survives.
+ */
+function withoutProse(source: string): string {
+  return source
+    .replaceAll(/\/\*[\s\S]*?\*\//g, ' ')
+    .split('\n')
+    .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+    .join('\n');
+}
+
+/**
+ * Everything under `apps/hq/src` that could actually consume a binding.
+ *
+ * Three exclusions, and each one was learned by watching this fixture pass over
+ * something demonstrably dead. The bridge itself is where a property name is
+ * *written*, so counting it reports every binding as consumed. Tests are
+ * excluded one step removed: the first version passed because the comment
+ * explaining the dead properties named them and this file was scanning itself.
+ * Comments are excluded for the third turn of the same screw — the CSS comments
+ * added beside two new declarations named the properties they explained, so
+ * deleting the declarations would have left the fixture green.
+ *
+ * The rule underneath all three: a check must not be able to satisfy the thing
+ * it checks.
+ */
+const consumingSources = everySourceFile(sourceRoot)
+  .filter((path) => !path.endsWith('presentation.ts') && !/\.test\.tsx?$/.test(path))
+  .map((path) => withoutProse(readFileSync(path, 'utf8')))
+  .join('\n');
 
 describe('personalization presentation bindings', () => {
   it('binds only settings the schema actually declares', () => {
@@ -28,6 +81,60 @@ describe('personalization presentation bindings', () => {
     // by nothing, and nothing said so until the registry was recounted by hand
     // twice (C20, C31). A new definition now has to declare where it is read.
     expect(unaccounted).toEqual([]);
+  });
+
+  /*
+   * A binding is not a consumer, and until this test existed nothing said so.
+   *
+   * The two tests above prove a definition is *accounted for* — bound here or
+   * excused there. Neither proves anything reads what a binding emits, and five
+   * settings had been shipping a custom property that no stylesheet and no
+   * module mentioned: `--ops-tile-min-width`, `--ops-line-opacity`,
+   * `--ops-background-overlay`, `--ops-background-blur` and
+   * `--ops-background-speed`. They were drawn, validated, saved, written onto
+   * the shell root — and read by nothing, which is C20 again one level down,
+   * under the very bridge built to close it.
+   */
+  it('emits no custom property that nothing reads', () => {
+    const unread = presentationBindings
+      .filter((binding) => binding.kind === 'custom-property')
+      .map((binding) => binding.property)
+      .filter((property) => !consumingSources.includes(property));
+
+    expect(unread).toEqual([]);
+  });
+
+  it('emits no attribute that nothing selects on', () => {
+    const unread = presentationBindings
+      .filter((binding) => binding.kind === 'attribute')
+      .map((binding) => binding.attribute)
+      // A stylesheet selects on it, or a module reads it. Either is a consumer;
+      // neither being present means the operator moves a control for nothing.
+      .filter((attribute) => !consumingSources.includes(attribute));
+
+    expect(unread).toEqual([]);
+  });
+
+  /*
+   * The category that actually produced the defect, mechanized.
+   *
+   * `general.localOnly` was never a broken binding. It was an excuse — "Read by
+   * the pairing surface, which decides whether a group is offered" — naming a
+   * surface that does not exist, and it passed every test in this file because
+   * the only thing asked of an excuse was that it be longer than twenty
+   * characters. A sentence can claim anything.
+   *
+   * A setting said to be read somewhere must therefore be named somewhere. That
+   * is weaker than proving the read does what the sentence says, and far
+   * stronger than counting its characters: an excuse for a consumer that was
+   * never written now fails here.
+   */
+  it('does not excuse a setting as read somewhere that never names it', () => {
+    const absent = Object.keys(settingsReadElsewhere).filter(
+      (id) => !consumingSources.includes(id),
+    );
+
+    expect(absent).toEqual([]);
   });
 
   it('excuses only settings that exist, and only once each', () => {
@@ -73,12 +180,16 @@ describe('personalization presentation bindings', () => {
       'themes.id': 'amber-crt',
       'colors.accent': 'cyan',
       'accessibility.reducedMotion': true,
-      'animations.intensity': 0.25,
+      'patterns.opacity': 0.25,
     });
 
     expect(resolved.attributes['data-theme']).toBe('amber-crt');
     expect(resolved.attributes['data-accent']).toBe('cyan');
     expect(resolved.attributes['data-reduced-motion']).toBe('on');
-    expect(resolved.customProperties['--ops-animation-intensity']).toBe('0.25');
+    // `animations.intensity` used to stand here. It is no longer bound: the
+    // property it emitted was read by nothing, and the shell spends the value
+    // itself as two durations, so it is now accounted as derived rather than
+    // bound.
+    expect(resolved.customProperties['--ops-pattern-opacity']).toBe('0.25');
   });
 });

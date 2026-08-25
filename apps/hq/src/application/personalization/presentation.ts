@@ -128,13 +128,6 @@ export const presentationBindings: readonly PresentationBinding[] = [
     property: '--ops-size-scale-setting',
     toCss: ratio,
   },
-  {
-    kind: 'custom-property',
-    setting: 'animations.intensity',
-    property: '--ops-animation-intensity',
-    toCss: ratio,
-  },
-
   // Geometry. Each of these is read by a rule in `operations.css`, so moving
   // one changes the shape of every panel rather than one screen's.
   {
@@ -161,12 +154,6 @@ export const presentationBindings: readonly PresentationBinding[] = [
   // have to be neutral on its own, and `min-height: 0` is not neutral — for a
   // flex item the initial value is `auto`, and replacing it changes the
   // automatic minimum size of every control in the shell.
-  {
-    kind: 'custom-property',
-    setting: 'layout.tileMinimumWidth',
-    property: '--ops-tile-min-width',
-    toCss: px,
-  },
 
   // Typography.
   {
@@ -316,7 +303,6 @@ export const presentationBindings: readonly PresentationBinding[] = [
  * consumer exists today, and it is wrong the moment that stops being true.
  */
 export const settingsReadElsewhere: Readonly<Record<string, string>> = {
-  'general.localOnly': 'Read by the pairing surface, which decides whether a group is offered.',
   'tiles.hiddenIds': 'Read by TileGrid, which drops the named tiles before layout.',
   'tiles.order': 'Read by TileGrid, which orders tiles before layout.',
   'tiles.spans': 'Read by TileGrid, which sizes tiles before layout.',
@@ -353,6 +339,22 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
  * only honest thing to do is say so and name the address.
  */
 export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
+  // Moved here from `settingsReadElsewhere`, where it claimed to be "read by
+  // the pairing surface, which decides whether a group is offered". No pairing
+  // surface exists: outside the schema the identifier occurs twice, in this
+  // file and in a negative assertion in `issueDraft.test.ts`. An excuse that
+  // names an imaginary consumer is worse than no excuse, because the accounting
+  // then reports the category as healthy.
+  'general.localOnly': 'F10 with R27 — no pairing surface exists to offer or withhold a group.',
+  // It was bound to `--ops-tile-min-width`, which no stylesheet and no module
+  // read. Wiring it is not a matter of finding the missing rule: a screen's
+  // `columns` is a coordinate system, not a pixel promise — `/cases` measures
+  // tiles in twelfths — so capping the count makes every tile wider than the cap
+  // unplaceable. Measured, not deduced: doing that emptied eleven routes and
+  // failed four R10 cases. `resolveGridLayout` has to take the minimum width
+  // itself and decide relocation against it.
+  'layout.tileMinimumWidth':
+    'Needs a minimum-width input in @gremuchaya/layout-engine; the resolver has none.',
   'localization.locale': 'F11 — no locale runtime exists; every label is a Russian literal.',
   'simulation.preset': 'F12 — the simulation formula reads no setting at all.',
   'groups.authority': 'F10 with R27 — the client has no SyncService client to send it through.',
@@ -371,6 +373,11 @@ export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
 export const settingsDerivedIntoPresentation: Readonly<Record<string, string>> = {
   'sizes.controlHeight': 'Summed with the tap padding into `--ops-control-floor`.',
   'accessibility.tapPadding': 'Summed with the control height into `--ops-control-floor`.',
+  // It used to be bound to `--ops-animation-intensity` as well, which no
+  // stylesheet and no module ever read: the shell takes the value itself and
+  // spends it as two durations. The binding was accounting, not a consumer.
+  'animations.intensity':
+    'Spent by OperationsShell as `--ops-motion-duration` and `--ops-background-duration`.',
 };
 
 /** Every definition that is not bound to the document one-to-one. */

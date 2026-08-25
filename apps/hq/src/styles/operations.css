@@ -18,8 +18,18 @@
   --ops-text-strong: #e1efe4;
   --ops-muted: #607869;
   --ops-dim: #39493f;
-  --ops-line: #263a2c;
-  --ops-line-strong: #45624c;
+  /*
+   * Outlines carry their hue as channels and their alpha as a setting, the same
+   * split `--ops-panel-surface` already uses. A theme overrides the channel and
+   * never the composed value, so `colors.lineOpacity` survives a theme change
+   * instead of being erased by the next block that sets `--ops-line` outright.
+   * At the default opacity of 1 this computes the same colour as the literals
+   * it replaces: `#263a2c` and `#45624c`.
+   */
+  --ops-line-channel: 38 58 44;
+  --ops-line-strong-channel: 69 98 76;
+  --ops-line: rgb(var(--ops-line-channel) / calc(var(--ops-line-opacity, 1) * 100%));
+  --ops-line-strong: rgb(var(--ops-line-strong-channel) / calc(var(--ops-line-opacity, 1) * 100%));
   --ops-green: #73b885;
   --ops-green-bright: #a9d9b4;
   --ops-orange: #d4873d;
@@ -3418,6 +3428,18 @@ button.is-active {
 }
 
 .ops-shell[data-theme='high-contrast-dark'] {
+  /*
+   * R14: `colors.lineOpacity` cannot reach this theme. The composed
+   * `--ops-line` in the base block multiplies the channel by the operator's
+   * opacity, whose schema floor is 0.3 -- which drops a control outline here to
+   * about 1.45:1, well under the 3:1 WCAG 1.4.11 asks of a component boundary.
+   * Declaring the colour outright wins over the base block on specificity, and
+   * the setting arrives as an inline custom property that names only
+   * `--ops-line-opacity`, so it cannot climb back over this. Same stance the
+   * accents already take toward the two high-contrast themes.
+   */
+  --ops-line: #8e8e8e;
+  --ops-line-strong: #fff;
   --ops-bg: #000;
   --ops-bg-1: #000;
   --ops-bg-2: #000;
@@ -3426,13 +3448,25 @@ button.is-active {
   --ops-text: #f1f1f1;
   --ops-text-strong: #fff;
   --ops-muted: #bdbdbd;
-  --ops-line: #8e8e8e;
-  --ops-line-strong: #fff;
+  --ops-line-channel: 142 142 142;
+  --ops-line-strong-channel: 255 255 255;
   --ops-orange: #ffd400;
   --ops-orange-bright: #fff08a;
 }
 
 .ops-shell[data-theme='high-contrast-light'] {
+  /*
+   * R14: `colors.lineOpacity` cannot reach this theme. The composed
+   * `--ops-line` in the base block multiplies the channel by the operator's
+   * opacity, whose schema floor is 0.3 -- which drops a control outline here to
+   * about 1.45:1, well under the 3:1 WCAG 1.4.11 asks of a component boundary.
+   * Declaring the colour outright wins over the base block on specificity, and
+   * the setting arrives as an inline custom property that names only
+   * `--ops-line-opacity`, so it cannot climb back over this. Same stance the
+   * accents already take toward the two high-contrast themes.
+   */
+  --ops-line: #777;
+  --ops-line-strong: #111;
   --ops-bg: #ececec;
   --ops-bg-1: #fff;
   --ops-bg-2: #f6f6f6;
@@ -3441,8 +3475,8 @@ button.is-active {
   --ops-text: #1e1e1e;
   --ops-text-strong: #000;
   --ops-muted: #454545;
-  --ops-line: #777;
-  --ops-line-strong: #111;
+  --ops-line-channel: 119 119 119;
+  --ops-line-strong-channel: 17 17 17;
   --ops-orange: #9b2900;
   --ops-orange-bright: #551600;
 }
@@ -3456,8 +3490,8 @@ button.is-active {
   --ops-text: #172119;
   --ops-text-strong: #08100a;
   --ops-muted: #48604d;
-  --ops-line: #90a493;
-  --ops-line-strong: #3f5a45;
+  --ops-line-channel: 144 164 147;
+  --ops-line-strong-channel: 63 90 69;
   --ops-green: #247545;
   --ops-green-bright: #195c35;
   --ops-orange: #ad3b12;
@@ -3537,7 +3571,9 @@ button.is-active {
     150% 150%,
     150% 150%,
     auto;
-  animation: ops-background-sweep var(--ops-background-duration, 18s) linear infinite alternate;
+  animation: ops-background-sweep
+    calc(var(--ops-background-duration, 18s) / var(--ops-background-speed, 1)) linear infinite
+    alternate;
 }
 
 .ops-shell[data-background-kind='barber-lines'] {
@@ -3547,7 +3583,8 @@ button.is-active {
     transparent 2px 12px
   );
   background-size: 44px 44px;
-  animation: ops-background-sweep var(--ops-background-duration, 18s) linear infinite;
+  animation: ops-background-sweep
+    calc(var(--ops-background-duration, 18s) / var(--ops-background-speed, 1)) linear infinite;
 }
 
 .ops-shell[data-background-kind='radar'] {
@@ -3572,7 +3609,9 @@ button.is-active {
     230px 180px,
     310px 250px,
     auto;
-  animation: ops-background-sweep var(--ops-background-duration, 18s) linear infinite alternate;
+  animation: ops-background-sweep
+    calc(var(--ops-background-duration, 18s) / var(--ops-background-speed, 1)) linear infinite
+    alternate;
 }
 
 /* Media backgrounds require a material binding from the storage phase. Until then
@@ -3605,7 +3644,19 @@ button.is-active {
  * else, so no text an operator can type ever becomes CSS.
  */
 .ops-shell[data-background-image='material'] {
-  background-image: var(--ops-background-source);
+  /*
+   * The wash rides in the same stack as the photograph rather than on an
+   * element of its own, because `.ops-shell`'s two pseudo-elements are already
+   * the frame rules. `backgrounds.overlayOpacity` had been reaching
+   * `--ops-background-overlay` and no rule at all, so a chosen still competed
+   * with the interface drawn over it at full strength.
+   */
+  background-image:
+    linear-gradient(
+      rgb(2 2 2 / calc(var(--ops-background-overlay, 0.55) * 100%)),
+      rgb(2 2 2 / calc(var(--ops-background-overlay, 0.55) * 100%))
+    ),
+    var(--ops-background-source);
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
@@ -3625,9 +3676,32 @@ button.is-active {
 }
 
 .ops-shell__background-video video {
-  width: 100%;
-  height: 100%;
+  /*
+   * `backgrounds.blur` reached `--ops-background-blur` and no declaration, so
+   * the control moved and the clip stayed sharp. Blurring the element rather
+   * than the shell keeps it off everything the shell draws above it.
+   *
+   * The clip is grown by twice the radius on every side, because `blur()`
+   * samples beyond the element's box as transparent: at 24px an exactly-filling
+   * video feathers into a translucent band some 50px wide *inside* the
+   * viewport, with the shell background showing through it. The parent clips
+   * the overflow. At the default of 0 every term collapses -- `inset: 0`,
+   * `100%`, `blur(0px)` -- so an untouched profile renders the identical frame.
+   */
+  position: absolute;
+  inset: calc(-2 * var(--ops-background-blur, 0px));
+  width: calc(100% + 4 * var(--ops-background-blur, 0px));
+  height: calc(100% + 4 * var(--ops-background-blur, 0px));
+  filter: blur(var(--ops-background-blur, 0px));
   object-fit: cover;
+}
+
+/* The same wash the still image carries, over a clip that is a real element. */
+.ops-shell__background-video::after {
+  position: absolute;
+  inset: 0;
+  background: rgb(2 2 2 / calc(var(--ops-background-overlay, 0.55) * 100%));
+  content: '';
 }
 
 .ops-shell[data-style-mode='dense-mainframe'] {
@@ -4445,8 +4519,8 @@ button.is-active {
   --ops-text-strong: #f1f1ee;
   --ops-muted: #62656b;
   --ops-dim: #303238;
-  --ops-line: #1c1c1c;
-  --ops-line-strong: #2b2b2b;
+  --ops-line-channel: 28 28 28;
+  --ops-line-strong-channel: 43 43 43;
   --ops-green: #d8d8d3;
   --ops-green-bright: #f2f2ef;
   --ops-orange: #ff3d00;
@@ -4832,12 +4906,18 @@ button.is-active {
    sets `position` and `border-color`, but its background now goes through the
    same theme token as the first: hardcoding `rgb(6 6 6)` here is what made both
    light themes draw dark text on a near-black panel however the earlier
-   declaration was themed. */
+   declaration was themed.
+
+   Both fallbacks now match the earlier declaration and the schema. They used to
+   read `6 6 6` and `93%` against its `7 13 9` and `92%`, and this declaration
+   wins on source order — so `colors.panelOpacity` reported 0.92 in the
+   catalogue while the panel in front of the operator was drawn at 93% until
+   they touched the slider. */
 .ops-panel {
   position: relative;
   overflow: hidden;
   border-color: var(--ops-line);
-  background: rgb(var(--ops-panel-surface, 6 6 6) / var(--ops-panel-opacity, 93%));
+  background: rgb(var(--ops-panel-surface, 7 13 9) / var(--ops-panel-opacity, 92%));
 }
 
 .ops-panel::after {
@@ -6103,8 +6183,25 @@ button.is-active {
   transition: none;
 }
 
-.ops-shell[data-background-motion='off'] .ops-shell__ascii,
-.ops-shell[data-background-motion='off']::before {
+/*
+ * The animated background kinds run `ops-background-sweep` on `.ops-shell`
+ * itself. This rule used to name `.ops-shell__ascii` and `.ops-shell::before`,
+ * neither of which carries an `animation` declaration anywhere in this file, so
+ * switching background motion off stopped nothing at all.
+ *
+ * The reduced-motion class is here for the same reason, and it was broken by
+ * the same mistake: `.ops-shell--no-motion *` above is a descendant selector,
+ * so it reaches everything the shell contains and never the shell itself. The
+ * clip stopped -- `BackgroundVideoLayer` pauses it in TypeScript -- while the
+ * gradient kept sweeping behind an operator who had asked for stillness.
+ *
+ * Written as a compound rather than as `.ops-shell--no-motion` alone: that is
+ * (0,1,0) and would lose to the (0,2,0) `[data-background-kind]` rules that set
+ * the animation, whatever the source order.
+ */
+.ops-shell[data-background-motion='off'],
+.ops-shell.ops-shell--no-motion,
+.ops-shell[data-reduced-motion='on'] {
   animation: none;
 }
 

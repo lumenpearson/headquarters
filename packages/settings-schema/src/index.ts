@@ -740,7 +740,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'backgrounds',
     0,
     'device',
-    'Blur applied to an image or video background, in pixels.',
+    'Blur applied to a video background, in pixels.',
     numberWithin(0, 24),
   ),
   definition(
