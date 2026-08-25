@@ -261,3 +261,89 @@
   font-size: var(--font-xs);
   letter-spacing: 0.12em;
 }
+
+/*
+ * R4: the content an operator can change from edit mode.
+ *
+ * Outside edit mode the value renders as plain text. Inside it the same value
+ * is a button that selects the field for the panel, drawn as the text with a
+ * dashed accent edge rather than as a button: it sits inside a table cell, a
+ * heading or a definition list, and a button's chrome there would move the
+ * layout the operator is reading. The attribute and two classes outrank the
+ * primitive's own rules and the custom control floor.
+ */
+[data-edit-mode='on'] .terminal-button.editable-content {
+  display: inline;
+  min-height: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  outline: 1px dashed var(--accent);
+  outline-offset: 1px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  white-space: inherit;
+  cursor: pointer;
+}
+
+[data-edit-mode='on'] .terminal-button.editable-content:hover,
+[data-edit-mode='on'] .terminal-button.editable-content:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: inherit;
+}
+
+[data-edit-mode='on'] .terminal-button.editable-content[data-selected='true'] {
+  outline-style: solid;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+[data-edit-mode='on'] .terminal-button.editable-content[data-changed='true']::after {
+  color: var(--accent);
+  content: ' *';
+}
+
+/* The content section of the panel: the selected field, then what changed. */
+.edit-content__field {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+}
+
+.edit-content__field > span,
+.edit-content__changed > li > span {
+  display: grid;
+  min-width: 0;
+  font-size: var(--font-xs);
+  letter-spacing: 0.06em;
+}
+
+.edit-content__field small,
+.edit-content__changed small {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.edit-content__error {
+  color: var(--critical);
+  font-size: var(--font-xs);
+  letter-spacing: 0.08em;
+}
+
+.edit-content__changed {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.edit-content__changed > li {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+}

@@ -5,6 +5,7 @@ import { TerminalButton } from '@gremuchaya/ui/primitives';
 
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
+import { EditableContent } from '@/components/edit/EditableContent';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
 import { RecordPagination } from '@/components/operations/RecordPagination';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
@@ -150,10 +151,18 @@ export function ReportsScreen() {
                     >
                       <td>{report.id}</td>
                       <td>
-                        <strong>{report.title}</strong>
+                        <strong>
+                          <EditableContent field="report.title" entityId={report.id}>
+                            {report.title}
+                          </EditableContent>
+                        </strong>
                       </td>
                       <td>{report.kind.toUpperCase()}</td>
-                      <td>{new Date(report.createdAt).toLocaleString('ru-RU')}</td>
+                      <td>
+                        <EditableContent field="report.createdAt" entityId={report.id}>
+                          {new Date(report.createdAt).toLocaleString('ru-RU')}
+                        </EditableContent>
+                      </td>
                       <td>
                         <StatusBadge status={report.status} />
                       </td>

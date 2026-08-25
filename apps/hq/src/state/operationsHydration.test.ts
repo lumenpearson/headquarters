@@ -103,4 +103,55 @@ describe('initializeOperationsClient', () => {
       'SNAP-1',
     ]);
   });
+
+  it('brings content edits back over the seed on the next launch', () => {
+    dispose = initializeOperationsClient();
+    operationsStore
+      .getState()
+      .applyContentPatch([{ id: 'case.title', entityId: 'CASE-03', value: 'МАРШРУТ / ПРОВЕРЕНО' }]);
+    dispose();
+    dispose = () => undefined;
+
+    // A fresh session starts from the seed and reads the blob.
+    operationsStore.getState().resetWorld();
+    expect(operationsStore.getState().cases['CASE-03']?.title).not.toBe('МАРШРУТ / ПРОВЕРЕНО');
+    dispose = initializeOperationsClient();
+
+    expect(operationsStore.getState().cases['CASE-03']?.title).toBe('МАРШРУТ / ПРОВЕРЕНО');
+    expect(operationsStore.getState().content.overrides).toEqual({
+      'case.title@CASE-03': 'МАРШРУТ / ПРОВЕРЕНО',
+    });
+  });
+
+  it('drops a stored content override it cannot validate and keeps the rest', () => {
+    const state = operationsStore.getState();
+    const { snapshots: _snapshots, ...production } = state.production;
+    localStorage.setItem(
+      persistedStateKey,
+      JSON.stringify({
+        version: 5,
+        ui: state.ui,
+        production,
+        personalization: state.personalization,
+        content: {
+          overrides: {
+            'case.createdAt@CASE-01': '2026-02-30',
+            'case.title@CASE-99': 'НЕТ ТАКОГО ДЕЛА',
+            'case.title@CASE-01': 'ДЕЛО / ПРОВЕРЕНО',
+          },
+        },
+      }),
+    );
+    const seedCreatedAt = state.cases['CASE-01']?.createdAt;
+
+    dispose = initializeOperationsClient();
+
+    // The blob is a trust boundary: a value the field refuses never reaches
+    // the world, and an entity the seed lacks has nothing to project onto.
+    expect(operationsStore.getState().content.overrides).toEqual({
+      'case.title@CASE-01': 'ДЕЛО / ПРОВЕРЕНО',
+    });
+    expect(operationsStore.getState().cases['CASE-01']?.createdAt).toBe(seedCreatedAt);
+    expect(operationsStore.getState().cases['CASE-01']?.title).toBe('ДЕЛО / ПРОВЕРЕНО');
+  });
 });

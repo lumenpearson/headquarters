@@ -6,6 +6,7 @@ import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/pr
 
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
+import { EditableContent } from '@/components/edit/EditableContent';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
 import { RecordPagination } from '@/components/operations/RecordPagination';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
@@ -217,8 +218,16 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                       >
                         <td>[CASE]</td>
                         <td>{caseFile.code}</td>
-                        <td>{caseFile.title}</td>
-                        <td>{new Date(caseFile.createdAt).toLocaleDateString('ru-RU')}</td>
+                        <td>
+                          <EditableContent field="case.title" entityId={caseFile.id}>
+                            {caseFile.title}
+                          </EditableContent>
+                        </td>
+                        <td>
+                          <EditableContent field="case.createdAt" entityId={caseFile.id}>
+                            {new Date(caseFile.createdAt).toLocaleDateString('ru-RU')}
+                          </EditableContent>
+                        </td>
                         <td>P{caseFile.priority}</td>
                         <td>
                           <StatusBadge status={caseFile.status} />
@@ -280,7 +289,11 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                 <dl className="ops-definition-list">
                   <div>
                     <dt>ДАТА РОЖДЕНИЯ</dt>
-                    <dd>{selectedPerson.birthDate}</dd>
+                    <dd>
+                      <EditableContent field="person.birthDate" entityId={selectedPerson.id}>
+                        {selectedPerson.birthDate}
+                      </EditableContent>
+                    </dd>
                   </div>
                   <div>
                     <dt>ГРАЖДАНСТВО</dt>

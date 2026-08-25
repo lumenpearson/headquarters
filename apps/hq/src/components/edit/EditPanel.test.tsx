@@ -3,6 +3,7 @@ import { settingsDefinitions } from '@gremuchaya/settings-schema';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { contentElementId } from '../../application/edit/contentFields';
 import { settingGroups } from '../../application/personalization/catalog';
 import { operationsStore } from '../../state/operationsStore';
 import { settingLabel } from '../settings/SchemaSetting';
@@ -153,5 +154,86 @@ describe('EditPanel', () => {
     expect(operationsStore.getState().personalization.draft.values['layout.density']).toBe(
       'comfortable',
     );
+  });
+});
+
+describe('EditPanel content editing (R4)', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+    operationsStore.getState().exitEditMode();
+  });
+
+  it('counts a content edit with the settings and enables undo and the issue draft for it', () => {
+    operationsStore.getState().enterEditMode();
+    render(<EditPanel />);
+
+    act(() => {
+      operationsStore
+        .getState()
+        .applyContentPatch([{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' }]);
+    });
+
+    expect(screen.getByText('1 ИЗМЕНЕНИЙ')).toBeTruthy();
+    expect(button(/отменить/i).disabled).toBe(false);
+    expect(button(/issue/i).disabled).toBe(false);
+
+    // The same undo button, the same stack: a content edit steps back through it.
+    fireEvent.click(button(/отменить/i));
+    expect(operationsStore.getState().content.overrides).toEqual({});
+    expect(screen.getByText('0 ИЗМЕНЕНИЙ')).toBeTruthy();
+  });
+
+  it('shows the editor for the content field selected on screen and applies a date at once', () => {
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().selectEditElement(contentElementId('case.createdAt', 'CASE-01'));
+    render(<EditPanel />);
+
+    expect(screen.getByText('СОДЕРЖИМОЕ / CONTENT')).toBeTruthy();
+    const input = screen.getByLabelText('ДАТА ДЕЛА') as HTMLInputElement;
+    expect(input.type).toBe('date');
+
+    fireEvent.change(input, { target: { value: '2026-09-01' } });
+
+    expect(operationsStore.getState().content.overrides['case.createdAt@CASE-01']).toBe(
+      '2026-09-01',
+    );
+    expect(
+      new Date(operationsStore.getState().cases['CASE-01']?.createdAt ?? '').toLocaleDateString(
+        'ru-RU',
+      ),
+    ).toBe('01.09.2026');
+  });
+
+  it('commits a text field on Enter and offers the way back to the seed value', () => {
+    const seedTitle = operationsStore.getState().cases['CASE-01']?.title;
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().selectEditElement(contentElementId('case.title', 'CASE-01'));
+    render(<EditPanel />);
+
+    const input = screen.getByLabelText('НАЗВАНИЕ ДЕЛА');
+    fireEvent.change(input, { target: { value: 'НОВОЕ НАЗВАНИЕ' } });
+    // Typing alone commits nothing: undo would otherwise step back a letter.
+    expect(operationsStore.getState().cases['CASE-01']?.title).toBe(seedTitle);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(operationsStore.getState().cases['CASE-01']?.title).toBe('НОВОЕ НАЗВАНИЕ');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Вернуть исходное значение: case.title@CASE-01' }),
+    );
+    expect(operationsStore.getState().cases['CASE-01']?.title).toBe(seedTitle);
+    expect(operationsStore.getState().content.overrides).toEqual({});
+  });
+
+  it('says why a value was refused instead of failing silently', () => {
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().selectEditElement(contentElementId('case.title', 'CASE-01'));
+    render(<EditPanel />);
+
+    const input = screen.getByLabelText('НАЗВАНИЕ ДЕЛА');
+    fireEvent.change(input, { target: { value: 'AB' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(screen.getByText('ЗНАЧЕНИЕ ОТКЛОНЕНО')).toBeTruthy();
+    expect(operationsStore.getState().content.overrides).toEqual({});
   });
 });

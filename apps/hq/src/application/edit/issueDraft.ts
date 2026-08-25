@@ -5,11 +5,18 @@ import {
 } from '@gremuchaya/settings-schema';
 
 import { buildDiagnosticsReport } from '@/application/contextMenus/diagnostics';
+import {
+  getContentFieldDefinition,
+  parseContentKey,
+  type ContentOverrides,
+} from '@/application/edit/contentFields';
 import { readBooleanSetting, readStringSetting } from '@/application/personalization/useSetting';
 
 export interface IssueDraftInput {
   readonly repository: string;
   readonly draft: SettingsDraft;
+  /** Domain-content edits (R4), listed after the settings. Absent means none. */
+  readonly content?: ContentOverrides;
 }
 
 /**
@@ -20,8 +27,10 @@ export interface IssueDraftInput {
  * operator stays the author of the eventual issue, and no credential is ever
  * held by this application.
  */
-export function buildIssueDraftUrl({ repository, draft }: IssueDraftInput): string {
-  if (draft.changedIds.length === 0) {
+export function buildIssueDraftUrl({ repository, draft, content = {} }: IssueDraftInput): string {
+  const contentEntries = Object.entries(content);
+  const total = draft.changedIds.length + contentEntries.length;
+  if (total === 0) {
     throw new Error('An issue draft needs at least one change; this draft has no changes.');
   }
 
@@ -35,6 +44,20 @@ export function buildIssueDraftUrl({ repository, draft }: IssueDraftInput): stri
     const suffix = description === undefined ? '' : ` — ${description}`;
     return `${bullet}\`${id}\` → \`${formatValue(value)}\`${suffix}`;
   });
+  // Content rows read the same way as setting rows, under their own heading:
+  // a reviewer confirming a date is doing a different check than one
+  // confirming a theme, and the list should say which is which.
+  const contentRows = contentEntries.map(([key, value]) => {
+    const target = parseContentKey(key);
+    const definition = target === undefined ? undefined : getContentFieldDefinition(target.id);
+    const description = includeDescriptions ? definition?.description : undefined;
+    const suffix = description === undefined ? '' : ` — ${description}`;
+    return `${bullet}\`${key}\` → \`${value}\`${suffix}`;
+  });
+  const sections = [
+    ...(rows.length === 0 ? [] : [['## Change made in edit mode', '', ...rows]]),
+    ...(contentRows.length === 0 ? [] : [['## Content changed in edit mode', '', ...contentRows]]),
+  ];
 
   /*
    * `github.draftOnly` is group scope: with it on, nothing composed here is
@@ -58,9 +81,7 @@ export function buildIssueDraftUrl({ repository, draft }: IssueDraftInput): stri
       : null;
 
   const body = [
-    '## Change made in edit mode',
-    '',
-    ...rows,
+    ...sections.flatMap((section, index) => (index === 0 ? section : ['', ...section])),
     '',
     ...(readBooleanSetting('github.includeBaseRevision')
       ? [`Base revision: ${draft.baseRevision.toString()}`]
@@ -74,7 +95,7 @@ export function buildIssueDraftUrl({ repository, draft }: IssueDraftInput): stri
   const url = new URL(`https://github.com/${repository}/issues/new`);
   url.searchParams.set(
     'title',
-    `${draftOnly ? '[DRAFT] ' : ''}Personalization: ${draft.changedIds.length.toString()} change(s)`,
+    `${draftOnly ? '[DRAFT] ' : ''}Personalization: ${total.toString()} change(s)`,
   );
   url.searchParams.set('body', body);
   return url.toString();

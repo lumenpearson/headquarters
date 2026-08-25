@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { ContentPatchError, seedContentValue } from '../application/edit/contentFields';
+import { operationsSeed } from '../data/operationsSeed';
+import { querySettingsHistory } from '../infrastructure/settings/SettingsHistoryLedger';
 import { operationsStore } from './operationsStore';
 
 describe('operationsStore', () => {
@@ -214,5 +217,166 @@ describe('advanced depth and privacy settings', () => {
     }
 
     expect(operationsStore.getState().personalization.undoStack.length).toBe(20);
+  });
+});
+
+describe('domain content edits (R4)', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  it('applies a content patch to the world at once and records it in the settings ledger', () => {
+    const store = operationsStore.getState();
+    store.applyContentPatch([
+      { id: 'case.title', entityId: 'CASE-01', value: 'НАБЛЮДЕНИЕ / K-01 / ПРОВЕРЕНО' },
+    ]);
+
+    const next = operationsStore.getState();
+    expect(next.cases['CASE-01']?.title).toBe('НАБЛЮДЕНИЕ / K-01 / ПРОВЕРЕНО');
+    expect(next.content.overrides).toEqual({
+      'case.title@CASE-01': 'НАБЛЮДЕНИЕ / K-01 / ПРОВЕРЕНО',
+    });
+    const entry = next.personalization.history[0];
+    expect(entry).toMatchObject({
+      operation: 'patch',
+      category: 'information',
+      scope: 'device',
+      changedIds: ['case.title@CASE-01'],
+    });
+    expect(entry?.content).toEqual({
+      before: {},
+      after: { 'case.title@CASE-01': 'НАБЛЮДЕНИЕ / K-01 / ПРОВЕРЕНО' },
+    });
+    // The settings draft is not what changed.
+    expect(next.personalization.draft.changedIds).toEqual([]);
+    expect(next.personalization.undoStack).toHaveLength(1);
+    expect(next.audit[0]?.action).toBe('ИЗМЕНЕНО СОДЕРЖИМОЕ');
+  });
+
+  it('moves a case date by the calendar day the registry prints', () => {
+    operationsStore
+      .getState()
+      .applyContentPatch([{ id: 'case.createdAt', entityId: 'CASE-02', value: '2026-09-01' }]);
+
+    const createdAt = operationsStore.getState().cases['CASE-02']?.createdAt ?? '';
+    expect(new Date(createdAt).toLocaleDateString('ru-RU')).toBe('01.09.2026');
+  });
+
+  it('undoes and redoes a content edit through the shared stack, leaving the draft alone', () => {
+    const store = operationsStore.getState();
+    store.applySettingsPatch([{ id: 'themes.id', value: 'cold-cyan' }]);
+    store.applyContentPatch([
+      { id: 'event.title', entityId: 'EV-1001', value: 'K-17: СИГНАЛ ВОССТАНОВЛЕН' },
+    ]);
+    const title = () =>
+      operationsStore.getState().events.find((event) => event.id === 'EV-1001')?.title;
+    expect(operationsStore.getState().personalization.undoStack).toHaveLength(2);
+
+    store.undoSettingsDraft();
+    let current = operationsStore.getState();
+    expect(title()).toBe('K-17: ПОТЕРЯ СИГНАЛА');
+    expect(current.content.overrides).toEqual({});
+    // The theme change beneath it is untouched by undoing a content edit.
+    expect(current.personalization.draft.values['themes.id']).toBe('cold-cyan');
+    expect(current.personalization.redoStack).toHaveLength(1);
+
+    store.redoSettingsDraft();
+    expect(title()).toBe('K-17: СИГНАЛ ВОССТАНОВЛЕН');
+
+    store.undoSettingsDraft();
+    store.undoSettingsDraft();
+    current = operationsStore.getState();
+    expect(title()).toBe('K-17: ПОТЕРЯ СИГНАЛА');
+    expect(current.personalization.draft.values['themes.id']).toBe('terminal-red');
+  });
+
+  it('refuses an unknown field and a bad date without touching the state or the ledger', () => {
+    const store = operationsStore.getState();
+
+    expect(() =>
+      store.applyContentPatch([{ id: 'case.priority', entityId: 'CASE-01', value: '1' }]),
+    ).toThrow(ContentPatchError);
+    expect(() =>
+      store.applyContentPatch([{ id: 'case.createdAt', entityId: 'CASE-01', value: '2026-02-30' }]),
+    ).toThrow(ContentPatchError);
+
+    const current = operationsStore.getState();
+    expect(current.personalization.history).toHaveLength(0);
+    expect(current.content.overrides).toEqual({});
+    expect(current.cases['CASE-01']?.createdAt).toBe(operationsSeed.cases[0]?.createdAt);
+  });
+
+  it('resets one field by patching the seed value back, and every field at once', () => {
+    const store = operationsStore.getState();
+    const seedBirthDate = seedContentValue('person.birthDate', 'P-01');
+    store.applyContentPatch([{ id: 'person.birthDate', entityId: 'P-01', value: '1980-01-15' }]);
+    store.applyContentPatch([
+      { id: 'report.title', entityId: 'REP-01', value: 'ОПЕРАТИВНАЯ СВОДКА / ГС / ЧЕРНОВИК' },
+    ]);
+
+    store.applyContentPatch([{ id: 'person.birthDate', entityId: 'P-01', value: seedBirthDate }]);
+    let current = operationsStore.getState();
+    expect(current.people['P-01']?.birthDate).toBe(seedBirthDate);
+    expect(Object.keys(current.content.overrides)).toEqual(['report.title@REP-01']);
+
+    store.resetContentEdits();
+    current = operationsStore.getState();
+    expect(current.content.overrides).toEqual({});
+    expect(current.reports['REP-01']?.title).toBe(operationsSeed.reports[0]?.title);
+    expect(current.personalization.history[0]).toMatchObject({
+      operation: 'reset-category',
+      category: 'information',
+      changedIds: ['report.title@REP-01'],
+    });
+    // Nothing to reset is not a change, so no entry claims one.
+    const entries = current.personalization.history.length;
+    store.resetContentEdits();
+    expect(operationsStore.getState().personalization.history).toHaveLength(entries);
+  });
+
+  it('restores a content entry from the history into the world', () => {
+    const store = operationsStore.getState();
+    store.applyContentPatch([
+      { id: 'operation.title', entityId: 'OP-GS-042', value: 'ГРЕМУЧАЯ СМЕСЬ II' },
+    ]);
+    const entry = operationsStore.getState().personalization.history[0];
+    store.resetContentEdits();
+    expect(operationsStore.getState().operation.title).toBe('ГРЕМУЧАЯ СМЕСЬ');
+
+    operationsStore.getState().restoreSettingsHistoryEntry(entry?.id ?? 'missing');
+
+    expect(operationsStore.getState().operation.title).toBe('ГРЕМУЧАЯ СМЕСЬ II');
+    expect(operationsStore.getState().content.overrides).toEqual({
+      'operation.title@OP-GS-042': 'ГРЕМУЧАЯ СМЕСЬ II',
+    });
+  });
+
+  it('is found by the history query under the information category and by its key', () => {
+    operationsStore
+      .getState()
+      .applyContentPatch([{ id: 'case.createdAt', entityId: 'CASE-04', value: '2026-09-02' }]);
+    operationsStore.getState().applySettingsPatch([{ id: 'themes.id', value: 'cold-cyan' }]);
+
+    const page = querySettingsHistory(operationsStore.getState().personalization.history, {
+      page: 1,
+      pageSize: 10,
+      order: 'newest',
+      category: 'information',
+      settingId: 'CASE-04',
+    });
+
+    expect(page.total).toBe(1);
+    expect(page.items[0]?.changedIds).toEqual(['case.createdAt@CASE-04']);
+  });
+
+  it('gives consecutive ledger entries distinct ids even within one millisecond', () => {
+    const store = operationsStore.getState();
+    store.applyContentPatch([{ id: 'case.title', entityId: 'CASE-05', value: 'ДЕЛО / А' }]);
+    store.applyContentPatch([{ id: 'case.title', entityId: 'CASE-05', value: 'ДЕЛО / Б' }]);
+
+    const ids = operationsStore.getState().personalization.history.map((entry) => entry.id);
+    // The history list keys rows by id and restore finds an entry by it; two
+    // changes in the same millisecond used to share one.
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

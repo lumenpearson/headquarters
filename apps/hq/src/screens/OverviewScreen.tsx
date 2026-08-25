@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { EditableContent } from '@/components/edit/EditableContent';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import {
   Gauge,
@@ -110,7 +111,11 @@ export function OverviewScreen() {
               </TerminalButton>
             }
           >
-            <p>{operation.summary}</p>
+            <p>
+              <EditableContent field="operation.summary" entityId={operation.id}>
+                {operation.summary}
+              </EditableContent>
+            </p>
             {presentation === 'full' ? (
               <TerminalButton className="operation-schematic" onClick={() => router.push('/map')}>
                 <svg viewBox="0 0 600 220" aria-label="Схема сектора операции">
@@ -579,6 +584,7 @@ export function OverviewScreen() {
       objects,
       openDrawer,
       operation.currentPhase,
+      operation.id,
       operation.summary,
       router,
       sectors,
@@ -594,7 +600,13 @@ export function OverviewScreen() {
       <header className="ops-screen__title operation-titlebar">
         <div>
           <span>OPERATION / {operation.code}</span>
-          <h1>СВОДКА ОПЕРАЦИИ «{operation.title}»</h1>
+          <h1>
+            СВОДКА ОПЕРАЦИИ «
+            <EditableContent field="operation.title" entityId={operation.id}>
+              {operation.title}
+            </EditableContent>
+            »
+          </h1>
         </div>
         <div className="operation-titlebar__metrics">
           <StatusBadge status={operation.status} />

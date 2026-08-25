@@ -20,6 +20,7 @@ export * from './TerminalSeparator.js';
 export * from './TerminalSlider.js';
 export * from './TerminalSwitch.js';
 export * from './TerminalTabs.js';
+export * from './TerminalTextarea.js';
 export * from './TerminalToast.js';
 export * from './TerminalToggle.js';
 export * from './TerminalToolbar.js';

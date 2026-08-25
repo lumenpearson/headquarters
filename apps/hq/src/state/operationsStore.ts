@@ -40,11 +40,19 @@ import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/react/shallow';
 import { createStore } from 'zustand/vanilla';
 
+import {
+  patchContentOverrides,
+  projectContentOverrides,
+  sanitizeContentOverrides,
+  type ContentOverrides,
+  type ContentPatch,
+} from '../application/edit/contentFields';
 import { booleanSetting, numberSetting } from '../application/personalization/settingValue';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
   createSettingsHistoryEntry,
+  type ContentHistoryCheckpoint,
   type SettingsHistoryEntry,
   type SettingsHistoryEntryInput,
 } from '../infrastructure/settings/SettingsHistoryLedger';
@@ -164,6 +172,23 @@ interface EditModeState {
 
 export type EditDockEdge = 'left' | 'right' | 'top' | 'bottom';
 
+/**
+ * Domain-content edits made from edit mode (R4).
+ *
+ * The overrides are the record; the world entities they name are the
+ * projection every screen reads. Kept beside the world rather than inside
+ * `personalization`, because a case's date is not a setting and does not
+ * publish, export or reset with the settings draft -- it shares only the
+ * ledger, the undo stack and the issue draft with them.
+ *
+ * Persisted, and applied again over the seed on the next launch: an edit is
+ * the operator's decision about the content, and it outlives the session the
+ * way a setting does.
+ */
+interface ContentEditState {
+  readonly overrides: ContentOverrides;
+}
+
 interface ProductionState {
   readonly paused: boolean;
   readonly preset: string;
@@ -218,6 +243,7 @@ export interface OperationsState {
   readonly production: ProductionState;
   readonly personalization: PersonalizationState;
   readonly edit: EditModeState;
+  readonly content: ContentEditState;
   readonly metrics: OperationsMetrics;
   readonly audit: readonly OpsAuditEntry[];
   readonly setRoute: (route: OperationsRoute) => void;
@@ -257,6 +283,8 @@ export interface OperationsState {
   readonly exitEditMode: () => void;
   readonly selectEditElement: (id: string) => void;
   readonly dockEditPanel: (edge: EditDockEdge) => void;
+  readonly applyContentPatch: (patches: readonly ContentPatch[]) => void;
+  readonly resetContentEdits: () => void;
   readonly applySettingsPatch: (patches: readonly SettingsPatch[]) => void;
   readonly resetSettingsCategory: (category: SettingCategory) => void;
   readonly resetAllSettings: () => void;
@@ -367,6 +395,7 @@ function createBaseState() {
       // to string and stops satisfying EditDockEdge.
       dockEdge: 'right' as const,
     },
+    content: { overrides: {} as ContentOverrides },
     metrics: {
       cpu: 43,
       ram: 68,
@@ -403,8 +432,19 @@ function auditEntry(action: string, entityId: string): OpsAuditEntry {
   };
 }
 
+let settingsSequence = 0;
+
+/**
+ * The sequence is what keeps two ids apart within one millisecond. The history
+ * list keys its rows by id and `restoreSettingsHistoryEntry` finds an entry by
+ * it, and a content reset followed by a restore lands in the same tick.
+ */
 function settingsMetadata(prefix: string): { readonly id: string; readonly at: string } {
-  return { id: `${prefix}-${Date.now()}`, at: new Date().toISOString() };
+  settingsSequence += 1;
+  return {
+    id: `${prefix}-${Date.now()}-${settingsSequence}`,
+    at: new Date().toISOString(),
+  };
 }
 
 function appendSettingsHistory(
@@ -427,6 +467,23 @@ function appendSettingsHistory(
       ? [...state.undoStack, historyEntry].slice(-undoDepth)
       : state.undoStack,
     redoStack: options.redoStack ?? (options.reversible ? [] : state.redoStack),
+  };
+}
+
+/**
+ * Moves the content overrides to `overrides` and projects the move onto the
+ * world: what the store has to set, and what the ledger records about it.
+ */
+function contentTransition(
+  state: OperationsState,
+  overrides: ContentOverrides,
+): { readonly patch: Partial<OperationsState>; readonly record: ContentHistoryCheckpoint } {
+  return {
+    patch: {
+      ...projectContentOverrides(state, state.content.overrides, overrides),
+      content: { overrides },
+    },
+    record: { before: state.content.overrides, after: overrides },
   };
 }
 
@@ -612,6 +669,70 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
 
   dockEditPanel: (edge) => set((state) => ({ edit: { ...state.edit, dockEdge: edge } })),
 
+  applyContentPatch: (patches) =>
+    set((state) => {
+      // Throws for an unknown field, an unseeded entity or a refused value,
+      // as applyDraftPatch does for a setting; the updater then never returns
+      // and the state is untouched.
+      const { overrides, changedIds } = patchContentOverrides(state.content.overrides, patches);
+      const content = contentTransition(state, overrides);
+      const checkpoint = createSettingsDraftCheckpoint(state.personalization.draft);
+      const personalization = appendSettingsHistory(
+        state.personalization,
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'patch',
+          // The category the settings about what the shell shows already
+          // use: both are about the information on screen, and the history
+          // filter has one list of categories.
+          category: 'information',
+          changedIds,
+          // No setting moves. The checkpoints are the draft as it stands, so
+          // restoring this entry through the ledger touches only content.
+          before: checkpoint,
+          after: checkpoint,
+          content: content.record,
+        },
+        { reversible: true },
+      );
+      return {
+        ...content.patch,
+        personalization,
+        audit: [auditEntry('ИЗМЕНЕНО СОДЕРЖИМОЕ', changedIds.join(',')), ...state.audit].slice(
+          0,
+          100,
+        ),
+      };
+    }),
+
+  resetContentEdits: () =>
+    set((state) => {
+      const changedIds = Object.keys(state.content.overrides);
+      if (changedIds.length === 0) return state;
+      const content = contentTransition(state, {});
+      const checkpoint = createSettingsDraftCheckpoint(state.personalization.draft);
+      const personalization = appendSettingsHistory(
+        state.personalization,
+        {
+          id: settingsMetadata('SET-HISTORY').id,
+          at: new Date().toISOString(),
+          operation: 'reset-category',
+          category: 'information',
+          changedIds,
+          before: checkpoint,
+          after: checkpoint,
+          content: content.record,
+        },
+        { reversible: true },
+      );
+      return {
+        ...content.patch,
+        personalization,
+        audit: [auditEntry('СБРОШЕНО СОДЕРЖИМОЕ', 'ALL'), ...state.audit].slice(0, 100),
+      };
+    }),
+
   applySettingsPatch: (patches) => {
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
@@ -745,11 +866,18 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const entry = state.personalization.undoStack.at(-1);
       if (entry === undefined) return state;
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
-      const draft = restoreSettingsDraft(
-        state.personalization.draft,
-        entry.before,
-        settingsMetadata('SET-UNDO'),
-      );
+      // A content entry changed no setting, so the draft is left alone and
+      // what it changed goes back through the projection that applied it.
+      const draft =
+        entry.content === undefined
+          ? restoreSettingsDraft(
+              state.personalization.draft,
+              entry.before,
+              settingsMetadata('SET-UNDO'),
+            )
+          : state.personalization.draft;
+      const content =
+        entry.content === undefined ? null : contentTransition(state, entry.content.before);
       const personalization = appendSettingsHistory(
         {
           ...state.personalization,
@@ -764,6 +892,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           changedIds: entry.changedIds,
           before,
           after: createSettingsDraftCheckpoint(draft),
+          ...(content === null ? {} : { content: content.record }),
         },
         {
           reversible: false,
@@ -773,6 +902,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         },
       );
       return {
+        ...(content === null ? {} : content.patch),
         personalization,
         audit: [auditEntry('ОТМЕНЕНО ИЗМЕНЕНИЕ НАСТРОЕК', entry.id), ...state.audit].slice(0, 100),
       };
@@ -782,11 +912,16 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const entry = state.personalization.redoStack.at(-1);
       if (entry === undefined) return state;
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
-      const draft = restoreSettingsDraft(
-        state.personalization.draft,
-        entry.after,
-        settingsMetadata('SET-REDO'),
-      );
+      const draft =
+        entry.content === undefined
+          ? restoreSettingsDraft(
+              state.personalization.draft,
+              entry.after,
+              settingsMetadata('SET-REDO'),
+            )
+          : state.personalization.draft;
+      const content =
+        entry.content === undefined ? null : contentTransition(state, entry.content.after);
       const personalization = appendSettingsHistory(
         {
           ...state.personalization,
@@ -801,10 +936,12 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           changedIds: entry.changedIds,
           before,
           after: createSettingsDraftCheckpoint(draft),
+          ...(content === null ? {} : { content: content.record }),
         },
         { reversible: true },
       );
       return {
+        ...(content === null ? {} : content.patch),
         personalization,
         audit: [auditEntry('ПОВТОРЕНО ИЗМЕНЕНИЕ НАСТРОЕК', entry.id), ...state.audit].slice(0, 100),
       };
@@ -814,11 +951,16 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const entry = state.personalization.history.find((candidate) => candidate.id === id);
       if (entry === undefined) return state;
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
-      const draft = restoreSettingsDraft(
-        state.personalization.draft,
-        entry.after,
-        settingsMetadata('SET-RESTORE'),
-      );
+      const draft =
+        entry.content === undefined
+          ? restoreSettingsDraft(
+              state.personalization.draft,
+              entry.after,
+              settingsMetadata('SET-RESTORE'),
+            )
+          : state.personalization.draft;
+      const content =
+        entry.content === undefined ? null : contentTransition(state, entry.content.after);
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
@@ -829,10 +971,12 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           changedIds: entry.changedIds,
           before,
           after: createSettingsDraftCheckpoint(draft),
+          ...(content === null ? {} : { content: content.record }),
         },
         { reversible: true },
       );
       return {
+        ...(content === null ? {} : content.patch),
         personalization,
         audit: [
           auditEntry('СОСТОЯНИЕ ИЗ ИСТОРИИ ЗАГРУЖЕНО В DRAFT', entry.id),
@@ -964,6 +1108,8 @@ interface PersistedOperationsState {
   readonly tasks: Readonly<Record<string, OpsTask>>;
   /** Absent when `privacy.persistAudit` is off; hydration falls back to the seed. */
   readonly audit?: readonly OpsAuditEntry[];
+  /** Absent in a blob written before R4; hydration then applies no content edits. */
+  readonly content?: ContentEditState;
   readonly personalization: PersonalizationState;
 }
 
@@ -975,6 +1121,7 @@ function persistedSnapshot(state: OperationsState): PersistedOperationsState {
     production,
     alerts: state.alerts,
     tasks: state.tasks,
+    content: state.content,
     /*
      * `privacy.persistAudit` omits the key rather than writing an empty array:
      * an empty trail read back would look like a session that did nothing,
@@ -1086,6 +1233,15 @@ function hydratePersistedState(): void {
         tasks: restoreWorld ? (parsed.tasks ?? state.tasks) : state.tasks,
         audit: restoreWorld ? (parsed.audit ?? state.audit) : state.audit,
         personalization: hydratePersonalization(personalization, state.personalization),
+        /*
+         * Content edits come back regardless of `startup.restoreWorld`. That
+         * setting names alerts, tasks and the audit trail -- what the session
+         * did -- where a date the operator corrected is a decision, kept the
+         * way a setting is. Sanitized first: the blob is a trust boundary, and
+         * a key from an older build or a hand-edited value must not reach the
+         * world.
+         */
+        ...contentTransition(state, sanitizeContentOverrides(parsed.content?.overrides)).patch,
       }));
     }
   } catch {
@@ -1161,6 +1317,10 @@ export function initializeOperationsClient(): () => void {
         // A peer that keeps no trail sends none; this session keeps its own
         // rather than adopting an emptiness the peer never meant to share.
         audit: event.data.audit ?? state.audit,
+        // Content edits are world, not personalization: a date corrected on
+        // one screen is the date on every screen of the group, which is what
+        // `advanced.worldSync` -- the gate on this channel -- is for.
+        ...contentTransition(state, sanitizeContentOverrides(event.data.content?.overrides)).patch,
         // Personalization is deliberately not taken from the world snapshot.
         // `advanced.liveEdit` is the opt-in that decides whether a settings
         // change reaches the other sessions, and it defaults to off — but this

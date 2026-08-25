@@ -50,6 +50,8 @@ import {
   type ResolvedPresentation,
 } from '@/application/personalization/presentation';
 
+import { EditableContent } from '@/components/edit/EditableContent';
+
 import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
 import { resolveMotionDurationMs } from './ShellMotion';
@@ -660,11 +662,36 @@ function OperationsDrawer() {
     return (
       <Drawer title={event.title} eyebrow={`EVENT / ${event.id}`} onClose={close}>
         <SeverityBadge severity={event.severity} />
-        <p>{event.description}</p>
+        <p>
+          <EditableContent field="event.description" entityId={event.id}>
+            {event.description}
+          </EditableContent>
+        </p>
         <dl className="ops-definition-list">
+          {/*
+           * The card is where an event's fields are edited (R4): the feeds
+           * render each event as a button, and a selector cannot sit inside
+           * one. The title is repeated here as a row for that reason.
+           */}
+          <div>
+            <dt>НАЗВАНИЕ</dt>
+            <dd>
+              <EditableContent field="event.title" entityId={event.id}>
+                {event.title}
+              </EditableContent>
+            </dd>
+          </div>
           <div>
             <dt>ВРЕМЯ</dt>
-            <dd>{formatDateTime(event.timestamp)}</dd>
+            <dd>
+              <EditableContent field="event.date" entityId={event.id}>
+                {formatDate(event.timestamp)}
+              </EditableContent>
+              ,&nbsp;
+              <EditableContent field="event.time" entityId={event.id}>
+                {formatTime(event.timestamp)}
+              </EditableContent>
+            </dd>
           </div>
           <div>
             <dt>ИСТОЧНИК</dt>
@@ -972,14 +999,29 @@ function Toggle({
   );
 }
 
+const dateFormat = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+});
+
+const timeFormat = new Intl.DateTimeFormat('ru-RU', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+function formatDate(value: string): string {
+  return dateFormat.format(new Date(value));
+}
+
+function formatTime(value: string): string {
+  return timeFormat.format(new Date(value));
+}
+
+// The two halves are separate because the event card edits them separately;
+// joined the way the single formatter used to print them.
 function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(new Date(value));
+  return `${formatDate(value)}, ${formatTime(value)}`;
 }

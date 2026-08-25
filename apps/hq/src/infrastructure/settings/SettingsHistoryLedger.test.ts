@@ -128,4 +128,19 @@ describe('the scope a change reaches', () => {
     expect(device.items.map((item) => item.id)).toEqual(['1']);
     expect(group.total).toBe(1);
   });
+
+  it('keeps a content checkpoint on the entry without sharing its record with the caller', () => {
+    const before: Record<string, string> = { 'case.title@CASE-01': 'A' };
+    const stored = createSettingsHistoryEntry({
+      ...entry('7', ['case.title@CASE-01']),
+      content: { before, after: {} },
+    });
+    before['case.title@CASE-01'] = 'B';
+
+    expect(stored.content).toEqual({ before: { 'case.title@CASE-01': 'A' }, after: {} });
+    // A content id names no setting, so it never carries a group scope.
+    expect(stored.scope).toBe('device');
+    // And an entry without one stays without one rather than gaining `{}`.
+    expect(entry('8', ['themes.id']).content).toBeUndefined();
+  });
 });

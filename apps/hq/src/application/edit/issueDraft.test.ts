@@ -173,3 +173,62 @@ describe('issue draft composition settings', () => {
     expect(bodyOf()).toContain('## Diagnostics');
   });
 });
+
+describe('issue draft with content edits', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  it('lists content edits under their own heading and counts them in the title', () => {
+    const draft = createSettingsDraft(createFactorySnapshot());
+
+    const url = new URL(
+      buildIssueDraftUrl({
+        repository: 'owner/repo',
+        draft,
+        content: { 'case.createdAt@CASE-01': '2026-09-01' },
+      }),
+    );
+    const body = url.searchParams.get('body') ?? '';
+
+    expect(url.searchParams.get('title')).toBe('[DRAFT] Personalization: 1 change(s)');
+    expect(body).toContain('## Content changed in edit mode');
+    expect(body).toContain('`case.createdAt@CASE-01` → `2026-09-01`');
+    // The registry's description, the way a setting row carries its own.
+    expect(body).toContain('Calendar date the case was opened');
+    // No settings changed, so no settings section claims otherwise.
+    expect(body).not.toContain('## Change made in edit mode');
+  });
+
+  it('keeps both sections when settings and content changed together', () => {
+    const draft = applyDraftPatch(
+      createSettingsDraft(createFactorySnapshot()),
+      [{ id: 'layout.density', value: 'comfortable' }],
+      metadata,
+    );
+
+    const url = new URL(
+      buildIssueDraftUrl({
+        repository: 'owner/repo',
+        draft,
+        content: { 'event.time@EV-1001': '18:05:09' },
+      }),
+    );
+    const body = url.searchParams.get('body') ?? '';
+
+    expect(url.searchParams.get('title')).toBe('[DRAFT] Personalization: 2 change(s)');
+    expect(body.indexOf('## Change made in edit mode')).toBeLessThan(
+      body.indexOf('## Content changed in edit mode'),
+    );
+    expect(body).toContain('`layout.density`');
+    expect(body).toContain('`event.time@EV-1001` → `18:05:09`');
+  });
+
+  it('still refuses a draft with neither a setting nor a content change', () => {
+    const draft = createSettingsDraft(createFactorySnapshot());
+
+    expect(() => buildIssueDraftUrl({ repository: 'owner/repo', draft, content: {} })).toThrow(
+      'no changes',
+    );
+  });
+});

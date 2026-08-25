@@ -4,6 +4,7 @@ import {
   type SettingsDraftCheckpoint,
 } from '@gremuchaya/settings-schema';
 
+import type { ContentOverrides } from '@/application/edit/contentFields';
 import { queryRecords } from '@/application/records/query';
 
 export const settingsHistoryOperations = [
@@ -43,6 +44,18 @@ export function scopeOfChangedIds(changedIds: readonly string[]): SettingsHistor
   return changedIds.some((id) => getSettingDefinition(id)?.scope === 'group') ? 'group' : 'device';
 }
 
+/**
+ * The content overrides around a domain-content edit (R4).
+ *
+ * Present only on an entry that changed content. A settings entry carries
+ * none, and the store reads its absence as "content untouched" rather than as
+ * an empty set, so undoing a theme change never moves a date.
+ */
+export interface ContentHistoryCheckpoint {
+  readonly before: ContentOverrides;
+  readonly after: ContentOverrides;
+}
+
 export interface SettingsHistoryEntry {
   readonly id: string;
   readonly at: string;
@@ -54,6 +67,7 @@ export interface SettingsHistoryEntry {
   readonly before: SettingsDraftCheckpoint;
   readonly after: SettingsDraftCheckpoint;
   readonly publishedRevision?: number;
+  readonly content?: ContentHistoryCheckpoint;
 }
 
 export interface SettingsHistoryQuery {
@@ -85,14 +99,18 @@ export type SettingsHistoryEntryInput = Omit<SettingsHistoryEntry, 'scope'> & {
 
 export function createSettingsHistoryEntry(entry: SettingsHistoryEntryInput): SettingsHistoryEntry {
   const changedIds = unique(entry.changedIds);
+  const { content, ...rest } = entry;
   return {
-    ...entry,
+    ...rest,
     changedIds,
     // Recomputed rather than taken from the caller, so a stored entry cannot
     // disagree with the definitions it names.
     scope: scopeOfChangedIds(changedIds),
     before: cloneCheckpoint(entry.before),
     after: cloneCheckpoint(entry.after),
+    ...(content === undefined
+      ? {}
+      : { content: { before: { ...content.before }, after: { ...content.after } } }),
   };
 }
 

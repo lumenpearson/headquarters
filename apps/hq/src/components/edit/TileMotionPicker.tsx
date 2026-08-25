@@ -3,6 +3,7 @@
 import { tileCategories, type TileCategory } from '@gremuchaya/settings-schema';
 import { TerminalSelect } from '@gremuchaya/ui/primitives';
 
+import { parseContentElementId } from '@/application/edit/contentFields';
 import {
   readCategoryMotions,
   readTileMotions,
@@ -49,7 +50,10 @@ const motionOptions = tileMotions.map((motion) => ({
 }));
 
 export function TileMotionPicker() {
-  const selected = useOperationsStore((state) => state.edit.selectedElementId);
+  const selectedElement = useOperationsStore((state) => state.edit.selectedElementId);
+  // The selection is shared with content fields (R4); one of those is not a
+  // tile and gets no motion.
+  const selected = parseContentElementId(selectedElement) === undefined ? selectedElement : '';
   const screen = useOperationsStore((state) => state.ui.route);
   const tileEntries = useOperationsStore((state) =>
     stringList(state.personalization.draft.values['tiles.animations']),

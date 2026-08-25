@@ -21,6 +21,7 @@ import {
 import { categoryLabel, groupLabel, SchemaSetting } from '@/components/settings/SchemaSetting';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
+import { ContentEditor } from './ContentEditor';
 import { resolveDockEdge } from './EditPanelDock';
 import { TileMotionPicker } from './TileMotionPicker';
 import { TileVisibility } from './TileVisibility';
@@ -47,7 +48,9 @@ const groupOptions = settingGroups.map((group) => ({
  * `applySettingsPatch`, and undo through `undoSettingsDraft`, so the panel is a
  * second surface onto the personalization slice rather than a second copy of
  * it. That is why there is no local editing state here beyond what is on
- * screen.
+ * screen. R4 adds a second patch target with the same shape: a content field
+ * selected on screen is dispatched through `applyContentPatch`, into the same
+ * ledger and the same undo stack, and `ContentEditor` is its surface here.
  *
  * It navigates the same catalogue as the settings screen and through the same
  * functions -- `queryCatalog` and `searchEverySetting` -- but not through the
@@ -73,6 +76,7 @@ export function EditPanel() {
   const active = useOperationsStore((state) => state.edit.active);
   const dockEdge = useOperationsStore((state) => state.edit.dockEdge);
   const draft = useOperationsStore((state) => state.personalization.draft);
+  const overrides = useOperationsStore((state) => state.content.overrides);
   const canUndo = useOperationsStore((state) => state.personalization.undoStack.length > 0);
   const [group, setGroup] = useState<SettingGroup>('appearance');
   const [search, setSearch] = useState('');
@@ -154,7 +158,8 @@ export function EditPanel() {
 
   if (!active) return null;
 
-  const hasChanges = draft.changedIds.length > 0;
+  const changeCount = draft.changedIds.length + Object.keys(overrides).length;
+  const hasChanges = changeCount > 0;
   const shown = runs.reduce((total, run) => total + run.definitions.length, 0);
 
   return (
@@ -167,7 +172,7 @@ export function EditPanel() {
     >
       <header className="edit-panel__header">
         <strong>РЕЖИМ РЕДАКТИРОВАНИЯ</strong>
-        <span>{draft.changedIds.length} ИЗМЕНЕНИЙ</span>
+        <span>{changeCount} ИЗМЕНЕНИЙ</span>
       </header>
 
       <div className="edit-panel__nav">
@@ -196,6 +201,13 @@ export function EditPanel() {
       </div>
 
       <TerminalScrollArea className="edit-panel__settings">
+        {/*
+         * Above the catalogue and outside the section and search, because the
+         * operator reaches it by pointing at a value on screen, not by
+         * navigating here: whatever the panel was showing, the field they
+         * just selected is the next thing they want to see.
+         */}
+        <ContentEditor />
         {runs.length === 0 ? (
           <p className="edit-panel__empty">
             {changedOnly ? 'НИЧЕГО НЕ ИЗМЕНЕНО ЗДЕСЬ' : 'НИЧЕГО НЕ НАЙДЕНО'}
@@ -242,7 +254,11 @@ export function EditPanel() {
           size="small"
           disabled={!hasChanges}
           onClick={() => {
-            window.open(buildIssueDraftUrl({ repository, draft }), '_blank', 'noopener');
+            window.open(
+              buildIssueDraftUrl({ repository, draft, content: overrides }),
+              '_blank',
+              'noopener',
+            );
           }}
         >
           ЧЕРНОВИК ISSUE
