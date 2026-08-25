@@ -655,3 +655,112 @@ test('R6: dateTime.showSeconds shortens both clocks, in every mode', async ({ pa
       .toMatch(/^\d{2}:\d{2}$/);
   }
 });
+
+test('R6: styles.panelCorners decides when a panel shows its brackets', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  const corners = page.locator('.ops-panel__corners').first();
+  await expect(corners).toBeAttached();
+  // `hover` is the default and writes no rule, so the brackets start hidden.
+  await expect.poll(() => corners.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+
+  await seedSettings(page, { 'styles.panelCorners': 'always' });
+  await page.reload();
+  // Nobody hovers a wall display, which is the case this exists for.
+  await expect
+    .poll(() =>
+      page
+        .locator('.ops-panel__corners')
+        .first()
+        .evaluate((el) => getComputedStyle(el).opacity),
+    )
+    .toBe('1');
+
+  await seedSettings(page, { 'styles.panelCorners': 'never' });
+  await page.reload();
+  const panel = page.locator('.ops-panel').first();
+  await panel.hover();
+  // `never` has to beat the hover rule as well, which is why these rules are
+  // written after it: all three are (0,2,0) and source order decides.
+  await expect
+    .poll(() =>
+      page
+        .locator('.ops-panel__corners')
+        .first()
+        .evaluate((el) => getComputedStyle(el).opacity),
+    )
+    .toBe('0');
+});
+
+test('R6: the shell decoration settings reach their own elements', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, {
+    'styles.cornerLength': 22,
+    'styles.signalFieldOpacity': 0.2,
+    'styles.frameRules': false,
+    'styles.workspaceSeam': false,
+  });
+  await page.goto('/overview');
+  await settled(page, 'data-frame-rules', 'off');
+
+  await expect
+    .poll(() =>
+      page
+        .locator('.ops-panel__corners')
+        .first()
+        .evaluate((el) => getComputedStyle(el).backgroundSize),
+    )
+    .toContain('22px');
+  await expect
+    .poll(() => page.locator('.ops-shell__ascii').evaluate((el) => getComputedStyle(el).opacity))
+    .toBe('0.2');
+  expect(await displayOf(page, '.ops-shell__frame')).toBe('none');
+  expect(
+    await page.evaluate(
+      () =>
+        getComputedStyle(document.querySelector('.ops-workspace') as Element, '::before').display,
+    ),
+  ).toBe('none');
+});
+
+test('R6: the camera-safe grade answers to its three dials and its token switch', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'gremuchaya-hq:operations:v3',
+      JSON.stringify({
+        version: 5,
+        ui: {},
+        production: { cameraSafe: true },
+        personalization: {
+          published: { revision: 0, values: {} },
+          draft: {
+            baseRevision: 0,
+            values: { 'themes.cameraSafeSaturation': 0.2, 'themes.cameraSafeTokens': false },
+            changedIds: ['themes.cameraSafeSaturation', 'themes.cameraSafeTokens'],
+            history: [],
+          },
+          history: [],
+          undoStack: [],
+          redoStack: [],
+        },
+      }),
+    );
+  });
+  await page.goto('/overview');
+  const shell = page.locator('.ops-shell');
+  await expect(shell).toHaveClass(/ops-shell--camera-safe/);
+
+  // Saturation scales what the theme produced and can never name a hue, which
+  // is the one dial R14 positively invites.
+  await expect
+    .poll(() => shell.evaluate((el) => getComputedStyle(el).filter))
+    .toContain('saturate(0.2)');
+  // With the tokens switched off the shell keeps the theme's own text colour
+  // instead of the fixed greenish one camera-safe writes over it.
+  await expect
+    .poll(() => shell.evaluate((el) => getComputedStyle(el).getPropertyValue('--ops-text').trim()))
+    .not.toBe('#9fb6a5');
+});

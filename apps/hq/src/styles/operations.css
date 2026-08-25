@@ -138,11 +138,19 @@
 }
 
 .ops-shell--camera-safe {
+  filter: brightness(var(--ops-camera-brightness, 0.88)) contrast(var(--ops-camera-contrast, 0.9))
+    saturate(var(--ops-camera-saturation, 0.86));
+}
+
+/* `themes.cameraSafeTokens`. These four are fixed greenish values written over
+   whatever theme is active, so `light-operations` plus camera-safe puts pale
+   green text on a white panel. The selector matches at the default, so nothing
+   renders differently until the operator switches it off. */
+.ops-shell--camera-safe:not([data-camera-safe-tokens='off']) {
   --ops-text: #9fb6a5;
   --ops-text-strong: #c8d8cb;
   --ops-green: #679f74;
   --ops-orange: #b77639;
-  filter: brightness(0.88) contrast(0.9) saturate(0.86);
 }
 
 .ops-cursor--hidden,
@@ -4582,7 +4590,7 @@ button.is-active {
   color: #777;
   font: 11px/1.42 var(--font-mono);
   letter-spacing: 0.08em;
-  opacity: 0.055;
+  opacity: var(--ops-signal-field-opacity, 0.055);
   pointer-events: none;
   transform: translateX(-50%) scale(1.55, 1.2);
   transform-origin: top center;
@@ -4939,10 +4947,14 @@ button.is-active {
   z-index: 2;
   inset: 0;
   background:
-    linear-gradient(var(--ops-orange), var(--ops-orange)) left top / 10px 1px no-repeat,
-    linear-gradient(var(--ops-orange), var(--ops-orange)) left top / 1px 10px no-repeat,
-    linear-gradient(var(--ops-orange), var(--ops-orange)) right top / 10px 1px no-repeat,
-    linear-gradient(var(--ops-orange), var(--ops-orange)) right top / 1px 10px no-repeat;
+    linear-gradient(var(--ops-orange), var(--ops-orange)) left top / var(--ops-corner-length, 10px)
+      1px no-repeat,
+    linear-gradient(var(--ops-orange), var(--ops-orange)) left top / 1px
+      var(--ops-corner-length, 10px) no-repeat,
+    linear-gradient(var(--ops-orange), var(--ops-orange)) right top / var(--ops-corner-length, 10px)
+      1px no-repeat,
+    linear-gradient(var(--ops-orange), var(--ops-orange)) right top / 1px
+      var(--ops-corner-length, 10px) no-repeat;
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
@@ -4952,6 +4964,18 @@ button.is-active {
 .ops-panel:focus-within > .ops-panel__corners,
 .ops-panel.is-selected > .ops-panel__corners {
   opacity: 1;
+}
+
+/* `styles.panelCorners`. Placed after the hover rule above on purpose: both are
+   (0,2,0) — `always` has to win over it, and `never` over both — so source
+   order is what decides. Nobody hovers a wall display, which is why `always`
+   exists; `hover` is the default and writes nothing. */
+.ops-shell[data-panel-corners='always'] .ops-panel > .ops-panel__corners {
+  opacity: 1;
+}
+
+.ops-shell[data-panel-corners='never'] .ops-panel > .ops-panel__corners {
+  opacity: 0;
 }
 
 .ops-panel--clickable:hover {
@@ -6139,6 +6163,21 @@ button.is-active {
 }
 .ops-shell[data-camera-density='3x4'] .camera-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* `styles.frameRules` and `styles.workspaceSeam` — decoration the operator
+   could not switch off, and both read as a seam on camera. Only `off` carries a
+   rule. The workspace seam named here is the live one: the earlier seam on
+   `.ops-screen` is overridden by `background: transparent` further down, so
+   switching that one off would prove nothing. */
+.ops-shell[data-frame-rules='off']::before,
+.ops-shell[data-frame-rules='off']::after,
+.ops-shell[data-frame-rules='off'] .ops-shell__frame {
+  display: none;
+}
+
+.ops-shell[data-workspace-seam='off'] .ops-workspace::before {
+  display: none;
 }
 
 /* Shell chrome the operator can put away. Each carries a rule only for `off`:
