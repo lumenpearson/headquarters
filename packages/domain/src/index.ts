@@ -9,5 +9,6 @@ export * from './operations.js';
 export * from './scene.js';
 export * from './screen.js';
 export * from './screenBus.js';
+export * from './simulationCurve.js';
 export * from './snapshots.js';
 export * from './virtualPath.js';

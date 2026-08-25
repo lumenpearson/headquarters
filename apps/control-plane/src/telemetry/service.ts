@@ -3,6 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { create, fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
 import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
+import {
+  channelSeverity,
+  channelValue,
+  type CurveInterpolationKind,
+  type SimulationChannelLike,
+  type SimulationCurveLike,
+  type TelemetrySeverityKind,
+} from '@gremuchaya/domain';
 import { ResourceIdSchema, RevisionSchema, telemetryV1 } from '@gremuchaya/protocol';
 import type { TelemetryService } from '@gremuchaya/protocol';
 
@@ -553,10 +561,13 @@ function requireSampleCount(requested: number): number {
 /**
  * Walks a profile's timeline and reports what each channel would read.
  *
- * The walk is deterministic in the profile alone: noise comes from the
- * channel's own seed and the sample's index, never from a clock or a shared
- * generator. Two previews of one profile therefore agree, which is what makes a
- * preview worth showing an operator before the profile is published.
+ * The arithmetic is `@gremuchaya/domain`'s `channelValue` and
+ * `channelSeverity`, the same functions the client drives its own simulation
+ * with, so a preview here and a run there agree reading for reading. The walk
+ * is deterministic in the profile alone: noise comes from the channel's own
+ * seed and the sample's index, never from a clock or a shared generator. Two
+ * previews of one profile therefore agree, which is what makes a preview worth
+ * showing an operator before the profile is published.
  *
  * A zero `time_scale`, `period_seconds` or `update_interval_ms` is the proto3
  * default for a field the client left alone, so each falls back to its own
@@ -571,15 +582,20 @@ function previewSnapshots(
     profile.updateIntervalMs > 0 ? profile.updateIntervalMs : defaultUpdateIntervalMs;
   const periodSeconds = profile.periodSeconds > 0 ? profile.periodSeconds : defaultPeriodSeconds;
   const timeScale = profile.timeScale > 0 ? profile.timeScale : 1;
-  const previous = new Array<number | undefined>(profile.channels.length).fill(undefined);
+  // The protocol enums are mapped once per channel here, not once per sample.
+  const channels = profile.channels.map((channel) => ({
+    sourceId: channel.sourceId,
+    simulated: toSimulationChannel(channel),
+  }));
+  const previous = new Array<number | undefined>(channels.length).fill(undefined);
   const snapshots: telemetryV1.TelemetrySnapshot[] = [];
 
   for (let index = 0; index < sampleCount; index += 1) {
     const elapsedMs = index * intervalMs;
     const observedAt = new Date(capturedAt.getTime() + elapsedMs);
     const phase = ((elapsedMs / 1_000) * timeScale) / periodSeconds;
-    const samples = profile.channels.map((channel, channelIndex) => {
-      const value = channelValue(channel, phase, index, previous[channelIndex]);
+    const samples = channels.map((channel, channelIndex) => {
+      const value = channelValue(channel.simulated, phase, index, previous[channelIndex]);
       previous[channelIndex] = value;
       return create(telemetryV1.TelemetrySampleSchema, {
         ...(channel.sourceId === undefined ? {} : { sourceId: channel.sourceId }),
@@ -588,7 +604,7 @@ function previewSnapshots(
         // registry of data sources, so a preview reports the number and leaves
         // naming it to whoever owns the source.
         unit: '',
-        severity: channelSeverity(channel, phase),
+        severity: toSeverityMessage(channelSeverity(channel.simulated, phase)),
         observedAt: timestampFromDate(observedAt),
       });
     });
@@ -605,171 +621,71 @@ function previewSnapshots(
 }
 
 /**
- * One channel's reading at one point of the timeline.
+ * The protocol's channel, read into the shape the shared arithmetic takes.
  *
- * `smoothing` is the weight the previous reading keeps, so 0 follows the curve
- * exactly and 1 holds the first reading for the whole preview. It is applied
- * after the noise and after the clamp, because smoothing a value that was never
- * inside the channel's own range would drift the whole series out of it.
+ * Only the enums need translating: the points and the numbers are the same
+ * fields under the same names. The source identifier is left behind on
+ * purpose; it names the reading and plays no part in computing it.
  */
-function channelValue(
-  channel: telemetryV1.SimulationChannel,
-  phase: number,
-  index: number,
-  previous: number | undefined,
-): number {
-  const range = channel.maximum - channel.minimum;
-  const curved = evaluateCurve(channel.valueCurve, phase);
-  const base = curved ?? channel.minimum + range / 2;
-  const amplitude = clamp(channel.noise, 0, 1) * range;
-  const noise = (deterministicUnit(channel.seed, index) - 0.5) * 2 * amplitude;
-  const raw = clamp(base + noise, channel.minimum, channel.maximum);
-  if (previous === undefined) return raw;
-  return previous + (raw - previous) * (1 - clamp(channel.smoothing, 0, 1));
+function toSimulationChannel(channel: telemetryV1.SimulationChannel): SimulationChannelLike {
+  const valueCurve = toSimulationCurve(channel.valueCurve);
+  const criticalityCurve = toSimulationCurve(channel.criticalityCurve);
+  return {
+    minimum: channel.minimum,
+    maximum: channel.maximum,
+    noise: channel.noise,
+    smoothing: channel.smoothing,
+    seed: channel.seed,
+    ...(valueCurve === undefined ? {} : { valueCurve }),
+    ...(criticalityCurve === undefined ? {} : { criticalityCurve }),
+  };
 }
 
-/**
- * Where a channel sits on the four-band scale the contract declares.
- *
- * A channel with no criticality curve reports NORMAL rather than guessing from
- * its value: warning and critical thresholds belong to the data source, and
- * without a source registry there is nothing here to compare against.
- */
-function channelSeverity(
-  channel: telemetryV1.SimulationChannel,
-  phase: number,
-): telemetryV1.TelemetrySeverity {
-  const criticality = evaluateCurve(channel.criticalityCurve, phase);
-  if (criticality === undefined) return telemetryV1.TelemetrySeverity.NORMAL;
-  const level = clamp(criticality, 0, 1);
-  if (level < 0.25) return telemetryV1.TelemetrySeverity.NORMAL;
-  if (level < 0.5) return telemetryV1.TelemetrySeverity.ELEVATED;
-  if (level < 0.75) return telemetryV1.TelemetrySeverity.DEGRADED;
-  return telemetryV1.TelemetrySeverity.CRITICAL;
-}
-
-/**
- * Reads a curve at a point of its own timeline.
- *
- * An empty curve answers `undefined` rather than zero, because zero is a
- * reading a channel could legitimately produce and the caller has to be able to
- * tell "no curve" from "a curve that says nothing is happening". Outside a
- * non-looping curve's own span the nearest end point holds, which is what keeps
- * a preview flat before a curve starts instead of extrapolating off the scale.
- */
-function evaluateCurve(
+function toSimulationCurve(
   curve: telemetryV1.SimulationCurve | undefined,
-  phase: number,
-): number | undefined {
-  const points = [...(curve?.points ?? [])].sort((left, right) => left.time - right.time);
-  const first = points[0];
-  const last = points[points.length - 1];
-  if (first === undefined || last === undefined) return undefined;
-  if (points.length === 1) return first.value;
-
-  const span = last.time - first.time;
-  const time =
-    curve?.loop === true && span > 0
-      ? first.time + positiveRemainder(phase - first.time, span)
-      : phase;
-  if (time <= first.time) return first.value;
-  if (time >= last.time) return last.value;
-
-  let index = 0;
-  while (index + 1 < points.length) {
-    const next = points[index + 1];
-    if (next === undefined || next.time > time) break;
-    index += 1;
-  }
-  const from = points[index];
-  const to = points[index + 1];
-  if (from === undefined || to === undefined) return last.value;
-  const segment = to.time - from.time;
-  if (segment <= 0) return to.value;
-  return interpolate(curve?.interpolation, from, to, (time - from.time) / segment, segment);
+): SimulationCurveLike | undefined {
+  if (curve === undefined) return undefined;
+  return {
+    points: curve.points,
+    interpolation: toCurveInterpolationKind(curve.interpolation),
+    loop: curve.loop,
+  };
 }
 
-function interpolate(
-  interpolation: telemetryV1.CurveInterpolation | undefined,
-  from: telemetryV1.CurvePoint,
-  to: telemetryV1.CurvePoint,
-  progress: number,
-  segment: number,
-): number {
+/**
+ * An unspecified interpolation reads as linear: a straight line is the reading
+ * a curve of bare points describes without its tangents. The default branch
+ * stays because a newer client can put a wire value here that this enum does
+ * not name, and such a curve is still a list of points.
+ */
+function toCurveInterpolationKind(
+  interpolation: telemetryV1.CurveInterpolation,
+): CurveInterpolationKind {
   switch (interpolation) {
     case telemetryV1.CurveInterpolation.STEP:
-      return from.value;
+      return 'step';
     case telemetryV1.CurveInterpolation.HERMITE:
-      return hermite(from, to, progress, segment);
+      return 'hermite';
     case telemetryV1.CurveInterpolation.BEZIER:
-      return bezier(from, to, progress, segment);
+      return 'bezier';
+    case telemetryV1.CurveInterpolation.LINEAR:
+    case telemetryV1.CurveInterpolation.UNSPECIFIED:
     default:
-      // LINEAR, and an unspecified interpolation with it: a straight line is
-      // the reading a curve of bare points describes without its tangents.
-      return from.value + (to.value - from.value) * progress;
+      return 'linear';
   }
 }
 
-function hermite(
-  from: telemetryV1.CurvePoint,
-  to: telemetryV1.CurvePoint,
-  progress: number,
-  segment: number,
-): number {
-  const squared = progress * progress;
-  const cubed = squared * progress;
-  return (
-    (2 * cubed - 3 * squared + 1) * from.value +
-    (cubed - 2 * squared + progress) * segment * from.outTangent +
-    (-2 * cubed + 3 * squared) * to.value +
-    (cubed - squared) * segment * to.inTangent
-  );
-}
-
-/**
- * The tangents are slopes, and a cubic Bézier wants control points, so each
- * tangent is carried a third of the segment out from its own end. That is the
- * standard conversion between the two ways of writing the same curve, and it is
- * what makes a Bézier segment and a Hermite segment with equal tangents agree.
- */
-function bezier(
-  from: telemetryV1.CurvePoint,
-  to: telemetryV1.CurvePoint,
-  progress: number,
-  segment: number,
-): number {
-  const control1 = from.value + (from.outTangent * segment) / 3;
-  const control2 = to.value - (to.inTangent * segment) / 3;
-  const inverse = 1 - progress;
-  return (
-    inverse * inverse * inverse * from.value +
-    3 * inverse * inverse * progress * control1 +
-    3 * inverse * progress * progress * control2 +
-    progress * progress * progress * to.value
-  );
-}
-
-/**
- * A unit value that depends on nothing but the channel's seed and the sample's
- * index. A shared generator would make a preview depend on how many previews
- * ran before it, and a clock-seeded one would make two previews of one profile
- * disagree — which is the whole reason a channel carries a seed at all.
- */
-function deterministicUnit(seed: bigint, index: number): number {
-  let state = (Number(BigInt.asUintN(32, seed)) + Math.imul(index, 0x9e37_79b9)) >>> 0;
-  state = Math.imul(state ^ (state >>> 16), 0x21f0_aaad) >>> 0;
-  state = Math.imul(state ^ (state >>> 15), 0x735a_2d97) >>> 0;
-  state = (state ^ (state >>> 15)) >>> 0;
-  return state / 0x1_0000_0000;
-}
-
-function positiveRemainder(value: number, span: number): number {
-  return ((value % span) + span) % span;
-}
-
-function clamp(value: number, lowest: number, highest: number): number {
-  if (Number.isNaN(value)) return lowest;
-  return Math.min(Math.max(value, lowest), highest);
+function toSeverityMessage(severity: TelemetrySeverityKind): telemetryV1.TelemetrySeverity {
+  switch (severity) {
+    case 'normal':
+      return telemetryV1.TelemetrySeverity.NORMAL;
+    case 'elevated':
+      return telemetryV1.TelemetrySeverity.ELEVATED;
+    case 'degraded':
+      return telemetryV1.TelemetrySeverity.DEGRADED;
+    case 'critical':
+      return telemetryV1.TelemetrySeverity.CRITICAL;
+  }
 }
 
 function requireProfile(

@@ -17,7 +17,9 @@ infrastructure (browser, bridge and Tauri adapters)
 
 Package ownership:
 
-- `@gremuchaya/domain`: framework-free models, state machines, errors, paths and ports.
+- `@gremuchaya/domain`: framework-free models, state machines, errors, paths and ports, and the
+  simulation-curve evaluator (`simulationCurve.ts`), the one copy of the curve arithmetic in the
+  repository.
 - `@gremuchaya/config`: Zod trust-boundary schemas, parsers and scene validation. It holds no
   migrations; the only migrations in the repository live in
   `apps/control-plane/src/db/migrations.ts`.
@@ -42,7 +44,9 @@ Package ownership:
   `IntegrationService` are registered only when durable auth config is present. `src/db` owns the
   schema and its migrations, `src/realtime` the WebSocket hub and the `sync_events` replay store,
   `src/redis` the optional presence and rate-limit coordinator, and `src/sync` the paired-device
-  lifecycle with its row mappers, receipt guard and paging. No client in `apps/hq` calls any of it.
+  lifecycle with its row mappers, receipt guard and paging. `src/telemetry` previews a profile
+  through `@gremuchaya/domain`'s curve evaluator, mapping the protocol enums at the boundary; that
+  is the control plane's only dependency on `domain`. No client in `apps/hq` calls any of it.
 - `src-tauri`: native read-only projection, watcher, physical monitor and window management, plus a
   loopback media gateway that runs `ffmpeg` and serves the resulting HLS to the WebView.
 
