@@ -6141,6 +6141,39 @@ button.is-active {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+/* Shell chrome the operator can put away. Each carries a rule only for `off`:
+   the default has to be the absence of a declaration, and each is reached by a
+   class or a marker attribute rather than by position — `.ops-topbar__metadata`
+   is already indexed by `:nth-child` twice in this file, and a third index
+   would move the moment an entry is added. */
+.ops-shell[data-brand-tagline='off'] .ops-brand small {
+  display: none;
+}
+
+.ops-shell[data-secure-badge='off'] .ops-topbar__metadata .is-secure {
+  display: none;
+}
+
+.ops-shell[data-header-date='off'] .ops-topbar__metadata [data-header-entry='date'] {
+  display: none;
+}
+
+.ops-shell[data-clock-rate='off'] .ops-topbar > time > span {
+  display: none;
+}
+
+.ops-shell[data-clock-mode-label='off'] .ops-statusline [data-clock-label] {
+  display: none;
+}
+
+.ops-shell[data-transport-probe='off'] .ops-statusline__probe {
+  display: none;
+}
+
+.ops-shell[data-keybind-hints='off'] .ops-statusline [data-keybind-hint] {
+  display: none;
+}
+
 /* `cameras.feedOverlay` — the telemetry burned over the live feed. Only `off`
    carries a rule: the default has to be the absence of one, or a `display`
    here would outrank whatever the overlay sets for itself. */

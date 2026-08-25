@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { useStringSetting } from '@/application/personalization/useSetting';
+import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 /**
@@ -49,6 +49,15 @@ const timeParts = {
 const systemTime = new Intl.DateTimeFormat(locale, timeParts);
 const utcTime = new Intl.DateTimeFormat(locale, { ...timeParts, timeZone: 'UTC' });
 
+/*
+ * `dateTime.showSeconds` off, hoisted rather than constructed per tick: this
+ * runs once a second for the life of the session, and building a formatter
+ * inside the tick is the cost this module already avoids for the other two.
+ */
+const { second: _second, ...minuteParts } = timeParts;
+const systemMinutes = new Intl.DateTimeFormat(locale, minuteParts);
+const utcMinutes = new Intl.DateTimeFormat(locale, { ...minuteParts, timeZone: 'UTC' });
+
 const modeLabels: Readonly<Record<DateTimeMode, string>> = {
   operation: 'ОПЕР',
   system: 'СИСТ',
@@ -75,11 +84,11 @@ export function resolveDateTimeMode(value: string): DateTimeMode {
 }
 
 /** Seconds since midnight, which is all a wall clock shows. */
-export function formatSecondsOfDay(seconds: number): string {
+export function formatSecondsOfDay(seconds: number, showSeconds = true): string {
   const wrapped = ((seconds % 86_400) + 86_400) % 86_400;
-  return [Math.floor(wrapped / 3600), Math.floor((wrapped % 3600) / 60), Math.floor(wrapped % 60)]
-    .map((part) => String(part).padStart(2, '0'))
-    .join(':');
+  const parts = [Math.floor(wrapped / 3600), Math.floor((wrapped % 3600) / 60)];
+  if (showSeconds) parts.push(Math.floor(wrapped % 60));
+  return parts.map((part) => String(part).padStart(2, '0')).join(':');
 }
 
 /**
@@ -111,11 +120,20 @@ export function operationSecondsOfDay(
  */
 export function formatShellClock(
   mode: DateTimeMode,
-  { now, operationSeconds }: { readonly now: Date; readonly operationSeconds: number },
+  {
+    now,
+    operationSeconds,
+    showSeconds = true,
+  }: {
+    readonly now: Date;
+    readonly operationSeconds: number;
+    /** `dateTime.showSeconds`. One argument reaches all three modes. */
+    readonly showSeconds?: boolean;
+  },
 ): string {
-  if (mode === 'system') return systemTime.format(now);
-  if (mode === 'utc') return utcTime.format(now);
-  return formatSecondsOfDay(operationSeconds);
+  if (mode === 'system') return (showSeconds ? systemTime : systemMinutes).format(now);
+  if (mode === 'utc') return (showSeconds ? utcTime : utcMinutes).format(now);
+  return formatSecondsOfDay(operationSeconds, showSeconds);
 }
 
 /*
@@ -177,6 +195,7 @@ export function useDateTimeMode(): DateTimeMode {
  */
 export function useShellClock(): string {
   const mode = useDateTimeMode();
+  const showSeconds = useBooleanSetting('dateTime.showSeconds');
   const clockMode = useOperationsStore((state) => state.production.clockMode);
   const fixedTime = useOperationsStore((state) => state.production.fixedTime);
   useSyncExternalStore(subscribeToTick, tickSnapshot, serverTickSnapshot);
@@ -184,5 +203,6 @@ export function useShellClock(): string {
   return formatShellClock(mode, {
     now,
     operationSeconds: operationSecondsOfDay({ clockMode, fixedTime }, operationElapsed, now),
+    showSeconds,
   });
 }

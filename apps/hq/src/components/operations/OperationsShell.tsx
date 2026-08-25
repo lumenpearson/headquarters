@@ -339,7 +339,7 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
         </small>
       </div>
       <div className="ops-topbar__metadata">
-        <span>
+        <span data-header-entry="date">
           <small>ДАТА</small>
           <b>12.09.2026 / СБ</b>
         </span>
@@ -491,9 +491,11 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
           different things in the three modes and the header shows only the
           digits. */}
       <span data-detail="standard">
-        {dateTimeModeLabel(mode)} {clock}
+        <span data-clock-label>{dateTimeModeLabel(mode)}</span> {clock}
       </span>
-      <span data-detail="standard">{hint}</span>
+      <span data-detail="standard" data-keybind-hint>
+        {hint}
+      </span>
     </footer>
   );
 }

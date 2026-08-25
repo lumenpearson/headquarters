@@ -598,3 +598,60 @@ function zoomLevel(page: Page): Promise<number> {
     return match?.[1] === undefined ? Number.NaN : Number(match[1]);
   });
 }
+
+test('R6: the shell chrome settings each put their own element away', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  await settled(page, 'data-brand-tagline', 'on');
+  // Each is present at the default, so the assertions below cannot pass on an
+  // element that was never there.
+  expect(await displayOf(page, '.ops-brand small')).not.toBe('none');
+  expect(await displayOf(page, '.ops-topbar__metadata .is-secure')).not.toBe('none');
+  expect(await displayOf(page, '[data-header-entry="date"]')).not.toBe('none');
+  expect(await displayOf(page, '.ops-topbar > time > span')).not.toBe('none');
+  expect(await displayOf(page, '.ops-statusline__probe')).not.toBe('none');
+  expect(await displayOf(page, '.ops-statusline [data-clock-label]')).not.toBe('none');
+  expect(await displayOf(page, '.ops-statusline [data-keybind-hint]')).not.toBe('none');
+
+  await seedSettings(page, {
+    'general.brandTagline': false,
+    'general.secureLinkBadge': false,
+    'dateTime.showHeaderDate': false,
+    'dateTime.showClockRate': false,
+    'dateTime.showModeLabel': false,
+    'diagnostics.showTransportProbe': false,
+    'diagnostics.showKeybindHints': false,
+  });
+  await page.reload();
+  await settled(page, 'data-brand-tagline', 'off');
+
+  expect(await displayOf(page, '.ops-brand small')).toBe('none');
+  expect(await displayOf(page, '.ops-topbar__metadata .is-secure')).toBe('none');
+  expect(await displayOf(page, '[data-header-entry="date"]')).toBe('none');
+  expect(await displayOf(page, '.ops-topbar > time > span')).toBe('none');
+  expect(await displayOf(page, '.ops-statusline__probe')).toBe('none');
+  expect(await displayOf(page, '.ops-statusline [data-clock-label]')).toBe('none');
+  expect(await displayOf(page, '.ops-statusline [data-keybind-hint]')).toBe('none');
+
+  // The bars themselves never leave: less chrome is not no header.
+  await expect(page.locator('.ops-topbar')).toBeVisible();
+  await expect(page.locator('.ops-statusline')).toBeVisible();
+});
+
+test('R6: dateTime.showSeconds shortens both clocks, in every mode', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  const header = page.locator('.ops-topbar > time > strong');
+  // hh:mm:ss at the default.
+  await expect.poll(() => header.textContent()).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+
+  for (const mode of ['operation', 'system', 'utc']) {
+    await seedSettings(page, { 'dateTime.showSeconds': false, 'dateTime.mode': mode });
+    await page.reload();
+    // One argument reaches all three modes, so all three are asserted: the
+    // operation clock is formatted by hand and the other two by Intl.
+    await expect
+      .poll(() => page.locator('.ops-topbar > time > strong').textContent())
+      .toMatch(/^\d{2}:\d{2}$/);
+  }
+});

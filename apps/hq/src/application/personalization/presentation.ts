@@ -96,6 +96,48 @@ export const presentationBindings: readonly PresentationBinding[] = [
   { kind: 'attribute', setting: 'tiles.presentation', attribute: 'data-tile-presentation' },
   {
     kind: 'attribute',
+    setting: 'general.brandTagline',
+    attribute: 'data-brand-tagline',
+    toAttribute: toggle,
+  },
+  {
+    kind: 'attribute',
+    setting: 'general.secureLinkBadge',
+    attribute: 'data-secure-badge',
+    toAttribute: toggle,
+  },
+  {
+    kind: 'attribute',
+    setting: 'dateTime.showModeLabel',
+    attribute: 'data-clock-mode-label',
+    toAttribute: toggle,
+  },
+  {
+    kind: 'attribute',
+    setting: 'dateTime.showClockRate',
+    attribute: 'data-clock-rate',
+    toAttribute: toggle,
+  },
+  {
+    kind: 'attribute',
+    setting: 'dateTime.showHeaderDate',
+    attribute: 'data-header-date',
+    toAttribute: toggle,
+  },
+  {
+    kind: 'attribute',
+    setting: 'diagnostics.showTransportProbe',
+    attribute: 'data-transport-probe',
+    toAttribute: toggle,
+  },
+  {
+    kind: 'attribute',
+    setting: 'diagnostics.showKeybindHints',
+    attribute: 'data-keybind-hints',
+    toAttribute: toggle,
+  },
+  {
+    kind: 'attribute',
     setting: 'information.showOperationalContext',
     attribute: 'data-operational-context',
     toAttribute: toggle,
@@ -355,6 +397,8 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'telemetry.source': 'Read by SystemScreen, which chooses what its host counters sample.',
   'keybinds.scheme': 'Read by the keybind registry, which resolves a chord through the scheme.',
   'dateTime.mode': 'Read by the shared date formatter the shell clock and status line use.',
+  'dateTime.showSeconds':
+    'Read by the shared date formatter, which drops seconds from both clocks.',
   'materials.defaultCategory': 'Read by the FilesScreen import dialog when it opens.',
   'privacy.copyDiagnostics': 'Read by the context menu, which offers or withholds the copy.',
   'github.draftOnly': 'Read by the issue draft builder when it composes the URL.',
