@@ -1,5 +1,5 @@
+import { activeKeybinds } from '../keybinds/activeScheme';
 import { formatChord } from '../keybinds/match';
-import { keybindRegistry } from '../keybinds/registry';
 
 /**
  * The surfaces that answer a right click with a menu of their own.
@@ -84,12 +84,19 @@ export function contextMenuFor(surface: string): ContextMenuDefinition | undefin
 }
 
 /**
- * The chord printed beside an entry, taken from the keybind registry.
+ * The chord printed beside an entry, taken from the collection now in force.
  *
  * Never a literal: a chord written twice is a chord that will be changed once.
+ *
+ * It resolved through `keybindRegistry` — the `terminal-default` collection —
+ * rather than through the scheme the operator selected, so under
+ * `vim-inspired` or the accessibility collection the menu advertised a chord
+ * that would not fire. The same defect the shell's own hint had (C35, commit
+ * `43f622b`); a menu is the second place a chord is printed, and it drifted the
+ * same way.
  */
 export function entryShortcut(entry: ContextMenuEntry): string | undefined {
   if (entry.keybind === undefined) return undefined;
-  const keybind = keybindRegistry.find((candidate) => candidate.id === entry.keybind);
+  const keybind = activeKeybinds().find((candidate) => candidate.id === entry.keybind);
   return keybind === undefined ? undefined : formatChord(keybind.chord);
 }

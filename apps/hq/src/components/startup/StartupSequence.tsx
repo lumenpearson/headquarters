@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { booleanSetting, numberSetting } from '../../application/personalization/useSetting';
 import { useOperationsStore } from '../../state/operationsStore';
 import { resolveStartupPlan, startupStages, type StartupStage } from './StartupPlan';
 
@@ -21,10 +22,10 @@ import { resolveStartupPlan, startupStages, type StartupStage } from './StartupP
 export function StartupSequence() {
   const values = useOperationsStore((state) => state.personalization.draft.values);
   const plan = resolveStartupPlan({
-    enabled: settingBoolean(values['startup.enabled'], true),
-    animationsEnabled: settingBoolean(values['animations.enabled'], true),
-    reducedMotion: settingBoolean(values['accessibility.reducedMotion'], false),
-    intensity: settingNumber(values['animations.intensity'], 0.65),
+    enabled: booleanSetting(values, 'startup.enabled'),
+    animationsEnabled: booleanSetting(values, 'animations.enabled'),
+    reducedMotion: booleanSetting(values, 'accessibility.reducedMotion'),
+    intensity: numberSetting(values, 'animations.intensity'),
   });
 
   const [stageIndex, setStageIndex] = useState(0);
@@ -65,11 +66,3 @@ const startupLines: Readonly<Record<StartupStage, string>> = {
   status: '> КАНАЛ СВЯЗИ: ЛОКАЛЬНЫЙ',
   ready: '> ШТАБ ГОТОВ',
 };
-
-function settingBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
-}
-
-function settingNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}

@@ -16,6 +16,11 @@ import { dateTimeModeLabel, useDateTimeMode, useShellClock } from '@/application
 import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { formatChord } from '@/application/keybinds/match';
 import { primaryNavigation } from '@/application/navigation';
+import {
+  booleanSetting,
+  numberSetting,
+  stringSetting,
+} from '@/application/personalization/useSetting';
 import { contextMenuFor } from '@/application/contextMenus/registry';
 import {
   buildContextMenuItems,
@@ -159,27 +164,13 @@ export function OperationsShell({
     () => resolvePresentation(personalization.draft.values),
     [personalization.draft.values],
   );
-  const background = settingString(
-    personalization.draft.values['backgrounds.kind'],
-    'terminal-grid',
-  );
-  const backgroundImageSource = settingString(
-    personalization.draft.values['backgrounds.imageSource'],
-    '',
-  );
-  const backgroundVideoSource = settingString(
-    personalization.draft.values['backgrounds.videoSource'],
-    '',
-  );
-  const animationIntensity = settingNumber(
-    personalization.draft.values['animations.intensity'],
-    0.65,
-  );
-  const draftAnimations = settingBoolean(personalization.draft.values['animations.enabled'], true);
-  const reducedMotion = settingBoolean(
-    personalization.draft.values['accessibility.reducedMotion'],
-    false,
-  );
+  const values = personalization.draft.values;
+  const background = stringSetting(values, 'backgrounds.kind');
+  const backgroundImageSource = stringSetting(values, 'backgrounds.imageSource');
+  const backgroundVideoSource = stringSetting(values, 'backgrounds.videoSource');
+  const animationIntensity = numberSetting(values, 'animations.intensity');
+  const draftAnimations = booleanSetting(values, 'animations.enabled');
+  const reducedMotion = booleanSetting(values, 'accessibility.reducedMotion');
 
   // Only the selected kind resolves a material; the other resolves nothing.
   const backgroundImageUrl = useBackgroundMaterialUrl(
@@ -313,18 +304,6 @@ export function OperationsShell({
 function scaleOf(presentation: ResolvedPresentation, property: string): number {
   const parsed = Number(presentation.customProperties[property]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-function settingString(value: unknown, fallback: string): string {
-  return typeof value === 'string' ? value : fallback;
-}
-
-function settingNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function settingBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
 }
 
 function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
