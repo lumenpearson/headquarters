@@ -3,13 +3,20 @@ import {
   createFactorySnapshot,
   createSettingsDraft,
 } from '@gremuchaya/settings-schema';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
+import { operationsStore } from '../../state/operationsStore';
 import { buildIssueDraftUrl } from './issueDraft';
 
 const metadata = { id: 'test-mutation', at: '2026-08-20T00:00:00.000Z' };
 
 describe('edit-mode issue draft', () => {
+  // The builder reads `github.draftOnly` from the live store, so a value left
+  // behind by an earlier case would decide the next one's title.
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
   it('builds a prefilled GitHub issue URL listing only what changed', () => {
     const draft = applyDraftPatch(
       createSettingsDraft(createFactorySnapshot()),
@@ -79,5 +86,36 @@ describe('edit-mode issue draft', () => {
     const body = url.searchParams.get('body') ?? '';
 
     expect(body).toContain('terminal red / high contrast');
+  });
+
+  it('marks the issue as an unconfirmed draft while github.draftOnly is on', () => {
+    // On by default: the declared default is the safe one, and the test says so
+    // by not patching the setting at all.
+    const draft = applyDraftPatch(
+      createSettingsDraft(createFactorySnapshot()),
+      [{ id: 'layout.density', value: 'comfortable' }],
+      metadata,
+    );
+
+    const url = new URL(buildIssueDraftUrl({ repository: 'leather147/headquarters', draft }));
+
+    expect(url.searchParams.get('title')).toBe('[DRAFT] Personalization: 1 change(s)');
+    expect(url.searchParams.get('body')).toContain('confirm this list with the group');
+  });
+
+  it('composes a plain issue once github.draftOnly is turned off', () => {
+    operationsStore.getState().applySettingsPatch([{ id: 'github.draftOnly', value: false }]);
+    const draft = applyDraftPatch(
+      createSettingsDraft(createFactorySnapshot()),
+      [{ id: 'layout.density', value: 'comfortable' }],
+      metadata,
+    );
+
+    const url = new URL(buildIssueDraftUrl({ repository: 'leather147/headquarters', draft }));
+
+    expect(url.searchParams.get('title')).toBe('Personalization: 1 change(s)');
+    expect(url.searchParams.get('body')).not.toContain('confirm this list with the group');
+    // The change list itself is not what the setting decides, so it stays.
+    expect(url.searchParams.get('body')).toContain('layout.density');
   });
 });

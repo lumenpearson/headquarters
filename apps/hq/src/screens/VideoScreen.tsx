@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   isVideoProvider,
   MediaPlayer,
@@ -12,6 +12,7 @@ import {
 } from '@vidstack/react';
 import { TerminalButton, TerminalSelect, TerminalSlider } from '@gremuchaya/ui/primitives';
 
+import { useBooleanSetting, useNumberSetting } from '@/application/personalization/useSetting';
 import { Gauge, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import {
   BridgeMaterialClient,
@@ -111,13 +112,83 @@ function samePlaybackTarget(left: PlaybackSyncTarget, right: PlaybackSyncTarget)
   );
 }
 
+/**
+ * `performance.inactiveDecode`: a stream nobody can see stops being decoded.
+ *
+ * Both browser signals are wired because neither covers the other's case.
+ * `visibilitychange` reports the whole document going dark — the operator
+ * switched to another window, or the shoot machine locked the screen — while
+ * the observer reports this surface leaving view inside a document that is
+ * still visible, which is what a screen switch or a collapsed tile does.
+ * Nothing polls: an interval would decide on a stale answer for as long as it
+ * lasts, and this setting exists to stop work rather than to schedule more.
+ *
+ * The gate reports a decision rather than pausing the player itself. Playback
+ * intent lives in `ui.videoPlaying`, and the effect that applies it takes this
+ * as a second input, so one owner still writes play/pause: a stream that was
+ * playing when the surface went dark comes back playing, and one the operator
+ * had paused stays paused.
+ */
+function useInactiveDecodeSuspension(surfaceRef: RefObject<MediaPlayerInstance | null>): boolean {
+  const stopInactiveDecode = useBooleanSetting('performance.inactiveDecode');
+  // Read once rather than waited for: a screen mounted while the operator is
+  // already in another window has missed the event that would have said so.
+  // The guard is for the static export, which renders this file with no DOM.
+  const [documentHidden, setDocumentHidden] = useState(
+    () => typeof document !== 'undefined' && document.visibilityState === 'hidden',
+  );
+  // An observer reports nothing until its first callback, and a player that has
+  // not attached its host element yet is not evidence of an invisible one, so
+  // the surface counts as on screen until something says otherwise: the failure
+  // an operator notices is a black feed, not a warm decoder.
+  const [surfaceOffScreen, setSurfaceOffScreen] = useState(false);
+
+  useEffect(() => {
+    const onVisibilityChange = (): void => {
+      setDocumentHidden(document.visibilityState === 'hidden');
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const surfaceElement = surfaceRef.current?.el ?? null;
+    let observer: IntersectionObserver | null = null;
+    // `typeof` rather than a property lookup: this file is also loaded where
+    // the constructor is not declared at all.
+    if (surfaceElement !== null && typeof IntersectionObserver === 'function') {
+      observer = new IntersectionObserver((entries) => {
+        const latest = entries.at(-1);
+        if (latest === undefined) return;
+        setSurfaceOffScreen(!latest.isIntersecting);
+      });
+      observer.observe(surfaceElement);
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      observer?.disconnect();
+    };
+  }, [surfaceRef]);
+
+  // The setting gates the decision, not the subscription. Both signals stay
+  // current while it is off, so turning it back on suspends on what the browser
+  // reports now instead of on whatever it last reported before the setting
+  // stopped being honoured.
+  return stopInactiveDecode && (documentHidden || surfaceOffScreen);
+}
+
 export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'archive' }) {
   const router = useRouter();
   const state = useOperationsStore((value) => value);
   const playerRef = useRef<MediaPlayerInstance>(null);
+  const decodeSuspended = useInactiveDecodeSuspension(playerRef);
+  const defaultPlaybackRate = useNumberSetting('player.defaultRate');
   const [duration, setDuration] = useState(18);
   const [currentTime, setCurrentTime] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1);
+  // `player.defaultRate` is the rate until the transport is used to pick one,
+  // which is the difference between a default and a lock: a rate chosen here
+  // outlives a later move of the setting, and a screen that was never touched
+  // follows the setting wherever the operator puts it.
+  const [chosenPlaybackRate, setChosenPlaybackRate] = useState<number | null>(null);
+  const playbackRate = chosenPlaybackRate ?? defaultPlaybackRate;
   const [volume, setVolume] = useState(0.35);
   const [muted, setMuted] = useState(true);
   const [failedCameraId, setFailedCameraId] = useState<string | null>(null);
@@ -525,7 +596,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       const nextPosition = Math.min(mediaDuration, Math.max(0, positionSeconds));
       const nextPercent = (nextPosition / mediaDuration) * 100;
       if (action === 'SET_RATE') {
-        setPlaybackRate(rate);
+        setChosenPlaybackRate(rate);
         if (player !== null) player.playbackRate = rate;
         return;
       }
@@ -692,6 +763,9 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     void player.enterPictureInPicture().catch(() => undefined);
   }, []);
 
+  // This is where `player.defaultRate` reaches the media element: the rate is
+  // pushed on mount as well as on every later change, so a stream starts at the
+  // configured speed instead of at whatever the provider defaults to.
   useEffect(() => {
     const player = playerRef.current;
     if (player === null) return;
@@ -703,12 +777,15 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   useEffect(() => {
     const player = playerRef.current;
     if (player === null || mediaError || selected === undefined) return;
-    if (state.ui.videoPlaying) {
+    // The decode gate is the second input here rather than a second writer:
+    // playback intent survives a hidden surface, and this effect re-runs the
+    // moment the surface comes back to act on it again.
+    if (state.ui.videoPlaying && !decodeSuspended) {
       void player.play().catch(() => undefined);
     } else {
       void player.pause().catch(() => undefined);
     }
-  }, [mediaError, selected, state.ui.videoPlaying]);
+  }, [decodeSuspended, mediaError, selected, state.ui.videoPlaying]);
 
   useEffect(() => {
     const cameraId = selected?.id;
@@ -845,7 +922,10 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             src={activeSelectedSource}
             poster={selectedStream.thumbnailSource}
             title={`${selected.id} / ${selected.location}`}
-            autoPlay
+            // Autoplay is withheld while the surface is invisible, otherwise a
+            // source that finishes loading during that time starts decoding on
+            // its own and no state change follows to stop it again.
+            autoPlay={!decodeSuspended}
             loop={!isWebcamSelected}
             muted={muted}
             playsInline

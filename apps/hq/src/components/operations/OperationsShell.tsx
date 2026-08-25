@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, useEffect, useMemo } from 'react';
 import {
   TerminalButton,
   TerminalInput,
@@ -12,6 +12,9 @@ import {
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 
+import { dateTimeModeLabel, useDateTimeMode, useShellClock } from '@/application/dateTime';
+import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
+import { formatChord } from '@/application/keybinds/match';
 import { primaryNavigation } from '@/application/navigation';
 import { contextMenuFor } from '@/application/contextMenus/registry';
 import {
@@ -331,33 +334,11 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
     Object.values(state.alerts).filter((alert) => alert.lifecycle !== 'RESOLVED'),
   );
   const openDrawer = useOperationsStore((state) => state.openDrawer);
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    if (production.paused) return;
-    const intervalId = window.setInterval(
-      () => setElapsed((value) => value + production.clockSpeed),
-      1000,
-    );
-    return () => window.clearInterval(intervalId);
-  }, [production.clockSpeed, production.paused]);
-
-  const clock = useMemo(() => {
-    if (production.clockMode === 'real') {
-      return new Intl.DateTimeFormat('ru-RU', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      }).format(new Date());
-    }
-    const parts = production.fixedTime.split(':').map(Number);
-    const seconds =
-      ((parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0) + elapsed) % 86_400;
-    return [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), Math.floor(seconds % 60)]
-      .map((part) => String(part).padStart(2, '0'))
-      .join(':');
-  }, [elapsed, production.clockMode, production.fixedTime]);
+  // The reading, the tick and the mode all come from `@/application/dateTime`.
+  // The clock used to be assembled here from the production slice alone, which
+  // is why `dateTime.mode` could be set to `system` or `utc` and the header
+  // would go on showing the operation's own time.
+  const clock = useShellClock();
 
   return (
     <header className="ops-topbar">
@@ -492,6 +473,25 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
   const metrics = useOperationsStore((state) => state.metrics);
   const alerts = useOperationsStore((state) => state.alerts);
   const bus = typeof BroadcastChannel === 'undefined' ? 'FALLBACK' : 'BROADCAST';
+  const mode = useDateTimeMode();
+  const clock = useShellClock();
+  const keybinds = useActiveKeybinds();
+  // The three chords the status line has always advertised, taken from the
+  // collection `keybinds.scheme` selected instead of spelled out. They were
+  // written here as `F:FULL ^K:SEARCH ^⇧P:PROD`, which stopped being true the
+  // moment a scheme moved any of them.
+  const hints = [
+    ['shell.fullscreen', 'FULL'],
+    ['shell.search', 'SEARCH'],
+    ['shell.productionPanel', 'PROD'],
+  ] as const;
+  const hint = hints
+    .map(([id, label]) => {
+      const keybind = keybinds.find((candidate) => candidate.id === id);
+      return keybind === undefined ? undefined : `${formatChord(keybind.chord)} ${label}`;
+    })
+    .filter((entry): entry is string => entry !== undefined)
+    .join(' · ');
   return (
     <footer className="ops-statusline">
       {/* Each entry declares the verbosity it belongs to, and the shell hides
@@ -508,7 +508,13 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
       <TransportProbe bus={bus} />
       <span>AL:{Object.values(alerts).filter((alert) => alert.lifecycle === 'NEW').length}</span>
       <span data-detail="verbose">UTF-8</span>
-      <span data-detail="standard">F:FULL ^K:SEARCH ^⇧P:PROD</span>
+      {/* The marker names which clock this is, because the same digits mean
+          different things in the three modes and the header shows only the
+          digits. */}
+      <span data-detail="standard">
+        {dateTimeModeLabel(mode)} {clock}
+      </span>
+      <span data-detail="standard">{hint}</span>
     </footer>
   );
 }

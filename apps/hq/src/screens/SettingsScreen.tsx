@@ -1,10 +1,6 @@
 'use client';
 
-import {
-  getSettingsDefinitionsForCategory,
-  settingCategories,
-  type SettingCategory,
-} from '@gremuchaya/settings-schema';
+import { settingCategories, type SettingCategory } from '@gremuchaya/settings-schema';
 import {
   TerminalAlertDialog,
   TerminalButton,
@@ -15,6 +11,13 @@ import {
 } from '@gremuchaya/ui/primitives';
 import { useMemo, useState } from 'react';
 
+import {
+  groupOfCategory,
+  queryCatalog,
+  searchEverySetting,
+  settingGroups,
+  type SettingGroup,
+} from '@/application/personalization/catalog';
 import { KeybindList } from '@/components/keybinds/KeybindList';
 import { Panel } from '@/components/operations/OpsUi';
 import { categoryLabel, SchemaSetting, Setting } from '@/components/settings/SchemaSetting';
@@ -29,7 +32,10 @@ export function SettingsScreen() {
   const state = useOperationsStore((value) => value);
   const toast = useTerminalToast();
   const draft = state.personalization.draft;
-  const [catalogCategory, setCatalogCategory] = useState<SettingCategory>('themes');
+  const [catalogGroup, setCatalogGroup] = useState<SettingGroup>('appearance');
+  const [catalogCategory, setCatalogCategory] = useState<SettingCategory | 'all'>('all');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [changedOnly, setChangedOnly] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [historyOperation, setHistoryOperation] = useState<SettingsHistoryOperation | 'all'>('all');
   const [historyCategory, setHistoryCategory] = useState<SettingCategory | 'all'>('all');
@@ -37,9 +43,22 @@ export function SettingsScreen() {
   const [historyDate, setHistoryDate] = useState('');
   const [historyOrder, setHistoryOrder] = useState<'newest' | 'oldest'>('newest');
   const [historyPageNumber, setHistoryPageNumber] = useState(1);
-  const categoryDefinitions = useMemo(
-    () => getSettingsDefinitionsForCategory(catalogCategory),
-    [catalogCategory],
+  const catalog = useMemo(
+    () =>
+      queryCatalog({
+        group: catalogGroup,
+        category: catalogCategory,
+        search: catalogSearch,
+        changedOnly,
+        changedIds: draft.changedIds,
+      }),
+    [catalogCategory, catalogGroup, catalogSearch, changedOnly, draft.changedIds],
+  );
+  // A grouping creates the case where the operator does not know which group
+  // holds what they want, so the same search also answers across all of them.
+  const acrossGroups = useMemo(
+    () => searchEverySetting(catalogSearch, draft.changedIds, changedOnly),
+    [catalogSearch, changedOnly, draft.changedIds],
   );
   const historyPage = useMemo(
     () =>
@@ -263,24 +282,58 @@ export function SettingsScreen() {
         >
           <div className="settings-catalog-toolbar">
             <TerminalSelect
-              label="Категория персонализации"
-              value={catalogCategory}
-              onValueChange={setCatalogCategory}
-              options={settingCategories.map((category) => ({
-                value: category,
-                label: categoryLabel(category),
+              label="Раздел персонализации"
+              value={catalogGroup}
+              onValueChange={(value) => {
+                setCatalogGroup(value as SettingGroup);
+                // The category filter belongs to the group it was chosen in;
+                // carrying it across would leave the operator on a section that
+                // selects nothing and looks empty.
+                setCatalogCategory('all');
+              }}
+              options={settingGroups.map((group) => ({
+                value: group,
+                label: groupLabel(group),
               }))}
             />
+            <TerminalSelect
+              label="Категория персонализации"
+              value={catalogCategory}
+              onValueChange={(value) => {
+                const next = value as SettingCategory | 'all';
+                setCatalogCategory(next);
+                // Choosing a category moves the section to the one that holds
+                // it. The category list stays complete on purpose: a section is
+                // a way of narrowing, and one that could hide a category the
+                // operator was looking for would be worse than no section at
+                // all.
+                if (next !== 'all') setCatalogGroup(groupOfCategory(next));
+              }}
+              options={[
+                { value: 'all', label: 'ВСЕ КАТЕГОРИИ РАЗДЕЛА' },
+                ...settingCategories.map((category) => ({
+                  value: category,
+                  label: categoryLabel(category),
+                })),
+              ]}
+            />
+            <TerminalInput
+              aria-label="Поиск по настройкам"
+              placeholder="ИМЯ ИЛИ ОПИСАНИЕ"
+              value={catalogSearch}
+              onValueChange={setCatalogSearch}
+            />
+            <TerminalSwitch
+              label="Только изменённые"
+              checked={changedOnly}
+              onCheckedChange={setChangedOnly}
+            />
             <span>
-              {categoryDefinitions.length} ПАРАМЕТР(А) ·{' '}
-              {
-                categoryDefinitions.filter((definition) => draft.changedIds.includes(definition.id))
-                  .length
-              }{' '}
-              ИЗМЕНЕНО
+              {catalog.definitions.length} ИЗ {catalog.groupTotal} · {catalog.changedInGroup}{' '}
+              ИЗМЕНЕНО В РАЗДЕЛЕ
             </span>
           </div>
-          {categoryDefinitions.map((definition) => (
+          {catalog.definitions.map((definition) => (
             <SchemaSetting
               key={definition.id}
               definition={definition}
@@ -289,10 +342,31 @@ export function SettingsScreen() {
               onValueChange={(value) => state.applySettingsPatch([{ id: definition.id, value }])}
             />
           ))}
+          {catalogSearch.trim().length > 0 && acrossGroups.length > catalog.definitions.length ? (
+            <div className="settings-catalog-elsewhere">
+              <h3>НАЙДЕНО В ДРУГИХ РАЗДЕЛАХ: {acrossGroups.length - catalog.definitions.length}</h3>
+              {acrossGroups
+                .filter((definition) => !catalog.definitions.includes(definition))
+                .map((definition) => (
+                  <SchemaSetting
+                    key={definition.id}
+                    definition={definition}
+                    value={draft.values[definition.id] ?? definition.defaultValue}
+                    changed={draft.changedIds.includes(definition.id)}
+                    onValueChange={(value) =>
+                      state.applySettingsPatch([{ id: definition.id, value }])
+                    }
+                  />
+                ))}
+            </div>
+          ) : null}
           <div className="settings-draft-actions">
             <TerminalButton
               className="ops-action"
-              onClick={() => state.resetSettingsCategory(catalogCategory)}
+              disabled={catalogCategory === 'all'}
+              onClick={() => {
+                if (catalogCategory !== 'all') state.resetSettingsCategory(catalogCategory);
+              }}
             >
               [R] СБРОСИТЬ КАТЕГОРИЮ
             </TerminalButton>
@@ -518,4 +592,25 @@ function formatHistoryDate(value: string): string {
     dateStyle: 'short',
     timeStyle: 'medium',
   }).format(date);
+}
+
+/**
+ * The name of a section, in the words an operator would use to look for it.
+ *
+ * Grouping is what makes sixty-nine definitions navigable, and it only works if
+ * the group names describe what someone is trying to change rather than the
+ * layer that implements it.
+ */
+function groupLabel(group: SettingGroup): string {
+  return (
+    {
+      appearance: 'ВНЕШНИЙ ВИД / APPEARANCE',
+      layout: 'МАКЕТ И РАЗМЕРЫ / LAYOUT',
+      motion: 'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION',
+      information: 'ИНФОРМАЦИЯ / INFORMATION',
+      media: 'МЕДИА И КАРТА / MEDIA',
+      session: 'СЕССИЯ И УПРАВЛЕНИЕ / SESSION',
+      system: 'СИСТЕМА / SYSTEM',
+    } satisfies Record<SettingGroup, string>
+  )[group];
 }

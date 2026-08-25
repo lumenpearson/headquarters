@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalCheckbox } from '@gremuchaya/ui/primitives';
 
+import { useStringSetting } from '@/application/personalization/useSetting';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
@@ -13,6 +14,44 @@ import { type MapLayer, useOperationsStore } from '@/state/operationsStore';
 const MOSCOW_OPERATION_CENTER = [55.7558, 37.6173] as const;
 
 type ChannelSort = 'id' | 'encryption' | 'load' | 'packetLoss' | 'latency';
+
+type MapRepresentation = 'tactical' | 'map' | 'satellite';
+
+/** Toolbar order, and the order the setting's `oneOf` declares. */
+const representations = ['tactical', 'map', 'satellite'] as const satisfies readonly [
+  MapRepresentation,
+  ...MapRepresentation[],
+];
+
+const representationLabels: Readonly<Record<MapRepresentation, string>> = {
+  tactical: 'ТАКТИКА',
+  map: 'КАРТА',
+  satellite: 'СПУТНИК',
+};
+
+/*
+ * What `map.mode` selects, and what each of its three values does today.
+ *
+ * The base surface is not this screen's to swap: `YandexTacticalMap` builds
+ * the provider with `mode: 'vector'` and one fixed scheme layer, and it
+ * belongs to another surface. A representation here therefore chooses the
+ * overlay stack drawn over that base and how the surface is announced.
+ *
+ * - `tactical` draws every layer the operator has switched on -- the stack
+ *   the screen drew before the setting had a consumer.
+ * - `map` reads as cartography: the two overlays that paint over the ground,
+ *   restricted zones and sensor markers, stay off so the streets and
+ *   buildings under them stay legible. Objects, routes and alerts remain.
+ * - `satellite` has no imagery to read, because the provider is wired for the
+ *   vector scheme only. It draws the bare situational plot -- objects and
+ *   alerts -- and the toolbar states that imagery is unavailable, rather than
+ *   showing the tactical stack under a name it has not earned.
+ */
+const representationHiddenLayers: Readonly<Record<MapRepresentation, readonly MapLayer[]>> = {
+  tactical: [],
+  map: ['restricted', 'sensors'],
+  satellite: ['restricted', 'sensors', 'routes'],
+};
 
 const channelColumns = [
   ['id', 'КАНАЛ'],
@@ -42,17 +81,59 @@ export function TacticalMapScreen() {
     if (subject !== undefined) state.openDrawer('channel', subject);
   });
   const selected = state.objects[state.ui.selectedObjectId];
+
+  /*
+   * The representation the surface opens in belongs to `map.mode`; the one
+   * the operator picks afterwards belongs to the session and outlives neither
+   * a reload nor a new value for the setting.
+   *
+   * Seeding a `useState` initialiser with the setting would read as simpler
+   * and would be wrong: `initializeOperationsClient` hydrates the persisted
+   * draft from an effect in `OperationsRuntime`, which runs after this
+   * screen's first render, so an initialiser captures the factory default and
+   * the operator's saved representation never arrives. Re-seeding when the
+   * configured value changes covers hydration and a later edit in the
+   * settings screen with the same rule.
+   */
+  const configuredMapMode = useStringSetting('map.mode');
+  // Narrowing, not a second validation: the reader has already resolved the
+  // value through the definition, so the `??` arm cannot be reached by
+  // anything the schema allows and names no default of its own.
+  const configuredRepresentation =
+    representations.find((mode) => mode === configuredMapMode) ?? representations[0];
+  const [chosenRepresentation, setChosenRepresentation] = useState<MapRepresentation | null>(null);
+  const [seededFrom, setSeededFrom] = useState<MapRepresentation>(configuredRepresentation);
+  if (seededFrom !== configuredRepresentation) {
+    setSeededFrom(configuredRepresentation);
+    setChosenRepresentation(null);
+  }
+  const representation = chosenRepresentation ?? configuredRepresentation;
+  const hiddenLayers = representationHiddenLayers[representation];
+
+  /*
+   * The store keeps the operator's layer stack and the representation decides
+   * how much of it reaches the surface. Masking here rather than writing the
+   * suppressed layers back is what lets a trip through `satellite` and back
+   * return the exact stack they had.
+   */
+  const surfaceLayers = useMemo<Readonly<Record<MapLayer, boolean>>>(() => {
+    if (hiddenLayers.length === 0) return state.ui.mapLayers;
+    const masked = { ...state.ui.mapLayers };
+    for (const layer of hiddenLayers) masked[layer] = false;
+    return masked;
+  }, [hiddenLayers, state.ui.mapLayers]);
+
   const visibleObjects = useMemo(
     () =>
       Object.values(state.objects).filter((object) => {
-        if (object.kind === 'group') return state.ui.mapLayers.friendly;
-        if (object.threat >= 70) return state.ui.mapLayers.hostile;
+        if (object.kind === 'group') return surfaceLayers.friendly;
+        if (object.threat >= 70) return surfaceLayers.hostile;
         if (['address', 'device', 'point'].includes(object.kind)) {
-          return state.ui.mapLayers.infrastructure;
+          return surfaceLayers.infrastructure;
         }
-        return state.ui.mapLayers.neutral;
+        return surfaceLayers.neutral;
       }),
-    [state.objects, state.ui.mapLayers],
+    [state.objects, surfaceLayers],
   );
   const activeAlerts = useMemo(
     () => Object.values(state.alerts).filter((alert) => alert.lifecycle !== 'RESOLVED'),
@@ -109,7 +190,7 @@ export function TacticalMapScreen() {
           <YandexTacticalMap
             center={state.ui.mapCenter}
             zoom={state.ui.mapZoom}
-            layers={state.ui.mapLayers}
+            layers={surfaceLayers}
             objects={visibleObjects}
             routes={Object.values(state.routes)}
             alerts={activeAlerts}
@@ -279,6 +360,18 @@ export function TacticalMapScreen() {
             </div>
             <footer>
               <span>ЛЕГЕНДА</span>
+              {/*
+               * A checkbox that is on while nothing is drawn would be a lie,
+               * so the representation says which of them it is holding back.
+               * The checkbox itself stays live: it records the stack the
+               * operator wants back in `tactical`.
+               */}
+              {hiddenLayers.length === 0 ? null : (
+                <p>
+                  РЕЖИМ «{representationLabels[representation]}» НЕ ОТРИСОВЫВАЕТ:{' '}
+                  {hiddenLayers.map((layer) => layerLabels[layer]).join(', ')}
+                </p>
+              )}
               <p>
                 <i className="legend-mark legend-mark--friendly" /> СВОЙ
               </p>
@@ -428,9 +521,12 @@ export function TacticalMapScreen() {
       channelDescending,
       channelSort,
       channels,
+      hiddenLayers,
+      representation,
       router,
       selected,
       state,
+      surfaceLayers,
       visibleObjects,
     ],
   );
@@ -439,10 +535,28 @@ export function TacticalMapScreen() {
     <div className="ops-screen map-screen">
       <header className="ops-screen__title">
         <div>
-          <span>GEO / LOCAL VECTOR LAYER</span>
+          {/*
+           * The eyebrow names the active representation rather than the
+           * toolbar carrying a caption of its own: `.map-toolbar span` reserves
+           * 100px per span, and a fourth reserved slot in a header that neither
+           * wraps nor scrolls is how a narrow window starts pushing the
+           * workspace sideways (R26).
+           */}
+          <span>GEO / {representationLabels[representation]} / LOCAL VECTOR LAYER</span>
           <h1>ТАКТИЧЕСКАЯ КАРТА</h1>
         </div>
         <div className="map-toolbar">
+          {representations.map((mode) => (
+            <TerminalButton
+              key={mode}
+              className={mode === representation ? 'is-selected' : ''}
+              aria-pressed={mode === representation}
+              onClick={() => setChosenRepresentation(mode)}
+            >
+              {representationLabels[mode]}
+            </TerminalButton>
+          ))}
+          {representation === 'satellite' ? <span>СНИМКИ НЕДОСТУПНЫ</span> : null}
           <TerminalButton onClick={() => state.setMapView(MOSCOW_OPERATION_CENTER, 12)}>
             [R] RESET VIEW
           </TerminalButton>

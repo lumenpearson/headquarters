@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 
-import { findKeybind } from '@/application/keybinds/registry';
+import { activeKeybinds } from '@/application/keybinds/activeScheme';
+import { findKeybind, prefixKeyFor } from '@/application/keybinds/registry';
 
 type KeybindHandler = () => void;
 
@@ -104,22 +105,67 @@ export function useKeybind(id: string, handler: () => void): void {
 }
 
 /**
+ * How long a prefix key stays open before it is forgotten.
+ *
+ * Long enough to press `g` and then think about which route, short enough that
+ * a `g` typed by accident cannot turn a digit pressed a minute later into a
+ * navigation the operator never asked for.
+ */
+const prefixWindowMs = 1200;
+
+/**
  * The single application-wide keydown listener.
  *
  * Replaces four separate `window.addEventListener('keydown')` effects that each
  * matched chords their own way and each decided independently whether the
  * operator was typing.
+ *
+ * The collection is read per event rather than per effect, so choosing another
+ * `keybinds.scheme` changes what the next press does without this listener
+ * being torn down and re-registered.
  */
 export function KeybindRuntime() {
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const keybind = findKeybind(event, { typing: isTypingTarget(event.target) });
-      if (keybind === undefined) return;
-      if (!fireKeybind(keybind.id)) return;
-      if (keybind.preventsDefault) event.preventDefault();
+    let pendingPrefix: string | undefined;
+    let prefixTimer = 0;
+
+    const forgetPrefix = () => {
+      pendingPrefix = undefined;
+      window.clearTimeout(prefixTimer);
+      prefixTimer = 0;
     };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const typing = isTypingTarget(event.target);
+      const keybinds = activeKeybinds();
+      const prefix = pendingPrefix;
+      const keybind = findKeybind(event, { typing, prefix, keybinds });
+
+      if (keybind !== undefined) {
+        forgetPrefix();
+        if (!fireKeybind(keybind.id)) return;
+        if (keybind.preventsDefault) event.preventDefault();
+        return;
+      }
+
+      // A prefix that led nowhere is dropped rather than carried into the next
+      // press: `g` then `x` then `1` must not navigate.
+      if (prefix !== undefined) forgetPrefix();
+      if (typing) return;
+
+      const opened = prefixKeyFor(event, keybinds);
+      if (opened === undefined) return;
+      pendingPrefix = opened;
+      // Not swallowed. The prefix alone commands nothing yet, and the runtime
+      // only takes a key once something actually ran on it.
+      prefixTimer = window.setTimeout(forgetPrefix, prefixWindowMs);
+    };
+
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.clearTimeout(prefixTimer);
+    };
   }, []);
 
   return null;

@@ -3,17 +3,20 @@
 import { TerminalPointerMenu, type TerminalMenuItem } from '@gremuchaya/ui/primitives';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
+import { copyDiagnosticsReport } from '@/application/contextMenus/diagnostics';
 import {
   contextMenuFor,
+  contextMenuRegistry,
   entryShortcut,
   type ContextMenuDefinition,
 } from '@/application/contextMenus/registry';
+import { readBooleanSetting } from '@/application/personalization/useSetting';
 import {
   fireKeybind,
   keybindOwnerIds,
   subscribeKeybindOwners,
 } from '@/components/keybinds/KeybindRuntime';
-import { useOperationsStore } from '@/state/operationsStore';
+import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 type ContextMenuHandler = (subject: string | undefined) => void;
 
@@ -40,22 +43,45 @@ function announceOwners(): void {
  *
  * `|` is safe as the separator: every id in both registries is a dotted
  * lowercase identifier.
+ *
+ * A setting that gates an entry belongs here for exactly the reason a claim
+ * does. `privacy.copyDiagnostics` decides whether the diagnostics entry may
+ * run, so leaving it out would let a list cached against this string keep
+ * answering with the permission the operator gave before they changed it.
  */
 function menuOwnerSnapshot(): string {
   const claimed = [...handlers.keys()].filter((id) => (handlers.get(id)?.size ?? 0) > 0);
-  return [...keybindOwnerIds().map((id) => `k:${id}`), ...claimed.map((id) => `a:${id}`)]
+  const permitted = new Set(
+    contextMenuRegistry
+      .flatMap((definition) => definition.items)
+      .flatMap((entry) =>
+        entry.requiresSetting !== undefined && readBooleanSetting(entry.requiresSetting)
+          ? [`s:${entry.requiresSetting}`]
+          : [],
+      ),
+  );
+  return [
+    ...keybindOwnerIds().map((id) => `k:${id}`),
+    ...claimed.map((id) => `a:${id}`),
+    ...permitted,
+  ]
     .sort()
     .join('|');
 }
 
-/** Subscribes a surface to both claim tables at once. */
+/** Subscribes a surface to both claim tables and to the settings draft. */
 export function useMenuOwners(): string {
   return useSyncExternalStore(
     useCallback((listener: () => void) => {
       const unsubscribeKeybinds = subscribeKeybindOwners(listener);
+      // Every store change, not a selector: the snapshot is a string, so a
+      // notification that changes nothing in it costs one comparison and no
+      // render.
+      const unsubscribeSettings = operationsStore.subscribe(listener);
       ownerListeners.add(listener);
       return () => {
         unsubscribeKeybinds();
+        unsubscribeSettings();
         ownerListeners.delete(listener);
       };
     }, []),
@@ -99,6 +125,10 @@ export function useContextMenuAction(id: string, handler: ContextMenuHandler): v
  * same commands, so the two cannot come to disagree about what a surface
  * offers or about which entry is available. Read at the moment the menu is
  * shown: ownership is a property of what is mounted right now.
+ *
+ * An entry a setting has switched off is disabled here and still listed, the
+ * same treatment an unclaimed one gets: an operator who cannot see a command
+ * cannot go and turn it back on.
  */
 export function buildContextMenuItems(
   definition: ContextMenuDefinition,
@@ -111,11 +141,13 @@ export function buildContextMenuItems(
       entry.keybind === undefined
         ? owners.has(`a:${entry.action ?? ''}`)
         : owners.has(`k:${entry.keybind}`);
+    const permitted =
+      entry.requiresSetting === undefined || owners.has(`s:${entry.requiresSetting}`);
     const shortcut = entryShortcut(entry);
     return {
       id: entry.id,
       label: entry.label,
-      disabled: !owned,
+      disabled: !owned || !permitted,
       ...(shortcut === undefined ? {} : { shortcut }),
       ...(entry.tone === undefined ? {} : { tone: entry.tone }),
       onSelect: () => {
@@ -153,6 +185,17 @@ export function ContextMenuRuntime() {
   const longPressEnabled = useOperationsStore(
     (state) => state.personalization.draft.values['popups.longPress'] !== false,
   );
+
+  /*
+   * Claimed by the runtime rather than by a screen, unlike the record actions:
+   * a diagnostic report describes the client, not the row under the pointer,
+   * and it has to be available from wherever the fault happened. This
+   * component is mounted once in the root layout, so the command exists on
+   * every route.
+   */
+  useContextMenuAction('shell.copyDiagnostics', () => {
+    void copyDiagnosticsReport();
+  });
 
   const openAt = useCallback((target: EventTarget | null, x: number, y: number): boolean => {
     if (!(target instanceof Element)) return false;

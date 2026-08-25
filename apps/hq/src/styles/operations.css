@@ -34,18 +34,57 @@
   color: var(--ops-text);
   font-family: var(--font-mono);
   font-size: calc(11px * var(--ops-type-scale, 1));
-  line-height: 1.35;
+  /* Each fallback is the value the design already drew with, so a fresh profile
+     is unchanged. The bridge emits a custom property only when the operator
+     moved it, which is what keeps that true. */
+  letter-spacing: var(--ops-letter-spacing, normal);
+  line-height: var(--ops-line-height, 1.35);
 }
 
 .ops-shell button,
 .ops-shell input,
 .ops-shell select,
 .ops-shell textarea {
-  border: 1px solid var(--ops-line);
+  border: var(--ops-border-width, 1px) solid var(--ops-line);
   border-radius: 0;
   background: var(--ops-bg-1);
   color: var(--ops-text);
   font: inherit;
+}
+
+/* Scoped to the primitive set rather than to every control in the shell: the
+   screens carry buttons that are tiles, thumbnails and grid cells, and a
+   blanket minimum height would grow those into the layout R26 keeps bounded.
+
+   The rule is written only when an operator moved one of the two settings
+   behind it, which is what the `data-control-sizing` attribute marks. A
+   declaration that merely carried a neutral value would not do: it outranks the
+   heights the primitives set themselves, and an unset variable resolves to
+   `unset` rather than falling back to them — so a `.terminal-input` that draws
+   itself 34px tall would come back as `auto`. */
+.ops-shell[data-control-sizing='custom'] .terminal-button,
+.ops-shell[data-control-sizing='custom'] .terminal-input,
+.ops-shell[data-control-sizing='custom'] .terminal-select {
+  min-height: var(--ops-control-floor);
+}
+
+/* `typography.weight` and `typography.accentWeight`. Only the values that are
+   not the default carry a rule: a declaration at the shell root outranks every
+   lower-specificity weight the design set, so the default has to be the absence
+   of a rule rather than a fallback that restates it. */
+.ops-shell[data-font-weight='medium'] {
+  font-weight: 500;
+}
+.ops-shell[data-font-weight='bold'] {
+  font-weight: 700;
+}
+.ops-shell[data-accent-weight='regular'] strong,
+.ops-shell[data-accent-weight='regular'] b {
+  font-weight: 400;
+}
+.ops-shell[data-accent-weight='medium'] strong,
+.ops-shell[data-accent-weight='medium'] b {
+  font-weight: 500;
 }
 
 .ops-shell button,
@@ -71,7 +110,7 @@
 .ops-shell a:focus-visible,
 .ops-shell input:focus-visible,
 .ops-shell select:focus-visible {
-  outline: 1px solid var(--ops-orange-bright);
+  outline: var(--ops-focus-ring-width, 1px) solid var(--ops-orange-bright);
   outline-offset: -2px;
 }
 
@@ -387,8 +426,12 @@
 .ops-panel {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--ops-line);
-  background: rgb(7 13 9 / 92%);
+  /* The three geometry settings are read here, at the declaration the design
+     already made, rather than in a later block. A rule appended at the end of
+     this file outranks every responsive and per-screen variant above it, so a
+     "default" copy of this declaration silently replaced all of them. */
+  border: var(--ops-border-width, 1px) solid var(--ops-line);
+  background: rgb(7 13 9 / var(--ops-panel-opacity, 92%));
   color: var(--ops-text);
   text-align: left;
 }
@@ -401,7 +444,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 31px;
+  min-height: var(--ops-panel-header, 31px);
   padding: 4px 8px;
   border-bottom: 1px solid var(--ops-line);
   background: #0a110c;
@@ -424,7 +467,7 @@
 
 .ops-panel__body {
   min-height: 0;
-  padding: 8px;
+  padding: var(--ops-panel-padding, 8px);
 }
 
 .ops-link-button,
@@ -5910,6 +5953,9 @@ button.is-active {
   display: grid;
   min-height: 0;
   flex: 1 1 auto;
+  /* The resolver hands each screen its own spacing, so the fallback is
+     `normal` and the setting only takes over once the operator moves it. */
+  gap: var(--ops-tile-gap, normal);
 }
 
 .tile-grid__cell {
@@ -6005,4 +6051,120 @@ button.is-active {
 .ops-shell[data-tile-presentation='minimal'] .ops-panel__body > .ops-detail,
 .ops-shell[data-tile-presentation='minimal'] .ops-panel__body > .ops-sparkline {
   display: none;
+}
+
+/* The catalogue toolbar carries five controls now — a section, a category, a
+   search, a filter and a count — so it wraps rather than forcing the panel
+   wider than the bounded workspace R26 keeps. */
+.settings-catalog-toolbar {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.settings-catalog-elsewhere {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--ops-line-strong);
+}
+
+.settings-catalog-elsewhere h3 {
+  margin: 0 0 6px;
+  color: var(--ops-muted);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.ops-shell[data-underline-links='on'] a {
+  text-decoration: underline;
+}
+
+/* Motion. `--ops-motion-easing` reaches every transition that already reads
+   `--ops-motion-duration`; the three toggles switch off one kind of movement
+   each, which is what R19 means by an animation setting per element rather
+   than one global switch. */
+.ops-shell[data-tile-enter='off'] .tile-grid__cell {
+  animation: none;
+}
+
+.ops-shell[data-panel-hover='off'] .ops-panel {
+  transition: none;
+}
+
+.ops-shell[data-background-motion='off'] .ops-shell__ascii,
+.ops-shell[data-background-motion='off']::before {
+  animation: none;
+}
+
+.ops-shell[data-ascii-field='off'] .ops-shell__ascii {
+  display: none;
+}
+
+.ops-shell[data-session-metadata='off'] .ops-topbar__metadata > span:nth-child(3),
+.ops-shell[data-session-metadata='off'] .ops-topbar__metadata > span:nth-child(4) {
+  display: none;
+}
+
+/* The pattern layer rides `.ops-shell__frame`, the decorative element that
+   already spans the shell, rather than `.ops-shell::after`. The shell's own
+   `::after` is spoken for three times over — it positions the right-hand rule
+   of the frame at three breakpoints — and a fourth declaration of it later in
+   the file would silently replace all three. */
+.ops-shell__frame::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  opacity: var(--ops-pattern-opacity, 0.35);
+  pointer-events: none;
+}
+
+.ops-shell[data-background-pattern='none'] .ops-shell__frame::after {
+  display: none;
+}
+
+.ops-shell[data-background-pattern='grid'] .ops-shell__frame::after {
+  background-image:
+    linear-gradient(var(--ops-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ops-line) 1px, transparent 1px);
+  background-size: var(--ops-pattern-scale, 12px) var(--ops-pattern-scale, 12px);
+}
+
+.ops-shell[data-background-pattern='dots'] .ops-shell__frame::after {
+  background-image: radial-gradient(var(--ops-line) 1px, transparent 1px);
+  background-size: var(--ops-pattern-scale, 12px) var(--ops-pattern-scale, 12px);
+}
+
+.ops-shell[data-background-pattern='barber'] .ops-shell__frame::after {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--ops-line) 0,
+    var(--ops-line) 1px,
+    transparent 1px,
+    transparent var(--ops-pattern-scale, 12px)
+  );
+}
+
+.ops-shell[data-background-pattern='scanlines'] .ops-shell__frame::after {
+  background-image: repeating-linear-gradient(
+    var(--ops-line) 0,
+    var(--ops-line) 1px,
+    transparent 1px,
+    transparent var(--ops-pattern-scale, 12px)
+  );
+}
+
+/* Tables. Density and zebra are cosmetic; a sticky header is the one that
+   matters on a shoot, because a scrolled table with no header is a table
+   nobody can read a column of. */
+.ops-shell[data-table-density='comfortable'] .ops-table td,
+.ops-shell[data-table-density='comfortable'] .ops-table th {
+  padding-block: 6px;
+}
+
+.ops-shell[data-table-zebra='on'] .ops-table tbody tr:nth-child(even) {
+  background: var(--ops-bg-2);
+}
+
+.ops-shell[data-table-sticky='off'] .ops-table thead th {
+  position: static;
 }

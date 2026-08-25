@@ -40,6 +40,11 @@ export interface Keybind {
  * Element-scoped keys are deliberately not here. The media player's arrows and
  * space act on a focused player, not on the application, and listing them as
  * global would be a promise the application does not keep.
+ *
+ * This is also the `terminal-default` collection `keybinds.scheme` names. The
+ * other two collections are chord tables over these entries (`./schemes`), so
+ * an action's id, category, description and typing guard are still declared
+ * once whichever scheme is active.
  */
 export const keybindRegistry: readonly Keybind[] = [
   ...primaryNavigation.slice(0, 9).map((entry, index) => ({
@@ -179,12 +184,48 @@ export const keybindRegistry: readonly Keybind[] = [
  *
  * `typing` is decided once by the runtime rather than per handler, which is
  * what the three separate guards used to disagree about.
+ *
+ * `keybinds` is the collection `keybinds.scheme` selected; it defaults to the
+ * declarations above, which are the `terminal-default` scheme itself. A caller
+ * that does not pass one therefore gets the default collection rather than
+ * whatever the operator chose, so the runtime passes it explicitly.
+ *
+ * A pending prefix is tried first and the unprefixed chords second. Falling
+ * through matters: with `g` held open, Escape still has to dismiss the panel,
+ * and a scheme that swallowed it until the prefix expired would leave the
+ * operator with an overlay they cannot close.
  */
 export function findKeybind(
   event: KeyboardEvent,
-  { typing }: { readonly typing: boolean },
+  {
+    typing,
+    prefix,
+    keybinds = keybindRegistry,
+  }: {
+    readonly typing: boolean;
+    readonly prefix?: string | undefined;
+    readonly keybinds?: readonly Keybind[];
+  },
 ): Keybind | undefined {
-  return keybindRegistry.find(
-    (keybind) => (keybind.whileTyping || !typing) && matchesChord(event, keybind.chord),
-  );
+  const reachable = keybinds.filter((keybind) => keybind.whileTyping || !typing);
+  if (prefix !== undefined) {
+    const chained = reachable.find((keybind) => matchesChord(event, keybind.chord, prefix));
+    if (chained !== undefined) return chained;
+  }
+  return reachable.find((keybind) => matchesChord(event, keybind.chord));
+}
+
+/**
+ * The prefix this event opens, if the active collection has one.
+ *
+ * A prefix is a bare key: every modifier combination is already a chord in its
+ * own right, and arming on Ctrl+G would take a combination away from the
+ * scheme that declares it.
+ */
+export function prefixKeyFor(
+  event: KeyboardEvent,
+  keybinds: readonly Keybind[],
+): string | undefined {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return undefined;
+  return keybinds.some((keybind) => keybind.chord.prefix === event.code) ? event.code : undefined;
 }

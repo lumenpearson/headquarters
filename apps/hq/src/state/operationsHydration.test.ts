@@ -22,6 +22,42 @@ describe('initializeOperationsClient', () => {
     dispose = () => undefined;
   });
 
+  it('keeps personalization out of what one session broadcasts to the others', () => {
+    const posted: unknown[] = [];
+    class RecordingChannel {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      constructor(readonly name: string) {}
+      postMessage(message: unknown): void {
+        posted.push(message);
+      }
+      close(): void {}
+    }
+    const original = globalThis.BroadcastChannel;
+    globalThis.BroadcastChannel = RecordingChannel as unknown as typeof BroadcastChannel;
+    try {
+      dispose = initializeOperationsClient();
+      operationsStore.getState().applySettingsPatch([{ id: 'themes.id', value: 'amber-crt' }]);
+    } finally {
+      globalThis.BroadcastChannel = original;
+    }
+
+    expect(posted.length).toBeGreaterThan(0);
+    // `advanced.liveEdit` is the opt-in that decides whether a settings change
+    // reaches the other sessions, and it defaults to off. The world snapshot
+    // carried the whole personalization state on every store change, so the
+    // opt-in governed nothing and every same-origin session followed a theme
+    // change immediately.
+    for (const message of posted) {
+      expect(Object.keys(message as Record<string, unknown>)).not.toContain('personalization');
+    }
+    // The change is still persisted: storage is what makes a preference outlive
+    // a restart, and that is not what the opt-in is about.
+    const stored = JSON.parse(localStorage.getItem(persistedStateKey) ?? '{}') as {
+      personalization?: { draft?: { values?: Record<string, unknown> } };
+    };
+    expect(stored.personalization?.draft?.values?.['themes.id']).toBe('amber-crt');
+  });
+
   it('clears the snapshot key it could not read, not the state key', () => {
     localStorage.setItem(persistedStateKey, JSON.stringify({ version: 5 }));
     localStorage.setItem(snapshotStateKey, 'not json');

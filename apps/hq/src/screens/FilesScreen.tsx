@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Attachment, FileKind } from '@gremuchaya/domain';
+import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import {
   TerminalButton,
   TerminalDialog,
@@ -19,6 +20,7 @@ import {
   type MaterialImportProgress,
 } from '@/infrastructure/materials/BridgeMaterialClient';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
+import { useStringSetting } from '@/application/personalization/useSetting';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { RecordPagination } from '@/components/operations/RecordPagination';
@@ -33,6 +35,38 @@ const fileSortOptions = [
   { value: 'kind', label: 'ТИП' },
   { value: 'sizeLabel', label: 'РАЗМЕР' },
 ] as const satisfies ReadonlyArray<{ readonly value: FileSort; readonly label: string }>;
+
+const materialCategoryLabels: Readonly<Record<string, string>> = {
+  video: 'ВИДЕО',
+  camera: 'КАМЕРА',
+  photo: 'ФОТО',
+  audio: 'АУДИО',
+  document: 'ДОКУМЕНТ',
+  map: 'КАРТА',
+  intercept: 'ПЕРЕХВАТ',
+  dossier: 'ДОСЬЕ',
+  report: 'РАПОРТ',
+  archive: 'АРХИВ',
+  technical: 'ТЕХНИЧЕСКОЕ',
+  other: 'ПРОЧЕЕ',
+};
+
+/*
+ * The categories the picker offers are the ones the definition itself allows,
+ * not a second list of the same twelve names. A category added to the schema
+ * would otherwise be selectable in the settings catalogue and missing from the
+ * dialog that is supposed to honour it; this way it appears at once, under its
+ * identifier until someone gives it a Russian label.
+ */
+const materialCategoryOptions: ReadonlyArray<{ readonly value: string; readonly label: string }> =
+  (() => {
+    const editor = getSettingDefinition('materials.defaultCategory')?.editor;
+    const values = editor?.kind === 'enum' ? editor.options : [];
+    return values.map((value) => ({
+      value,
+      label: materialCategoryLabels[value] ?? value.toUpperCase(),
+    }));
+  })();
 
 export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const state = useOperationsStore((value) => value);
@@ -51,11 +85,28 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const [bridgeMessage, setBridgeMessage] = useState('');
   const [importProgress, setImportProgress] = useState<MaterialImportProgress | null>(null);
   const [importing, setImporting] = useState(false);
+  /*
+   * `materials.defaultCategory` decides what the import dialog offers before
+   * the operator has said anything. It is applied each time the dialog opens
+   * rather than only on mount, so changing it in the catalogue takes effect on
+   * the next import instead of the next reload -- and so a category chosen for
+   * one batch does not silently carry into the next.
+   */
+  const defaultCategory = useStringSetting('materials.defaultCategory');
+  const [importCategory, setImportCategory] = useState(defaultCategory);
+  // Kept beside the mirror listing rather than inside it: the bridge stores
+  // content, and a category is the operator's reading of that content.
+  const [importedCategories, setImportedCategories] = useState<Readonly<Record<string, string>>>(
+    {},
+  );
   const abortImport = useRef<AbortController | null>(null);
   const materialClient = useMemo(() => new BridgeMaterialClient(), []);
   const localAttachments = useMemo(
-    () => bridgeMaterials.map(materialToAttachment),
-    [bridgeMaterials],
+    () =>
+      bridgeMaterials.map((material) =>
+        materialToAttachment(material, importedCategories[material.materialId]),
+      ),
+    [bridgeMaterials, importedCategories],
   );
   const allFiles = useMemo(
     () => [...Object.values(state.attachments), ...localAttachments],
@@ -82,6 +133,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const openImportDialog = () => {
     setBridgeStatus('loading');
     setBridgeMessage('');
+    setImportCategory(defaultCategory);
     setImportOpen(true);
   };
 
@@ -140,6 +192,10 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           completed.material,
           ...current.filter((entry) => entry.materialId !== completed.material.materialId),
         ]);
+        setImportedCategories((current) => ({
+          ...current,
+          [completed.material.materialId]: importCategory,
+        }));
         state.selectFile(completed.material.materialId);
       }
       setBridgeMessage(`ЗАГРУЖЕНО: ${filesToImport.length} / LOCAL MIRROR`);
@@ -472,6 +528,16 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       >
         <div className="material-import-dialog__content">
           <label className="material-import-dialog__picker">
+            <span>КАТЕГОРИЯ ИМПОРТА</span>
+            <TerminalSelect
+              value={importCategory}
+              options={materialCategoryOptions}
+              onValueChange={setImportCategory}
+              label="Категория импортируемых материалов"
+              disabled={importing}
+            />
+          </label>
+          <label className="material-import-dialog__picker">
             <span>ВЫБРАТЬ ФАЙЛЫ / ВИДЕО / ФОТО / ДОКУМЕНТЫ</span>
             <TerminalInput
               type="file"
@@ -538,7 +604,16 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   );
 }
 
-function materialToAttachment(material: MaterialEntry): Attachment {
+/**
+ * The mirror entry as the registry sees it.
+ *
+ * `category` is the one the operator chose in the import dialog, and it is
+ * absent for anything the bridge already held: the bridge stores content and
+ * has no opinion about it. Carrying it as a tag rather than a column keeps the
+ * category searchable from the same box that searches ids and sources.
+ */
+function materialToAttachment(material: MaterialEntry, category: string | undefined): Attachment {
+  const mimeType = material.mimeType || 'application/octet-stream';
   return {
     id: material.materialId,
     title: material.displayName,
@@ -547,7 +622,8 @@ function materialToAttachment(material: MaterialEntry): Attachment {
     createdAt: material.createdAt,
     source: 'LOCAL MIRROR / GRPC-WEB',
     classification: 'АЛЬФА',
-    tags: ['local-mirror', material.mimeType || 'application/octet-stream'],
+    tags:
+      category === undefined ? ['local-mirror', mimeType] : ['local-mirror', category, mimeType],
     linkedCaseIds: [],
     linkedObjectIds: [],
     sizeLabel: formatBytes(material.byteSize),

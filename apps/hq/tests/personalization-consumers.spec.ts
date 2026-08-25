@@ -160,6 +160,126 @@ test('R14: a theme and an accent both reach the document and neither breaks the 
   );
 });
 
+test('R6/R19: geometry settings resize the interface without letting the page scroll', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  await expect(page.locator('.ops-panel').first()).toBeVisible();
+  const before = await panelMetrics(page);
+
+  await seedSettings(page, {
+    'sizes.panelHeader': 44,
+    'sizes.panelPadding': 16,
+    'sizes.borderWidth': 3,
+    'typography.letterSpacing': 0.15,
+    'colors.panelOpacity': 0.6,
+  });
+  await page.reload();
+  await expect(page.locator('.ops-panel').first()).toBeVisible();
+  await expect.poll(() => panelMetrics(page).then((metrics) => metrics.borderWidth)).toBe('3px');
+  const after = await panelMetrics(page);
+
+  // Header height is deliberately not asserted here: the wide breakpoint sets
+  // its own, and a responsive rule outranking the base declaration is correct
+  // rather than a setting failing to apply.
+  expect(after.bodyPadding).toBe('16px');
+  // The typography hook is asserted as the property reaching the shell rather
+  // than as a computed letter spacing: the design sets its own on several
+  // descendants, so measuring one of those would report no change however far
+  // the setting moved. The two geometry values above are what prove a hook
+  // actually redraws something.
+  expect(after.letterSpacingProperty).toBe('0.15em');
+  expect(before.letterSpacingProperty).toBe('');
+  // R19 asks for per-element size settings "within reason": the reason is that
+  // the layout stays bounded, which is R26 and is the property that would break
+  // first if a size setting were unbounded.
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(
+    await page.evaluate(() => window.innerHeight),
+  );
+});
+
+test('R13: a background pattern appears only when one is chosen', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  await settled(page, 'data-background-pattern', 'none');
+  // `none` is the default, and it must paint nothing at all: a profile that
+  // never touched this setting has no extra layer.
+  expect(await patternDisplay(page)).toBe('none');
+
+  await seedSettings(page, { 'patterns.background': 'dots', 'patterns.scale': 20 });
+  await page.reload();
+  await settled(page, 'data-background-pattern', 'dots');
+  expect(await patternDisplay(page)).not.toBe('none');
+  expect(await patternSize(page)).toBe('20px 20px');
+});
+
+test('R19: switching a kind of motion off leaves the rest of the interface moving', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, { 'animations.panelHover': false });
+  await page.goto('/overview');
+  await settled(page, 'data-panel-hover', 'off');
+
+  // One kind of movement, not the global switch: the shell still declares a
+  // motion duration, which is what R19 means by an animation setting per
+  // element rather than one toggle for everything.
+  expect(
+    await page.evaluate(() => {
+      const panel = document.querySelector('.ops-panel');
+      return panel === null ? 'absent' : window.getComputedStyle(panel).transitionDuration;
+    }),
+  ).toBe('0s');
+  expect(
+    await page.evaluate(() =>
+      window
+        .getComputedStyle(document.querySelector('.ops-shell') as Element)
+        .getPropertyValue('--ops-motion-duration')
+        .trim(),
+    ),
+  ).not.toBe('');
+});
+
+async function panelMetrics(page: Page): Promise<{
+  headerHeight: number;
+  bodyPadding: string;
+  borderWidth: string;
+  letterSpacingProperty: string;
+}> {
+  return page.evaluate(() => {
+    const panel = document.querySelector('.ops-panel');
+    const header = document.querySelector('.ops-panel__header');
+    const body = document.querySelector('.ops-panel__body');
+    if (panel === null || header === null || body === null) {
+      throw new Error('no panel is laid out');
+    }
+    return {
+      headerHeight: Math.round(header.getBoundingClientRect().height),
+      bodyPadding: window.getComputedStyle(body).paddingTop,
+      borderWidth: window.getComputedStyle(panel).borderTopWidth,
+      letterSpacingProperty: window
+        .getComputedStyle(document.querySelector('.ops-shell') as Element)
+        .getPropertyValue('--ops-letter-spacing')
+        .trim(),
+    };
+  });
+}
+
+function patternDisplay(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const frame = document.querySelector('.ops-shell__frame');
+    return frame === null ? 'absent' : window.getComputedStyle(frame, '::after').display;
+  });
+}
+
+function patternSize(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const frame = document.querySelector('.ops-shell__frame');
+    return frame === null ? 'absent' : window.getComputedStyle(frame, '::after').backgroundSize;
+  });
+}
+
 function columnCount(page: Page): Promise<number> {
   return page.evaluate(() => {
     const grid = document.querySelector('.camera-grid');

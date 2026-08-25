@@ -32,6 +32,15 @@ export interface ContextMenuEntry {
    * and drawn disabled where nothing claims it.
    */
   readonly action?: string;
+  /**
+   * The boolean setting that has to be on before this entry may run.
+   *
+   * A command the operator has switched off is drawn disabled, never dropped,
+   * for the same reason an unclaimed one is: a command that disappears is a
+   * command the operator concludes this build does not have, and then looks
+   * for the switch that would bring it back without knowing one exists.
+   */
+  readonly requiresSetting?: string;
   readonly tone?: 'neutral' | 'primary' | 'critical';
 }
 
@@ -51,6 +60,12 @@ export const contextMenuRegistry: readonly ContextMenuDefinition[] = [
       { id: 'shell.edit', label: 'Режим редактирования', keybind: 'edit.toggle', tone: 'primary' },
       { id: 'shell.fullscreen', label: 'Полный экран', keybind: 'shell.fullscreen' },
       { id: 'shell.production', label: 'Панель режиссёра', keybind: 'shell.productionPanel' },
+      {
+        id: 'shell.diagnostics',
+        label: 'Скопировать диагностику',
+        action: 'shell.copyDiagnostics',
+        requiresSetting: 'privacy.copyDiagnostics',
+      },
     ],
   },
   {

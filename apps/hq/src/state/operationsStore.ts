@@ -40,6 +40,7 @@ import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/react/shallow';
 import { createStore } from 'zustand/vanilla';
 
+import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
   createSettingsHistoryEntry,
@@ -602,7 +603,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
 
   dockEditPanel: (edge) => set((state) => ({ edit: { ...state.edit, dockEdge: edge } })),
 
-  applySettingsPatch: (patches) =>
+  applySettingsPatch: (patches) => {
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
       const draft = applyDraftPatch(state.personalization.draft, patches, settingsMetadata('SET'));
@@ -626,7 +627,16 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           ...state.audit,
         ].slice(0, 100),
       };
-    }),
+    });
+    // R27: the change reaches the other sessions of the group, and only them.
+    // Outside `set` because sending is an effect and a Zustand updater has to
+    // stay a pure function of the previous state -- and after it, so a patch
+    // `applyDraftPatch` refused is never announced as applied. The opt-in that
+    // decides whether anything travels is `advanced.liveEdit`, read by
+    // `EditModeRuntime`, which connects a transport only while the group has
+    // enabled it; with nothing connected this call does nothing at all.
+    publishLiveEdit(patches);
+  },
   resetSettingsCategory: (category) =>
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
@@ -958,6 +968,25 @@ function persistedSnapshot(state: OperationsState): PersistedOperationsState {
   };
 }
 
+/**
+ * What one session tells the others.
+ *
+ * The same shape as the persisted blob minus personalization. Storage is
+ * per-origin and every session on this machine reads it on load, which is what
+ * makes a preference survive a restart; the broadcast is what makes another
+ * session change *now*, and that is the act `advanced.liveEdit` exists to gate.
+ *
+ * Leaving personalization in here meant the gate governed nothing: a theme
+ * changed on one screen reached every other one immediately, with the opt-in
+ * off and no record of the change on the receiving side.
+ */
+function broadcastSnapshot(
+  state: OperationsState,
+): Omit<PersistedOperationsState, 'personalization'> {
+  const { personalization: _personalization, ...world } = persistedSnapshot(state);
+  return world;
+}
+
 function hydratePersonalization(
   persisted: PersonalizationState,
   fallback: PersonalizationState,
@@ -1063,7 +1092,9 @@ export function initializeOperationsClient(): () => void {
     typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(channelName);
   let applyingRemote = false;
   if (broadcast !== null) {
-    broadcast.onmessage = (event: MessageEvent<PersistedOperationsState>) => {
+    broadcast.onmessage = (
+      event: MessageEvent<Omit<PersistedOperationsState, 'personalization'>>,
+    ) => {
       if (event.data.version !== 4 && event.data.version !== 5) return;
       // Timed playback is ordered by PlaybackSyncCoordinator. Applying these
       // transient fields from the general world snapshot would race the
@@ -1086,15 +1117,20 @@ export function initializeOperationsClient(): () => void {
         alerts: event.data.alerts,
         tasks: event.data.tasks,
         audit: event.data.audit,
-        personalization: hydratePersonalization(event.data.personalization, state.personalization),
+        // Personalization is deliberately not taken from the world snapshot.
+        // `advanced.liveEdit` is the opt-in that decides whether a settings
+        // change reaches the other sessions, and it defaults to off — but this
+        // snapshot carried the whole personalization state to every same-origin
+        // session on every store change, so the opt-in governed nothing and
+        // "off" meant "off except through here". Live settings now travel only
+        // through the gated live-edit channel.
       }));
       applyingRemote = false;
     };
   }
   const unsubscribe = operationsStore.subscribe((state) => {
-    const snapshot = persistedSnapshot(state);
-    localStorage.setItem(persistedStateKey, JSON.stringify(snapshot));
-    if (!applyingRemote) broadcast?.postMessage(snapshot);
+    localStorage.setItem(persistedStateKey, JSON.stringify(persistedSnapshot(state)));
+    if (!applyingRemote) broadcast?.postMessage(broadcastSnapshot(state));
   });
   return () => {
     unsubscribe();

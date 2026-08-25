@@ -48,7 +48,11 @@ describe('personalization presentation bindings', () => {
     expect(resolved.attributes['data-theme']).toBe('terminal-red');
     expect(resolved.attributes['data-layout-density']).toBe('dense');
     expect(resolved.attributes['data-operational-context']).toBe('on');
-    expect(resolved.customProperties['--ops-type-scale-setting']).toBe('1');
+    // A custom property at its default is not emitted at all: declaring one
+    // would inherit a value where the design had none, and `letter-spacing` at
+    // the shell root changes the metrics of every line in the application.
+    expect(resolved.customProperties['--ops-type-scale-setting']).toBeUndefined();
+    expect(resolved.customProperties['--ops-letter-spacing']).toBeUndefined();
   });
 
   it('refuses a value the definition would reject and uses the default instead', () => {
@@ -61,7 +65,7 @@ describe('personalization presentation bindings', () => {
     // build is not: falling back keeps a stale value from reaching a selector
     // that has no rule for it.
     expect(resolved.attributes['data-theme']).toBe('terminal-red');
-    expect(resolved.customProperties['--ops-type-scale-setting']).toBe('1');
+    expect(resolved.customProperties['--ops-type-scale-setting']).toBeUndefined();
   });
 
   it('carries a chosen value through unchanged', () => {

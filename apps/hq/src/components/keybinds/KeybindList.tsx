@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
+import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { groupKeybinds, keybindCategoryLabel } from '@/application/keybinds/grouping';
 import { formatChord } from '@/application/keybinds/match';
-import { keybindRegistry } from '@/application/keybinds/registry';
 
 import { subscribeKeybindFired } from './KeybindRuntime';
 
@@ -22,8 +22,15 @@ const highlightMs = 700;
  * without appearing here and cannot appear here without existing. The
  * highlight is what makes it a reference an operator can check against rather
  * than a table they have to trust.
+ *
+ * The chords are the ones `keybinds.scheme` currently selects. This list is
+ * where the keyboard is learned -- it is the first thing the application shows
+ * on first launch -- so printing the default collection's chords beside
+ * another collection's behaviour would teach the wrong keys to the one
+ * operator who reads it.
  */
 export function KeybindList() {
+  const keybinds = useActiveKeybinds();
   const [firedId, setFiredId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,7 +48,7 @@ export function KeybindList() {
 
   return (
     <div className="keybind-list">
-      {groupKeybinds(keybindRegistry).map((group) => (
+      {groupKeybinds(keybinds).map((group) => (
         <section key={group.category} className="keybind-list__group">
           <h4>{keybindCategoryLabel(group.category)}</h4>
           <ul>

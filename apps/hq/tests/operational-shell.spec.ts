@@ -454,6 +454,11 @@ test('renders the full safe personalization catalogue and resets one selected ca
 }) => {
   await page.goto('/settings');
 
+  // The catalogue is grouped now — thirty-two categories in one list stopped
+  // being readable well before the sixty-nine definitions R6 asks for — but the
+  // category list stays complete and moves the section to match. A section that
+  // could hide a category the operator was looking for would be worse than no
+  // section at all.
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
   await expect(
@@ -795,7 +800,11 @@ test('keeps overview, communications and tactical layers interactive through wra
   const wasChecked = await hostileLayer.isChecked();
   await hostileLayer.click();
   await expect(hostileLayer).toBeChecked({ checked: !wasChecked });
-  await expect(page.locator('.map-toolbar .terminal-button')).toHaveCount(3);
+  // Six, not three: `map.mode` added the three representation buttons beside
+  // the three the toolbar already carried. The count is asserted rather than
+  // loosened because it is what proves the wrappers are reached at all — a
+  // toolbar drawn with raw elements would report none.
+  await expect(page.locator('.map-toolbar .terminal-button')).toHaveCount(6);
 
   await page.goto('/communications');
   const firstChannel = page.locator('.channel-list .terminal-button').first();
