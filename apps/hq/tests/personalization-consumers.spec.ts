@@ -531,3 +531,70 @@ test('R6: player.startMuted opens the feed unmuted when the operator asks', asyn
     .toBeGreaterThan(0);
   expect(await video.evaluate((el: HTMLVideoElement) => el.muted)).toBe(false);
 });
+
+test('R6: the map zoom controls move by the step the operator sets', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, { 'map.zoomStep': 4, 'map.resetZoom': 7 });
+  await page.goto('/map');
+
+  const readout = page.locator('.map-toolbar, .map-controls').first();
+  await expect(readout).toBeVisible();
+  await page.getByRole('button', { name: '[R] RESET VIEW' }).click();
+  // Reset first, so the step is measured from a level the setting decided.
+  await expect.poll(() => zoomLevel(page)).toBe(7);
+
+  await page
+    .getByRole('button', { name: /\[\+\]/ })
+    .first()
+    .click();
+  await expect.poll(() => zoomLevel(page)).toBe(11);
+});
+
+test('R6: the map shade and the camera feed take their grade from the settings', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/map');
+  const shade = page.locator('.yandex-tactical-map__shade');
+  await expect(shade).toBeAttached();
+  // Nothing is emitted at the default, so the declaration resolves to the
+  // initial value and the element looks exactly as it did.
+  await expect.poll(() => shade.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+
+  await seedSettings(page, { 'map.shadeOpacity': 0.2, 'cameras.feedBrightness': 0.5 });
+  await page.reload();
+  await expect(page.locator('.yandex-tactical-map__shade')).toBeAttached();
+  await expect
+    .poll(() =>
+      page.locator('.yandex-tactical-map__shade').evaluate((el) => getComputedStyle(el).opacity),
+    )
+    .toBe('0.2');
+
+  await page.goto('/video/cameras');
+  const media = page.locator('.video-main-feed__media').first();
+  await expect(media).toBeAttached();
+  await expect
+    .poll(() => media.evaluate((el) => getComputedStyle(el).filter))
+    .toContain('brightness(0.5)');
+});
+
+test('R6: the camera telemetry overlay leaves the feed when the setting turns it off', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/video/cameras');
+  await settled(page, 'data-camera-overlay', 'on');
+  expect(await displayOf(page, '.video-overlay-left')).not.toBe('none');
+
+  await seedSettings(page, { 'cameras.feedOverlay': false });
+  await page.reload();
+  await settled(page, 'data-camera-overlay', 'off');
+  expect(await displayOf(page, '.video-overlay-left')).toBe('none');
+});
+
+function zoomLevel(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const match = /Z(\d+(?:\.\d+)?)/.exec(document.body.textContent ?? '');
+    return match?.[1] === undefined ? Number.NaN : Number(match[1]);
+  });
+}

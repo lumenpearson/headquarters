@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalCheckbox } from '@gremuchaya/ui/primitives';
 
-import { useStringSetting } from '@/application/personalization/useSetting';
+import { useNumberSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
@@ -96,6 +96,9 @@ export function TacticalMapScreen() {
    * settings screen with the same rule.
    */
   const configuredMapMode = useStringSetting('map.mode');
+  const mapZoomStep = useNumberSetting('map.zoomStep');
+  const mapResetZoom = useNumberSetting('map.resetZoom');
+  const mapAlertRows = useNumberSetting('map.alertRows');
   // Narrowing, not a second validation: the reader has already resolved the
   // value through the definition, so the `??` arm cannot be reached by
   // anything the schema allows and names no default of its own.
@@ -308,7 +311,7 @@ export function TacticalMapScreen() {
             <div className="compact-alert-list">
               {Object.values(state.alerts)
                 .filter((alert) => alert.lifecycle !== 'RESOLVED')
-                .slice(0, 6)
+                .slice(0, mapAlertRows)
                 .map((alert) => (
                   <TerminalButton
                     key={alert.id}
@@ -522,6 +525,7 @@ export function TacticalMapScreen() {
       channelSort,
       channels,
       hiddenLayers,
+      mapAlertRows,
       representation,
       router,
       selected,
@@ -557,17 +561,17 @@ export function TacticalMapScreen() {
             </TerminalButton>
           ))}
           {representation === 'satellite' ? <span>СНИМКИ НЕДОСТУПНЫ</span> : null}
-          <TerminalButton onClick={() => state.setMapView(MOSCOW_OPERATION_CENTER, 12)}>
+          <TerminalButton onClick={() => state.setMapView(MOSCOW_OPERATION_CENTER, mapResetZoom)}>
             [R] RESET VIEW
           </TerminalButton>
           <TerminalButton
-            onClick={() => state.setMapView(state.ui.mapCenter, state.ui.mapZoom - 1)}
+            onClick={() => state.setMapView(state.ui.mapCenter, state.ui.mapZoom - mapZoomStep)}
           >
             [-] ZOOM
           </TerminalButton>
           <strong>Z{state.ui.mapZoom.toFixed(1)}</strong>
           <TerminalButton
-            onClick={() => state.setMapView(state.ui.mapCenter, state.ui.mapZoom + 1)}
+            onClick={() => state.setMapView(state.ui.mapCenter, state.ui.mapZoom + mapZoomStep)}
           >
             [+] ZOOM
           </TerminalButton>
