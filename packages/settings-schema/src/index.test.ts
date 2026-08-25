@@ -104,9 +104,41 @@ describe('safe settings draft schema', () => {
     expect(restored.values['cameras.gridDensity']).toBe('3x3');
     expect(restored.history[0]?.operation).toBe('import');
     expect(publishDraft(restored)).toMatchObject({ revision: 1, values: restored.values });
-    expect(() => importDraft(restored, '{"revision":0,"values":{}}', event('broken'))).toThrow(
-      InvalidSettingValueError,
+
+    // A value that is present and wrong is refused by name. This is the trust
+    // boundary, and it does not move.
+    expect(() =>
+      importDraft(
+        restored,
+        '{"revision":0,"values":{"cameras.gridDensity":"9x9"}}',
+        event('broken'),
+      ),
+    ).toThrow(InvalidSettingValueError);
+  });
+
+  it('imports a file written before a setting existed, filling the gap from the schema', () => {
+    /*
+     * Every definition used to be required to be present, so adding one made
+     * every previously exported file unimportable. R6 adds definitions by the
+     * dozen; that would have turned a rare failure into the usual one.
+     *
+     * The file below is the shape of an old export: a revision, and only the
+     * settings that existed when it was written.
+     */
+    const older = JSON.stringify({ revision: 0, values: { 'cameras.gridDensity': '2x2' } });
+    const restored = importDraft(
+      createSettingsDraft(createFactorySnapshot()),
+      older,
+      event('import-old'),
     );
+
+    expect(restored.values['cameras.gridDensity']).toBe('2x2');
+    // The settings it predates arrive at exactly what a fresh draft holds --
+    // read from the schema rather than restated here, because a literal would
+    // be a second copy of the default.
+    const fresh = createSettingsDraft(createFactorySnapshot());
+    expect(restored.values['layout.density']).toBe(fresh.values['layout.density']);
+    expect(restored.values['themes.id']).toBe(fresh.values['themes.id']);
   });
 
   it('restores only a schema-valid immutable checkpoint into a new draft history event', () => {

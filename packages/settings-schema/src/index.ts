@@ -1002,6 +1002,28 @@ export function parseSettingsSnapshot(value: unknown): SettingsSnapshot {
   const values: Record<string, SettingValue> = {};
   for (const definition of settingsDefinitions) {
     const imported = value.values[definition.id];
+    /*
+     * A setting the file does not mention takes its declared default; a setting
+     * it does mention must still pass that setting's own validator.
+     *
+     * Absence and invalidity are different facts and used to be one. Every
+     * definition was required to be present, so the day a definition was added
+     * every settings file an operator had already exported stopped importing --
+     * `[!] IMPORT REJECTED: SCHEMA VALIDATION FAILED`, for a file that was
+     * correct when it was written. R6 adds definitions by the dozen, which
+     * would have made that the normal outcome rather than the rare one.
+     *
+     * This is not a loosened validator, and the distinction is the whole point.
+     * Nothing an operator supplies skips `validate`: a value that is present and
+     * wrong is still refused by name. What fills the gap is the schema's own
+     * `defaultValue`, which is the same thing a fresh draft would hold, so an
+     * older file imports as "everything it says, and the defaults for what it
+     * predates".
+     */
+    if (imported === undefined) {
+      values[definition.id] = cloneValue(definition.defaultValue);
+      continue;
+    }
     if (!definition.validate(imported)) throw new InvalidSettingValueError(definition.id);
     values[definition.id] = cloneValue(imported);
   }
