@@ -29,7 +29,9 @@ import {
 import {
   querySettingsHistory,
   settingsHistoryOperations,
+  settingsHistoryScopes,
   type SettingsHistoryOperation,
+  type SettingsHistoryScope,
 } from '@/infrastructure/settings/SettingsHistoryLedger';
 import { useOperationsStore } from '@/state/operationsStore';
 
@@ -45,6 +47,7 @@ export function SettingsScreen() {
   const [historyOperation, setHistoryOperation] = useState<SettingsHistoryOperation | 'all'>('all');
   const [historyCategory, setHistoryCategory] = useState<SettingCategory | 'all'>('all');
   const [historySettingId, setHistorySettingId] = useState('');
+  const [historyScope, setHistoryScope] = useState<SettingsHistoryScope | 'all'>('all');
   const [historyDate, setHistoryDate] = useState('');
   const [historyOrder, setHistoryOrder] = useState<'newest' | 'oldest'>('newest');
   const [historyPageNumber, setHistoryPageNumber] = useState(1);
@@ -74,10 +77,12 @@ export function SettingsScreen() {
         operation: historyOperation === 'all' ? undefined : historyOperation,
         category: historyCategory === 'all' ? undefined : historyCategory,
         settingId: historySettingId.trim() || undefined,
+        scope: historyScope === 'all' ? undefined : historyScope,
         date: historyDate || undefined,
       }),
     [
       historyCategory,
+      historyScope,
       historyDate,
       historyOperation,
       historyOrder,
@@ -471,6 +476,21 @@ export function SettingsScreen() {
                 ...settingsHistoryOperations.map((operation) => ({
                   value: operation,
                   label: operation.toUpperCase(),
+                })),
+              ]}
+            />
+            <TerminalSelect
+              label="Охват истории"
+              value={historyScope}
+              onValueChange={(value) => {
+                setHistoryScope(value as SettingsHistoryScope | 'all');
+                setHistoryPageNumber(1);
+              }}
+              options={[
+                { value: 'all', label: 'ЛЮБОЙ ОХВАТ' },
+                ...settingsHistoryScopes.map((scope) => ({
+                  value: scope,
+                  label: scope === 'group' ? 'ГРУППОВЫЕ' : 'ТОЛЬКО ЭТА МАШИНА',
                 })),
               ]}
             />

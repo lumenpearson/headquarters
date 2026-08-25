@@ -46,6 +46,7 @@ import { operationsSeed } from '../data/operationsSeed';
 import {
   createSettingsHistoryEntry,
   type SettingsHistoryEntry,
+  type SettingsHistoryEntryInput,
 } from '../infrastructure/settings/SettingsHistoryLedger';
 
 // The union is also needed at runtime: `localStorage` is a trust boundary, and
@@ -408,7 +409,7 @@ function settingsMetadata(prefix: string): { readonly id: string; readonly at: s
 
 function appendSettingsHistory(
   state: PersonalizationState,
-  entry: SettingsHistoryEntry,
+  entry: SettingsHistoryEntryInput,
   options: { readonly reversible: boolean; readonly redoStack?: readonly SettingsHistoryEntry[] },
 ): PersonalizationState {
   const historyEntry = createSettingsHistoryEntry(entry);

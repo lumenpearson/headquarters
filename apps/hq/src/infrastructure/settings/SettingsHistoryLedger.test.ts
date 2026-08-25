@@ -67,3 +67,65 @@ describe('SettingsHistoryLedger', () => {
     expect(stored.after.changedIds).toEqual(['themes.id']);
   });
 });
+
+describe('the scope a change reaches', () => {
+  const checkpoint = { values: {}, changedIds: [] };
+  const entry = (id: string, changedIds: readonly string[]) =>
+    createSettingsHistoryEntry({
+      id,
+      at: `2026-08-25T10:0${id}:00.000Z`,
+      operation: 'patch',
+      changedIds,
+      before: checkpoint,
+      after: checkpoint,
+    });
+
+  it('derives the scope from the definitions a change names', () => {
+    // `SettingScope` has carried 'group' since the schema was written and
+    // decided nothing anywhere (C23). It decides this.
+    expect(entry('1', ['layout.density']).scope).toBe('device');
+    expect(entry('2', ['advanced.liveEdit']).scope).toBe('group');
+    // A change that touches both reaches the group, because part of it does.
+    expect(entry('3', ['layout.density', 'github.draftOnly']).scope).toBe('group');
+    // An id the schema does not know reaches nothing.
+    expect(entry('4', ['not.a.setting']).scope).toBe('device');
+  });
+
+  it('recomputes the scope rather than trusting what it was handed', () => {
+    const forged = createSettingsHistoryEntry({
+      id: '5',
+      at: '2026-08-25T10:05:00.000Z',
+      operation: 'patch',
+      changedIds: ['layout.density'],
+      scope: 'group',
+      before: checkpoint,
+      after: checkpoint,
+    });
+
+    // A stored entry cannot disagree with the definitions it names.
+    expect(forged.scope).toBe('device');
+  });
+
+  it('filters the history by the scope a change reached', () => {
+    const entries = [entry('1', ['layout.density']), entry('2', ['advanced.liveEdit'])];
+
+    const group = querySettingsHistory(entries, {
+      page: 1,
+      pageSize: 10,
+      order: 'newest',
+      scope: 'group',
+    });
+    const device = querySettingsHistory(entries, {
+      page: 1,
+      pageSize: 10,
+      order: 'newest',
+      scope: 'device',
+    });
+
+    // The operator's question is which of their changes will propagate once a
+    // group exists, and which are only ever local.
+    expect(group.items.map((item) => item.id)).toEqual(['2']);
+    expect(device.items.map((item) => item.id)).toEqual(['1']);
+    expect(group.total).toBe(1);
+  });
+});

@@ -1,4 +1,8 @@
-import type { SettingCategory, SettingsDraftCheckpoint } from '@gremuchaya/settings-schema';
+import {
+  getSettingDefinition,
+  type SettingCategory,
+  type SettingsDraftCheckpoint,
+} from '@gremuchaya/settings-schema';
 
 import { queryRecords } from '@/application/records/query';
 
@@ -17,12 +21,36 @@ export const settingsHistoryOperations = [
 export type SettingsHistoryOperation = (typeof settingsHistoryOperations)[number];
 export type SettingsHistoryOrder = 'newest' | 'oldest';
 
+export const settingsHistoryScopes = ['device', 'group'] as const;
+
+/**
+ * Whether a change reaches beyond this machine.
+ *
+ * `SettingScope` has declared `'group'` since the schema was written, five
+ * definitions carry it, and the value was read in exactly one place — as text
+ * in a label. It decided nothing (C23). Here it decides something: an entry is
+ * `group` when it changed at least one group-scoped setting, which is the same
+ * as saying it will propagate once a group exists, and `device` when it changed
+ * none.
+ *
+ * Derived rather than stored by the caller. The scope of a change is a fact
+ * about the settings it touched, and a caller free to assert otherwise is a
+ * caller free to be wrong about it.
+ */
+export type SettingsHistoryScope = (typeof settingsHistoryScopes)[number];
+
+export function scopeOfChangedIds(changedIds: readonly string[]): SettingsHistoryScope {
+  return changedIds.some((id) => getSettingDefinition(id)?.scope === 'group') ? 'group' : 'device';
+}
+
 export interface SettingsHistoryEntry {
   readonly id: string;
   readonly at: string;
   readonly operation: SettingsHistoryOperation;
   readonly category?: SettingCategory | undefined;
   readonly changedIds: readonly string[];
+  /** Derived from `changedIds`; see {@link scopeOfChangedIds}. */
+  readonly scope: SettingsHistoryScope;
   readonly before: SettingsDraftCheckpoint;
   readonly after: SettingsDraftCheckpoint;
   readonly publishedRevision?: number;
@@ -35,6 +63,7 @@ export interface SettingsHistoryQuery {
   readonly operation?: SettingsHistoryOperation | undefined;
   readonly category?: SettingCategory | undefined;
   readonly settingId?: string | undefined;
+  readonly scope?: SettingsHistoryScope | undefined;
   /** ISO calendar date in the operator locale, for example 2026-08-18. */
   readonly date?: string | undefined;
 }
@@ -46,10 +75,22 @@ export interface SettingsHistoryPage {
   readonly total: number;
 }
 
-export function createSettingsHistoryEntry(entry: SettingsHistoryEntry): SettingsHistoryEntry {
+/**
+ * What a caller supplies. `scope` is absent because it is derived, and optional
+ * rather than forbidden so a stored entry can be passed straight back through.
+ */
+export type SettingsHistoryEntryInput = Omit<SettingsHistoryEntry, 'scope'> & {
+  readonly scope?: SettingsHistoryScope;
+};
+
+export function createSettingsHistoryEntry(entry: SettingsHistoryEntryInput): SettingsHistoryEntry {
+  const changedIds = unique(entry.changedIds);
   return {
     ...entry,
-    changedIds: unique(entry.changedIds),
+    changedIds,
+    // Recomputed rather than taken from the caller, so a stored entry cannot
+    // disagree with the definitions it names.
+    scope: scopeOfChangedIds(changedIds),
     before: cloneCheckpoint(entry.before),
     after: cloneCheckpoint(entry.after),
   };
@@ -71,6 +112,7 @@ export function querySettingsHistory(
       (entry) =>
         settingId === undefined ||
         entry.changedIds.some((id) => id.toLowerCase().includes(settingId)),
+      (entry) => query.scope === undefined || entry.scope === query.scope,
       (entry) => query.date === undefined || entry.at.startsWith(query.date),
     ],
     comparator: (left, right) => {
