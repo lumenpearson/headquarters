@@ -399,3 +399,135 @@ async function workspaceBox(page: Page): Promise<{ width: number; height: number
   if (box === null) throw new Error('the workspace is not laid out');
   return { width: Math.round(box.width), height: Math.round(box.height) };
 }
+
+/**
+ * Recorded rather than stubbed away: the page keeps every constraint object
+ * `getUserMedia` was asked for, and answers with a canvas stream so nothing
+ * touches real hardware. Asserting the call did *not* happen is the whole point
+ * of `privacy.webcamCapture`, and that assertion is only worth making against a
+ * real browser — a jsdom double can be made to report anything (§2.3).
+ */
+async function recordWebcamRequests(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const requests: unknown[] = [];
+    Object.defineProperty(window, '__webcamRequests', { value: requests });
+    const media = { getUserMedia: undefined } as unknown as MediaDevices;
+    Object.defineProperty(media, 'getUserMedia', {
+      value: (constraints: unknown) => {
+        requests.push(constraints);
+        const canvas = document.createElement('canvas');
+        canvas.width = 32;
+        canvas.height = 32;
+        return Promise.resolve(canvas.captureStream());
+      },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', { value: media, configurable: true });
+  });
+}
+
+function webcamRequests(page: Page): Promise<unknown[]> {
+  return page.evaluate(
+    () => (window as unknown as { __webcamRequests: unknown[] }).__webcamRequests,
+  );
+}
+
+test('R6: the machine camera is asked for the size and rate the settings name', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await recordWebcamRequests(page);
+  await seedSettings(page, {
+    'performance.webcamResolution': '480p',
+    'performance.webcamFrameRate': 12,
+  });
+  await page.goto('/video/cameras');
+
+  const feed = page.locator('.video-main-feed');
+  await expect(feed).toBeVisible();
+  await feed.click();
+  await page.keyboard.press('w');
+
+  await expect.poll(() => webcamRequests(page).then((calls) => calls.length)).toBe(1);
+  const [constraints] = await webcamRequests(page);
+  // Three literals lived in this one object and none of them was a setting.
+  expect(constraints).toMatchObject({
+    video: {
+      width: { ideal: 854 },
+      height: { ideal: 480 },
+      frameRate: { ideal: 12 },
+    },
+  });
+});
+
+test('R6: privacy.webcamCapture refuses the camera to the key as well as the button', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await recordWebcamRequests(page);
+  await seedSettings(page, { 'privacy.webcamCapture': false });
+  await page.goto('/video/cameras');
+
+  const feed = page.locator('.video-main-feed');
+  await expect(feed).toBeVisible();
+  await expect(page.getByRole('button', { name: /WEBCAM|КАМЕРА МАШИНЫ/i }).first()).toBeDisabled();
+
+  /*
+   * The keyboard is the path that matters. Disabling the button alone would
+   * promise a boundary the `w` key walks straight around, which is the defect
+   * C33 records against `advanced.liveEdit`.
+   */
+  await feed.click();
+  await page.keyboard.press('w');
+  await page.waitForTimeout(250);
+  expect(await webcamRequests(page)).toEqual([]);
+});
+
+test('R6: privacy.frameCapture refuses to write a surveillance frame to disk', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, { 'privacy.frameCapture': false });
+  await page.goto('/video/cameras');
+
+  const snap = page.getByRole('button', { name: '[S] SNAP' });
+  await expect(snap).toBeVisible();
+  // A PNG of a live feed, stamped with a camera id and a wall-clock time, used
+  // to reach the download folder with no confirmation and no way to refuse.
+  await expect(snap).toBeDisabled();
+});
+
+test('R6: a feed opens muted by default, which is also what lets the wall auto-start', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/video/cameras');
+  const video = page.locator('.video-main-feed video').first();
+  await expect(video).toBeAttached();
+
+  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.muted)).toBe(true);
+  // Browsers refuse unmuted autoplay without a gesture, so the default is what
+  // makes an unattended wall start on its own. Asserted so that moving the
+  // default later cannot quietly cost that.
+  await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
+});
+
+test('R6: player.startMuted opens the feed unmuted when the operator asks', async ({ page }) => {
+  await page.setViewportSize(wide);
+  // Seeded before the first navigation, not after: `addInitScript` runs on the
+  // next document, and seeding between a `goto` and a `reload` leaves the
+  // assertion measuring the page that booted without it.
+  await seedSettings(page, { 'player.startMuted': false });
+  await page.goto('/video/cameras');
+
+  const video = page.locator('.video-main-feed video').first();
+  await expect(video).toBeAttached();
+  /*
+   * Wait for the element to have loaded something before reading `muted`.
+   * A bare `<video>` starts unmuted, and personalization arrives an effect
+   * later, so polling for `false` from the moment of attach matches the very
+   * first frame and passes however the setting is wired -- measured: it passed
+   * against a hardcoded `?? true`.
+   */
+  await expect
+    .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState))
+    .toBeGreaterThan(0);
+  expect(await video.evaluate((el: HTMLVideoElement) => el.muted)).toBe(false);
+});

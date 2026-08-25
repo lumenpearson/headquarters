@@ -61,6 +61,18 @@ const playbackRateOptions = [0.5, 1, 1.5, 2, 4].map((rate) => ({
   label: `${rate}×`,
 }));
 
+/**
+ * What `performance.webcamResolution` asks the machine camera for.
+ *
+ * Named rather than computed: a resolution is a pair, and a setting that let an
+ * operator name one dimension would ask for shapes no camera offers.
+ */
+const webcamCaptureSizes = {
+  '1080p': { width: { ideal: 1920 }, height: { ideal: 1080 } },
+  '720p': { width: { ideal: 1280 }, height: { ideal: 720 } },
+  '480p': { width: { ideal: 854 }, height: { ideal: 480 } },
+} as const;
+
 const cameraFilterOptions = [
   { value: 'all', label: 'ВСЕ КАНАЛЫ' },
   { value: 'online', label: 'ТОЛЬКО ACTIVE' },
@@ -189,6 +201,11 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   const snapshotGrayscale = useBooleanSetting('player.snapshotGrayscale');
   const configuredVolume = useNumberSetting('player.defaultVolume') / 100;
   const configuredCameraFilter = useStringSetting('cameras.defaultFilter');
+  const webcamCaptureAllowed = useBooleanSetting('privacy.webcamCapture');
+  const frameCaptureAllowed = useBooleanSetting('privacy.frameCapture');
+  const webcamResolution = useStringSetting('performance.webcamResolution');
+  const webcamFrameRate = useNumberSetting('performance.webcamFrameRate');
+  const startMuted = useBooleanSetting('player.startMuted');
   const [duration, setDuration] = useState(18);
   const [currentTime, setCurrentTime] = useState(0);
   // `player.defaultRate` is the rate until the transport is used to pick one,
@@ -203,7 +220,8 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   // bounds -- a 0..1 range would ship a slider that steps by whole units.
   const [chosenVolume, setChosenVolume] = useState<number | null>(null);
   const volume = chosenVolume ?? configuredVolume;
-  const [muted, setMuted] = useState(true);
+  const [chosenMuted, setChosenMuted] = useState<boolean | null>(null);
+  const muted = chosenMuted ?? startMuted;
   const [failedCameraId, setFailedCameraId] = useState<string | null>(null);
   const [sourceOverride, setSourceOverride] = useState<{
     readonly cameraId: string;
@@ -554,6 +572,17 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   const toggleWebcam = useCallback(async () => {
     const cameraId = selected?.id;
     if (cameraId === undefined) return;
+    /*
+     * Gated here rather than on the button. `w` reaches this same function from
+     * the keyboard, so disabling the control would promise a boundary a
+     * keystroke walks straight around — which is what C33 records about
+     * `advanced.liveEdit`. The button is disabled as well, so the operator can
+     * see the refusal rather than press a control that silently does nothing.
+     */
+    if (!webcamCaptureAllowed) {
+      setWebcamState('unavailable');
+      return;
+    }
     const current = webcamSessionRef.current;
     if (current?.cameraId === cameraId && current.stream.active) {
       stopWebcam();
@@ -574,9 +603,13 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 25, max: 30 },
+          ...webcamCaptureSizes[
+            webcamResolution === '720p' || webcamResolution === '480p' ? webcamResolution : '1080p'
+          ],
+          // `ideal` is a request the browser negotiates, so the setting moves
+          // what is asked for and never what is enforced. `max` rises with the
+          // choice rather than capping it below what was asked.
+          frameRate: { ideal: webcamFrameRate, max: Math.max(30, webcamFrameRate) },
         },
       });
       if (webcamRequestRef.current !== requestId || selectedCameraIdRef.current !== cameraId) {
@@ -614,7 +647,11 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
           : 'denied',
       );
     }
-  }, [selected?.id, stopWebcam]);
+    // The three settings belong in this list. Without them the callback keeps
+    // the values it first closed over, so the privacy gate answers with
+    // whatever was true at mount and the constraints never follow the operator
+    // — the defect a Playwright run caught and the jsdom stub could not.
+  }, [selected?.id, stopWebcam, webcamCaptureAllowed, webcamFrameRate, webcamResolution]);
 
   const applyPlaybackAction = useCallback(
     (action: Exclude<PlaybackSyncAction, 'SELECT'>, positionSeconds: number, rate: number) => {
@@ -765,6 +802,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   }, [duration, requestPlaybackAction]);
 
   const takeSnapshot = useCallback(() => {
+    if (!frameCaptureAllowed) return;
     const provider = playerRef.current?.provider;
     const video = isVideoProvider(provider) ? provider.video : undefined;
     if (video === undefined || video.videoWidth === 0 || video.videoHeight === 0) return;
@@ -788,7 +826,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     // `snapshotGrayscale` belongs here: without it the callback keeps the value
     // it closed over, and the setting would only take effect the next time some
     // unrelated change rebuilt it.
-  }, [selected?.id, snapshotGrayscale]);
+  }, [frameCaptureAllowed, selected?.id, snapshotGrayscale]);
 
   const togglePictureInPicture = useCallback(() => {
     const player = playerRef.current;
@@ -1118,12 +1156,18 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               >
                 [●] LIVE
               </TerminalButton>
-              <TerminalButton onClick={takeSnapshot}>[S] SNAP</TerminalButton>
+              <TerminalButton disabled={!frameCaptureAllowed} onClick={takeSnapshot}>
+                [S] SNAP
+              </TerminalButton>
               <TerminalButton onClick={togglePictureInPicture}>[P] PIP</TerminalButton>
               <TerminalButton onClick={fullscreen}>[F] FULL</TerminalButton>
               <TerminalButton
                 className={isWebcamSelected ? 'is-live' : ''}
-                disabled={webcamState === 'requesting' || !selectedStream.webcamEligible}
+                disabled={
+                  webcamState === 'requesting' ||
+                  !selectedStream.webcamEligible ||
+                  !webcamCaptureAllowed
+                }
                 onClick={() => void toggleWebcam()}
               >
                 {webcamState === 'requesting'
@@ -1150,7 +1194,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 label="Скорость воспроизведения"
                 disabled={isWebcamSelected}
               />
-              <TerminalButton onClick={() => setMuted((value) => !value)}>
+              <TerminalButton onClick={() => setChosenMuted(!muted)}>
                 {muted ? '[M] MUTED' : '[M] AUDIO'}
               </TerminalButton>
               <TerminalSlider
