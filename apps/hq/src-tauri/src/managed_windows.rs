@@ -1,6 +1,6 @@
 use serde::Serialize;
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
@@ -28,25 +28,56 @@ pub struct NativeMonitor {
     primary: bool,
 }
 
+/// The rectangle a monitor occupies on the virtual desktop, in physical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MonitorGeometry {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+impl From<&Monitor> for MonitorGeometry {
+    fn from(monitor: &Monitor) -> Self {
+        Self {
+            x: monitor.position().x,
+            y: monitor.position().y,
+            width: monitor.size().width,
+            height: monitor.size().height,
+        }
+    }
+}
+
+/// A monitor is the primary one when it occupies the primary monitor's
+/// rectangle. The runtime may report `None` or one shared generic name for
+/// several displays, so the name stays metadata and never decides identity.
+fn is_primary_monitor(candidate: MonitorGeometry, primary: Option<MonitorGeometry>) -> bool {
+    primary == Some(candidate)
+}
+
 #[tauri::command]
 pub fn list_monitors(window: WebviewWindow) -> Result<Vec<NativeMonitor>, String> {
     let primary = window
         .primary_monitor()
-        .map_err(|error| error.to_string())?;
-    let primary_name = primary.as_ref().and_then(|monitor| monitor.name().cloned());
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(MonitorGeometry::from);
     let monitors = window
         .available_monitors()
         .map_err(|error| error.to_string())?;
     Ok(monitors
         .into_iter()
-        .map(|monitor| NativeMonitor {
-            name: monitor.name().cloned(),
-            x: monitor.position().x,
-            y: monitor.position().y,
-            width: monitor.size().width,
-            height: monitor.size().height,
-            scale_factor: monitor.scale_factor(),
-            primary: monitor.name() == primary_name.as_ref(),
+        .map(|monitor| {
+            let geometry = MonitorGeometry::from(&monitor);
+            NativeMonitor {
+                name: monitor.name().cloned(),
+                x: geometry.x,
+                y: geometry.y,
+                width: geometry.width,
+                height: geometry.height,
+                scale_factor: monitor.scale_factor(),
+                primary: is_primary_monitor(geometry, primary),
+            }
         })
         .collect())
 }
@@ -108,4 +139,48 @@ pub fn close_managed_windows(app: AppHandle) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn geometry(x: i32, y: i32, width: u32, height: u32) -> MonitorGeometry {
+        MonitorGeometry {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn nothing_is_primary_when_the_runtime_reports_no_primary_monitor() {
+        assert!(!is_primary_monitor(geometry(0, 0, 1920, 1080), None));
+    }
+
+    #[test]
+    fn the_monitor_occupying_the_primary_rectangle_is_primary() {
+        let primary = Some(geometry(0, 0, 2560, 1440));
+        assert!(is_primary_monitor(geometry(0, 0, 2560, 1440), primary));
+    }
+
+    #[test]
+    fn a_monitor_at_another_position_or_size_is_not_primary() {
+        let primary = Some(geometry(0, 0, 1920, 1080));
+        assert!(!is_primary_monitor(geometry(1920, 0, 1920, 1080), primary));
+        assert!(!is_primary_monitor(geometry(-1920, 0, 1920, 1080), primary));
+        assert!(!is_primary_monitor(geometry(0, 0, 2560, 1440), primary));
+    }
+
+    #[test]
+    fn identical_panels_with_the_same_name_are_told_apart_by_geometry() {
+        // Two identical panels report the same generic name (or `None`) to the
+        // runtime; only one of them sits at the primary rectangle.
+        let left = geometry(0, 0, 1920, 1080);
+        let right = geometry(1920, 0, 1920, 1080);
+        let primary = Some(left);
+        assert!(is_primary_monitor(left, primary));
+        assert!(!is_primary_monitor(right, primary));
+    }
 }

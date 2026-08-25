@@ -30,3 +30,11 @@ thiserror = "2.0.20"
 tokio = { version = "=1.53.1", features = ["fs", "net", "process", "sync", "time"] }
 tower-http = { version = "=0.7.0", features = ["cors"] }
 url = "=2.5.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+  "Wdk_System_SystemServices",
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_System_SystemInformation",
+] }

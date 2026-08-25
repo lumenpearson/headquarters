@@ -1,4 +1,4 @@
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{event::ModifyKind, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -60,7 +60,7 @@ pub struct NativeEntry {
 #[serde(rename_all = "camelCase")]
 struct NativeWatchEvent {
     watcher_id: String,
-    kind: String,
+    kind: &'static str,
     relative_paths: Vec<String>,
 }
 
@@ -203,7 +203,7 @@ pub fn watch_directory(
                     .collect();
                 let payload = NativeWatchEvent {
                     watcher_id: emitted_id.clone(),
-                    kind: format!("{:?}", event.kind),
+                    kind: watch_event_kind(&event.kind),
                     relative_paths,
                 };
                 let _ = app.emit("hq:file-event", payload);
@@ -275,6 +275,20 @@ fn safe_segments(relative_path: &str) -> Result<Vec<&str>, NativeFsError> {
     Ok(segments)
 }
 
+/// Collapses notify's platform-flavoured event kinds into the stable tags a
+/// screen-bus consumer can switch on. Renames get their own tag because the
+/// Windows watcher reports them as a `Modify(Name)` pair, not as remove+create,
+/// and a consumer that refreshes on "modified" would otherwise miss the move.
+fn watch_event_kind(kind: &EventKind) -> &'static str {
+    match kind {
+        EventKind::Create(_) => "created",
+        EventKind::Modify(ModifyKind::Name(_)) => "renamed",
+        EventKind::Modify(_) => "modified",
+        EventKind::Remove(_) => "removed",
+        EventKind::Any | EventKind::Access(_) | EventKind::Other => "other",
+    }
+}
+
 fn slash_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
@@ -319,5 +333,54 @@ mod tests {
             safe_segments(r"cases\K-01\report.txt").unwrap(),
             vec!["cases", "K-01", "report.txt"]
         );
+    }
+
+    #[test]
+    fn maps_every_notify_kind_to_a_stable_tag() {
+        use notify::event::{
+            AccessKind, AccessMode, CreateKind, DataChange, MetadataKind, RemoveKind, RenameMode,
+        };
+
+        assert_eq!(
+            watch_event_kind(&EventKind::Create(CreateKind::Any)),
+            "created"
+        );
+        assert_eq!(
+            watch_event_kind(&EventKind::Create(CreateKind::File)),
+            "created"
+        );
+        assert_eq!(
+            watch_event_kind(&EventKind::Remove(RemoveKind::Folder)),
+            "removed"
+        );
+        assert_eq!(
+            watch_event_kind(&EventKind::Modify(ModifyKind::Any)),
+            "modified"
+        );
+        assert_eq!(
+            watch_event_kind(&EventKind::Modify(ModifyKind::Data(DataChange::Content))),
+            "modified"
+        );
+        assert_eq!(
+            watch_event_kind(&EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any))),
+            "modified"
+        );
+        for mode in [
+            RenameMode::Any,
+            RenameMode::From,
+            RenameMode::To,
+            RenameMode::Both,
+        ] {
+            assert_eq!(
+                watch_event_kind(&EventKind::Modify(ModifyKind::Name(mode))),
+                "renamed"
+            );
+        }
+        assert_eq!(watch_event_kind(&EventKind::Any), "other");
+        assert_eq!(
+            watch_event_kind(&EventKind::Access(AccessKind::Open(AccessMode::Read))),
+            "other"
+        );
+        assert_eq!(watch_event_kind(&EventKind::Other), "other");
     }
 }

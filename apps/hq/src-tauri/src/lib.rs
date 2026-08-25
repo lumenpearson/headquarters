@@ -1,3 +1,4 @@
+mod host_profile;
 mod managed_windows;
 mod media_gateway;
 mod native_fs;
@@ -38,6 +39,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            host_profile::host_window_profile,
+            host_profile::apply_window_corners,
             managed_windows::list_monitors,
             managed_windows::open_screen_window,
             managed_windows::close_managed_windows,

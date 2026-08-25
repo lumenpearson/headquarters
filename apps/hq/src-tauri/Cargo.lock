@@ -1263,6 +1263,7 @@ dependencies = [
  "tokio",
  "tower-http 0.7.0",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
