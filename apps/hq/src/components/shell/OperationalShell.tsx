@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import type { WorkspaceWindow } from '@gremuchaya/domain';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
+import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
+import { formatChord } from '@/application/keybinds/match';
 import { ModuleRenderer } from '@/components/modules/ModuleRenderer';
 import { RuntimeProvider, useRuntime } from '@/components/runtime/RuntimeProvider';
 import { SceneControl } from '@/components/operator/SceneControl';
@@ -16,13 +18,22 @@ import { useAppStore } from '@/state/appStore';
 import { NavigationRail } from './NavigationRail';
 import { TopBar } from './TopBar';
 
-const shortcutHints = [
-  ['F2', 'FILES'],
-  ['F3', 'MAP'],
-  ['F7', 'PREV'],
-  ['F8', 'GO'],
-  ['F9', 'RESET'],
-  ['^K', 'COMMAND'],
+/**
+ * The six actions the task strip advertises, by id rather than by chord.
+ *
+ * The chords themselves come from the active scheme: this strip printed `^K`
+ * for the command line, which was the palette's chord under no scheme —
+ * `scene.commandPalette` is Ctrl+Shift+K by default and `:` under
+ * `vim-inspired` — and a hint that names a chord nothing answers teaches the
+ * operator a key that does not work.
+ */
+const shortcutHintIds = [
+  ['scene.sectionFiles', 'FILES'],
+  ['scene.sectionMap', 'MAP'],
+  ['scene.previousCue', 'PREV'],
+  ['scene.nextCue', 'GO'],
+  ['scene.resetScene', 'RESET'],
+  ['scene.commandPalette', 'COMMAND'],
 ] as const;
 
 const paletteCommands = [
@@ -195,6 +206,7 @@ function Telemetry({ label, value }: { readonly label: string; readonly value: s
 }
 
 function TaskStrip({ windows }: { readonly windows: readonly WorkspaceWindow[] }) {
+  const keybinds = useActiveKeybinds();
   return (
     <div className="task-strip">
       <strong className="task-strip__mode">-- NORMAL --</strong>
@@ -204,12 +216,16 @@ function TaskStrip({ windows }: { readonly windows: readonly WorkspaceWindow[] }
         ))}
       </div>
       <div className="task-strip__hints" aria-label="Горячие клавиши">
-        {shortcutHints.map(([key, label]) => (
-          <span className="terminal-hint" key={key}>
-            <kbd>{key}</kbd>
-            <em>{label}</em>
-          </span>
-        ))}
+        {shortcutHintIds.map(([id, label]) => {
+          const keybind = keybinds.find((candidate) => candidate.id === id);
+          if (keybind === undefined) return null;
+          return (
+            <span className="terminal-hint" key={id}>
+              <kbd>{formatChord(keybind.chord)}</kbd>
+              <em>{label}</em>
+            </span>
+          );
+        })}
       </div>
     </div>
   );

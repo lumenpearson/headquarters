@@ -6,6 +6,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+.tests/
 .turbo/
 *.tsbuildinfo
 target/
@@ -57,4 +58,8 @@ shared/materials/*
 *.rej
 
 # --- Git ---
+.husky/_/
 .git
+.github/changeset-version.js
+.github/collect-prerelease-info.js
+.github/version-script-next.js

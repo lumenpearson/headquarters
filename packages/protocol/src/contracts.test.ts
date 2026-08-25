@@ -70,6 +70,7 @@ describe('versioned Protobuf contracts', () => {
     expect(methodNames(SyncService)).toEqual([
       'CreateGroup',
       'CreatePairingCode',
+      'GetDocumentSnapshot',
       'GetPresence',
       'JoinGroup',
       'LeaveGroup',
