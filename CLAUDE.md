@@ -166,6 +166,58 @@ the UI. Real nodes shadow an emulated/config-defined node at the same virtual pa
   production RTSP/HLS/WebRTC endpoints yet
 - `docs/plans/` — active implementation plans
 
+## Delegation: one agent per task
+
+This repository defines seven specialised agents in `.claude/agents/`. **Route work to the
+agent that owns the area instead of doing it inline.** They exist because the layering above
+is wide enough that a single context reading every package reads none of them carefully —
+which is how `CompositeFileSource` stayed in three documents for months after it stopped
+existing.
+
+| Agent               | Owns                                                                                                                | Writes code |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `architect`         | Where a capability belongs, layering checks, multi-package refactor order, ADRs, plan checkpoints                   | no          |
+| `ui-engineer`       | `apps/hq` presentation, `packages/ui`, `packages/layout-engine`, Zustand slices, tokens/CSS, `Terminal*` primitives | yes         |
+| `scene-engineer`    | Scene/cue engine, the 52 scenes, `packages/config` schemas, `packages/domain` state machines                        | yes         |
+| `protocol-engineer` | `.proto` contracts, `apps/control-plane`, `apps/file-bridge`, pairing/tokens, migrations, the realtime hub          | yes         |
+| `desktop-engineer`  | `apps/hq/src-tauri`, Tauri config and commands, NSIS/WebView2 packaging, native watcher, media gateway              | yes         |
+| `tester`            | Vitest, Playwright, cargo tests, and whether a test proves what it claims                                           | yes         |
+| `reviewer`          | Correctness, security, and the enforced boundaries, before a commit or PR                                           | no          |
+
+Rules that make the habit worth having:
+
+- **One agent per task, matched to the area.** A task spanning `apps/hq` and
+  `apps/control-plane` is two delegations, not one agent with a wide brief.
+- **Independent tasks go out in one message** so they run concurrently. Dependent ones wait.
+- **`architect` before code when the question is "where does this live"**, not after.
+- **`reviewer` before committing** anything touching credentials, SQL, the file bridge, or
+  the UI boundary. It is read-only by design: it reports, it does not fix.
+- **`tester` establishes evidence**, and is the right agent for "did this test ever fail?" —
+  see rules 2.3 and 2.4 in `docs/plans/actual_plan.md`.
+- Every agent runs `background: true` with `isolation: worktree`. Worktree isolation earns
+  its cost when agents edit in parallel; a single sequential edit does not need it, and the
+  edits still have to be brought back into this tree.
+- **Do not delegate** a one-line fix in a file already open, or a question answerable by
+  reading one module. The dispatch costs more than the work.
+
+### Skills
+
+`.claude/skills/` holds eight skills, tracked in git and pinned by `skills-lock.json`, so a
+clone gets the same set. Each agent's own `## Skills` section says which apply to it. The
+ones that carry repository-specific weight:
+
+- `shadcn` and `migrate-radix-to-base` — always paired. The shadcn CLI pulls Radix
+  primitives; `packages/ui` wraps **Base UI**. Convert before wrapping as a `Terminal*`
+  export, or `check-ui-boundary.mjs` fails.
+- `web-design-guidelines` — accessibility and focus-state review, alongside this repo's own
+  viewport/DPI/density matrix.
+- `writing-guidelines` — prose that outlives a session: docs, ADRs, the plan.
+
+Vercel deployment skills are deliberately absent: this project has no server at runtime
+(ADR 0005) and no deploy target. The React skills kept from that source
+(`vercel-react-best-practices`, `vercel-composition-patterns`,
+`vercel-react-view-transitions`) are framework-generic despite their names.
+
 ## Git commit and pull request conventions
 
 Commit messages, pull request titles and pull request bodies are written in **English**,

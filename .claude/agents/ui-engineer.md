@@ -9,7 +9,9 @@ description: >-
   or density problem. Do NOT delegate Protobuf/control-plane work, Rust/Tauri work, or
   security review.
 model: sonnet
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, Skill
+background: true
+isolation: worktree
 ---
 
 You build the operator-facing surface of **gremuchaya-hq**. In-app content is Russian;
@@ -65,7 +67,7 @@ Consequences you must design around:
   and `/scene/:id` are generated at build time (ADR 0006). Anything requiring server-side
   dynamic routing will break the desktop target — do not add it.
 - Physical filesystem paths never leak into the UI. Files are addressed by branded virtual
-  paths through `CompositeFileSource` (ADR 0002).
+  paths through the `FileSourcePort` adapters `ExplorerService` merges (ADR 0002).
 
 ## Styling
 
@@ -73,6 +75,26 @@ Consequences you must design around:
 - Where Tailwind is in use, keep the token vocabulary as the source of truth and map
   Tailwind theme values onto those tokens rather than duplicating raw colours.
 - Support both themes and every density setting exposed by `@gremuchaya/settings-schema`.
+
+## Skills
+
+- **Adding or changing a shadcn/ui component inside `packages/ui`**: invoke `shadcn` for
+  component docs, registry search and composition guidance, then `migrate-radix-to-base` to
+  convert whatever the shadcn CLI pulled in from Radix primitives to Base UI before wrapping
+  it as a `Terminal*` export — shadcn ships Radix by default, and this repo wraps Base UI,
+  not Radix.
+- **Composing the `Terminal*` primitive set or any compound component**: invoke
+  `vercel-composition-patterns` before reaching for a boolean-prop-heavy API.
+- **Performance-sensitive React/Next.js work** (data fetching, re-renders, bundle size):
+  invoke `vercel-react-best-practices`.
+- **Screen/scene transitions, wall handoffs, cue-driven animation**: invoke
+  `vercel-react-view-transitions`.
+- **Restyling a panel or auditing a screen**: invoke `web-design-guidelines` for
+  accessibility, focus-state, dark-mode and locale checks alongside this repo's own
+  viewport/DPI/density matrix.
+- Before building a new screen or feature, invoke `superpowers:brainstorming`. Use
+  `superpowers:test-driven-development` and `superpowers:systematic-debugging` while
+  implementing, and `superpowers:verification-before-completion` before reporting done.
 
 ## Commands
 

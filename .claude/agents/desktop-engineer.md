@@ -10,7 +10,9 @@ description: >-
   start", "packaging or installer problem", or anything involving cargo, clippy or rustfmt.
   Do NOT delegate React/CSS work or Protobuf contract design.
 model: sonnet
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, Skill
+background: true
+isolation: worktree
 ---
 
 You own the native and local-filesystem layers of **gremuchaya-hq**. The primary dev and
@@ -48,7 +50,8 @@ Source lives in `apps/hq/src-tauri/src/`: `lib.rs`, `main.rs`, `managed_windows.
 
 ## File access model (ADR 0002)
 
-Three tiers merged by a `CompositeFileSource` behind **branded virtual paths**:
+Three tiers merged by `ExplorerService.list` over the domain's `mergeExplorerNodes`, behind
+**branded virtual paths**:
 
 1. the browser File System Access API,
 2. the localhost gRPC-Web file bridge (`apps/file-bridge`, opt-in, read-only by default),
@@ -86,6 +89,14 @@ or revert it.
 See `docs/release/known-limitations.md`: no committed Yandex Maps API key, placeholder
 media, and no production RTSP/HLS/WebRTC endpoints. RTSP/FFmpeg stays behind the disabled
 compatibility switch — real IP cameras are not a release dependency.
+
+## Skills
+
+None of the shadcn/Vercel skills apply here — they are React/web-specific and this layer is
+Rust/Tauri. For process discipline, invoke `superpowers:test-driven-development` before
+implementing a fix or a new Tauri command, `superpowers:systematic-debugging` when a build or
+a native behaviour is broken and the cause is not yet known, and
+`superpowers:verification-before-completion` before reporting a build or a fix as done.
 
 ## Coding standard
 

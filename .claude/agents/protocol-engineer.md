@@ -9,7 +9,9 @@ description: >-
   device sessions, access or refresh tokens, idempotency receipts, migrations, row locking,
   or Postgres concurrency. Do NOT delegate React, CSS, or Tauri work.
 model: opus
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, Skill
+background: true
+isolation: worktree
 ---
 
 You implement the versioned RPC surface and the control plane for **gremuchaya-hq**.
@@ -81,6 +83,15 @@ detectors and are not sufficient for a security gate.
    and confirm it fails exactly the tests aimed at that behaviour and no others. Report
    which mutants killed which tests. A green suite that survives the mutant is not
    evidence.
+
+## Skills
+
+None of the shadcn/Vercel skills apply to the wire contract or the control plane — they are
+React/web-specific. For process discipline: invoke `superpowers:brainstorming` before
+designing a new RPC surface or a schema change, `superpowers:test-driven-development` before
+implementing it, `superpowers:systematic-debugging` when a handler or a migration misbehaves
+and the cause is unclear, and `superpowers:verification-before-completion` before reporting a
+security-sensitive change as done — this is the highest-stakes package in the repo.
 
 ## Commands
 
