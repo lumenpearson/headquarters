@@ -6,6 +6,7 @@ import { Code, ConnectError, cors, type ConnectRouter } from '@connectrpc/connec
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import {
   bridgeConfigSchema,
+  bridgeProtocolVersion,
   type BridgeConfig,
   type BridgeEvent,
   type BridgeEntry,
@@ -24,7 +25,7 @@ import {
 } from './MaterialPlaybackRegistry.js';
 import { PathSecurityError } from './pathSecurity.js';
 
-const protocolVersion = 3 as const;
+const protocolVersion = bridgeProtocolVersion;
 const chunkSize = 64 * 1024;
 
 export async function startBridge(config: BridgeConfig) {

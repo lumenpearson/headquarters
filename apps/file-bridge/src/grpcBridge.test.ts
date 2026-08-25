@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 
 import { createClient } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
-import type { BridgeConfig } from '@gremuchaya/config';
+import { bridgeHealthSchema, type BridgeConfig } from '@gremuchaya/config';
 import { EntryKind, FileBridgeService } from '@gremuchaya/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -56,6 +56,18 @@ describe('gRPC-Web file bridge', () => {
       status: 'ok',
       transport: 'grpc-web+protobuf',
     });
+    // The literal above says what the version is; this says the schema clients
+    // validate against agrees. The two were allowed to disagree for one whole
+    // protocol bump because nothing imported the schema to find out.
+    expect(() =>
+      bridgeHealthSchema.parse({
+        service: health.service,
+        protocolVersion: health.protocolVersion,
+        status: health.status,
+        startedAt: health.startedAt,
+        transport: health.transport,
+      }),
+    ).not.toThrow();
 
     const listed = await client.list({ mountId: 'incoming', path: '/' });
     expect(listed.entries.map((entry) => [entry.name, entry.kind])).toEqual([

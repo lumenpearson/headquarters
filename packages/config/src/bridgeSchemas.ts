@@ -60,9 +60,21 @@ export const bridgeConfigSchema = z
     }
   });
 
+/**
+ * The wire protocol version the bridge and its clients have to agree on.
+ *
+ * It is declared here rather than in the server because the schema and the
+ * server each held their own copy, the copies disagreed — the server moved to 3
+ * with the gRPC-Web transport and this literal stayed at 2 — and nothing
+ * failed, because no importer of the schema existed to notice. One constant,
+ * imported by the server, is what makes the next move impossible to make in one
+ * place only.
+ */
+export const bridgeProtocolVersion = 3;
+
 export const bridgeHealthSchema = z.object({
   service: z.literal('gremuchaya-file-bridge'),
-  protocolVersion: z.literal(2),
+  protocolVersion: z.literal(bridgeProtocolVersion),
   status: z.literal('ok'),
   startedAt: z.iso.datetime(),
   transport: z.literal('grpc-web+protobuf'),
