@@ -10,13 +10,18 @@ import {
   entryShortcut,
   type ContextMenuDefinition,
 } from '@/application/contextMenus/registry';
-import { readBooleanSetting } from '@/application/personalization/useSetting';
+import {
+  readBooleanSetting,
+  useBooleanSetting,
+  useNumberSetting,
+  useStringSetting,
+} from '@/application/personalization/useSetting';
 import {
   fireKeybind,
   keybindOwnerIds,
   subscribeKeybindOwners,
 } from '@/components/keybinds/KeybindRuntime';
-import { operationsStore, useOperationsStore } from '@/state/operationsStore';
+import { operationsStore } from '@/state/operationsStore';
 
 type ContextMenuHandler = (subject: string | undefined) => void;
 
@@ -182,9 +187,11 @@ interface OpenMenu {
 export function ContextMenuRuntime() {
   const [open, setOpen] = useState<OpenMenu | null>(null);
   const owners = useMenuOwners();
-  const longPressEnabled = useOperationsStore(
-    (state) => state.personalization.draft.values['popups.longPress'] !== false,
-  );
+  // Through the shared reader rather than a lookup with a literal beside it:
+  // the definition already states the default.
+  const longPressEnabled = useBooleanSetting('popups.longPress');
+  const longPressDelay = useNumberSetting('popups.longPressDelay');
+  const fieldMenu = useStringSetting('popups.fieldMenu');
 
   /*
    * Claimed by the runtime rather than by a screen, unlike the record actions:
@@ -197,30 +204,41 @@ export function ContextMenuRuntime() {
     void copyDiagnosticsReport();
   });
 
-  const openAt = useCallback((target: EventTarget | null, x: number, y: number): boolean => {
-    if (!(target instanceof Element)) return false;
-    // A field keeps the browser's own menu: cut, copy, paste and spellcheck are
-    // real commands there and this application has nothing better to offer.
-    if (target.closest('input, textarea, [contenteditable="true"]') !== null) return false;
-    /*
-     * The nearest declared surface wins, and `data-context-menu-own` is part
-     * of the selector on purpose: an element carrying its own Base UI context
-     * menu stops the walk without naming a surface, so nothing opens over it.
-     * Two menus for one click would be two places deciding what the right
-     * button does.
-     */
-    const surface = target.closest('[data-context-menu], [data-context-menu-own]');
-    if (surface === null) return false;
-    const definition = contextMenuFor(surface.getAttribute('data-context-menu') ?? '');
-    if (definition === undefined) return false;
-    setOpen({
-      definition,
-      subject: surface.getAttribute('data-context-subject') ?? undefined,
-      x,
-      y,
-    });
-    return true;
-  }, []);
+  const openAt = useCallback(
+    (target: EventTarget | null, x: number, y: number): boolean => {
+      if (!(target instanceof Element)) return false;
+      // A field keeps the browser's own menu: cut, copy, paste and spellcheck are
+      // real commands there and this application has nothing better to offer.
+      if (
+        fieldMenu === 'native' &&
+        target.closest('input, textarea, [contenteditable="true"]') !== null
+      ) {
+        return false;
+      }
+      /*
+       * The nearest declared surface wins, and `data-context-menu-own` is part
+       * of the selector on purpose: an element carrying its own Base UI context
+       * menu stops the walk without naming a surface, so nothing opens over it.
+       * Two menus for one click would be two places deciding what the right
+       * button does.
+       */
+      const surface = target.closest('[data-context-menu], [data-context-menu-own]');
+      if (surface === null) return false;
+      const definition = contextMenuFor(surface.getAttribute('data-context-menu') ?? '');
+      if (definition === undefined) return false;
+      setOpen({
+        definition,
+        subject: surface.getAttribute('data-context-subject') ?? undefined,
+        x,
+        y,
+      });
+      return true;
+      // `fieldMenu` belongs here: with an empty list this closes over the value
+      // the runtime mounted with, and the guard would keep yielding a field to
+      // the browser however the operator had set it.
+    },
+    [fieldMenu],
+  );
 
   useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
@@ -243,7 +261,7 @@ export function ContextMenuRuntime() {
       if (event.pointerType !== 'touch') return;
       const { target, clientX, clientY } = event;
       cancel();
-      timer = window.setTimeout(() => openAt(target, clientX, clientY), 500);
+      timer = window.setTimeout(() => openAt(target, clientX, clientY), longPressDelay);
     };
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('pointerup', cancel);
@@ -256,7 +274,7 @@ export function ContextMenuRuntime() {
       document.removeEventListener('pointercancel', cancel);
       document.removeEventListener('pointermove', cancel);
     };
-  }, [longPressEnabled, openAt]);
+  }, [longPressDelay, longPressEnabled, openAt]);
 
   if (open === null) return null;
 

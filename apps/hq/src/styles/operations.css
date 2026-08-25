@@ -869,6 +869,26 @@ button.is-active {
   content: '';
 }
 
+/* `popups.drawerWidth` and `popups.drawerScrim`. Class hooks rather than custom
+   properties: the drawer is portalled outside `.ops-shell`, where the `--ops-*`
+   family is not declared at all. `standard` adds no class and therefore no
+   rule. */
+.ops-drawer--narrow {
+  width: min(320px, 32vw);
+}
+
+.ops-drawer--wide {
+  width: min(560px, 58vw);
+}
+
+.ops-drawer--scrim-clear::before {
+  background: transparent;
+}
+
+.ops-drawer--scrim-opaque::before {
+  background: rgb(0 0 0 / 72%);
+}
+
 .ops-drawer > header {
   display: flex;
   align-items: center;

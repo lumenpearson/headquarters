@@ -3,6 +3,7 @@
 import type { OpsSeverity, OpsStatus } from '@gremuchaya/domain';
 import { TerminalDrawer, TerminalTooltip } from '@gremuchaya/ui/primitives';
 import type { ReactElement, ReactNode } from 'react';
+import { useStringSetting } from '@/application/personalization/useSetting';
 
 const statusLabels: Readonly<Record<OpsStatus, string>> = {
   ACTIVE: 'АКТИВЕН',
@@ -203,12 +204,16 @@ export function Drawer({
   readonly onClose: () => void;
   readonly children: ReactNode;
 }) {
+  const drawerWidth = useStringSetting('popups.drawerWidth');
+  const drawerScrim = useStringSetting('popups.drawerScrim');
   return (
     <TerminalDrawer
       title={title}
       eyebrow={eyebrow}
       onClose={onClose}
-      className="ops-drawer"
+      className={`ops-drawer ${drawerWidth === 'standard' ? '' : `ops-drawer--${drawerWidth}`} ${
+        drawerScrim === 'standard' ? '' : `ops-drawer--scrim-${drawerScrim}`
+      }`.trim()}
       bodyClassName="ops-drawer__body"
     >
       {children}

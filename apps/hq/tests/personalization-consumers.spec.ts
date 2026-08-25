@@ -942,3 +942,37 @@ test('R6: startup.restoreWorld decides whether the last session comes back', asy
   await expect(page.locator('.system-audit')).toBeVisible();
   await expect(page.locator('.system-audit')).not.toContainText('ВОССТАНОВЛЕННАЯ ЗАПИСЬ');
 });
+
+test('R6: the drawer takes its width and its scrim from the settings', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, { 'popups.drawerWidth': 'wide', 'popups.drawerScrim': 'opaque' });
+  await page.goto('/overview');
+  // The alert button opens the drawer this styles.
+  await page.getByRole('button', { name: /ALERT/ }).first().click();
+
+  const drawer = page.locator('.ops-drawer');
+  await expect(drawer).toBeVisible();
+  /*
+   * Class hooks rather than custom properties: the drawer is portalled outside
+   * `.ops-shell`, where the `--ops-*` family is not declared at all.
+   */
+  await expect(drawer).toHaveClass(/ops-drawer--wide/);
+  await expect(drawer).toHaveClass(/ops-drawer--scrim-opaque/);
+  const width = await drawer.evaluate((el) => el.getBoundingClientRect().width);
+  expect(width).toBeGreaterThan(420);
+});
+
+test('R6: popups.fieldMenu decides whether a text field keeps the browser menu', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, { 'popups.fieldMenu': 'application' });
+  await page.goto('/settings');
+
+  const field = page.getByLabel('Поиск по настройкам');
+  await expect(field).toBeVisible();
+  await field.click({ button: 'right' });
+  // The default yields the field to the browser, whose menu Playwright cannot
+  // see; `application` is the operator asking for this one instead.
+  await expect(page.locator('[role="menu"], .terminal-pointer-menu').first()).toBeVisible();
+});

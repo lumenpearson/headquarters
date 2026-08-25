@@ -32,10 +32,24 @@ describe('native camera gateway boundary', () => {
   });
 
   it('bounds native reconnect delays without using render-time randomness', () => {
-    expect([0, 1, 2, 3, 4, 5, 50].map(getNativeCameraRetryDelay)).toEqual([
+    // Called explicitly rather than passed to `map`: the second parameter is
+    // the retry profile, and `map` would hand it the index.
+    expect([0, 1, 2, 3, 4, 5, 50].map((attempt) => getNativeCameraRetryDelay(attempt))).toEqual([
       500, 1_000, 2_000, 4_000, 8_000, 8_000, 8_000,
     ]);
     expect(getNativeCameraRetryDelay(-1)).toBe(500);
     expect(getNativeCameraRetryDelay(Number.NaN)).toBe(500);
+  });
+
+  it('retries on the ladder `performance.streamRetryBackoff` names', () => {
+    // A shoot on a good local network wants the picture back quickly; one on a
+    // strained uplink wants the gateway left alone between attempts.
+    expect(getNativeCameraRetryDelay(0, 'fast')).toBe(200);
+    expect(getNativeCameraRetryDelay(0, 'patient')).toBe(1_000);
+    // `standard` is the ladder that was here as a bare constant, so an
+    // untouched profile retries exactly as it did.
+    expect(getNativeCameraRetryDelay(0, 'standard')).toBe(500);
+    expect(getNativeCameraRetryDelay(50, 'patient')).toBe(20_000);
+    expect(getNativeCameraRetryDelay(-1, 'fast')).toBe(200);
   });
 });

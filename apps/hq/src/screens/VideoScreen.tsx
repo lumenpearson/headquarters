@@ -42,6 +42,7 @@ import {
 } from '@/infrastructure/media/cameraStreamRegistry';
 import {
   getNativeCameraRetryDelay,
+  type NativeCameraRetryProfile,
   startNativeCameraStream,
   stopNativeCameraStream,
   type NativeCameraStream,
@@ -200,6 +201,12 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   const loopDemoSource = useBooleanSetting('player.loopDemo');
   const snapshotGrayscale = useBooleanSetting('player.snapshotGrayscale');
   const configuredVolume = useNumberSetting('player.defaultVolume') / 100;
+  const playbackLeadMs = useNumberSetting('performance.playbackLeadMs');
+  const retryProfileSetting = useStringSetting('performance.streamRetryBackoff');
+  const retryProfile: NativeCameraRetryProfile =
+    retryProfileSetting === 'fast' || retryProfileSetting === 'patient'
+      ? retryProfileSetting
+      : 'standard';
   const configuredCameraFilter = useStringSetting('cameras.defaultFilter');
   const webcamCaptureAllowed = useBooleanSetting('privacy.webcamCapture');
   const frameCaptureAllowed = useBooleanSetting('privacy.frameCapture');
@@ -711,8 +718,12 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
 
   useEffect(() => {
     try {
+      // The coordinator already declared and validated this option; nothing
+      // passed it. A lead gives a slower screen time to arrive at the same
+      // instant as a fast one, which is the point of synchronised playback.
       const coordinator = new PlaybackSyncCoordinator({
         onCommand: (command) => playbackCommandHandlerRef.current(command),
+        executionDelayMs: playbackLeadMs,
       });
       playbackSyncRef.current = coordinator;
       void Promise.resolve().then(() => setPlaybackSyncState('ACTIVE'));
@@ -724,7 +735,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       void Promise.resolve().then(() => setPlaybackSyncState('LOCAL ONLY'));
       return undefined;
     }
-  }, []);
+  }, [playbackLeadMs]);
 
   const requestPlaybackAction = useCallback(
     (
@@ -877,7 +888,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
         if (!cancelled) {
           retryTimer = setTimeout(
             () => void connect(attempt + 1),
-            getNativeCameraRetryDelay(attempt),
+            getNativeCameraRetryDelay(attempt, retryProfile),
           );
         }
       }
@@ -889,7 +900,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       void stopNativeCameraStream(cameraId, nativeConsumerId).catch(() => undefined);
     };
-  }, [nativeConsumerId, selected?.id, selectedStream?.transport]);
+  }, [nativeConsumerId, retryProfile, selected?.id, selectedStream?.transport]);
 
   useEffect(() => {
     const cameraId = selected?.id;
@@ -905,22 +916,25 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const scheduleRecovery = (attempt: number): void => {
-      retryTimer = setTimeout(() => {
-        void startNativeCameraStream(cameraId, nativeConsumerId)
-          .then(async (stream) => {
-            if (stream === null) return;
-            if (cancelled) {
-              await stopNativeCameraStream(cameraId, nativeConsumerId).catch(() => undefined);
-              return;
-            }
-            setNativeStream(stream);
-            setSourceOverride((current) => (current?.cameraId === cameraId ? null : current));
-            playerRef.current?.startLoading();
-          })
-          .catch(() => {
-            if (!cancelled) scheduleRecovery(attempt + 1);
-          });
-      }, getNativeCameraRetryDelay(attempt));
+      retryTimer = setTimeout(
+        () => {
+          void startNativeCameraStream(cameraId, nativeConsumerId)
+            .then(async (stream) => {
+              if (stream === null) return;
+              if (cancelled) {
+                await stopNativeCameraStream(cameraId, nativeConsumerId).catch(() => undefined);
+                return;
+              }
+              setNativeStream(stream);
+              setSourceOverride((current) => (current?.cameraId === cameraId ? null : current));
+              playerRef.current?.startLoading();
+            })
+            .catch(() => {
+              if (!cancelled) scheduleRecovery(attempt + 1);
+            });
+        },
+        getNativeCameraRetryDelay(attempt, retryProfile),
+      );
     };
 
     scheduleRecovery(0);
@@ -930,6 +944,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     };
   }, [
     nativeConsumerId,
+    retryProfile,
     selected?.id,
     selectedNativeStream,
     selectedSourceOverride,

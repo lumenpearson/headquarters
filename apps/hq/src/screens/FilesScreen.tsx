@@ -20,7 +20,7 @@ import {
   type MaterialImportProgress,
 } from '@/infrastructure/materials/BridgeMaterialClient';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
-import { useStringSetting } from '@/application/personalization/useSetting';
+import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { RecordPagination } from '@/components/operations/RecordPagination';
@@ -77,7 +77,24 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     if (subject !== undefined) state.selectFile(subject);
   });
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<FileSort>('createdAt');
+  /*
+   * Seeded and re-seeded, not initialised: personalization hydrates from an
+   * effect after the first render, so an initialiser would hold the factory
+   * default for the life of the screen.
+   */
+  const configuredSort = useStringSetting('materials.defaultSort');
+  const seededSort =
+    (['createdAt', 'title', 'kind', 'sizeLabel'] as const).find(
+      (candidate) => candidate === configuredSort,
+    ) ?? 'createdAt';
+  const [chosenSort, setChosenSort] = useState<FileSort | null>(null);
+  const [sortSeededFrom, setSortSeededFrom] = useState<FileSort>(seededSort);
+  if (sortSeededFrom !== seededSort) {
+    setSortSeededFrom(seededSort);
+    setChosenSort(null);
+  }
+  const sort = chosenSort ?? seededSort;
+  const rememberImportCategory = useBooleanSetting('materials.rememberImportCategory');
   const [importOpen, setImportOpen] = useState(false);
   const [bridgeMaterials, setBridgeMaterials] = useState<readonly MaterialEntry[]>([]);
   const [nextBridgeCursor, setNextBridgeCursor] = useState('');
@@ -133,7 +150,10 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const openImportDialog = () => {
     setBridgeStatus('loading');
     setBridgeMessage('');
-    setImportCategory(defaultCategory);
+    // `materials.rememberImportCategory` keeps the last choice instead. The
+    // default stays "reset", so a category chosen for one batch does not
+    // silently carry into the next unless the operator asked for that.
+    if (!rememberImportCategory) setImportCategory(defaultCategory);
     setImportOpen(true);
   };
 
@@ -304,7 +324,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
               <TerminalSelect
                 value={sort}
                 options={fileSortOptions}
-                onValueChange={setSort}
+                onValueChange={setChosenSort}
                 label="Сортировка материалов"
               />
             </div>

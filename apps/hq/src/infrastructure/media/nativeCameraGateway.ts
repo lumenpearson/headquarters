@@ -1,6 +1,19 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 
-const nativeCameraRetryDelaysMs = [500, 1_000, 2_000, 4_000, 8_000] as const;
+/**
+ * How patiently a lost stream is retried, per `performance.streamRetryBackoff`.
+ *
+ * A shoot on a good local network wants the picture back quickly; one on a
+ * strained uplink wants the gateway left alone between attempts. `standard` is
+ * the ladder that was here as a bare constant.
+ */
+const nativeCameraRetryLadders = {
+  fast: [200, 400, 800, 1_600, 3_000],
+  standard: [500, 1_000, 2_000, 4_000, 8_000],
+  patient: [1_000, 3_000, 6_000, 12_000, 20_000],
+} as const;
+
+export type NativeCameraRetryProfile = keyof typeof nativeCameraRetryLadders;
 
 export interface NativeCameraStream {
   readonly cameraId: string;
@@ -28,11 +41,13 @@ export async function stopNativeCameraStream(
   return invoke<boolean>('stop_camera_stream', { cameraId, consumerId });
 }
 
-export function getNativeCameraRetryDelay(attempt: number): number {
-  if (!Number.isSafeInteger(attempt) || attempt < 0) return nativeCameraRetryDelaysMs[0];
-  return (
-    nativeCameraRetryDelaysMs[Math.min(attempt, nativeCameraRetryDelaysMs.length - 1)] ?? 8_000
-  );
+export function getNativeCameraRetryDelay(
+  attempt: number,
+  profile: NativeCameraRetryProfile = 'standard',
+): number {
+  const ladder = nativeCameraRetryLadders[profile];
+  if (!Number.isSafeInteger(attempt) || attempt < 0) return ladder[0];
+  return ladder[Math.min(attempt, ladder.length - 1)] ?? ladder[ladder.length - 1] ?? 8_000;
 }
 
 export function parseNativeCameraStream(

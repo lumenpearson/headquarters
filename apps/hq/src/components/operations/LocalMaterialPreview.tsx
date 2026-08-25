@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type {
   BridgeMaterialClient,
@@ -11,6 +11,8 @@ import {
   readMaterialBlob,
   readMaterialText,
 } from '@/infrastructure/materials/MaterialPreviewReader';
+import { useNumberSetting } from '@/application/personalization/useSetting';
+
 import { LocalMaterialPlayer } from './LocalMaterialPlayer';
 
 type PreviewState =
@@ -26,7 +28,12 @@ export function LocalMaterialPreview({
   readonly material: MaterialEntry;
   readonly client: BridgeMaterialClient;
 }) {
-  const mode = previewModeForMaterial(material);
+  // The operator's own limits reach the reader as an argument; the module that
+  // enforces them stays free of the store.
+  const textBytes = useNumberSetting('materials.textPreviewLimitMb') * 1024 * 1024;
+  const binaryBytes = useNumberSetting('materials.previewLimitMb') * 1024 * 1024;
+  const limits = useMemo(() => ({ textBytes, binaryBytes }), [binaryBytes, textBytes]);
+  const mode = previewModeForMaterial(material, limits);
   const [state, setState] = useState<PreviewState>({ type: 'loading' });
 
   useEffect(() => {
@@ -61,7 +68,7 @@ export function LocalMaterialPreview({
     void (async () => {
       try {
         if (mode === 'text') {
-          const content = await readMaterialText(client, material, controller.signal);
+          const content = await readMaterialText(client, material, controller.signal, limits);
           if (!released) setState({ type: 'text', content });
           return;
         }
@@ -75,7 +82,7 @@ export function LocalMaterialPreview({
           setState({ type: 'source', url: grant.url, transport: 'range' });
           return;
         }
-        const blob = await readMaterialBlob(client, material, controller.signal);
+        const blob = await readMaterialBlob(client, material, controller.signal, limits);
         currentObjectUrl = URL.createObjectURL(blob);
         if (released) {
           release();
@@ -97,7 +104,7 @@ export function LocalMaterialPreview({
       controller.abort();
       release();
     };
-  }, [client, material, mode]);
+  }, [client, limits, material, mode]);
 
   if (mode === 'unsupported') {
     return <MetadataOnlyPreview reason="ПРЕДПРОСМОТР ЭТОГО ТИПА БУДЕТ ДОБАВЛЕН ОТДЕЛЬНЫМ VIEWER" />;
