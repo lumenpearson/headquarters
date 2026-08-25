@@ -61,6 +61,94 @@ test('an operator opens edit mode, docks the panel and edits without the page sc
   await expect(page.locator('html')).toHaveAttribute('data-edit-mode', 'off');
 });
 
+/**
+ * R6: the catalogue reached from the floating panel, not only from the screen.
+ *
+ * The panel used to offer one flat select over all thirty-two categories and
+ * draw whichever was chosen. Seventy-one definitions are past what that can be
+ * read from, and R6 asks for more. The panel navigates by section instead, with
+ * the categories as headings inside the list -- and the two things that have to
+ * stay true are the same two the settings screen answers for: every setting is
+ * reachable, and the panel never pushes the page into scrolling.
+ */
+test('R6: every section is reachable from the floating panel and shows its categories', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.keyboard.press('Control+Shift+E');
+  const panel = page.locator('.edit-panel');
+  await expect(panel).toBeVisible();
+
+  const section = panel.getByRole('combobox', { name: 'Раздел' });
+  const sections = [
+    'ВНЕШНИЙ ВИД / APPEARANCE',
+    'МАКЕТ И РАЗМЕРЫ / LAYOUT',
+    'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION',
+    'ИНФОРМАЦИЯ / INFORMATION',
+    'МЕДИА И КАРТА / MEDIA',
+    'СЕССИЯ И УПРАВЛЕНИЕ / SESSION',
+    'СИСТЕМА / SYSTEM',
+  ];
+
+  for (const name of sections) {
+    await section.click();
+    await page.getByRole('option', { name, exact: true }).click();
+
+    // Every section holds at least one category and at least one setting. A
+    // section that selects nothing is a dead entry in the only navigation the
+    // panel has.
+    await expect(panel.locator('.edit-panel__category').first()).toBeVisible();
+    await expect.poll(() => panel.locator('.settings-row').count()).toBeGreaterThan(0);
+
+    // The document still does not scroll, at every section: the sections differ
+    // in length, and the longest is what would push it.
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollHeight > document.documentElement.clientHeight,
+      ),
+    ).toBe(false);
+  }
+});
+
+test('R6/R26: the panel navigates and scrolls its own body on a short window', async ({ page }) => {
+  // The panel is capped at 40dvh against the top or bottom edge and is at its
+  // narrowest here, which is where a navigation row too many would show.
+  await page.setViewportSize({ width: 1024, height: 600 });
+  await page.goto('/');
+  await page.keyboard.press('Control+Shift+E');
+  const panel = page.locator('.edit-panel');
+  await expect(panel).toBeVisible();
+
+  const search = panel.getByLabel('Поиск по настройкам');
+  await search.fill('liveedit');
+
+  // `advanced.liveEdit` is in `system`; the panel opens on `appearance`. One
+  // search box answering across every section is what replaces the screen's
+  // section-scoped search plus its separate "found elsewhere" block.
+  await expect(panel.getByText('ADVANCED / LIVE EDIT')).toBeVisible();
+
+  await search.fill('');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollHeight > document.documentElement.clientHeight,
+      ),
+    )
+    .toBe(false);
+
+  // R26 for the panel itself: a whole section is taller than the room the
+  // panel has, and the body scrolls it rather than cutting it off. The
+  // scrolling element is the scroll area's viewport, not the wrapper the
+  // className sits on -- measuring the wrapper reports "not scrollable" no
+  // matter how much content is inside it.
+  const viewport = panel.locator('.edit-panel__settings .terminal-scroll-area__viewport');
+  const overflow = await viewport.evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  }));
+  expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
+});
+
 test('R17: state changes land instantly while edit mode is on, and ease again once it is off', async ({
   page,
 }) => {

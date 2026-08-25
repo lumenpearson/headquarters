@@ -78,9 +78,61 @@
   letter-spacing: 0.12em;
 }
 
+/*
+ * R6: navigating seventy-one definitions from a panel this narrow.
+ *
+ * One row of navigation, not the settings screen's four: a section select, a
+ * search field across the whole catalogue, and a filter line. The categories
+ * are headings inside the list below rather than a second control, which is
+ * what keeps this to one row.
+ */
+.edit-panel__nav {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.edit-panel__filter {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-2);
+  font-size: var(--font-xs);
+  letter-spacing: 0.08em;
+}
+
 /* R26: the panel scrolls internally; it never lengthens the document. */
 .edit-panel__settings {
   min-height: 0;
+}
+
+.edit-panel__category {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.edit-panel__category > h3 {
+  position: sticky;
+  top: 0;
+  /*
+   * Opaque because it is sticky: the rows scrolling under a transparent
+   * heading would read as one line of text over another.
+   */
+  z-index: 1;
+  padding: var(--space-2) 0 var(--space-1);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--panel-raised);
+  color: var(--accent);
+  font-size: var(--font-xs);
+  letter-spacing: 0.12em;
+}
+
+.edit-panel__empty {
+  padding: var(--space-3) 0;
+  color: var(--text-2);
+  font-size: var(--font-xs);
+  letter-spacing: 0.08em;
+  text-align: center;
 }
 
 .edit-panel__actions {

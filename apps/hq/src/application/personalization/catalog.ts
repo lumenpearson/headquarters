@@ -132,6 +132,32 @@ export function queryCatalog(query: CatalogQuery): CatalogResult {
   };
 }
 
+export interface CategoryRun {
+  readonly category: SettingCategory;
+  readonly definitions: readonly SettingDefinition[];
+}
+
+/**
+ * The same definitions, split under the category each one belongs to.
+ *
+ * The settings screen can afford a category select beside its section select;
+ * the floating panel cannot spend a row on a second control. It shows a whole
+ * section at once instead and lets the categories be headings inside the list,
+ * which needs the definitions grouped rather than flat.
+ *
+ * The order is `settingCategories`, not the order the definitions arrived in,
+ * so the same section always reads the same way — a list that reorders itself
+ * between two openings of the panel is a list the operator has to re-read.
+ */
+export function splitByCategory(definitions: readonly SettingDefinition[]): readonly CategoryRun[] {
+  return settingCategories
+    .map((category) => ({
+      category,
+      definitions: definitions.filter((definition) => definition.category === category),
+    }))
+    .filter((run) => run.definitions.length > 0);
+}
+
 /**
  * A search across every group, for the case the operator does not know which
  * group holds what they want — which is the case a grouping creates and has to

@@ -20,7 +20,12 @@ import {
 } from '@/application/personalization/catalog';
 import { KeybindList } from '@/components/keybinds/KeybindList';
 import { Panel } from '@/components/operations/OpsUi';
-import { categoryLabel, SchemaSetting, Setting } from '@/components/settings/SchemaSetting';
+import {
+  categoryLabel,
+  groupLabel,
+  SchemaSetting,
+  Setting,
+} from '@/components/settings/SchemaSetting';
 import {
   querySettingsHistory,
   settingsHistoryOperations,
@@ -592,25 +597,4 @@ function formatHistoryDate(value: string): string {
     dateStyle: 'short',
     timeStyle: 'medium',
   }).format(date);
-}
-
-/**
- * The name of a section, in the words an operator would use to look for it.
- *
- * Grouping is what makes sixty-nine definitions navigable, and it only works if
- * the group names describe what someone is trying to change rather than the
- * layer that implements it.
- */
-function groupLabel(group: SettingGroup): string {
-  return (
-    {
-      appearance: 'ВНЕШНИЙ ВИД / APPEARANCE',
-      layout: 'МАКЕТ И РАЗМЕРЫ / LAYOUT',
-      motion: 'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION',
-      information: 'ИНФОРМАЦИЯ / INFORMATION',
-      media: 'МЕДИА И КАРТА / MEDIA',
-      session: 'СЕССИЯ И УПРАВЛЕНИЕ / SESSION',
-      system: 'СИСТЕМА / SYSTEM',
-    } satisfies Record<SettingGroup, string>
-  )[group];
 }

@@ -455,7 +455,7 @@ test('renders the full safe personalization catalogue and resets one selected ca
   await page.goto('/settings');
 
   // The catalogue is grouped now — thirty-two categories in one list stopped
-  // being readable well before the sixty-nine definitions R6 asks for — but the
+  // being readable well before the seventy-one definitions R6 asks for — but the
   // category list stays complete and moves the section to match. A section that
   // could hide a category the operator was looking for would be worse than no
   // section at all.

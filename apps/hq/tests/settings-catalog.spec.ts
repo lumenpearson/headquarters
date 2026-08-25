@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 /**
  * The catalogue at the size R6 asks for.
  *
- * Sixty-nine definitions across thirty-two categories is already past what one
+ * Seventy-one definitions across thirty-two categories is already past what one
  * flat list can be read from, and R6 asks for more. The screen therefore groups
  * the categories and searches across all of them, and these are the two things
  * that has to keep true: an operator can reach any setting, and the panel still

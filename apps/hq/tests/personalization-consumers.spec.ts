@@ -323,8 +323,10 @@ test('R19: the edit panel gives a selected tile its own motion', async ({ page }
   await page.keyboard.press('Control+Shift+E');
   await expect(page.locator('.edit-mode-frame')).toBeVisible();
 
-  await page.locator('.edit-panel').getByRole('combobox', { name: 'Категория' }).click();
-  await page.getByRole('option', { name: 'АНИМАЦИИ / ANIMATIONS', exact: true }).click();
+  // The animations category is a heading inside the `motion` section: the panel
+  // shows a whole section at once rather than one category out of thirty-two.
+  await page.locator('.edit-panel').getByRole('combobox', { name: 'Раздел' }).click();
+  await page.getByRole('option', { name: 'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION', exact: true }).click();
   // Said rather than hidden: a control that appears only once the operator has
   // done the thing it needs cannot teach them to do it.
   await expect(page.locator('.edit-tile-motion__hint')).toBeVisible();

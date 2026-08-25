@@ -1,13 +1,24 @@
 'use client';
 
-import { getSettingsDefinitionsForCategory, settingCategories } from '@gremuchaya/settings-schema';
-import type { SettingCategory } from '@gremuchaya/settings-schema';
-import { TerminalButton, TerminalScrollArea, TerminalSelect } from '@gremuchaya/ui/primitives';
-import { useCallback, useRef, useState } from 'react';
+import {
+  TerminalButton,
+  TerminalInput,
+  TerminalScrollArea,
+  TerminalSelect,
+  TerminalSwitch,
+} from '@gremuchaya/ui/primitives';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
 import { buildIssueDraftUrl } from '@/application/edit/issueDraft';
-import { categoryLabel, SchemaSetting } from '@/components/settings/SchemaSetting';
+import {
+  queryCatalog,
+  searchEverySetting,
+  settingGroups,
+  splitByCategory,
+  type SettingGroup,
+} from '@/application/personalization/catalog';
+import { categoryLabel, groupLabel, SchemaSetting } from '@/components/settings/SchemaSetting';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { resolveDockEdge } from './EditPanelDock';
@@ -24,9 +35,9 @@ const dockThresholdPx = 120;
 /** Below this the press on the header was a click, not a drag. */
 const dragThresholdPx = 6;
 
-const categoryOptions = settingCategories.map((category) => ({
-  value: category,
-  label: categoryLabel(category),
+const groupOptions = settingGroups.map((group) => ({
+  value: group,
+  label: groupLabel(group),
 }));
 
 /**
@@ -35,26 +46,70 @@ const categoryOptions = settingCategories.map((category) => ({
  * It owns no draft of its own. Every edit is dispatched through the existing
  * `applySettingsPatch`, and undo through `undoSettingsDraft`, so the panel is a
  * second surface onto the personalization slice rather than a second copy of
- * it. That is why there is no local editing state here beyond which category is
- * on screen.
+ * it. That is why there is no local editing state here beyond what is on
+ * screen.
+ *
+ * It navigates the same catalogue as the settings screen and through the same
+ * functions -- `queryCatalog` and `searchEverySetting` -- but not through the
+ * same layout. The screen spends two selects, a search field and a switch on
+ * its toolbar; this panel is `clamp(280px, 22vw, 380px)` wide against an edge,
+ * and capped at `40dvh` against the top or bottom one, so four navigation rows
+ * would leave nothing under them to navigate to. It spends one row instead:
+ *
+ * - a section select of **seven** options rather than a flat list of
+ *   thirty-two categories, which is the thing that had stopped being navigable;
+ * - the categories demoted from a control to headings inside the list, so a
+ *   whole section is read at once and the structure is still visible;
+ * - one search field that answers across **every** section rather than the
+ *   screen's section-scoped search plus its "found elsewhere" block, because
+ *   an operator who is already pointing at something knows its name and wants
+ *   one list, not two.
+ *
+ * Every one of the seventy-one definitions stays reachable both ways: each
+ * belongs to exactly one category and each category to exactly one section, so
+ * browsing covers the catalogue, and search covers it again independently.
  */
 export function EditPanel() {
   const active = useOperationsStore((state) => state.edit.active);
   const dockEdge = useOperationsStore((state) => state.edit.dockEdge);
   const draft = useOperationsStore((state) => state.personalization.draft);
   const canUndo = useOperationsStore((state) => state.personalization.undoStack.length > 0);
-  const [category, setCategory] = useState<SettingCategory>('layout');
+  const [group, setGroup] = useState<SettingGroup>('appearance');
+  const [search, setSearch] = useState('');
+  const [changedOnly, setChangedOnly] = useState(false);
   const [dragging, setDragging] = useState(false);
   const origin = useRef<{ readonly x: number; readonly y: number } | null>(null);
+  const searching = search.trim().length > 0;
+  const changedIds = draft.changedIds;
+  /*
+   * Searching leaves the section behind on purpose. The screen keeps its
+   * section list and offers what it found elsewhere underneath; splitting a
+   * panel this size into two lists would spend the room the second list needs
+   * on saying that it is a second list.
+   */
+  const catalog = useMemo(
+    () => queryCatalog({ group, category: 'all', search: '', changedOnly, changedIds }),
+    [group, changedOnly, changedIds],
+  );
+  const found = useMemo(
+    () => (searching ? searchEverySetting(search, changedIds, changedOnly) : []),
+    [searching, search, changedIds, changedOnly],
+  );
+  const runs = useMemo(
+    () => splitByCategory(searching ? found : catalog.definitions),
+    [searching, found, catalog.definitions],
+  );
 
   /*
    * The drag starts on the panel header and nowhere else.
    *
    * It used to start anywhere inside the panel, which made every press on a
-   * control a drag: clicking the category select re-docked the panel from the
-   * right edge to the top, the popup's anchor moved with it, and the click on
-   * an option landed on nothing. Measured, not deduced -- the category could
-   * not be changed with a pointer at all, only with the keyboard.
+   * control a drag: clicking the panel's select re-docked it from the right
+   * edge to the top, the popup's anchor moved with it, and the click on an
+   * option landed on nothing. Measured, not deduced -- the selection could not
+   * be changed with a pointer at all, only with the keyboard. The select was
+   * over categories then and is over sections now; the gesture is what the
+   * threshold below protects, whatever the control turns out to be.
    *
    * Pointer capture is what makes the drag work at all. A drag ends with the
    * pointer somewhere else on screen -- that is the point of it -- so without
@@ -99,8 +154,8 @@ export function EditPanel() {
 
   if (!active) return null;
 
-  const definitions = getSettingsDefinitionsForCategory(category);
   const hasChanges = draft.changedIds.length > 0;
+  const shown = runs.reduce((total, run) => total + run.definitions.length, 0);
 
   return (
     <div
@@ -115,26 +170,61 @@ export function EditPanel() {
         <span>{draft.changedIds.length} ИЗМЕНЕНИЙ</span>
       </header>
 
-      <TerminalSelect
-        label="Категория"
-        value={category}
-        options={categoryOptions}
-        onValueChange={setCategory}
-      />
+      <div className="edit-panel__nav">
+        <TerminalSelect
+          label="Раздел"
+          value={group}
+          options={groupOptions}
+          onValueChange={(value) => setGroup(value as SettingGroup)}
+        />
+        <TerminalInput
+          aria-label="Поиск по настройкам"
+          placeholder="ИМЯ ИЛИ ОПИСАНИЕ"
+          value={search}
+          onValueChange={setSearch}
+        />
+        <div className="edit-panel__filter">
+          <TerminalSwitch
+            label="Только изменённые"
+            checked={changedOnly}
+            onCheckedChange={setChangedOnly}
+          />
+          <span>
+            {shown} {searching ? 'ВО ВСЁМ КАТАЛОГЕ' : `ИЗ ${catalog.groupTotal}`}
+          </span>
+        </div>
+      </div>
 
       <TerminalScrollArea className="edit-panel__settings">
-        {category === 'tiles' ? <TileVisibility /> : null}
-        {category === 'animations' ? <TileMotionPicker /> : null}
-        {definitions.map((definition) => (
-          <SchemaSetting
-            key={definition.id}
-            definition={definition}
-            value={draft.values[definition.id] ?? definition.defaultValue}
-            changed={draft.changedIds.includes(definition.id)}
-            onValueChange={(value) =>
-              operationsStore.getState().applySettingsPatch([{ id: definition.id, value }])
-            }
-          />
+        {runs.length === 0 ? (
+          <p className="edit-panel__empty">
+            {changedOnly ? 'НИЧЕГО НЕ ИЗМЕНЕНО ЗДЕСЬ' : 'НИЧЕГО НЕ НАЙДЕНО'}
+          </p>
+        ) : null}
+        {runs.map((run) => (
+          <section key={run.category} className="edit-panel__category">
+            <h3>{categoryLabel(run.category)}</h3>
+            {/*
+             * The tile and motion pickers belong to their category, so they
+             * appear under its heading rather than beside a select that no
+             * longer exists. They stay out of a search result on purpose: a
+             * search is the operator naming one setting, and answering it with
+             * a picker over every tile on the screen would bury the answer.
+             */}
+            {!searching && run.category === 'tiles' ? <TileVisibility /> : null}
+            {!searching && run.category === 'animations' ? <TileMotionPicker /> : null}
+            {run.definitions.map((definition) => (
+              <SchemaSetting
+                key={definition.id}
+                definition={definition}
+                value={draft.values[definition.id] ?? definition.defaultValue}
+                changed={draft.changedIds.includes(definition.id)}
+                onValueChange={(value) =>
+                  operationsStore.getState().applySettingsPatch([{ id: definition.id, value }])
+                }
+              />
+            ))}
+          </section>
         ))}
       </TerminalScrollArea>
 

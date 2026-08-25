@@ -7,6 +7,7 @@ import {
   queryCatalog,
   searchEverySetting,
   settingGroups,
+  splitByCategory,
 } from './catalog';
 
 describe('settings catalogue navigation', () => {
@@ -71,6 +72,42 @@ describe('settings catalogue navigation', () => {
     // be able to tell "one of forty changed" from "one setting exists".
     expect(filtered.groupTotal).toBeGreaterThan(1);
     expect(filtered.changedInGroup).toBe(1);
+  });
+
+  it('splits a section into category runs without losing or reordering a definition', () => {
+    const section = queryCatalog({
+      group: 'appearance',
+      category: 'all',
+      search: '',
+      changedOnly: false,
+      changedIds: [],
+    }).definitions;
+
+    const runs = splitByCategory(section);
+
+    // Nothing is dropped on the way from a flat section to headed runs: the
+    // panel shows a whole section at once, so a definition missing from a run
+    // is a definition with no surface in the panel at all.
+    expect(runs.flatMap((run) => run.definitions)).toHaveLength(section.length);
+    expect(runs.every((run) => run.definitions.length > 0)).toBe(true);
+    expect(runs.every((run) => run.definitions.every((d) => d.category === run.category))).toBe(
+      true,
+    );
+
+    // Declaration order, not arrival order, so the same section reads the same
+    // way every time the panel is opened.
+    const order = runs.map((run) => settingCategories.indexOf(run.category));
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('splits every definition in the catalogue into exactly one run', () => {
+    const runs = splitByCategory(settingsDefinitions);
+
+    // The panel browses by section and splits each into runs. If those runs do
+    // not add back up to the whole catalogue, some setting is unreachable by
+    // browsing and only findable by guessing its name in the search box.
+    expect(runs.flatMap((run) => run.definitions)).toHaveLength(settingsDefinitions.length);
+    expect(new Set(runs.map((run) => run.category)).size).toBe(runs.length);
   });
 
   it('lets a chosen category settle the question over the open section', () => {

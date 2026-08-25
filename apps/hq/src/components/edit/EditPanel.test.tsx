@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
+import { settingsDefinitions } from '@gremuchaya/settings-schema';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { settingGroups } from '../../application/personalization/catalog';
 import { operationsStore } from '../../state/operationsStore';
+import { settingLabel } from '../settings/SchemaSetting';
 import { EditPanel } from './EditPanel';
 
 function button(name: RegExp): HTMLButtonElement {
@@ -63,6 +66,79 @@ describe('EditPanel', () => {
     fireEvent.click(button(/отменить/i));
 
     expect(operationsStore.getState().personalization.draft.values['layout.density']).toBe('dense');
+  });
+
+  it('shows a whole section at once, with its categories as headings', () => {
+    operationsStore.getState().enterEditMode();
+    render(<EditPanel />);
+
+    // The panel opens on `appearance`, which spans six categories. The flat
+    // select this replaced showed one category at a time out of thirty-two, so
+    // more than one heading being present is the difference itself.
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((node) => node.textContent);
+    expect(headings.length).toBeGreaterThan(1);
+    expect(headings).toContain('ТЕМЫ / THEMES');
+    expect(headings).toContain('ТИПОГРАФИКА / TYPOGRAPHY');
+
+    // Settings from more than one of those categories are on screen together.
+    expect(screen.getByText(settingLabel('themes.id'))).toBeTruthy();
+    expect(screen.getByText(settingLabel('typography.weight'))).toBeTruthy();
+  });
+
+  it('offers seven sections rather than thirty-two categories', () => {
+    operationsStore.getState().enterEditMode();
+    render(<EditPanel />);
+
+    // The count is the point: a flat list of thirty-two was the thing that had
+    // stopped being navigable in a panel this narrow.
+    expect(settingGroups).toHaveLength(7);
+    expect(screen.getByRole('combobox', { name: /раздел/i })).toBeTruthy();
+  });
+
+  it('searches across every section, not only the open one', () => {
+    operationsStore.getState().enterEditMode();
+    render(<EditPanel />);
+
+    // `advanced.liveEdit` lives in `system`; the panel is open on `appearance`.
+    expect(screen.queryByText(settingLabel('advanced.liveEdit'))).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Поиск по настройкам'), {
+      target: { value: 'liveedit' },
+    });
+
+    // A search scoped to the open section would answer "no such setting" for a
+    // setting that exists, which is the failure a section grouping creates and
+    // has to answer for.
+    expect(screen.getByText(settingLabel('advanced.liveEdit'))).toBeTruthy();
+    expect(screen.queryByText(settingLabel('themes.id'))).toBeNull();
+  });
+
+  it('says so when a search matches nothing, instead of showing an empty panel', () => {
+    operationsStore.getState().enterEditMode();
+    render(<EditPanel />);
+
+    fireEvent.change(screen.getByLabelText('Поиск по настройкам'), {
+      target: { value: 'нетакойнастройки' },
+    });
+
+    // An empty list and a list that has not loaded look the same; only one of
+    // them is worth telling the operator about.
+    expect(screen.getByText(/ничего не найдено/i)).toBeTruthy();
+  });
+
+  it('reaches a setting in every section through search alone', () => {
+    operationsStore.getState().enterEditMode();
+    render(<EditPanel />);
+    const box = screen.getByLabelText('Поиск по настройкам');
+
+    // Searching by full identifier is the narrowest possible query, so this
+    // walks the whole catalogue one definition at a time. Browsing covers the
+    // catalogue too, and Playwright proves that half where the section select
+    // actually opens; this proves the search half over all of it.
+    for (const definition of settingsDefinitions) {
+      fireEvent.change(box, { target: { value: definition.id } });
+      expect(screen.queryByText(settingLabel(definition.id))).not.toBeNull();
+    }
   });
 
   it('closing from the panel leaves the draft intact, so edits survive reopening', () => {

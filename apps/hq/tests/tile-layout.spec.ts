@@ -233,8 +233,11 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   await expect(page.locator('.edit-mode-frame')).toBeVisible();
 
   const panel = page.locator('.edit-panel');
-  await panel.getByRole('combobox', { name: 'Категория' }).click();
-  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  // The panel navigates by section and shows the whole of one at once, so the
+  // tiles category is a heading inside `layout` rather than an entry in a flat
+  // list of all thirty-two categories.
+  await panel.getByRole('combobox', { name: 'Раздел' }).click();
+  await page.getByRole('option', { name: 'МАКЕТ И РАЗМЕРЫ / LAYOUT', exact: true }).click();
 
   const list = panel.locator('.edit-tiles');
   await expect(list).toBeVisible();
@@ -292,6 +295,12 @@ test('R10: a tile shows less at a smaller presentation, not the same list in a s
 
   await page.setViewportSize({ width: 2560, height: 1440 });
   await page.goto('/overview');
+  // Wait for the grid before asking a tile about its presentation. Without
+  // this the assertion races the first paint of the route and reports "element
+  // not found" for a tile that simply is not drawn yet -- observed once in a
+  // full-suite run and not reproducible on its own, which is what a race looks
+  // like. Every other test in this file already waits.
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
   await expect(page.locator('[data-tile="timeline"]')).toHaveAttribute('data-presentation', 'full');
   const atFull = await timelineRows().count();
 

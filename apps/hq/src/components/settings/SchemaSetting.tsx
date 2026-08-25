@@ -9,6 +9,8 @@ import {
 } from '@gremuchaya/ui/primitives';
 import { useEffect, type ReactNode } from 'react';
 
+import type { SettingGroup } from '@/application/personalization/catalog';
+
 import { useMaterialCatalog } from './MaterialCatalog';
 import { materialOptionsFor, unsetMaterialOption } from './MaterialOptions';
 
@@ -147,6 +149,29 @@ export function settingLabel(id: string): string {
     .replaceAll('.', ' / ')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .toUpperCase();
+}
+
+/**
+ * The name of a section, in the words an operator would use to look for it.
+ *
+ * Grouping is what makes seventy-one definitions navigable, and it only works
+ * if the group names describe what someone is trying to change rather than the
+ * layer that implements it. It sits here beside `categoryLabel` rather than in
+ * the settings screen because the edit panel navigates the same sections, and
+ * two copies of these names would drift the moment one section was renamed.
+ */
+export function groupLabel(group: SettingGroup): string {
+  return (
+    {
+      appearance: 'ВНЕШНИЙ ВИД / APPEARANCE',
+      layout: 'МАКЕТ И РАЗМЕРЫ / LAYOUT',
+      motion: 'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION',
+      information: 'ИНФОРМАЦИЯ / INFORMATION',
+      media: 'МЕДИА И КАРТА / MEDIA',
+      session: 'СЕССИЯ И УПРАВЛЕНИЕ / SESSION',
+      system: 'СИСТЕМА / SYSTEM',
+    } satisfies Record<SettingGroup, string>
+  )[group];
 }
 
 export function categoryLabel(category: SettingCategory): string {
