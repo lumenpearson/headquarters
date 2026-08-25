@@ -402,6 +402,150 @@ body.terminal-theme {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+/*
+ * R31: the rate-of-change graph whose extrema are moved by dragging. The
+ * curve is an SVG stretched to the plot (`preserveAspectRatio: none`), so the
+ * aspect ratio is a stylesheet decision -- `--terminal-curve-editor-aspect`
+ * on the root or any ancestor -- and strokes keep their width through
+ * `vector-effect: non-scaling-stroke`. Handles are HTML positioned in plot
+ * percentages on top of the SVG, so they never stretch with it.
+ */
+.terminal-curve-editor {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+.terminal-curve-editor__header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  text-transform: uppercase;
+}
+
+.terminal-curve-editor__readout {
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-curve-editor__plot {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--terminal-curve-editor-aspect, 2 / 1);
+  border: 1px solid var(--line-1);
+  outline: none;
+  background: var(--bg-0);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.terminal-curve-editor__plot:focus-visible {
+  border-color: var(--line-focus);
+}
+
+.terminal-curve-editor__svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.terminal-curve-editor__grid {
+  stroke: var(--line-1);
+  stroke-width: 1;
+}
+
+.terminal-curve-editor__path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.terminal-curve-editor__tangent-line {
+  stroke: var(--text-2);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.terminal-curve-editor__handle,
+.terminal-curve-editor__tangent {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  outline: none;
+  background: var(--bg-0);
+  cursor: grab;
+  touch-action: none;
+  transform: translate(-50%, -50%);
+  transition:
+    border-color var(--motion-micro) ease,
+    background var(--motion-micro) ease;
+}
+
+.terminal-curve-editor__handle {
+  width: 12px;
+  height: 12px;
+}
+
+/* Tangent handles are round so the two kinds read apart at a glance; the point is the square. */
+.terminal-curve-editor__tangent {
+  width: 8px;
+  height: 8px;
+  border-color: var(--text-2);
+  border-radius: 50%;
+}
+
+/* A hit area wider than the 12px mark, without the mark itself growing. */
+.terminal-curve-editor__handle::before,
+.terminal-curve-editor__tangent::before {
+  position: absolute;
+  inset: -6px;
+  content: '';
+}
+
+.terminal-curve-editor__handle:focus-visible,
+.terminal-curve-editor__tangent:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.terminal-curve-editor__handle[data-active],
+.terminal-curve-editor__handle:hover {
+  background: var(--accent);
+}
+
+.terminal-curve-editor__tangent[data-active],
+.terminal-curve-editor__tangent:hover {
+  background: var(--text-2);
+}
+
+/* R23: a grabbing cursor while a handle is actually being moved, as the slider does. */
+.terminal-curve-editor[data-adjusting] .terminal-curve-editor__plot,
+.terminal-curve-editor[data-adjusting] .terminal-curve-editor__handle,
+.terminal-curve-editor[data-adjusting] .terminal-curve-editor__tangent {
+  cursor: grabbing;
+}
+
+.terminal-curve-editor[data-readonly] .terminal-curve-editor__plot,
+.terminal-curve-editor[data-readonly] .terminal-curve-editor__handle,
+.terminal-curve-editor[data-readonly] .terminal-curve-editor__tangent {
+  cursor: default;
+}
+
+.terminal-curve-editor[data-readonly] .terminal-curve-editor__handle,
+.terminal-curve-editor[data-readonly] .terminal-curve-editor__tangent {
+  opacity: 0.62;
+}
+
 .terminal-tabs__list {
   position: relative;
   display: flex;
@@ -1035,7 +1179,9 @@ body.terminal-theme {
   .terminal-dialog,
   .terminal-menu,
   .terminal-tooltip,
-  .terminal-toast {
+  .terminal-toast,
+  .terminal-curve-editor__handle,
+  .terminal-curve-editor__tangent {
     transition-duration: 1ms;
   }
 }

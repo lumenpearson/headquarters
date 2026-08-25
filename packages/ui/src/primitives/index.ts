@@ -3,6 +3,7 @@ export * from './TerminalAlertDialog.js';
 export * from './TerminalCheckbox.js';
 export * from './TerminalCombobox.js';
 export * from './TerminalContextMenu.js';
+export * from './TerminalCurveEditor.js';
 export * from './TerminalDialog.js';
 export * from './TerminalField.js';
 export * from './TerminalIconButton.js';
