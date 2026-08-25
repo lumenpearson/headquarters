@@ -6168,3 +6168,72 @@ button.is-active {
 .ops-shell[data-table-sticky='off'] .ops-table thead th {
   position: static;
 }
+
+/* ---------------------------------------------------------------------------
+ * `tiles.animations` and `tiles.categoryAnimations` — R19's per-element half.
+ *
+ * The resolver on the cell has already decided which of these applies, so each
+ * rule here is one value of one attribute. `none` carries no rule at all, and
+ * the shell's own motion gate still wins: a cell inside a shell with motion off
+ * never animates, whatever it names.
+ * ------------------------------------------------------------------------ */
+
+@keyframes ops-tile-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ops-tile-rise {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
+
+@keyframes ops-tile-scan {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+}
+
+.tile-grid__cell[data-tile-motion='fade'] {
+  animation: ops-tile-fade var(--ops-motion-duration, 180ms)
+    var(--ops-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)) both;
+}
+
+.tile-grid__cell[data-tile-motion='rise'] {
+  animation: ops-tile-rise var(--ops-motion-duration, 180ms)
+    var(--ops-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)) both;
+}
+
+.tile-grid__cell[data-tile-motion='scan'] {
+  animation: ops-tile-scan var(--ops-motion-duration, 180ms)
+    var(--ops-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)) both;
+}
+
+/* The room decides over the tile. An operator who turned motion off, or whose
+   system asks for reduced motion, has said something about where they are
+   standing, and a per-tile preference is not an argument against it. */
+.ops-shell--no-motion .tile-grid__cell[data-tile-motion],
+.ops-shell[data-reduced-motion='on'] .tile-grid__cell[data-tile-motion] {
+  animation: none;
+}
+
+.edit-tile-motion {
+  display: grid;
+  gap: 6px;
+}
+
+.edit-tile-motion h3 {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.edit-tile-motion__hint {
+  margin: 0;
+  color: var(--ops-dim);
+  font-size: 8px;
+}

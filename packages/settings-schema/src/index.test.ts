@@ -154,9 +154,25 @@ describe('background source settings', () => {
   it('belongs to the backgrounds category, so its reset button is the one for backgrounds', () => {
     // R5 applies to it for free precisely because it is a declared setting and
     // not a registry off to one side.
+    // The three source settings, plus the wash the category has grown since.
+    // Asserted as containment rather than as the exact roster: this test is
+    // about a source setting belonging to its category, and a list that has to
+    // be edited every time the category gains a member tests the edit, not the
+    // membership.
     expect(
       getSettingsDefinitionsForCategory('backgrounds').map((definition) => definition.id),
-    ).toEqual(['backgrounds.kind', 'backgrounds.imageSource', 'backgrounds.videoSource']);
+    ).toEqual(
+      expect.arrayContaining([
+        'backgrounds.kind',
+        'backgrounds.imageSource',
+        'backgrounds.videoSource',
+      ]),
+    );
+    expect(
+      getSettingsDefinitionsForCategory('backgrounds').every((definition) =>
+        definition.id.startsWith('backgrounds.'),
+      ),
+    ).toBe(true);
   });
 
   it('starts unset, and the empty string is how an operator clears it', () => {

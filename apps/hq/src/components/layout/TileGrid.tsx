@@ -13,6 +13,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 
 import type { TileCategory } from '@gremuchaya/settings-schema';
 
+import { resolveTileMotion } from '@/application/personalization/tileMotion';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { publishScreenTiles } from './tileRegistry';
@@ -120,6 +121,15 @@ export function TileGrid({
   );
   const hiddenCategories = useOperationsStore((state) =>
     stringList(state.personalization.draft.values['tiles.hiddenCategories']),
+  );
+  const tileMotionEntries = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values['tiles.animations']),
+  );
+  const categoryMotionEntries = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values['tiles.categoryAnimations']),
+  );
+  const enteringAllowed = useOperationsStore(
+    (state) => state.personalization.draft.values['animations.tileEnter'] !== false,
   );
   const presentationCap = useOperationsStore((state) => {
     const value = state.personalization.draft.values['tiles.presentation'];
@@ -315,6 +325,17 @@ export function TileGrid({
                   className="tile-grid__cell"
                   data-tile={placed.id}
                   data-presentation={placed.presentation}
+                  // R19's per-element half. The narrower setting wins, and the
+                  // application-wide switch is a floor rather than a tier: with
+                  // entering animation off nothing moves, whatever a tile names.
+                  data-tile-motion={resolveTileMotion({
+                    screen,
+                    tile: placed.id,
+                    category: tile.category,
+                    tileEntries: tileMotionEntries,
+                    categoryEntries: categoryMotionEntries,
+                    enteringAllowed,
+                  })}
                   data-selected={selectedId === placed.id ? 'true' : undefined}
                   data-drag-source={
                     drag?.moved === true && drag.id === placed.id ? 'true' : undefined

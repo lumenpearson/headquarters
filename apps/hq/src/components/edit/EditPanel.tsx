@@ -11,6 +11,7 @@ import { categoryLabel, SchemaSetting } from '@/components/settings/SchemaSettin
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { resolveDockEdge } from './EditPanelDock';
+import { TileMotionPicker } from './TileMotionPicker';
 import { TileVisibility } from './TileVisibility';
 
 /**
@@ -123,6 +124,7 @@ export function EditPanel() {
 
       <TerminalScrollArea className="edit-panel__settings">
         {category === 'tiles' ? <TileVisibility /> : null}
+        {category === 'animations' ? <TileMotionPicker /> : null}
         {definitions.map((definition) => (
           <SchemaSetting
             key={definition.id}

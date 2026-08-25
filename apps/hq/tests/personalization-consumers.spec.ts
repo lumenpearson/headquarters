@@ -280,6 +280,80 @@ function patternSize(page: Page): Promise<string> {
   });
 }
 
+test('R19: a tile carries the motion its own entry names, over its group', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  await expect(page.locator('[data-tile="brief"]')).toBeVisible();
+  // The declared default, with nothing named.
+  await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-tile-motion', 'fade');
+
+  await seedSettings(page, {
+    // `summary` holds `brief` alone on this screen, so `events` is what proves
+    // a group rule reaches tiles the operator never named one by one.
+    'tiles.categoryAnimations': ['summary=rise', 'events=rise'],
+    'tiles.animations': ['overview:brief=scan'],
+  });
+  await page.reload();
+  await expect(page.locator('[data-tile="brief"]')).toBeVisible();
+
+  // The narrower setting wins: a group rule an operator cannot override for one
+  // tile is a rule they would have to abandon for the whole group.
+  await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-tile-motion', 'scan');
+  // Tiles the operator never named one by one take their group's motion.
+  await expect.poll(() => page.locator('[data-tile-motion="rise"]').count()).toBeGreaterThan(1);
+});
+
+test('R19: switching entering animation off overrules every per-tile choice', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, {
+    'tiles.animations': ['overview:brief=scan'],
+    'animations.tileEnter': false,
+  });
+  await page.goto('/overview');
+  await expect(page.locator('[data-tile="brief"]')).toBeVisible();
+
+  // A floor, not another tier.
+  await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-tile-motion', 'none');
+});
+
+test('R19: the edit panel gives a selected tile its own motion', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  await expect(page.locator('[data-tile="brief"]')).toBeVisible();
+  await page.keyboard.press('Control+Shift+E');
+  await expect(page.locator('.edit-mode-frame')).toBeVisible();
+
+  await page.locator('.edit-panel').getByRole('combobox', { name: 'Категория' }).click();
+  await page.getByRole('option', { name: 'АНИМАЦИИ / ANIMATIONS', exact: true }).click();
+  // Said rather than hidden: a control that appears only once the operator has
+  // done the thing it needs cannot teach them to do it.
+  await expect(page.locator('.edit-tile-motion__hint')).toBeVisible();
+
+  const tile = await page.locator('[data-tile="brief"]').boundingBox();
+  if (tile === null) throw new Error('the grid is not laid out');
+  await page.mouse.click(tile.x + 30, tile.y + 15);
+  await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-selected', 'true');
+
+  await page.getByRole('combobox', { name: /Движение плитки BRIEF/i }).click();
+  await page.getByRole('option', { name: 'РАЗВЁРТКА', exact: true }).click();
+
+  await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-tile-motion', 'scan');
+  // Stored as an ordinary setting, so it lands in undo, in the history and in
+  // the issue draft with everything else.
+  expect(await settingValue(page, 'tiles.animations')).toEqual(['overview:brief=scan']);
+});
+
+function settingValue(page: Page, id: string): Promise<unknown> {
+  return page.evaluate((settingId) => {
+    const raw = localStorage.getItem('gremuchaya-hq:operations:v3');
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw) as {
+      personalization?: { draft?: { values?: Record<string, unknown> } };
+    };
+    return parsed.personalization?.draft?.values?.[settingId] ?? null;
+  }, id);
+}
+
 function columnCount(page: Page): Promise<number> {
   return page.evaluate(() => {
     const grid = document.querySelector('.camera-grid');

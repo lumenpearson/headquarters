@@ -321,6 +321,8 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'tiles.order': 'Read by TileGrid, which orders tiles before layout.',
   'tiles.spans': 'Read by TileGrid, which sizes tiles before layout.',
   'tiles.hiddenCategories': 'Read by TileGrid, which drops whole groups before layout.',
+  'tiles.animations': 'Read by TileGrid, which gives a cell the motion its own entry names.',
+  'tiles.categoryAnimations': 'Read by TileGrid, when no per-tile entry names a motion.',
   'backgrounds.imageSource': 'Resolved to a material URL by OperationsShell, not to a token.',
   'backgrounds.videoSource': 'Resolved to a material URL by OperationsShell, not to a token.',
   'animations.enabled': 'Combined with production and accessibility state into one motion gate.',

@@ -191,6 +191,30 @@ const isTileCategoryList = withEditor(
 );
 
 const spanEntry = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*=[1-9][0-9]?x[1-9][0-9]?$/;
+/**
+ * `screen:tile=motion` and `category=motion`. Both carry the screen or the
+ * group in the key for the same reason spans do: a tile identifier is unique
+ * only within a screen, and `registry` is the table on four of them.
+ */
+const tileMotionEntry = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*=(none|fade|rise|scan)$/;
+const categoryMotionEntry = /^[a-z][a-z0-9-]*=(none|fade|rise|scan)$/;
+const isTileMotionList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string' && tileMotionEntry.test(item)),
+);
+const isCategoryMotionList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === 'string' &&
+        categoryMotionEntry.test(item) &&
+        (tileCategories as readonly string[]).includes(item.split('=')[0] ?? ''),
+    ),
+);
 const isSpanList = withEditor(
   { kind: 'string-list', delimiter: ',' },
   (value): value is readonly string[] =>
@@ -790,6 +814,22 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Draw the signal field behind the shell.',
     isBoolean,
+  ),
+  definition(
+    'tiles.animations',
+    'tiles',
+    [],
+    'device',
+    'Entering animation the operator chose per tile, as `screen:tile=motion` entries.',
+    isTileMotionList,
+  ),
+  definition(
+    'tiles.categoryAnimations',
+    'tiles',
+    [],
+    'device',
+    `Entering animation per tile group: ${tileCategories.join(', ')}, as \`group=motion\`.`,
+    isCategoryMotionList,
   ),
   definition(
     'layout.tileMinimumWidth',
