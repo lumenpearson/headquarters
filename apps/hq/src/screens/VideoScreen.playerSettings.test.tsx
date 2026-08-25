@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import type { ReactNode, Ref } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,6 +21,7 @@ const media = vi.hoisted(() => {
   interface StubPlayer {
     el: HTMLElement | null;
     playbackRate: number;
+    loop: boolean;
     volume: number;
     muted: boolean;
     paused: boolean;
@@ -40,6 +41,7 @@ const media = vi.hoisted(() => {
     const player: StubPlayer = {
       el: null,
       playbackRate: 1,
+      loop: false,
       volume: 1,
       muted: false,
       paused: true,
@@ -71,12 +73,19 @@ vi.mock('@vidstack/react', async () => {
     isVideoProvider: () => false,
     MediaProvider: () => null,
     MediaPlayer: forwardRef(function MediaPlayerStub(
-      props: { readonly className?: string; readonly children?: ReactNode },
+      props: {
+        readonly className?: string;
+        readonly children?: ReactNode;
+        readonly loop?: boolean;
+      },
       ref: Ref<unknown>,
     ) {
       const playerRef = useRef<ReturnType<typeof media.createPlayer> | null>(null);
       playerRef.current ??= media.createPlayer();
       const player = playerRef.current;
+      // `loop` is passed as a prop rather than written onto the instance, so the
+      // stub records it the way it records the properties the screen assigns.
+      player.loop = props.loop === true;
       useImperativeHandle(ref, () => player, [player]);
       return createElement(
         'div',
@@ -162,7 +171,7 @@ function latestObserver(): StubIntersectionObserver {
   return observer;
 }
 
-function patchSetting(id: string, value: number | boolean): void {
+function patchSetting(id: string, value: number | boolean | string): void {
   act(() => {
     operationsStore.getState().applySettingsPatch([{ id, value }]);
   });
@@ -213,6 +222,83 @@ describe('player.defaultRate', () => {
     patchSetting('player.defaultRate', 0.5);
 
     expect(latestPlayer().playbackRate).toBe(0.5);
+  });
+});
+
+describe('player.defaultVolume', () => {
+  it('opens the surface at the volume the setting names, and lets the screen win after', () => {
+    patchSetting('player.defaultVolume', 80);
+    render(<VideoScreen mode="live" />);
+
+    // Stored as a percentage: `numberWithin` takes its step from the bounds, so
+    // a 0..1 range would ship a slider stepping by whole units.
+    expect(latestPlayer().volume).toBeCloseTo(0.8, 5);
+  });
+
+  it('re-seeds a screen nobody touched when the setting moves', () => {
+    render(<VideoScreen mode="live" />);
+    expect(latestPlayer().volume).toBeCloseTo(0.35, 5);
+
+    patchSetting('player.defaultVolume', 10);
+
+    expect(latestPlayer().volume).toBeCloseTo(0.1, 5);
+  });
+});
+
+describe('player.loopDemo', () => {
+  it('stops repeating a finite source when the operator switches it off', () => {
+    render(<VideoScreen mode="live" />);
+    // The demo surveillance clip is finite, so it loops by default.
+    expect(latestPlayer().loop).toBe(true);
+
+    patchSetting('player.loopDemo', false);
+
+    expect(latestPlayer().loop).toBe(false);
+  });
+});
+
+describe('player.seekStep', () => {
+  it('names its own step on the control, so the button cannot promise one figure and move another', () => {
+    const { getByText } = render(<VideoScreen mode="live" />);
+    expect(getByText('[◀] -10S')).toBeTruthy();
+    expect(getByText('[▶] +10S')).toBeTruthy();
+
+    patchSetting('player.seekStep', 30);
+
+    expect(getByText('[◀] -30S')).toBeTruthy();
+    expect(getByText('[▶] +30S')).toBeTruthy();
+  });
+
+  /*
+   * What this does not prove, said rather than left to be assumed: the distance
+   * playback actually travels. `seekBy` reaches `requestPlaybackAction`, which
+   * publishes to the playback sync coordinator and returns before touching the
+   * player whenever a sync target exists -- which it does on this surface. The
+   * local position is therefore unchanged in this harness at every step size,
+   * and an assertion on it would pass for both 5 and 10 and prove nothing. The
+   * label above is a real consumer and the same variable feeds both it and the
+   * handler; the travelled distance belongs to a Playwright case against the
+   * real coordinator.
+   */
+});
+
+describe('cameras.ptzStep', () => {
+  it('moves the pad by the degrees the setting names', () => {
+    // The pad is only mounted on the camera wall, not the live surface.
+    const { getByText } = render(<VideoScreen mode="cameras" />);
+    expect(operationsStore.getState().ui.ptz.tilt).toBe(0);
+
+    act(() => {
+      fireEvent.click(getByText('▲'));
+    });
+    // Up is a negative tilt, and the schema default is 5.
+    expect(operationsStore.getState().ui.ptz.tilt).toBe(-5);
+
+    patchSetting('cameras.ptzStep', 20);
+    act(() => {
+      fireEvent.click(getByText('▲'));
+    });
+    expect(operationsStore.getState().ui.ptz.tilt).toBe(-25);
   });
 });
 

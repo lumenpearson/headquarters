@@ -4,6 +4,8 @@ import { useRef, useState } from 'react';
 import { MediaPlayer, MediaProvider, type MediaPlayerInstance } from '@vidstack/react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { useNumberSetting } from '@/application/personalization/useSetting';
+
 export function LocalMaterialPlayer({
   sourceUrl,
   title,
@@ -13,6 +15,7 @@ export function LocalMaterialPlayer({
 }) {
   const playerRef = useRef<MediaPlayerInstance>(null);
   const [paused, setPaused] = useState(true);
+  const seekStep = useNumberSetting('player.seekStep');
   const [muted, setMuted] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -52,20 +55,23 @@ export function LocalMaterialPlayer({
           onClick={() => {
             const player = playerRef.current;
             if (player === null) return;
-            player.currentTime = Math.max(0, player.currentTime - 10);
+            player.currentTime = Math.max(0, player.currentTime - seekStep);
           }}
         >
-          [◀] -10S
+          [◀] -{seekStep}S
         </TerminalButton>
         <TerminalButton
           size="small"
           onClick={() => {
             const player = playerRef.current;
             if (player === null) return;
-            player.currentTime = Math.min(player.duration || duration, player.currentTime + 10);
+            player.currentTime = Math.min(
+              player.duration || duration,
+              player.currentTime + seekStep,
+            );
           }}
         >
-          [▶] +10S
+          [▶] +{seekStep}S
         </TerminalButton>
         <TerminalButton
           size="small"

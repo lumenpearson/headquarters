@@ -12,7 +12,11 @@ import {
 } from '@vidstack/react';
 import { TerminalButton, TerminalSelect, TerminalSlider } from '@gremuchaya/ui/primitives';
 
-import { useBooleanSetting, useNumberSetting } from '@/application/personalization/useSetting';
+import {
+  useBooleanSetting,
+  useNumberSetting,
+  useStringSetting,
+} from '@/application/personalization/useSetting';
 import { Gauge, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import {
   BridgeMaterialClient,
@@ -51,8 +55,6 @@ import {
 } from '@/infrastructure/media/PlaybackSyncCoordinator';
 import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useOperationsStore } from '@/state/operationsStore';
-
-const cameraPageSize = 12;
 
 const playbackRateOptions = [0.5, 1, 1.5, 2, 4].map((rate) => ({
   value: String(rate),
@@ -181,6 +183,12 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   const playerRef = useRef<MediaPlayerInstance>(null);
   const decodeSuspended = useInactiveDecodeSuspension(playerRef);
   const defaultPlaybackRate = useNumberSetting('player.defaultRate');
+  const cameraPageSize = useNumberSetting('cameras.gridPageSize');
+  const seekStepSeconds = useNumberSetting('player.seekStep');
+  const loopDemoSource = useBooleanSetting('player.loopDemo');
+  const snapshotGrayscale = useBooleanSetting('player.snapshotGrayscale');
+  const configuredVolume = useNumberSetting('player.defaultVolume') / 100;
+  const configuredCameraFilter = useStringSetting('cameras.defaultFilter');
   const [duration, setDuration] = useState(18);
   const [currentTime, setCurrentTime] = useState(0);
   // `player.defaultRate` is the rate until the transport is used to pick one,
@@ -189,14 +197,33 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   // follows the setting wherever the operator puts it.
   const [chosenPlaybackRate, setChosenPlaybackRate] = useState<number | null>(null);
   const playbackRate = chosenPlaybackRate ?? defaultPlaybackRate;
-  const [volume, setVolume] = useState(0.35);
+  // Same shape as `player.defaultRate` above: a volume set on the screen
+  // outlives a later move of the setting, and a screen nobody touched follows
+  // it. Stored as a percentage because `numberWithin` takes its step from the
+  // bounds -- a 0..1 range would ship a slider that steps by whole units.
+  const [chosenVolume, setChosenVolume] = useState<number | null>(null);
+  const volume = chosenVolume ?? configuredVolume;
   const [muted, setMuted] = useState(true);
   const [failedCameraId, setFailedCameraId] = useState<string | null>(null);
   const [sourceOverride, setSourceOverride] = useState<{
     readonly cameraId: string;
     readonly source: string;
   } | null>(null);
-  const [cameraFilter, setCameraFilter] = useState<CameraRegistryFilter>('all');
+  /*
+   * Seeded, then re-seeded when the setting moves -- the shape
+   * `TacticalMapScreen` uses for `map.mode`. A `useState` initialiser would
+   * capture the factory default forever, because personalization hydrates from
+   * an effect after the first render.
+   */
+  const seededFilter: CameraRegistryFilter =
+    cameraFilterOptions.find((option) => option.value === configuredCameraFilter)?.value ?? 'all';
+  const [chosenFilter, setChosenFilter] = useState<CameraRegistryFilter | null>(null);
+  const [filterSeededFrom, setFilterSeededFrom] = useState<CameraRegistryFilter>(seededFilter);
+  if (filterSeededFrom !== seededFilter) {
+    setFilterSeededFrom(seededFilter);
+    setChosenFilter(null);
+  }
+  const cameraFilter = chosenFilter ?? seededFilter;
   const [cameraSort, setCameraSort] = useState<CameraRegistrySort>('registry');
   const [cameraPageIndex, setCameraPageIndex] = useState(1);
   const nativeConsumerSeed = useId();
@@ -326,7 +353,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
         page: cameraPageIndex,
         pageSize: cameraPageSize,
       }),
-    [cameraFilter, cameraPageIndex, cameras, cameraSort, streamRegistry],
+    [cameraFilter, cameraPageIndex, cameraPageSize, cameras, cameraSort, streamRegistry],
   );
   const cameraRegistryHealth = useMemo(
     () => ({
@@ -746,7 +773,10 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     canvas.height = video.videoHeight;
     const context = canvas.getContext('2d');
     if (context === null) return;
-    context.filter = 'grayscale(1) contrast(1.15)';
+    // The canvas draws from the raw element, so the CSS grade on
+    // `.video-main-feed__media` never reaches the file: this line alone is what
+    // makes an exported snapshot monochrome.
+    if (snapshotGrayscale) context.filter = 'grayscale(1) contrast(1.15)';
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     context.fillStyle = '#ff3d00';
     context.font = '22px monospace';
@@ -755,7 +785,10 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     link.href = canvas.toDataURL('image/png');
     link.download = `${selected?.id ?? 'camera'}-${Date.now()}.png`;
     link.click();
-  }, [selected?.id]);
+    // `snapshotGrayscale` belongs here: without it the callback keeps the value
+    // it closed over, and the setting would only take effect the next time some
+    // unrelated change rebuilt it.
+  }, [selected?.id, snapshotGrayscale]);
 
   const togglePictureInPicture = useCallback(() => {
     const player = playerRef.current;
@@ -926,7 +959,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             // source that finishes loading during that time starts decoding on
             // its own and no state change follows to stop it again.
             autoPlay={!decodeSuspended}
-            loop={!isWebcamSelected}
+            loop={!isWebcamSelected && loopDemoSource}
             muted={muted}
             playsInline
             preload="auto"
@@ -1062,8 +1095,8 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(-1 / selected.fps)}>
                 [|◀] FRAME
               </TerminalButton>
-              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(-10)}>
-                [◀] -10S
+              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(-seekStepSeconds)}>
+                [◀] -{seekStepSeconds}S
               </TerminalButton>
               <TerminalButton
                 tone="primary"
@@ -1072,8 +1105,8 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               >
                 {state.ui.videoPlaying ? '[Ⅱ] PAUSE' : '[▶] PLAY'}
               </TerminalButton>
-              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(10)}>
-                [▶] +10S
+              <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(seekStepSeconds)}>
+                [▶] +{seekStepSeconds}S
               </TerminalButton>
               <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(1 / selected.fps)}>
                 [▶|] FRAME
@@ -1123,7 +1156,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               <TerminalSlider
                 className="video-volume"
                 value={volume * 100}
-                onValueChange={(value) => setVolume(value / 100)}
+                onValueChange={(value) => setChosenVolume(value / 100)}
                 label="Громкость"
                 min={0}
                 max={100}
@@ -1209,7 +1242,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               value={cameraFilter}
               options={cameraFilterOptions}
               onValueChange={(value) => {
-                setCameraFilter(value as CameraRegistryFilter);
+                setChosenFilter(value as CameraRegistryFilter);
                 setCameraPageIndex(1);
               }}
               label="Фильтр камер"
@@ -1547,13 +1580,16 @@ function abbreviateMaterialName(value: string): string {
 
 function PtzPanel() {
   const ptz = useOperationsStore((state) => state.ui.ptz);
+  // Zoom keeps its own 0.15 step: it is a factor, not an angle, and binding it
+  // to a setting measured in degrees would change zoom at the default.
+  const step = useNumberSetting('cameras.ptzStep');
   const adjust = useOperationsStore((state) => state.adjustPtz);
   const setSpeed = useOperationsStore((state) => state.setPtzSpeed);
   return (
     <Panel title="PTZ CONTROL" eyebrow="VIRTUAL CROP / LOCAL" className="ptz-panel">
       <div className="ptz-pad">
-        <TerminalButton onClick={() => adjust('tilt', -5)}>▲</TerminalButton>
-        <TerminalButton onClick={() => adjust('pan', -5)}>◀</TerminalButton>
+        <TerminalButton onClick={() => adjust('tilt', -step)}>▲</TerminalButton>
+        <TerminalButton onClick={() => adjust('pan', -step)}>◀</TerminalButton>
         <TerminalButton
           onClick={() => {
             adjust('pan', -ptz.pan);
@@ -1562,8 +1598,8 @@ function PtzPanel() {
         >
           ●
         </TerminalButton>
-        <TerminalButton onClick={() => adjust('pan', 5)}>▶</TerminalButton>
-        <TerminalButton onClick={() => adjust('tilt', 5)}>▼</TerminalButton>
+        <TerminalButton onClick={() => adjust('pan', step)}>▶</TerminalButton>
+        <TerminalButton onClick={() => adjust('tilt', step)}>▼</TerminalButton>
       </div>
       <div className="ptz-controls">
         <TerminalButton onClick={() => adjust('zoom', 0.15)}>[+] ZOOM</TerminalButton>

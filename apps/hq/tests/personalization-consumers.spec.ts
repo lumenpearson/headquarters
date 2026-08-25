@@ -345,6 +345,36 @@ test('R19: the edit panel gives a selected tile its own motion', async ({ page }
   expect(await settingValue(page, 'tiles.animations')).toEqual(['overview:brief=scan']);
 });
 
+test('R6: the camera registry pages by the size the operator sets', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/video/cameras');
+  const cards = page.locator('.camera-grid > button');
+  await expect(cards.first()).toBeVisible();
+  const atDefault = await cards.count();
+
+  await seedSettings(page, { 'cameras.gridPageSize': 4 });
+  await page.reload();
+  await expect(cards.first()).toBeVisible();
+
+  // Four is below the registry's size, so the page genuinely truncates; the
+  // constant behind this was `const cameraPageSize = 12` and no setting read it.
+  await expect.poll(() => cards.count()).toBe(4);
+  expect(atDefault).toBeGreaterThan(4);
+});
+
+test('R6: the camera registry opens on the filter the operator chose', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, { 'cameras.defaultFilter': 'alert' });
+  await page.goto('/video/cameras');
+
+  const filter = page.getByRole('combobox', { name: 'Фильтр камер' });
+  await expect(filter).toBeVisible();
+  // Seeded rather than initialised: personalization hydrates from an effect
+  // after the first render, so a `useState` initialiser would have captured the
+  // factory default and this would still read ВСЕ КАНАЛЫ.
+  await expect(filter).toContainText('ТОЛЬКО ALERT');
+});
+
 function settingValue(page: Page, id: string): Promise<unknown> {
   return page.evaluate((settingId) => {
     const raw = localStorage.getItem('gremuchaya-hq:operations:v3');
