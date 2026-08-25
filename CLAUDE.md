@@ -15,9 +15,10 @@ protocol,ui,layout-engine,settings-schema,test-fixtures}`.
 
 ## Commands
 
-Requires Node 24.3+, pnpm 10.12.3+ (`.tool-versions` pins 10.12.3; `package.json`'s `packageManager`
-field currently pins corepack to pnpm@11.22.0 — treat `packageManager` as authoritative if the two
-disagree), Rust/Cargo 1.88+ for desktop builds. Primary dev/release target is Windows (NSIS installer,
+Requires Node 24.3+, pnpm 10.12.3+ (`.tool-versions`, `.nvmrc` and `package.json`'s
+`packageManager` all pin the same versions; `packageManager` is authoritative if they ever
+disagree), Rust/Cargo 1.88+ for desktop builds. The native RTSP gateway additionally needs ffmpeg
+on PATH or a path in `HQ_FFMPEG_PATH`. Primary dev/release target is Windows (NSIS installer,
 WebView2 Runtime required); commands below are PowerShell-oriented.
 
 ```powershell
@@ -149,8 +150,9 @@ routing fallback (ADR 0006).
 
 A three-tier virtual filesystem (ADR 0002): the browser File System Access API, the localhost
 gRPC-Web file-bridge (`apps/file-bridge`, opt-in, read-only by default — ADR 0003), and native Tauri
-roots, merged by a `CompositeFileSource` behind branded virtual paths so physical filesystem paths
-never leak into the UI. Real nodes shadow an emulated/config-defined node at the same virtual path.
+roots. Four `FileSourcePort` adapters are merged by `ExplorerService.list` over the domain's
+`mergeExplorerNodes`, behind branded virtual paths, so physical filesystem paths never leak into
+the UI. Real nodes shadow an emulated/config-defined node at the same virtual path.
 
 ### Further reading
 

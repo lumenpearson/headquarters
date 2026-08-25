@@ -12,13 +12,15 @@ local-first; сеть требуется только для опциональ�
 - Next.js 16.3 App Router, React 19.2, React Compiler и Turbopack;
 - 18 взаимосвязанных оперативных маршрутов: обзор, объекты, дела, карта, видео, связь, файлы,
   архив, аналитика, отчёты, поиск, настройки, система и детальные карточки;
-- единый Zustand-store с нормализованными сущностями, локальной persistence и синхронизацией
-  BroadcastChannel между окнами;
+- два Zustand-store — оперативный снимок с нормализованными сущностями и локальной persistence
+  и небольшой держатель runtime-состояния — с синхронизацией BroadcastChannel между окнами;
 - детерминированная симуляция событий, телеметрии, каналов и системных ресурсов с паузой и
   масштабом времени;
 - полноэкранная production-панель: 9 пресетов, camera-safe, фиксированные часы, 6 monitor ID,
   auto-demo и continuity snapshots;
-- терминальный квадратный UI для 720p, Full HD, ultrawide и 4K: без скруглений, blur и теней;
+- терминальный квадратный UI для 720p, Full HD, ultrawide и 4K: без скруглений и теней, с восемью
+  темами — от `terminal-red` по умолчанию до `light-operations` и двух high-contrast — и четырьмя
+  режимами подачи;
 - полноразмерная flex/grid-матрица без фиксированного `max-width`: панели занимают доступный монитор,
   а плотные экраны используют внутреннюю прокрутку вместо обрезки или горизонтального overflow;
 - CCTV-плеер на Vidstack React 1.15.6 с собственной terminal-компоновкой: demo/archive timeline,
@@ -27,12 +29,17 @@ local-first; сеть требуется только для опциональ�
   источник, а остальные каналы используют статические thumbnails; штатные источники — встроенные
   демо-ролики, назначенные локальные материалы и явно разрешённая пользователем веб-камера;
 - тактическая карта на Yandex Maps JavaScript API v3 с объектами, маршрутами, тревогами,
-  ограниченными зонами, датчиками и сохранением географического viewport;
+  ограниченными зонами, датчиками и сохранением географического viewport; настройка `map.mode`
+  даёт три представления — `tactical`, `map` и `satellite`, причём последнее намеренно скрывает
+  зоны, датчики и маршруты, пока к нему не подключены снимки;
 - типизированные domain/application/infrastructure/UI границы в Turborepo;
 - Base UI 1.7 как headless-основа 25 публичных Terminal-компонентов без изменения терминальной
   дизайн-системы; прямые Base UI imports и нативные JSX-controls вне `packages/ui` запрещены CI;
-- безопасный персонализационный draft: schema-bound темы, плотность, фон, анимации, category/all
-  reset, discard/publish, JSON export и локальная история без arbitrary HTML/CSS/JS;
+- безопасный персонализационный draft: 71 schema-bound определение в 32 категориях и 7 разделах —
+  темы, стили, цвета, типографика, фон, узоры, плотность, плитки, анимации, таблицы, доступность,
+  плеер, карта, локализация — с поиском по всему каталогу, фильтром «только изменённые»,
+  category/all reset, undo/redo, discard/publish, JSON export и import со схемной проверкой и
+  локальной историей, без arbitrary HTML/CSS/JS;
 - общий deterministic `@gremuchaya/layout-engine`: bounded tile packing, compact presentation,
   relocation и explicit overflow policy вместо document-scroll как способа скрыть контент;
 - версионированный Protobuf-контур `gremuchaya.*.v1`: common, control, materials, settings, sync,
@@ -51,6 +58,11 @@ local-first; сеть требуется только для опциональ�
   traversal/symlink escape, бинарным gRPC-Web, server-streaming watcher и
   явным opt-in для ограниченного локального импорта в `shared/materials`;
 - Tauri-команды для мониторов, managed windows, безопасного чтения и native watcher;
+- режим редактирования `Ctrl+Shift+E`: скрыть плитку или целую группу по имени прямо на экране,
+  переупорядочить и растянуть их, с необязательным каналом live-edit, который открывается только
+  при явном включении `advanced.liveEdit`;
+- контекстные меню по правой кнопке над оболочкой и записями, карточка сочетаний `Ctrl+/` и
+  терминальная последовательность запуска;
 - скрытый инженерный контур, simulation flags, локальные snapshots, JSON export;
 - local placeholders и runtime asset override без изменения scene-файлов.
 
@@ -80,10 +92,15 @@ pnpm dev:hq
 - `/scene/s02-58/` — прямой вход в сцену;
 - `/dev/` — защищённый прямой вход в инженерный контур.
 
-В новом штабе `Ctrl+K` открывает глобальный поиск, `Ctrl+Shift+P` — production-панель, `F` —
-fullscreen, цифры `1–9` переключают разделы, `Space` управляет видеопотоком, `Esc` закрывает
-drawer или production-панель. В совместимом `/control/` сохранены прежние сочетания и инженерный
-overlay `Ctrl+Shift+Alt+D`.
+В новом штабе действует одна из трёх схем, которую выбирает настройка `keybinds.scheme`. В схеме
+по умолчанию `terminal-default`: `Ctrl+K` открывает глобальный поиск, `Ctrl+Shift+P` —
+production-панель, `F` — fullscreen, цифры `1–9` переключают разделы, `Space` управляет
+видеопотоком, `Ctrl+/` показывает карточку сочетаний, `Ctrl+Shift+E` включает режим
+редактирования, `Esc` закрывает drawer или production-панель. Схема `accessibility` заменяет
+многомодификаторные аккорды функциональными клавишами и одиночным Ctrl, `vim-inspired` — на
+`hjkl`, `/` и последовательности с префиксом `g`. Актуальный список всегда виден по `Ctrl+/` и в
+разделе «НАСТРОЙКИ». Реестр смонтирован на весь документ, поэтому те же клавиши и инженерный
+overlay `Ctrl+Shift+Alt+D` работают и на совместимом `/control/`.
 
 На экране «ФАЙЛЫ» сочетание `Ctrl+Shift+Alt+S` открывает скрытый локальный import dialog. Он
 доступен только при явном opt-in loopback bridge из раздела ниже; если bridge не запущен или
@@ -91,36 +108,51 @@ overlay `Ctrl+Shift+Alt+D`.
 
 ### Черновик персонализации
 
-В «НАСТРОЙКИ» работает локальный **SAFE DRAFT**. Тема, плотность, фон и анимации применяются как
+В «НАСТРОЙКИ» работает локальный **SAFE DRAFT**. Каталог из 71 настройки — от темы и плотности до
+межбуквенного интервала, ширины фокусного кольца и размера страницы таблиц — применяется как
 обратимый preview, а `[CTRL+ENTER] ОПУБЛИКОВАТЬ` атомарно фиксирует revision. `[R]` сбрасывает
-категорию, `[RR]` — весь draft, `[ESC]` отменяет неподтверждённые изменения, `[↓]` формирует
-JSON export. Значения проходят централизованную schema validation, поэтому ни сохранённый draft,
-ни будущий edit mode не могут внедрить HTML, JavaScript или произвольное CSS.
+категорию, `[RR]` — весь draft, `[CTRL+Z]` и `[CTRL+Y]` отменяют и повторяют шаг, `[ESC]`
+отменяет неподтверждённые изменения, `[↓]` формирует JSON export, `[↑]` принимает его обратно
+через ту же schema validation. Значения проходят централизованную schema validation, поэтому ни
+сохранённый draft, ни edit mode не могут внедрить HTML, JavaScript или произвольное CSS.
+
+Из 71 определения 42 привязаны к корню документа один к одному, 23 читает названный потребитель,
+два складываются в одно вычисленное свойство, а четыре — `localization.locale`,
+`simulation.preset`, `groups.authority` и `titlebar.alignment` — пока не читает никто: их
+функции ещё нет. Учёт ведётся в `apps/hq/src/application/personalization/presentation.ts`, где
+тест не даёт пятому определению тихо присоединиться к этим четырём.
 
 ## Терминальный режим оператора
 
 Весь интерфейс собран на Signal Mesh design system: глубокий чёрный холст, тонкие серые rails,
 яркий красно-оранжевый системный сигнал, белая/дымчатая типографика, ASCII-поле, прямые углы,
 bracket controls и выделенные верхней оранжевой линией панели. Заголовки используют крупный
-геометрический sans, данные — моноширинный шрифт. Декоративные скругления, тени, стекло и blur
-отключены во всём операторском контуре, включая совместимые scene/wall/control маршруты.
-Навигация и действия доступны мышью и терминальными сочетаниями:
+геометрический sans, данные — моноширинный шрифт. Это тема по умолчанию: настройка `themes.id`
+даёт ещё семь, включая `light-operations` и две high-contrast. Декоративные скругления и тени
+отключены во всём операторском контуре, включая совместимые scene/wall/control маршруты, —
+радиус равен нулю в самих токенах. Blur остаётся ровно в двух местах: подложка палитры команд и
+панель разработчика, — и как явная настройка `backgrounds.blur` для операторского фонового
+изображения или видео. Навигация и действия доступны мышью и терминальными сочетаниями схемы
+`terminal-default`:
 
 - `1–9` — основные разделы;
 - `Ctrl+K` — глобальный поиск;
 - `Ctrl+Shift+P` — production-панель;
 - `F` — fullscreen / kiosk;
 - `Space` — play/pause в видеоконтуре;
+- `Ctrl+/` — карточка сочетаний;
+- `Ctrl+Shift+E` — режим редактирования;
 - `Esc` — закрыть drawer или production-панель.
 
-Совместимый `/control/` сохраняет клавиши сценового оператора:
+Клавиши сценового оператора живут в том же реестре и той же схеме; на `/control/` их владелец —
+сценовая оболочка:
 
-- `F2` — Virtual Explorer;
-- `F3` — карта;
+- `F2` — раздел «ФАЙЛЫ» с Virtual Explorer;
+- `F3` — раздел «КАРТА»;
 - `F7` — предыдущий cue;
 - `F8` — выполнить следующий cue;
 - `F9` — сбросить текущую сцену;
-- `Ctrl+K` — командная строка `:COMMAND`;
+- `Ctrl+Shift+K` — командная строка `:COMMAND`;
 - `Esc` — закрыть командную строку;
 - `Ctrl+Shift+Alt+D` — инженерный контур.
 
@@ -142,7 +174,9 @@ pnpm bridge
 
 В `bridge.config.json` замените `mounts[].root` на точный каталог съёмочной машины. Bridge слушает
 только `127.0.0.1`, принимает только разрешённые Origin и обслуживает бинарный gRPC-Web поверх
-HTTP/1.1. REST `/v1/*` и WebSocket endpoints отсутствуют. Контракт находится в
+HTTP/1.1. Прикладного REST и WebSocket endpoints нет: единственный не-gRPC путь —
+`/v1/material-playback/…`, data plane для байтовых диапазонов крупного локального медиа,
+описанный ниже. Контракт находится в
 `packages/protocol/proto/gremuchaya/bridge/v1/bridge.proto`: unary RPC `Health`/`List`,
 material-import RPC и server-streaming RPC `ReadFile`/`ReadImportedMaterial`/`Watch`.
 Статические runtime JSON остаются локальными ресурсами приложения и не являются сетевым REST API.
@@ -171,10 +205,12 @@ GRPC-WEB`; UI передаёт файл в ограниченных Protobuf-ч�
 отображает cursor-paginated recent list. Локальный viewer уже безопасно показывает изображения,
 PDF, plain/structured text и local audio/video: содержимое читается тем же gRPC-Web stream и
 только в ограниченные 2 MiB (text) либо 32 MiB (image/PDF/media) buffers. Последний вариант
-использует тот же custom Vidstack player. Oversized и неизвестные типы не исполняются и остаются
-metadata-only до специализированных streaming viewers. Это пока локальный foundation: облачный
-Blob, долгоживущие resumable-сессии после перезапуска, версии, корзина, преобразования и
-межклиентская синхронизация ещё не включены.
+использует тот же custom Vidstack player. Крупное локальное аудио и видео в буфер не читается:
+viewer запрашивает playback-grant и играет файл диапазонами через тот же loopback data plane.
+Metadata-only остаются только неизвестные типы и превысившие лимит изображения, PDF и текст.
+Это пока локальный foundation: облачный Blob, преобразования и межклиентская синхронизация в
+браузерном контуре ещё не включены. Версии, корзину и возобновляемую загрузку уже реализует
+`MaterialService` control-plane, но клиента к нему в `apps/hq` нет ни одного.
 
 ### Control-plane foundation
 
@@ -192,22 +228,43 @@ git. Без него сервис поднимается в health-only режи
 `--env-file-if-exists`, а не `--env-file`, чтобы отсутствие файла не ломало `pnpm dev`.
 
 RPC `gremuchaya.control.v1.ControlPlaneService/Health` и `GetCapabilities` доступны через
-Connect/gRPC-Web. Каждая capability выводится из того, что корень композиции действительно
-собрал, а не из константы: `sync` включается вместе с устойчивым журналом событий,
+Connect/gRPC-Web. Каждая из десяти capability выводится из того, что корень композиции
+действительно собрал, а не из константы: `sync` включается вместе с устойчивым журналом событий,
 `sync.device-lifecycle` — вместе с durable-рантаймом, `sync.realtime-admission` — вместе с
-допуском. `Health` отдельно сообщает состояние `database` и `redis`, читая его из
-конфигурации, а не проверяя соединением: health-check, открывающий сеть, падал бы по
-причине, не имеющей отношения к тому, обслуживает ли сервис запросы. Endpoint
-`/api/health` намеренно отсутствует: прикладной REST не используется.
+допуском, а `materials`, `settings`, `telemetry` и `integration` — вместе с соответствующими
+durable-хранилищами. Health-only запуск объявляет включёнными только `control.health` и два
+транспорта. В полной конфигурации `Health` отдельно сообщает состояние `database` и `redis`,
+читая его из конфигурации, а не проверяя соединением: health-check, открывающий сеть, падал бы
+по причине, не имеющей отношения к тому, обслуживает ли сервис запросы; в health-only режиме
+список зависимостей пуст — сообщать не о чем. Endpoint `/api/health` намеренно отсутствует:
+прикладной REST не используется.
 
 `SyncService` реализован целиком: семнадцать объявленных RPC плюс `GetDocumentSnapshot`,
 добавленный в F6 — без него `ResyncRequired` говорил клиенту «возьми снимок», а взять его
 было неоткуда.
 
-Первичная schema Neon подготовлена как проверяемая версия `0001_control_plane_foundation`.
-Соединение не открывается при старте health-only сервиса: чтобы применить миграции к
-предварительно созданной приватной базе Neon, пользователь задаёт секрет только в окружении
-процесса и запускает отдельную команду:
+Рядом с ним зарегистрированы ещё четыре сервиса того же контракта: `SettingsService` (13 RPC),
+`MaterialService` (16 RPC, включая версии, корзину и streaming `WatchMaterialEvents`),
+`TelemetryService` (7 из 10 — `ListDataSources`, `GetTelemetrySnapshot` и `StreamTelemetry`
+намеренно оставлены `unimplemented` до отдельного источника телеметрии) и `IntegrationService`
+(7 RPC). RPC, которым нужен не заданный здесь секрет — выдача storage-grant, GitHub-egress, —
+отвечают `FAILED_PRECONDITION` или `unimplemented` с именем недостающего, а не пустым успехом.
+
+Все пять сервисов включаются только вместе с durable auth. Для этого нужны
+`HQ_CONTROL_PLANE_DATABASE_URL` и две независимые серверные тайны не короче 32 непробельных
+символов — `HQ_CONTROL_PLANE_AUTH_TOKEN_PEPPER` и `HQ_CONTROL_PLANE_BOOTSTRAP_SECRET`. Полный
+список с границами TTL — в `apps/control-plane/.env.example`. Без них поднимается только
+`ControlPlaneService`.
+
+Ни один из пяти сервисов пока не вызывается из приложения: в `apps/hq` есть только два
+ConnectRPC-клиента, и оба идут в локальный `FileBridgeService`.
+
+Schema Neon разложена на восемь проверяемых миграций — от `0001_control_plane_foundation` до
+`0008_service_documents_and_receipt_scopes`; вместе они создают 30 постоянных таблиц. `0007`
+добавляет `group_event_sequences`, откуда PostgreSQL выдаёт номера событий, а `0008` — документы
+сервисов настроек, материалов, телеметрии и интеграций. Соединение не открывается при старте
+health-only сервиса: чтобы применить миграции к предварительно созданной приватной базе Neon,
+пользователь задаёт секрет только в окружении процесса и запускает отдельную команду:
 
 ```powershell
 $env:HQ_CONTROL_PLANE_DATABASE_URL = "postgresql://<role>:<password>@<neon-host>/<database>?sslmode=require"
@@ -215,11 +272,18 @@ pnpm --filter @gremuchaya/control-plane migrate
 ```
 
 Мигратор использует таблицу `hq_schema_migrations`, SHA-256 checksum и PostgreSQL advisory
-transaction lock. URL базы и любые другие секреты не попадают в репозиторий, браузерный bundle
-или gRPC-ответы.
+transaction lock. Ту же процедуру выполняет сам сервер при старте в полной конфигурации: он
+завершает миграции до регистрации первого RPC. URL базы и любые другие секреты не попадают в
+репозиторий, браузерный bundle или gRPC-ответы.
 
-Для presence, lease лидера сессии, sequence и rate limit control-plane использует отдельный
-ленивый Upstash Redis adapter. Для включения надо передать **обе** server-only переменные;
+Тот же `.env` читает и `vitest.config.ts`, поэтому на машине с заданным
+`HQ_CONTROL_PLANE_TEST_DATABASE_URL` `pnpm test` дополнительно выполняет десять наборов против
+настоящего PostgreSQL: они создают и удаляют базы `hqtest_*` рядом с указанной и отказываются
+работать, если URL совпадает с боевым. CI эту переменную не задаёт, поэтому наборы там
+пропускаются целиком.
+
+Для presence и ограничения частоты публикаций control-plane использует отдельный ленивый Upstash
+Redis adapter. Для включения надо передать **обе** server-only переменные;
 одна переменная без другой отклоняется при запуске:
 
 ```powershell
@@ -241,7 +305,9 @@ PostgreSQL остаётся источником истины. Redis содер�
 `nextSequence` сознательно не подключён. Он возвращает `number`, что теряет точность против
 `GroupEvent.sequence`, а сброс Redis отмотал бы счётчик вразрез с `sync_events.sequence`,
 чьё уникальное ограничение после этого начало бы отклонять публикации. Номера событий
-выдаёт PostgreSQL — таблица `group_event_sequences`.
+выдаёт PostgreSQL — таблица `group_event_sequences`. Вместе с ним не подключён и lease лидера
+сессии: он реализован в адаптере, но авторитет группы пока живёт в `groups.leader_device_id`, а
+не в истекающем ключе.
 
 #### Realtime transport
 
@@ -252,11 +318,13 @@ PostgreSQL остаётся источником истины. Redis содер�
 состояние. Text frames и повреждённые Protobuf messages получают типизированный error envelope;
 upgrade с неразрешённого Origin отвергается.
 
-Этот слой уже проверяет reconnect/replay в интеграционном тесте, но пока является
-однопроцессным transport foundation: authentication/pairing и cross-instance durable fanout будут
-подключены к SyncService и PostgreSQL/Redis до production-развёртывания. Реальный Vercel проект,
-секреты и WebSocket provider не настраиваются автоматически и требуют отдельного интерактивного
-входа пользователя.
+Этот слой аутентифицирован: допуск проверяет тот же access-token, группу и устройство, что и
+SyncService, и перепроверяет их перед каждой защищённой операцией. Историю переигрывает не память
+процесса, а таблица `sync_events`, поэтому перезапущенный control-plane отвечает на resume теми
+же событиями. Незакрытым остаётся одно: живая рассылка между несколькими экземплярами — набор
+слушателей принадлежит процессу, а Upstash REST не даёт pub/sub, поэтому разрыв закрывает
+очередной resume клиента. Реальный Vercel проект, секреты и WebSocket provider не настраиваются
+автоматически и требуют отдельного интерактивного входа пользователя.
 
 Полный исходный контракт находится в `packages/protocol/proto/gremuchaya/*/v1`. После изменения
 `.proto` необходимо выполнить:
@@ -424,6 +492,9 @@ Zod-валидацию до инициализации UI; некорректн�
 ## Проверки
 
 ```powershell
+pnpm format:check
+pnpm check:ui-boundary
+pnpm check:protocol-generation
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -433,14 +504,18 @@ pnpm build:offline
 pnpm test:cargo
 ```
 
-Полный release gate: `pnpm check:release`. Нативная упаковка: `pnpm tauri:build`; проверенный
-Windows NSIS installer появится в `apps/hq/src-tauri/target/release/bundle/nsis/`.
+Полный локальный gate: `pnpm check` — он же запускает `check:ui-boundary` и
+`check:protocol-generation`, без которых устаревшие сгенерированные bindings и прямые Base UI
+imports проходят незамеченными. Полный release gate: `pnpm check:release`; Prettier и
+`cargo fmt`/`cargo clippy` в него не входят и выполняются отдельно, как в CI. Нативная упаковка:
+`pnpm tauri:build`; проверенный Windows NSIS installer появится в
+`apps/hq/src-tauri/target/release/bundle/nsis/`.
 
 ## Архитектурные документы
 
 - [Карта зависимостей](docs/architecture/dependency-map.md)
-- [Scene state machines](docs/architecture/adr/0004-scene-state-machines.md)
-- [Offline/static routes](docs/architecture/adr/0006-static-export-routes.md)
+- [Information state machines](docs/adr/0004-information-state-machines.md)
+- [Offline/static routes](docs/adr/0006-static-route-generation.md)
 - [Release runbook](docs/release/runbook.md)
 - [Известные ограничения](docs/release/known-limitations.md)
 - [Protobuf control-plane contracts](docs/adr/0008-control-plane-protobuf-contracts.md)

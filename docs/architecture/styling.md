@@ -5,12 +5,13 @@ why the seams are where they are.
 
 ## Ownership
 
-| Concern                               | Owner                                                         |
-| ------------------------------------- | ------------------------------------------------------------- |
-| Colour, spacing, typography, motion   | `packages/ui/src/styles/tokens.css` — the single source       |
-| Operational shell, screens, scenes    | `apps/hq/src/styles/*.css` plus Tailwind utilities            |
-| Scene-agnostic interactive primitives | `packages/ui/src/primitives/` (`Terminal*`, wrapping Base UI) |
-| Richer generated components           | `packages/ui/src/shadcn/` (shadcn/ui, `base-maia` preset)     |
+| Concern                                    | Owner                                                            |
+| ------------------------------------------ | ---------------------------------------------------------------- |
+| Portal and primitive colour, spacing, type | `packages/ui/src/styles/tokens.css` — dark-only, no variants     |
+| Operational shell colour and its 8 themes  | `--ops-*` on `.ops-shell` in `apps/hq/src/styles/operations.css` |
+| Operational shell, screens, scenes         | `apps/hq/src/styles/*.css` plus Tailwind utilities               |
+| Scene-agnostic interactive primitives      | `packages/ui/src/primitives/` (`Terminal*`, wrapping Base UI)    |
+| Richer generated components                | `packages/ui/src/shadcn/` (shadcn/ui, `base-maia` preset)        |
 
 The terminal design system owns the product's appearance. shadcn/ui supplies
 components, not the look.
@@ -44,7 +45,10 @@ runtime theme or density change moves the utilities and the hand-written CSS
 together.
 
 The shadcn preset keeps its own unprefixed vocabulary (`bg-background`,
-`bg-primary`, `border-border`, …).
+`bg-primary`, `border-border`, …). Its dark variants never apply: nothing in
+the app sets the `dark` class the preset’s `@custom-variant` keys off — the
+body carries `terminal-theme` — so a shadcn component arrives in the preset’s
+light palette regardless of the active terminal theme.
 
 The prefix is not decoration. Both systems define `--accent`, and they mean
 different things: `#ff3d00` is the product's signature colour, while the
@@ -66,6 +70,27 @@ The preset wires Geist through `next/font/google` and points `--font-mono` at
 it. That is **not** adopted. The terminal type stacks are part of the product's
 look, and `next/font/google` fetches at build time, which conflicts with the
 offline-first desktop target. Typography stays owned by `tokens.css`.
+
+### How a setting reaches the document
+
+Personalization does not write CSS. `apps/hq/src/application/personalization/presentation.ts`
+holds one table from setting id to either a `data-*` attribute or an `--ops-*`
+custom property on the shell root, and `OperationsShell` applies the resolved
+pair. Adding a setting means adding a binding there, or listing the setting in
+`settingsWithoutPresentation` with the consumer that reads it instead;
+`presentation.test.ts` fails on any definition that is neither.
+
+A default is the absence of a rule, not a rule carrying a neutral value. A
+`letter-spacing`, `font-weight` or `min-height` declaration written at the shell
+root outranks every lower-specificity value the design already set, and
+`var(--x)` with no `--x` resolves to `unset` rather than to the value
+underneath. So a custom property is emitted only once an operator has moved it
+off the definition default, and a setting whose neutral value would still be a
+declaration — `typography.weight`, `typography.accentWeight`,
+`sizes.controlHeight` — travels as an attribute the stylesheet keys off
+instead. This is also why a new rule belongs at its original declaration site:
+appended at the end of a six-thousand-line stylesheet it outranks every
+responsive and per-screen variant above it.
 
 ## Adding a shadcn component
 
@@ -117,8 +142,13 @@ second design language.
 
 The existing hand-written CSS has **not** been migrated to Tailwind utilities.
 Tailwind is wired up, tokens are bridged, and utilities are available; converting
-`hq.css`, `terminal.css` and `operations.css` is a separate, screen-by-screen
-migration that needs visual verification per screen. Nothing in this change
+`hq.css`, `terminal.css`, `operations.css`, `edit.css`, `startup.css`,
+`keybinds.css` and `interaction.css` is a separate, screen-by-screen migration
+that needs visual verification per screen. Nothing in this change
 alters how any existing screen renders — that was the constraint it was built
 under, and the build output was checked for it (`--accent` still resolves to
 `#ff3d00`, no preflight rules in the emitted CSS).
+
+No screen imports from `@gremuchaya/ui/shadcn` yet — `button` is the only
+component the preset has generated — and no `hq-` utility appears in a
+component. The bridge exists so the first conversion does not have to build it.

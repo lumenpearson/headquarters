@@ -46,10 +46,12 @@ pnpm --filter @gremuchaya/protocol generate
 Минимум для любой задачи:
 
 ```powershell
+pnpm format:check
 pnpm typecheck
 pnpm lint
 pnpm test
 pnpm check:ui-boundary
+pnpm check:protocol-generation
 ```
 
 Полный локальный шлюз:
@@ -64,13 +66,17 @@ pnpm check
 | ---------------------------- | ----------------------------------------------------------------------------------- |
 | UI и пользовательские потоки | `pnpm test:ui`                                                                      |
 | Rust / `src-tauri`           | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `pnpm test:cargo` |
-| Сборка и экспорт             | `pnpm build`, `pnpm build:desktop:web`                                              |
+| Сборка и экспорт             | `pnpm build:web`, `pnpm build:desktop:web`                                          |
 | Перед днём съёмки            | `pnpm check:release`                                                                |
+
+На каждый pull request CI прогоняет `pnpm format:check`, обе сборки, `pnpm test:ui` и
+полный набор Rust-проверок независимо от того, что менялось. Строки выше — о том, что
+стоит прогнать локально, а не о том, что запустится.
 
 Запуск одного файла тестов:
 
 ```powershell
-pnpm --filter @gremuchaya/hq test -- src/state/someSlice.test.ts
+pnpm --filter @gremuchaya/hq test -- src/state/operationsStore.test.ts
 pnpm --filter @gremuchaya/control-plane test -- src/sync/runtime.test.ts
 ```
 
@@ -94,7 +100,8 @@ Conventional Commits:
 ```
 
 Типы: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`,
-`revert`. Проверяется хуком `commit-msg`.
+`revert`. Проверяется хуком `commit-msg`: он же отклоняет заголовок длиннее 100 символов и
+строки, начинающиеся с `Co-Authored-By`, `Generated with` или `Assisted-by`.
 
 Правила:
 

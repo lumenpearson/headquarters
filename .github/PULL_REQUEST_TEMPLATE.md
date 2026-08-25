@@ -43,16 +43,19 @@
 -->
 
 ```text
+pnpm format:check →
 pnpm typecheck →
 pnpm lint      →
 pnpm test      →
 pnpm check:ui-boundary →
+pnpm check:protocol-generation →
 ```
 
-Дополнительно, если применимо:
+CI прогоняет всё перечисленное ниже на каждый pull request, независимо от того, что
+менялось. Отметьте то, что прогнали локально:
 
 - [ ] `pnpm test:ui` — Playwright
-- [ ] `pnpm build` и `pnpm build:desktop:web`
+- [ ] `pnpm build:web` и `pnpm build:desktop:web`
 - [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `pnpm test:cargo`
 - [ ] Проверено на разрешении: <!-- например 1280x720 при масштабе 100% -->
 
