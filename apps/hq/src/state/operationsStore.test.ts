@@ -180,3 +180,39 @@ describe('edit mode', () => {
     expect(operationsStore.getState().edit.dockEdge).toBe('left');
   });
 });
+
+describe('advanced depth and privacy settings', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  it('bounds the settings history by the depth the operator set', () => {
+    operationsStore.getState().applySettingsPatch([{ id: 'advanced.historyDepth', value: 50 }]);
+
+    for (let index = 0; index < 60; index += 1) {
+      operationsStore
+        .getState()
+        .applySettingsPatch([
+          { id: 'layout.density', value: index % 2 === 0 ? 'dense' : 'mainframe' },
+        ]);
+    }
+
+    // The history is paged, filtered and sorted on the settings screen, so its
+    // depth is what an operator can still look back through.
+    expect(operationsStore.getState().personalization.history.length).toBe(50);
+  });
+
+  it('bounds the undo stack by the depth the operator set', () => {
+    operationsStore.getState().applySettingsPatch([{ id: 'advanced.undoDepth', value: 20 }]);
+
+    for (let index = 0; index < 40; index += 1) {
+      operationsStore
+        .getState()
+        .applySettingsPatch([
+          { id: 'layout.density', value: index % 2 === 0 ? 'dense' : 'mainframe' },
+        ]);
+    }
+
+    expect(operationsStore.getState().personalization.undoStack.length).toBe(20);
+  });
+});

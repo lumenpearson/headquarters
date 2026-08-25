@@ -22,11 +22,24 @@ export function buildDiagnosticsReport(): string {
     `route: ${ui.route} / screen ${production.screenId}`,
     `production: preset ${production.preset} / clock ${production.clockMode} x${production.clockSpeed.toString()} / ${production.paused ? 'paused' : 'running'}`,
     `metrics: cpu ${metrics.cpu.toString()} ram ${metrics.ram.toString()} storage ${metrics.storage.toString()} gpu ${metrics.gpu.toString()} readiness ${metrics.readiness.toString()} step ${metrics.simulationStep.toString()}`,
-    `records: objects ${count(state.objects)}, cases ${count(state.cases)}, materials ${count(state.attachments)}, alerts ${count(state.alerts)}, events ${state.events.length.toString()}`,
+    // Counts describe the size of a world, which is a hint about a shoot even
+    // though it names nothing in it. The operator decides whether that goes
+    // into a paste.
+    ...(readBooleanSetting('privacy.diagnosticsRecordCounts')
+      ? [
+          `records: objects ${count(state.objects)}, cases ${count(state.cases)}, materials ${count(state.attachments)}, alerts ${count(state.alerts)}, events ${state.events.length.toString()}`,
+        ]
+      : []),
     // Identifiers only. A changed value is a personalization choice and says
     // nothing about the fault; a changed id is what a reader needs to
     // reproduce it.
-    `settings: base revision ${personalization.draft.baseRevision.toString()}, ${changed.length.toString()} changed${changed.length === 0 ? '' : ` (${changed.join(', ')})`}`,
+    // With the names withheld the count survives: a reader still learns that
+    // something was personalised, without learning what the operator changed.
+    `settings: base revision ${personalization.draft.baseRevision.toString()}, ${changed.length.toString()} changed${
+      changed.length === 0 || !readBooleanSetting('privacy.diagnosticsSettingIds')
+        ? ''
+        : ` (${changed.join(', ')})`
+    }`,
     'redacted: filesystem paths, tokens and connection strings are never collected',
   ].join('\n');
 }

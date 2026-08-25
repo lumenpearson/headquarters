@@ -34,9 +34,17 @@ describe('safe settings draft schema', () => {
       maximum: 1.25,
       step: 0.01,
     });
-    expect(getSettingsDefinitionsForCategory('themes').map((definition) => definition.id)).toEqual([
-      'themes.id',
-    ]);
+    // The accessor returns a category's definitions in declaration order.
+    // Asserted as a set rather than a list of one, so filling a category does
+    // not break a test about how the accessor works.
+    expect(
+      getSettingsDefinitionsForCategory('themes').map((definition) => definition.id),
+    ).toContain('themes.id');
+    expect(
+      getSettingsDefinitionsForCategory('themes').every(
+        (definition) => definition.category === 'themes',
+      ),
+    ).toBe(true);
   });
 
   it('accepts only declared typed settings and retains a deterministic history', () => {

@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 
+import { useNumberSetting } from '@/application/personalization/useSetting';
+
 import {
   initializeOperationsClient,
   operationsStore,
@@ -23,6 +25,7 @@ const demoRoutes = [
 export function OperationsRuntime({ children }: { readonly children: ReactNode }) {
   const router = useRouter();
   const autoDemo = useOperationsStore((state) => state.production.autoDemo);
+  const demoRotationSeconds = useNumberSetting('advanced.demoRotationSeconds');
   useEffect(() => initializeOperationsClient(), []);
 
   useEffect(() => {
@@ -50,9 +53,9 @@ export function OperationsRuntime({ children }: { readonly children: ReactNode }
     const intervalId = window.setInterval(() => {
       index = (index + 1) % demoRoutes.length;
       router.push(demoRoutes[index] ?? '/overview');
-    }, 12_000);
+    }, demoRotationSeconds * 1000);
     return () => window.clearInterval(intervalId);
-  }, [autoDemo, router]);
+  }, [autoDemo, demoRotationSeconds, router]);
 
   return children;
 }

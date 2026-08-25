@@ -475,6 +475,17 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'materials.defaultCategory': 'Read by the FilesScreen import dialog when it opens.',
   'privacy.copyDiagnostics': 'Read by the context menu, which offers or withholds the copy.',
   'github.draftOnly': 'Read by the issue draft builder when it composes the URL.',
+  'github.includeDescriptions': 'Read by the issue draft builder when it writes each row.',
+  'github.includeBaseRevision': 'Read by the issue draft builder when it composes the body.',
+  'github.changeFormat': 'Read by the issue draft builder, which writes a list or a checklist.',
+  'github.attachDiagnostics': 'Read by the issue draft builder, behind privacy.copyDiagnostics.',
+  'privacy.diagnosticsRecordCounts': 'Read by the diagnostic report, which omits the counts.',
+  'privacy.diagnosticsSettingIds': 'Read by the diagnostic report, which withholds the names.',
+  'privacy.persistAudit': 'Read by persistedSnapshot, which omits the trail entirely.',
+  'advanced.undoDepth': 'Read by appendSettingsHistory, which bounds undo and redo by it.',
+  'advanced.historyDepth': 'Read by appendSettingsHistory, which bounds the history by it.',
+  'advanced.demoRotationSeconds': 'Read by OperationsRuntime, whose demo loop waits that long.',
+  'advanced.worldSync': 'Read at startup, which opens or refuses the cross-session channel.',
   'advanced.liveEdit':
     'Read by the live-edit bus, which decides whether a patch leaves the session.',
 };

@@ -40,7 +40,7 @@ import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/react/shallow';
 import { createStore } from 'zustand/vanilla';
 
-import { booleanSetting } from '../application/personalization/settingValue';
+import { booleanSetting, numberSetting } from '../application/personalization/settingValue';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
@@ -412,11 +412,18 @@ function appendSettingsHistory(
   options: { readonly reversible: boolean; readonly redoStack?: readonly SettingsHistoryEntry[] },
 ): PersonalizationState {
   const historyEntry = createSettingsHistoryEntry(entry);
+  /*
+   * Both depths are read from the draft being amended rather than through a
+   * hook: this reducer runs inside the store, where a hook cannot go, and the
+   * values it needs are in the state it was handed.
+   */
+  const historyDepth = numberSetting(state.draft.values, 'advanced.historyDepth');
+  const undoDepth = numberSetting(state.draft.values, 'advanced.undoDepth');
   return {
     ...state,
-    history: [historyEntry, ...state.history].slice(0, 200),
+    history: [historyEntry, ...state.history].slice(0, historyDepth),
     undoStack: options.reversible
-      ? [...state.undoStack, historyEntry].slice(-100)
+      ? [...state.undoStack, historyEntry].slice(-undoDepth)
       : state.undoStack,
     redoStack: options.redoStack ?? (options.reversible ? [] : state.redoStack),
   };
@@ -759,7 +766,9 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         },
         {
           reversible: false,
-          redoStack: [...state.personalization.redoStack, entry].slice(-100),
+          redoStack: [...state.personalization.redoStack, entry].slice(
+            -numberSetting(state.personalization.draft.values, 'advanced.undoDepth'),
+          ),
         },
       );
       return {
@@ -952,7 +961,8 @@ interface PersistedOperationsState {
   readonly production: Omit<ProductionState, 'snapshots'>;
   readonly alerts: Readonly<Record<string, Alert>>;
   readonly tasks: Readonly<Record<string, OpsTask>>;
-  readonly audit: readonly OpsAuditEntry[];
+  /** Absent when `privacy.persistAudit` is off; hydration falls back to the seed. */
+  readonly audit?: readonly OpsAuditEntry[];
   readonly personalization: PersonalizationState;
 }
 
@@ -964,7 +974,15 @@ function persistedSnapshot(state: OperationsState): PersistedOperationsState {
     production,
     alerts: state.alerts,
     tasks: state.tasks,
-    audit: state.audit,
+    /*
+     * `privacy.persistAudit` omits the key rather than writing an empty array:
+     * an empty trail read back would look like a session that did nothing,
+     * where an absent one is a session that chose not to keep a record. The
+     * trail names what this operator opened, entry by entry.
+     */
+    ...(booleanSetting(state.personalization.draft.values, 'privacy.persistAudit')
+      ? { audit: state.audit }
+      : {}),
     personalization: state.personalization,
   };
 }
@@ -1100,8 +1118,19 @@ export function initializeOperationsClient(): () => void {
   hydratePersistedState();
   hydratePersistedSnapshots();
 
+  /*
+   * `advanced.worldSync` refuses the channel rather than filtering what crosses
+   * it. A gate on `postMessage` alone would still leave this session applying
+   * every other session's world, which is half a switch.
+   */
+  const worldSyncAllowed = booleanSetting(
+    operationsStore.getState().personalization.draft.values,
+    'advanced.worldSync',
+  );
   const broadcast =
-    typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(channelName);
+    typeof BroadcastChannel === 'undefined' || !worldSyncAllowed
+      ? null
+      : new BroadcastChannel(channelName);
   let applyingRemote = false;
   if (broadcast !== null) {
     broadcast.onmessage = (
@@ -1128,7 +1157,9 @@ export function initializeOperationsClient(): () => void {
         production: { ...state.production, ...event.data.production },
         alerts: event.data.alerts,
         tasks: event.data.tasks,
-        audit: event.data.audit,
+        // A peer that keeps no trail sends none; this session keeps its own
+        // rather than adopting an emptiness the peer never meant to share.
+        audit: event.data.audit ?? state.audit,
         // Personalization is deliberately not taken from the world snapshot.
         // `advanced.liveEdit` is the opt-in that decides whether a settings
         // change reaches the other sessions, and it defaults to off — but this

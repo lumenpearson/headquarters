@@ -43,3 +43,38 @@ describe('the redacted diagnostic report', () => {
     await expect(copyDiagnosticsReport()).resolves.toBe(false);
   });
 });
+
+describe('diagnostic report privacy switches', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  it('omits the record counts when the operator withholds them', () => {
+    expect(buildDiagnosticsReport()).toContain('records: objects');
+
+    operationsStore
+      .getState()
+      .applySettingsPatch([{ id: 'privacy.diagnosticsRecordCounts', value: false }]);
+
+    // Counts describe the size of a world, which is a hint about a shoot even
+    // though they name nothing in it.
+    expect(buildDiagnosticsReport()).not.toContain('records: objects');
+    // Everything else survives: less detail is not no report.
+    expect(buildDiagnosticsReport()).toContain('GREMUCHAYA HQ / DIAGNOSTIC REPORT');
+  });
+
+  it('withholds the changed setting names but keeps their count', () => {
+    operationsStore.getState().applySettingsPatch([{ id: 'layout.density', value: 'comfortable' }]);
+    expect(buildDiagnosticsReport()).toContain('layout.density');
+
+    operationsStore
+      .getState()
+      .applySettingsPatch([{ id: 'privacy.diagnosticsSettingIds', value: false }]);
+
+    const report = buildDiagnosticsReport();
+    expect(report).not.toContain('(layout.density');
+    // A reader still learns that something was personalised, without learning
+    // what the operator changed.
+    expect(report).toMatch(/\d+ changed/);
+  });
+});

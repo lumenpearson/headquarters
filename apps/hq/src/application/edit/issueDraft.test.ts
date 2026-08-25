@@ -119,3 +119,57 @@ describe('edit-mode issue draft', () => {
     expect(url.searchParams.get('body')).toContain('layout.density');
   });
 });
+
+describe('issue draft composition settings', () => {
+  const draft = {
+    baseRevision: 3,
+    values: { 'layout.density': 'comfortable' },
+    changedIds: ['layout.density'],
+    history: [],
+  } as const;
+
+  function bodyOf(): string {
+    const url = new URL(buildIssueDraftUrl({ repository: 'owner/repo', draft }));
+    return url.searchParams.get('body') ?? '';
+  }
+
+  function set(id: string, value: boolean | string): void {
+    operationsStore.getState().applySettingsPatch([{ id, value }]);
+  }
+
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  it('writes a checklist when the operator asks for one', () => {
+    expect(bodyOf()).toContain('- `layout.density`');
+
+    set('github.changeFormat', 'checklist');
+    // A reviewer reading someone else's afternoon of edits ticks them off.
+    expect(bodyOf()).toContain('- [ ] `layout.density`');
+  });
+
+  it('drops the description and the base revision when they are switched off', () => {
+    expect(bodyOf()).toContain('Base revision: 3');
+    expect(bodyOf()).toContain('Screen density preset.');
+
+    set('github.includeBaseRevision', false);
+    set('github.includeDescriptions', false);
+
+    expect(bodyOf()).not.toContain('Base revision: 3');
+    expect(bodyOf()).not.toContain('Screen density preset.');
+    // The change itself always survives: this is a draft about a change.
+    expect(bodyOf()).toContain('`layout.density`');
+  });
+
+  it('refuses to attach diagnostics past the decision that governs them', () => {
+    set('github.attachDiagnostics', true);
+    // `privacy.copyDiagnostics` is off by default, and it is the standing
+    // answer about that report leaving the application at all. A second setting
+    // able to post it anyway would make the first one a suggestion.
+    expect(bodyOf()).not.toContain('## Diagnostics');
+
+    set('privacy.copyDiagnostics', true);
+    expect(bodyOf()).toContain('## Diagnostics');
+  });
+});

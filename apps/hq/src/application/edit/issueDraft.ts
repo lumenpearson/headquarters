@@ -4,7 +4,8 @@ import {
   type SettingValue,
 } from '@gremuchaya/settings-schema';
 
-import { readBooleanSetting } from '@/application/personalization/useSetting';
+import { buildDiagnosticsReport } from '@/application/contextMenus/diagnostics';
+import { readBooleanSetting, readStringSetting } from '@/application/personalization/useSetting';
 
 export interface IssueDraftInput {
   readonly repository: string;
@@ -24,11 +25,15 @@ export function buildIssueDraftUrl({ repository, draft }: IssueDraftInput): stri
     throw new Error('An issue draft needs at least one change; this draft has no changes.');
   }
 
+  const includeDescriptions = readBooleanSetting('github.includeDescriptions');
+  // `checklist` gives a reviewer something to tick off change by change, which
+  // is what a group reading someone else's afternoon of edits actually does.
+  const bullet = readStringSetting('github.changeFormat') === 'checklist' ? '- [ ] ' : '- ';
   const rows = draft.changedIds.map((id) => {
     const value = draft.values[id];
-    const description = getSettingDefinition(id)?.description;
+    const description = includeDescriptions ? getSettingDefinition(id)?.description : undefined;
     const suffix = description === undefined ? '' : ` — ${description}`;
-    return `- \`${id}\` → \`${formatValue(value)}\`${suffix}`;
+    return `${bullet}\`${id}\` → \`${formatValue(value)}\`${suffix}`;
   });
 
   /*
@@ -41,12 +46,26 @@ export function buildIssueDraftUrl({ repository, draft }: IssueDraftInput): stri
    */
   const draftOnly = readBooleanSetting('github.draftOnly');
 
+  /*
+   * The diagnostic report is attached only when both switches allow it: this
+   * one asks for it, and `privacy.copyDiagnostics` is the standing decision
+   * about that report leaving the application at all. A setting able to post it
+   * past that decision would make the other one a suggestion.
+   */
+  const diagnostics =
+    readBooleanSetting('github.attachDiagnostics') && readBooleanSetting('privacy.copyDiagnostics')
+      ? buildDiagnosticsReport()
+      : null;
+
   const body = [
     '## Change made in edit mode',
     '',
     ...rows,
     '',
-    `Base revision: ${draft.baseRevision.toString()}`,
+    ...(readBooleanSetting('github.includeBaseRevision')
+      ? [`Base revision: ${draft.baseRevision.toString()}`]
+      : []),
+    ...(diagnostics === null ? [] : ['', '## Diagnostics', '', '```', diagnostics, '```']),
     ...(draftOnly
       ? ['', 'Draft: confirm this list with the group before submitting the issue.']
       : []),
