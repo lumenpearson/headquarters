@@ -22,6 +22,8 @@ export interface StartupConditions {
   readonly reducedMotion: boolean;
   /** `animations.intensity`, 0..1. */
   readonly intensity: number;
+  /** `startup.stageHold` -- a multiplier on how long each stage is held. */
+  readonly stageHold: number;
 }
 
 export interface StartupPlan {
@@ -35,6 +37,7 @@ export function resolveStartupPlan({
   animationsEnabled,
   reducedMotion,
   intensity,
+  stageHold,
 }: StartupConditions): StartupPlan {
   const play = enabled && animationsEnabled && !reducedMotion;
   // A suppressed sequence costs nothing rather than a little: the shell must
@@ -43,6 +46,9 @@ export function resolveStartupPlan({
 
   // Same shape as the shell's own motion duration, one step shorter at each
   // end, so a low intensity reads as the same restraint everywhere.
-  const stageMs = Math.round(60 + intensity * 120);
+  // `startup.stageHold` multiplies the whole readout. On a shoot the boot
+  // screen is a shot, and its length is a directing decision. At 1 this is the
+  // expression that was here before.
+  const stageMs = Math.round((60 + intensity * 120) * stageHold);
   return { play: true, stageMs, totalMs: stageMs * startupStages.length };
 }

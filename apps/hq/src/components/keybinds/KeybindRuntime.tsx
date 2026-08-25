@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 
 import { activeKeybinds } from '@/application/keybinds/activeScheme';
 import { findKeybind, prefixKeyFor } from '@/application/keybinds/registry';
+import { readNumberSetting } from '@/application/personalization/useSetting';
 
 type KeybindHandler = () => void;
 
@@ -111,7 +112,6 @@ export function useKeybind(id: string, handler: () => void): void {
  * a `g` typed by accident cannot turn a digit pressed a minute later into a
  * navigation the operator never asked for.
  */
-const prefixWindowMs = 1200;
 
 /**
  * The single application-wide keydown listener.
@@ -158,7 +158,10 @@ export function KeybindRuntime() {
       pendingPrefix = opened;
       // Not swallowed. The prefix alone commands nothing yet, and the runtime
       // only takes a key once something actually ran on it.
-      prefixTimer = window.setTimeout(forgetPrefix, prefixWindowMs);
+      // Read here rather than closed over, the same way the active scheme is:
+      // this listener is installed once, and an operator who widens the window
+      // should not have to reload for the next chord to wait longer.
+      prefixTimer = window.setTimeout(forgetPrefix, readNumberSetting('keybinds.prefixWindow'));
     };
 
     window.addEventListener('keydown', onKeyDown);

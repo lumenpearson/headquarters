@@ -7,6 +7,7 @@ const playing = {
   animationsEnabled: true,
   reducedMotion: false,
   intensity: 0.65,
+  stageHold: 1,
 };
 
 describe('startup sequence plan', () => {
@@ -15,6 +16,17 @@ describe('startup sequence plan', () => {
     expect(plan.play).toBe(true);
     expect(plan.stageMs).toBe(138);
     expect(plan.totalMs).toBe(138 * startupStages.length);
+  });
+
+  it('holds each stage for the multiplier the operator set', () => {
+    // At 1 the arithmetic is the expression that was here before, which is what
+    // keeps the 138ms above true.
+    expect(resolveStartupPlan({ ...playing, stageHold: 2 }).stageMs).toBe(276);
+    expect(resolveStartupPlan({ ...playing, stageHold: 0.5 }).stageMs).toBe(69);
+    // On a shoot the boot screen is a shot, so the whole readout scales with it.
+    expect(resolveStartupPlan({ ...playing, stageHold: 2 }).totalMs).toBe(
+      276 * startupStages.length,
+    );
   });
 
   it('scales the sequence with the animation intensity', () => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { booleanSetting, numberSetting } from '../../application/personalization/useSetting';
+import { booleanSetting, numberSetting } from '../../application/personalization/settingValue';
 import { useOperationsStore } from '../../state/operationsStore';
 import { resolveStartupPlan, startupStages, type StartupStage } from './StartupPlan';
 
@@ -26,6 +26,7 @@ export function StartupSequence() {
     animationsEnabled: booleanSetting(values, 'animations.enabled'),
     reducedMotion: booleanSetting(values, 'accessibility.reducedMotion'),
     intensity: numberSetting(values, 'animations.intensity'),
+    stageHold: numberSetting(values, 'startup.stageHold'),
   });
 
   const [stageIndex, setStageIndex] = useState(0);

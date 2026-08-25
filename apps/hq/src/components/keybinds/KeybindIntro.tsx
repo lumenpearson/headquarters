@@ -3,6 +3,8 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { useBooleanSetting } from '@/application/personalization/useSetting';
+
 import { KeybindList } from './KeybindList';
 import { useKeybind } from './KeybindRuntime';
 
@@ -50,7 +52,10 @@ export function KeybindIntro() {
     () => true,
   );
   const [overridden, setOverridden] = useState<boolean | null>(null);
-  const open = overridden ?? !seen;
+  const introOnLaunch = useBooleanSetting('keybinds.introOnLaunch');
+  // Ctrl+/ still opens it either way: this decides the automatic offer on a
+  // first launch, not whether the card exists.
+  const open = overridden ?? (introOnLaunch && !seen);
 
   useKeybind(
     'keybinds.list',

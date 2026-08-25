@@ -858,3 +858,87 @@ test('R6: the system screen takes its thresholds and its counts from the setting
   await expect.poll(() => page.locator('td.is-critical').count()).toBeGreaterThan(0);
   await expect.poll(() => page.locator('.system-audit .audit-log > div').count()).toBe(3);
 });
+
+test('R6: keybinds.hiddenCategories drops a group from the shortcut list', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/settings');
+  const list = page.locator('.keybind-list');
+  await expect(list).toBeVisible();
+  const atDefault = await list.locator('.keybind-list__group').count();
+  expect(atDefault).toBeGreaterThan(1);
+
+  await seedSettings(page, { 'keybinds.hiddenCategories': ['navigation'] });
+  await page.reload();
+  await expect(page.locator('.keybind-list')).toBeVisible();
+  await expect
+    .poll(() => page.locator('.keybind-list .keybind-list__group').count())
+    .toBe(atDefault - 1);
+});
+
+test('R6: startup.productionPanel opens the panel on launch without the query flag', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  // Closed by default, and hydration forces it closed, so this cannot pass by
+  // the panel simply never having been shut.
+  await expect(page.locator('.production-panel')).toHaveCount(0);
+
+  await seedSettings(page, { 'startup.productionPanel': true });
+  await page.reload();
+  await expect(page.locator('.production-panel')).toBeVisible();
+});
+
+test('R6: startup.restoreWorld decides whether the last session comes back', async ({ page }) => {
+  await page.setViewportSize(wide);
+  const seedWorld = (values: Record<string, unknown>) =>
+    page.addInitScript(
+      ({ stored }: { stored: Record<string, unknown> }) => {
+        window.localStorage.setItem(
+          'gremuchaya-hq:operations:v3',
+          JSON.stringify({
+            version: 5,
+            ui: {},
+            production: {},
+            audit: [
+              {
+                id: 'audit-restored',
+                timestamp: '2026-09-12T07:00:00.000Z',
+                action: 'ВОССТАНОВЛЕННАЯ ЗАПИСЬ',
+                entityId: 'E-1',
+                operator: 'ОПЕРАТОР',
+              },
+            ],
+            personalization: {
+              published: { revision: 0, values: {} },
+              draft: {
+                baseRevision: 0,
+                values: stored,
+                changedIds: Object.keys(stored),
+                history: [],
+              },
+              history: [],
+              undoStack: [],
+              redoStack: [],
+            },
+          }),
+        );
+      },
+      { stored: values },
+    );
+
+  await seedWorld({});
+  await page.goto('/system');
+  await expect(page.locator('.system-audit')).toBeVisible();
+  await expect(page.locator('.system-audit')).toContainText('ВОССТАНОВЛЕННАЯ ЗАПИСЬ');
+
+  /*
+   * Read from the blob being hydrated, not through the store: the values are
+   * not in the store yet at that point, so a reader that went through it would
+   * answer with the factory default on the one launch that matters.
+   */
+  await seedWorld({ 'startup.restoreWorld': false });
+  await page.reload();
+  await expect(page.locator('.system-audit')).toBeVisible();
+  await expect(page.locator('.system-audit')).not.toContainText('ВОССТАНОВЛЕННАЯ ЗАПИСЬ');
+});

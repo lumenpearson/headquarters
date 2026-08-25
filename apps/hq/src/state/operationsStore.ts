@@ -40,6 +40,7 @@ import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/react/shallow';
 import { createStore } from 'zustand/vanilla';
 
+import { booleanSetting } from '../application/personalization/settingValue';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
@@ -1048,12 +1049,23 @@ function hydratePersistedState(): void {
       parsed.production !== undefined &&
       personalization !== undefined
     ) {
+      /*
+       * `startup.restoreWorld` is read from the blob being hydrated, not from
+       * the store: the values it needs are not in the store yet at this point,
+       * so a reader that went through the store would answer with the factory
+       * default on the launch that matters. `resolveSettingValue` is pure over
+       * a values record, which is exactly what this call site has.
+       */
+      const restoreWorld = booleanSetting(
+        personalization?.draft?.values ?? {},
+        'startup.restoreWorld',
+      );
       operationsStore.setState((state) => ({
         ui: { ...state.ui, ...parsed.ui, productionPanelOpen: false, drawer: null },
         production: { ...state.production, ...parsed.production },
-        alerts: parsed.alerts ?? state.alerts,
-        tasks: parsed.tasks ?? state.tasks,
-        audit: parsed.audit ?? state.audit,
+        alerts: restoreWorld ? (parsed.alerts ?? state.alerts) : state.alerts,
+        tasks: restoreWorld ? (parsed.tasks ?? state.tasks) : state.tasks,
+        audit: restoreWorld ? (parsed.audit ?? state.audit) : state.audit,
         personalization: hydratePersonalization(personalization, state.personalization),
       }));
     }

@@ -20,8 +20,8 @@ import {
   booleanSetting,
   numberSetting,
   stringSetting,
-  useStringListSetting,
-} from '@/application/personalization/useSetting';
+} from '@/application/personalization/settingValue';
+import { useStringListSetting } from '@/application/personalization/useSetting';
 import { contextMenuFor } from '@/application/contextMenus/registry';
 import {
   buildContextMenuItems,
@@ -190,11 +190,18 @@ export function OperationsShell({
     }
   }, [entityId, route, selectCase, selectObject, setRoute]);
 
+  const openProductionPanelOnStart = booleanSetting(values, 'startup.productionPanel');
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('production') === '1') {
+    // The query parameter is a one-off; the setting is the operator's standing
+    // answer. An operator's own machine wants the panel every launch, a wall
+    // never does.
+    if (
+      openProductionPanelOnStart ||
+      new URLSearchParams(window.location.search).get('production') === '1'
+    ) {
       toggleProductionPanel(true);
     }
-  }, [toggleProductionPanel]);
+  }, [openProductionPanelOnStart, toggleProductionPanel]);
 
   // Any keypress means the operator has taken over. Activity detection, not a
   // keybind: it reacts to every key, including the ones nothing is bound to,

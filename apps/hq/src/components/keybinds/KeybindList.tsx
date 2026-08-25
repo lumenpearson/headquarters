@@ -6,13 +6,14 @@ import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { groupKeybinds, keybindCategoryLabel } from '@/application/keybinds/grouping';
 import { formatChord } from '@/application/keybinds/match';
 
+import { useNumberSetting, useStringListSetting } from '@/application/personalization/useSetting';
+
 import { subscribeKeybindFired } from './KeybindRuntime';
 
 /**
  * How long a row stays lit after its keybind fires. Long enough to notice on a
  * glance, short enough that two presses read as two.
  */
-const highlightMs = 700;
 
 /**
  * R11: the list of every application-wide keybind, lighting up as they are
@@ -32,6 +33,8 @@ const highlightMs = 700;
 export function KeybindList() {
   const keybinds = useActiveKeybinds();
   const [firedId, setFiredId] = useState<string | null>(null);
+  const highlightMs = useNumberSetting('keybinds.firedHighlight');
+  const hiddenCategories = useStringListSetting('keybinds.hiddenCategories');
 
   useEffect(() => {
     let timer = 0;
@@ -44,27 +47,31 @@ export function KeybindList() {
       window.clearTimeout(timer);
       unsubscribe();
     };
-  }, []);
+    // Re-subscribed when the duration moves, so a highlight set after the
+    // change is held for the new time rather than the one this closed over.
+  }, [highlightMs]);
 
   return (
     <div className="keybind-list">
-      {groupKeybinds(keybinds).map((group) => (
-        <section key={group.category} className="keybind-list__group">
-          <h4>{keybindCategoryLabel(group.category)}</h4>
-          <ul>
-            {group.keybinds.map((keybind) => (
-              <li
-                key={keybind.id}
-                className="keybind-list__row"
-                data-fired={firedId === keybind.id ? 'true' : 'false'}
-              >
-                <kbd>{formatChord(keybind.chord)}</kbd>
-                <span>{keybind.description}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+      {groupKeybinds(keybinds)
+        .filter((group) => !hiddenCategories.includes(group.category))
+        .map((group) => (
+          <section key={group.category} className="keybind-list__group">
+            <h4>{keybindCategoryLabel(group.category)}</h4>
+            <ul>
+              {group.keybinds.map((keybind) => (
+                <li
+                  key={keybind.id}
+                  className="keybind-list__row"
+                  data-fired={firedId === keybind.id ? 'true' : 'false'}
+                >
+                  <kbd>{formatChord(keybind.chord)}</kbd>
+                  <span>{keybind.description}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
     </div>
   );
 }
