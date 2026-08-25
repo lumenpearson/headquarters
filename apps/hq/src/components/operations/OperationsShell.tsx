@@ -20,6 +20,7 @@ import {
   booleanSetting,
   numberSetting,
   stringSetting,
+  useStringListSetting,
 } from '@/application/personalization/useSetting';
 import { contextMenuFor } from '@/application/contextMenus/registry';
 import {
@@ -414,6 +415,7 @@ function ShellCommandsMenu() {
 
 function OpsNavigation({ route }: { readonly route: OperationsRoute }) {
   const compact = useOperationsStore((state) => state.ui.navCompact);
+  const hiddenRoutes = useStringListSetting('general.hiddenRoutes');
   const toggle = useOperationsStore((state) => state.toggleNavCompact);
   const screenId = useOperationsStore((state) => state.production.screenId);
   return (
@@ -426,19 +428,21 @@ function OpsNavigation({ route }: { readonly route: OperationsRoute }) {
         {compact ? '[+]' : '[−]'}
       </TerminalButton>
       <div>
-        {primaryNavigation.map(([id, href, key, label]) => {
-          const active =
-            route === id ||
-            (id === 'objects' && route === 'object-detail') ||
-            (id === 'cases' && route === 'case-detail') ||
-            (id === 'video' && (route === 'cameras' || route === 'video-archive'));
-          return (
-            <Link key={id} href={href} className={active ? 'is-active' : ''} title={label}>
-              <i>[{key}]</i>
-              <span>{label}</span>
-            </Link>
-          );
-        })}
+        {primaryNavigation
+          .filter(([id]) => !hiddenRoutes.includes(id) || id === 'settings')
+          .map(([id, href, key, label]) => {
+            const active =
+              route === id ||
+              (id === 'objects' && route === 'object-detail') ||
+              (id === 'cases' && route === 'case-detail') ||
+              (id === 'video' && (route === 'cameras' || route === 'video-archive'));
+            return (
+              <Link key={id} href={href} className={active ? 'is-active' : ''} title={label}>
+                <i>[{key}]</i>
+                <span>{label}</span>
+              </Link>
+            );
+          })}
       </div>
       <footer>
         <span>MONITOR</span>

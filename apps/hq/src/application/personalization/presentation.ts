@@ -444,6 +444,12 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'map.resetZoom': 'Read by TacticalMapScreen, which returns the map to it on reset.',
   'map.alertRows': 'Read by TacticalMapScreen, which lists that many alerts before stopping.',
   'telemetry.source': 'Read by SystemScreen, which chooses what its host counters sample.',
+  'telemetry.loadWarningPercent': 'Read by SystemScreen, which tones the load counters against it.',
+  'telemetry.nodeTemperatureLimit': 'Read by SystemScreen, which marks a hotter node critical.',
+  'telemetry.signalFloorPercent': 'Read by SystemScreen, which tones a channel bar against it.',
+  'telemetry.showCharts': 'Read by SystemScreen, which draws or omits the resource sparklines.',
+  'diagnostics.auditRows': 'Read by SystemScreen, which lists that many audit entries.',
+  'general.hiddenRoutes': 'Read by OpsNavigation, which drops the named routes from the rail.',
   'keybinds.scheme': 'Read by the keybind registry, which resolves a chord through the scheme.',
   'dateTime.mode': 'Read by the shared date formatter the shell clock and status line use.',
   'dateTime.showSeconds':

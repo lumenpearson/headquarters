@@ -59,6 +59,12 @@ export function booleanSetting(values: SettingValues, id: string): boolean {
   return resolveSettingValue(values, id) === true;
 }
 
+/** A `string-list` setting, narrowed to the array its editor stores. */
+export function stringListSetting(values: SettingValues, id: string): readonly string[] {
+  const value = resolveSettingValue(values, id);
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? value : [];
+}
+
 export function useStringSetting(id: string): string {
   return useOperationsStore((state) => stringSetting(state.personalization.draft.values, id));
 }
@@ -69,6 +75,10 @@ export function useNumberSetting(id: string): number {
 
 export function useBooleanSetting(id: string): boolean {
   return useOperationsStore((state) => booleanSetting(state.personalization.draft.values, id));
+}
+
+export function useStringListSetting(id: string): readonly string[] {
+  return useOperationsStore((state) => stringListSetting(state.personalization.draft.values, id));
 }
 
 /**

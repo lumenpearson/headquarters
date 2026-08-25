@@ -3,7 +3,11 @@
 import { useMemo } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
-import { useStringSetting } from '@/application/personalization/useSetting';
+import {
+  useBooleanSetting,
+  useNumberSetting,
+  useStringSetting,
+} from '@/application/personalization/useSetting';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Metric, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import { useOperationsStore, type OperationsState } from '@/state/operationsStore';
@@ -92,6 +96,11 @@ export function SystemScreen() {
    * would change where they come from.
    */
   const telemetrySource = useStringSetting('telemetry.source');
+  const loadWarningPercent = useNumberSetting('telemetry.loadWarningPercent');
+  const nodeTemperatureLimit = useNumberSetting('telemetry.nodeTemperatureLimit');
+  const signalFloorPercent = useNumberSetting('telemetry.signalFloorPercent');
+  const showCharts = useBooleanSetting('telemetry.showCharts');
+  const auditRows = useNumberSetting('diagnostics.auditRows');
   const telemetry = readTelemetry(telemetrySource, state.metrics);
   const sample = telemetry.sample;
 
@@ -129,13 +138,17 @@ export function SystemScreen() {
                 label="CPU"
                 value={sampleValue(sample?.cpu)}
                 detail={sample === null ? 'ОТСЧЁТА НЕТ' : '16C / 4.8 GHZ'}
-                tone={sample === null ? 'normal' : sample.cpu > 80 ? 'critical' : 'ok'}
+                tone={
+                  sample === null ? 'normal' : sample.cpu > loadWarningPercent ? 'critical' : 'ok'
+                }
               />
               <Metric
                 label="RAM"
                 value={sampleValue(sample?.ram)}
                 detail={sample === null ? 'ОТСЧЁТА НЕТ' : '43.5 / 64 GB'}
-                tone={sample === null ? 'normal' : sample.ram > 80 ? 'warning' : 'ok'}
+                tone={
+                  sample === null ? 'normal' : sample.ram > loadWarningPercent ? 'warning' : 'ok'
+                }
               />
               <Metric
                 label="GPU"
@@ -154,7 +167,7 @@ export function SystemScreen() {
              * No sample, no charts: a history plotted from the fixed leading
              * values alone would draw a line the named source never produced.
              */}
-            {presentation === 'full' && sample !== null ? (
+            {presentation === 'full' && showCharts && sample !== null ? (
               <div className="resource-charts">
                 <div>
                   <span>CPU HISTORY / 60S / {telemetry.seriesTag}</span>
@@ -219,7 +232,7 @@ export function SystemScreen() {
                     <td>
                       <ProgressBar value={node.load} />
                     </td>
-                    <td className={node.temperature > 65 ? 'is-critical' : ''}>
+                    <td className={node.temperature > nodeTemperatureLimit ? 'is-critical' : ''}>
                       {node.temperature}°C
                     </td>
                   </tr>
@@ -259,7 +272,7 @@ export function SystemScreen() {
                 </span>
                 <ProgressBar
                   value={channel.signal}
-                  tone={channel.signal < 50 ? 'critical' : 'ok'}
+                  tone={channel.signal < signalFloorPercent ? 'critical' : 'ok'}
                 />
               </TerminalButton>
             ))}
@@ -286,7 +299,7 @@ export function SystemScreen() {
             className="system-audit"
           >
             <div className="audit-log">
-              {state.audit.slice(0, presentation === 'full' ? 14 : 6).map((entry) => (
+              {state.audit.slice(0, presentation === 'full' ? auditRows : 6).map((entry) => (
                 <div key={entry.id}>
                   <time>{new Date(entry.timestamp).toLocaleTimeString('ru-RU')}</time>
                   <i>{entry.operator}</i>
@@ -327,7 +340,18 @@ export function SystemScreen() {
         ),
       },
     ],
-    [channels, nodes, sample, state, telemetry],
+    [
+      auditRows,
+      channels,
+      loadWarningPercent,
+      nodeTemperatureLimit,
+      nodes,
+      sample,
+      showCharts,
+      signalFloorPercent,
+      state,
+      telemetry,
+    ],
   );
 
   return (

@@ -764,3 +764,97 @@ test('R6: the camera-safe grade answers to its three dials and its token switch'
     .poll(() => shell.evaluate((el) => getComputedStyle(el).getPropertyValue('--ops-text').trim()))
     .not.toBe('#9fb6a5');
 });
+
+test('R6: general.hiddenRoutes drops a route from the rail but never the settings way back', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  const rail = page.locator('.ops-nav');
+  await expect(rail.locator('a[href="/analytics"]')).toBeVisible();
+
+  await seedSettings(page, { 'general.hiddenRoutes': ['analytics', 'reports', 'settings'] });
+  await page.reload();
+  await expect(rail.locator('a[href="/analytics"]')).toHaveCount(0);
+  await expect(rail.locator('a[href="/reports"]')).toHaveCount(0);
+
+  /*
+   * Settings refuses to be hidden. Everything else is recoverable from the
+   * settings screen; hiding the way to that screen would leave the operator
+   * with no route back except clearing the profile.
+   */
+  await expect(rail.locator('a[href="/settings"]')).toBeVisible();
+});
+
+test('R6: the system screen takes its thresholds and its counts from the settings', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+
+  /*
+   * The journal is seeded rather than driven. A fresh profile holds one audit
+   * entry, so `diagnostics.auditRows` would be unobservable — every count is
+   * under every limit, and the assertion would pass whatever the setting did.
+   * Seeded together with the settings because the blob is written whole: two
+   * seeds would leave the second without a journal.
+   */
+  const seedWith = (values: Record<string, unknown>) =>
+    page.addInitScript(
+      ({ stored, entries }: { stored: Record<string, unknown>; entries: unknown }) => {
+        window.localStorage.setItem(
+          'gremuchaya-hq:operations:v3',
+          JSON.stringify({
+            version: 5,
+            ui: {},
+            production: {},
+            audit: entries,
+            personalization: {
+              published: { revision: 0, values: {} },
+              draft: {
+                baseRevision: 0,
+                values: stored,
+                changedIds: Object.keys(stored),
+                history: [],
+              },
+              history: [],
+              undoStack: [],
+              redoStack: [],
+            },
+          }),
+        );
+      },
+      {
+        stored: values,
+        entries: Array.from({ length: 9 }, (_, index) => ({
+          id: `audit-${String(index)}`,
+          timestamp: new Date(Date.UTC(2026, 8, 12, 7, index)).toISOString(),
+          action: `ДЕЙСТВИЕ ${String(index)}`,
+          entityId: `E-${String(index)}`,
+          operator: 'ОПЕРАТОР',
+        })),
+      },
+    );
+
+  await seedWith({});
+  await page.goto('/system');
+  await expect(page.locator('.resource-charts')).toBeVisible();
+  // Stated before the change, so the count below cannot pass on a short list.
+  await expect.poll(() => page.locator('.system-audit .audit-log > div').count()).toBe(9);
+
+  await seedWith({
+    'telemetry.showCharts': false,
+    'telemetry.nodeTemperatureLimit': 40,
+    'telemetry.signalFloorPercent': 90,
+    'diagnostics.auditRows': 3,
+  });
+  await page.reload();
+  await expect(page.locator('.ops-screen')).toBeVisible();
+
+  // A TSX gate rather than `display: none`: the sparkline builds its point
+  // string eagerly, so hiding it in CSS would keep paying for it.
+  await expect(page.locator('.resource-charts')).toHaveCount(0);
+  // The world clamps node temperature to 30..78 and signal to 8..100, so a
+  // limit of 40 and a floor of 90 mark rows that were unmarked before.
+  await expect.poll(() => page.locator('td.is-critical').count()).toBeGreaterThan(0);
+  await expect.poll(() => page.locator('.system-audit .audit-log > div').count()).toBe(3);
+});
