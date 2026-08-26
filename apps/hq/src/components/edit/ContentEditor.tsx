@@ -128,6 +128,11 @@ function ContentFieldControl({
   );
   const seed = seedContentValue(target.id, target.entityId);
   const label = `${definition.label}${changed ? ' *' : ''}`;
+  // A rejection has to reach a screen reader, not only the eye: the control
+  // says it is invalid and names the message, and the message announces
+  // itself politely so it is read without stealing focus from the field.
+  const errorId = `edit-content-error-${contentKey(target.id, target.entityId)}`;
+  const invalid = error === null ? {} : { 'aria-invalid': true, 'aria-describedby': errorId };
 
   // Applied the moment the control reports a value: that is R17 for content,
   // and the store's own validator is the last word rather than this control.
@@ -152,6 +157,7 @@ function ContentFieldControl({
           <TerminalInput
             type="date"
             aria-label={label}
+            {...invalid}
             value={value}
             onValueChange={(next) => {
               // A cleared picker reports an empty string; nothing to apply.
@@ -165,6 +171,7 @@ function ContentFieldControl({
             type="time"
             step={1}
             aria-label={label}
+            {...invalid}
             value={value}
             onValueChange={(next) => {
               if (next !== '') commit(next);
@@ -177,6 +184,7 @@ function ContentFieldControl({
             type="datetime-local"
             step={1}
             aria-label={label}
+            {...invalid}
             value={toLocalDateTimeInput(value)}
             onValueChange={(next) => {
               const instant = fromLocalDateTimeInput(next);
@@ -185,7 +193,15 @@ function ContentFieldControl({
           />
         );
       case 'text':
-        return <ContentTextControl label={label} editor={editor} value={value} onCommit={commit} />;
+        return (
+          <ContentTextControl
+            label={label}
+            editor={editor}
+            value={value}
+            onCommit={commit}
+            invalid={invalid}
+          />
+        );
     }
   })();
 
@@ -198,7 +214,11 @@ function ContentFieldControl({
         </small>
       </span>
       {control}
-      {error === null ? null : <small className="edit-content__error">{error}</small>}
+      {error === null ? null : (
+        <small id={errorId} role="status" className="edit-content__error">
+          {error}
+        </small>
+      )}
     </div>
   );
 }
@@ -213,11 +233,13 @@ function ContentTextControl({
   editor,
   value,
   onCommit,
+  invalid,
 }: {
   readonly label: string;
   readonly editor: Extract<ContentFieldEditor, { kind: 'text' }>;
   readonly value: string;
   readonly onCommit: (value: string) => void;
+  readonly invalid: Readonly<Record<string, unknown>>;
 }) {
   const [draft, setDraft] = useState(value);
   const [committed, setCommitted] = useState(value);
@@ -241,6 +263,7 @@ function ContentTextControl({
     return (
       <TerminalTextarea
         aria-label={label}
+        {...invalid}
         rows={4}
         maxLength={editor.maxLength}
         value={draft}
@@ -259,6 +282,7 @@ function ContentTextControl({
   return (
     <TerminalInput
       aria-label={label}
+      {...invalid}
       maxLength={editor.maxLength}
       value={draft}
       onValueChange={setDraft}
