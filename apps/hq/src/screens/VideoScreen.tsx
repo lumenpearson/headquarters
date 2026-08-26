@@ -76,7 +76,7 @@ import {
 } from '@/components/sync/groupRuntimeHolder';
 import { createGroupPlaybackSyncTransport } from '@/infrastructure/controlPlane/GroupPlaybackSyncTransport';
 import { playbackLeadForDelivery } from '@/application/sync/groupEventFeed';
-import { useOperationsStore } from '@/state/operationsStore';
+import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 const playbackRateOptions = [0.5, 1, 1.5, 2, 4].map((rate) => ({
   value: String(rate),
@@ -831,6 +831,15 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
        * server allocated, and the coordinator adopts it. Authority is passed in
        * too, so a session under `LEADER` refuses to publish locally rather than
        * learning it from a `FAILED_PRECONDITION` on every control press.
+       *
+       * The clock offset is what moves the *instant* off this machine (R27).
+       * A lead cannot repair two screens whose clocks disagree -- it equalizes
+       * delivery, and a clock difference is not delivery -- so `executeAtMs`
+       * is expressed on the group's scale, and `TimeSync` is what converts to
+       * it. Passed as a reader rather than a value on purpose: the estimate is
+       * re-taken every minute, and putting it in this effect's dependencies
+       * would rebuild the coordinator on each round, dropping every pending
+       * command with it. The store is read at each conversion instead.
        */
       const groupTransport =
         group === null
@@ -842,6 +851,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       const coordinator = new PlaybackSyncCoordinator({
         onCommand: (command) => playbackCommandHandlerRef.current(command),
         executionDelayMs: playbackLeadForDelivery(group?.delivery ?? 'socket', playbackLeadMs),
+        clockOffsetMs: () => operationsStore.getState().connection.clock.offsetMs,
         ...(groupTransport === undefined ? {} : { transport: groupTransport }),
         ...(group === null ? {} : { deviceId: group.deviceId }),
         ...(authority === undefined

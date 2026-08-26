@@ -71,7 +71,7 @@ function tile(id: string): ScreenTile {
       variants: [{ presentation: 'full', columns: 1, rows: 1 }],
     },
     title: id.toUpperCase(),
-    category: 'registry',
+    category: 'records',
     render: () => <div data-testid={id} />,
   };
 }

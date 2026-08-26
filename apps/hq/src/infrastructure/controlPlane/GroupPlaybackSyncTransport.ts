@@ -44,6 +44,13 @@ export interface GroupPlaybackSyncTransportOptions {
  * and the publication rate limiter answers `RESOURCE_EXHAUSTED`; both arrive
  * at `onPublishFailed`, so the screen can say `LOCAL ONLY` rather than claim a
  * synchronization that is not happening.
+ *
+ * `execute_at` is carried in both directions exactly as given: the control
+ * plane copies the client's value into the appended event and neither the hub
+ * nor the poll feed touches it. That is why the coordinator puts the group's
+ * clock on it rather than the issuing machine's -- there is no point on this
+ * path where a server could restate the instant, so the clients state it on
+ * one scale themselves (R27).
  */
 export function createGroupPlaybackSyncTransport(
   options: GroupPlaybackSyncTransportOptions,
@@ -151,7 +158,11 @@ function toPlaybackSyncCommand(
     positionSeconds: command.positionSeconds,
     playbackRate: command.playbackRate > 0 ? command.playbackRate : 1,
     // `issued_at` is not on the wire, so the event's own instant stands in for
-    // it; it only ever breaks a tie between two commands of equal epoch.
+    // it; it only ever breaks a tie between two commands of equal epoch. Both
+    // candidates are already on the group's clock -- `occurred_at` is the
+    // server's own stamp and `executeAtMs` was converted before publication --
+    // so the tie is broken between comparable numbers rather than between two
+    // machines' idea of the time.
     issuedAtMs: Number.isNaN(issuedAtMs) ? executeAtMs : issuedAtMs,
     executeAtMs,
     issuedByDeviceId: command.issuedByDeviceId,

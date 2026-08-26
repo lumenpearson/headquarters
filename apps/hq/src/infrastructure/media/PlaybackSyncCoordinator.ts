@@ -76,6 +76,18 @@ export interface PlaybackSyncCoordinatorOptions {
   readonly leaderDeviceId?: string;
   readonly executionDelayMs?: number;
   readonly now?: () => number;
+  /**
+   * What to add to this machine's clock to read the group's, as `TimeSync`
+   * last measured it (`ClockEstimate.offsetMs`). Absent means zero, which is
+   * both the honest answer for a browser talking to itself and the answer
+   * before the first round completes.
+   *
+   * A function rather than a number because the estimate is re-taken every
+   * minute and this coordinator outlives many of those rounds: passing the
+   * value would mean rebuilding the coordinator on each one, discarding the
+   * pending timers and the per-device sequence map with it.
+   */
+  readonly clockOffsetMs?: () => number;
   readonly schedule?: (callback: () => void, delayMs: number) => () => void;
   readonly transport?: PlaybackSyncTransport;
   /**
@@ -101,6 +113,33 @@ export interface PlaybackSyncCoordinatorOptions {
  * answers with what was allocated, and {@link PlaybackSyncCoordinator.publish}
  * replaces the local pair with it -- without moving `executeAtMs`, so the
  * instant the command runs at is unchanged by the round trip.
+ *
+ * ## The one scale (R27)
+ *
+ * `issuedAtMs` and `executeAtMs` are on the **group's** clock, never on the
+ * machine that wrote them. They have to be: `execute_at` crosses the wire
+ * untouched -- `publishSessionCommand` copies the client's value into the
+ * appended event and the hub carries it on -- so two screens agree on an
+ * instant only if both express it on one scale. Two machines whose clocks
+ * differ by three seconds and who each schedule against their own would run
+ * one command three seconds apart, and no lead repairs that: a lead equalizes
+ * *delivery*, and a clock difference is not delivery.
+ *
+ * The conversion has exactly one home, {@link PlaybackSyncCoordinator.#groupNow},
+ * and every clock this class reads goes through it. That is what keeps the
+ * offset from being applied twice. Each side applies **its own** offset once,
+ * in opposite directions -- the publisher converting a local instant up to the
+ * group's scale, every receiver converting the same instant back down to a
+ * local delay -- because the two offsets are different numbers and neither
+ * machine can know the other's: `SessionCommand` carries no issuer clock, and
+ * adding one would be a wire change for something the shared scale already
+ * settles. On a screen that never reached a control plane the offset is zero
+ * and both conversions are identities, so a single machine behaves exactly as
+ * it did before.
+ *
+ * The lead is added once, to the instant, by the publisher alone; it never
+ * touches the conversion. A delay is a duration, and durations do not carry an
+ * offset.
  */
 export class PlaybackSyncCoordinator {
   readonly #deviceId: string;
@@ -108,6 +147,7 @@ export class PlaybackSyncCoordinator {
   readonly #leaderDeviceId: string | undefined;
   readonly #executionDelayMs: number;
   readonly #now: () => number;
+  readonly #clockOffsetMs: () => number;
   readonly #schedule: (callback: () => void, delayMs: number) => () => void;
   readonly #transport: PlaybackSyncTransport;
   readonly #unsubscribe: () => void;
@@ -123,6 +163,7 @@ export class PlaybackSyncCoordinator {
     this.#leaderDeviceId = options.leaderDeviceId;
     this.#executionDelayMs = validatedExecutionDelay(options.executionDelayMs);
     this.#now = options.now ?? Date.now;
+    this.#clockOffsetMs = options.clockOffsetMs ?? (() => 0);
     this.#schedule =
       options.schedule ??
       ((callback, delayMs) => {
@@ -141,7 +182,7 @@ export class PlaybackSyncCoordinator {
     if (this.#closed || !isPlaybackSyncTarget(input.target)) return null;
     if (this.#authority === 'LEADER' && this.#leaderDeviceId !== this.#deviceId) return null;
 
-    const issuedAtMs = this.#now();
+    const issuedAtMs = this.#groupNow();
     const command: PlaybackSyncCommand = {
       epoch: 1,
       sequence: this.#sequence + 1,
@@ -231,9 +272,32 @@ export class PlaybackSyncCoordinator {
     return true;
   }
 
+  /**
+   * This machine's clock, read on the group's scale.
+   *
+   * The single conversion point between the two, so that no caller has to
+   * remember which scale it is holding and no path can apply the correction
+   * twice. `#now` is read nowhere else in this class.
+   *
+   * The estimate is read here, at each conversion, rather than captured once.
+   * A `TimeSync` round every minute is a better measurement of the same
+   * relationship, and a command converted after one lands should use it. What
+   * this deliberately does *not* do is re-time a command whose timer is
+   * already armed: a pending command waits at most the lead -- 6 s on a polled
+   * feed, {@link maximumExecutionDelayMs} at the ceiling -- drift over that
+   * window is far below what this estimate resolves, and re-arming would move
+   * the instant on whichever screens happened to be holding a pending command
+   * and on no others. The published `executeAtMs` never moves for the same
+   * reason: it is the one number every participant is scheduling against.
+   */
+  #groupNow(): number {
+    const offsetMs = this.#clockOffsetMs();
+    return this.#now() + (Number.isFinite(offsetMs) ? offsetMs : 0);
+  }
+
   #scheduleCommand(command: PlaybackSyncCommand): void {
     const key = targetKey(command.target);
-    const delayMs = Math.max(0, command.executeAtMs - this.#now());
+    const delayMs = Math.max(0, command.executeAtMs - this.#groupNow());
     const cancel = this.#schedule(() => {
       this.#cancelByTarget.delete(key);
       if (this.#closed || this.#latestByTarget.get(key) !== command) return;

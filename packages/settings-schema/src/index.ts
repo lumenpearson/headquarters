@@ -992,7 +992,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
   definition(
     'performance.playbackLeadMs',
     'performance',
-    0,
+    40,
     'device',
     'How far ahead a synchronised playback command is scheduled, in milliseconds.',
     numberWithin(0, 400),

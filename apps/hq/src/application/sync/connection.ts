@@ -206,6 +206,13 @@ export interface GroupDevice {
  * to add to this machine's clock to read the server's, `latencyMs` the
  * one-way trip. `sampledAt` is empty until the first round completes, in the
  * store's idiom of an empty string rather than an absent field.
+ *
+ * `offsetMs` is not only shown. `PlaybackSyncCoordinator` reads it to express
+ * `executeAtMs` on the group's clock instead of on the machine that issued the
+ * command, which is what makes two screens with different clocks run one
+ * command at one instant (R27). Zero is the correct value before the first
+ * round and for a session that never reached a control plane: the conversion
+ * becomes an identity and a single machine behaves as it always did.
  */
 export interface ClockEstimate {
   readonly offsetMs: number;

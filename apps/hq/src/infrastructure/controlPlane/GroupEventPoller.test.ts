@@ -718,6 +718,45 @@ describe('playback across a polled group', () => {
     expect(fired[0]?.atMs).toBe(fired[1]?.atMs);
     expect(fired[0]?.atMs).toBe(baseMs + 6_000);
   });
+
+  it('runs the command at one true instant when the publishing screen is three seconds fast', async () => {
+    /*
+     * The millisecond promise of R27, on the one path that can break it: two
+     * machines whose own clocks disagree. `execute_at` crosses the wire
+     * untouched -- `publishSessionCommand` copies the client's value into the
+     * appended event -- so the only thing that can make two screens agree on
+     * an instant is that both express it on the same scale. Three seconds is
+     * half again the whole lead, so a coordinator scheduling against its own
+     * clock cannot land on the follower's instant by accident.
+     */
+    const { fired } = await twoScreens(playbackLeadForDelivery('poll', 0), {
+      issuing: { skewMs: 3_000, offsetMs: -3_000 },
+      following: trueClock,
+    });
+
+    expect(fired).toHaveLength(2);
+    expect(fired[0]?.atMs).toBe(fired[1]?.atMs);
+    expect(fired[0]?.atMs).toBe(baseMs + 6_000);
+  });
+
+  it('shows the same two screens three seconds apart while neither holds an estimate', async () => {
+    /*
+     * The counter-case, so the assertion above cannot pass for a reason other
+     * than the offset. A machine that has never completed a `TimeSync` round
+     * reports zero, which is also the honest answer for a group of one -- and
+     * the divergence that leaves is exactly the difference between the two
+     * clocks, neither more nor less. The lead cannot close it: a lead
+     * equalizes delivery, and this is not delivery.
+     */
+    const { fired } = await twoScreens(playbackLeadForDelivery('poll', 0), {
+      issuing: { skewMs: 3_000, offsetMs: 0 },
+      following: trueClock,
+    });
+
+    expect(fired).toHaveLength(2);
+    expect(fired[0]?.atMs).toBe(baseMs + 6_000);
+    expect(fired[1]?.atMs).toBe(baseMs + 9_000);
+  });
 });
 
 function groupChannel(deviceId = 'device-a', port?: ControlPlanePort): ControlPlaneGroupChannel {
@@ -802,12 +841,37 @@ class FakeRealtimeSocket implements RealtimeSocketLike {
 }
 
 /**
+ * One screen's relationship to the true instant this file measures in.
+ *
+ * `skewMs` is how far the machine's own clock has run ahead of that instant;
+ * `offsetMs` is what its last `TimeSync` round told it to add to that clock to
+ * read the control plane's. A machine three seconds fast with an honest
+ * estimate reports `+3000 / -3000`, and one that has never completed a round
+ * reports an offset of zero whatever its clock says.
+ */
+interface ScreenClock {
+  readonly skewMs: number;
+  readonly offsetMs: number;
+}
+
+/** A machine agreeing with the group to the millisecond. */
+const trueClock: ScreenClock = { skewMs: 0, offsetMs: 0 };
+
+/**
  * Two sessions of one group, one publishing and one following by poll.
  *
  * Both coordinators share the fake log and the fake clock, so what the test
  * reads off them is the instant each screen actually executed the command at.
+ * `clocks` is what each screen's own `Date.now()` and `TimeSync` say instead;
+ * left alone, both screens agree with true time and with each other.
  */
-async function twoScreens(leadMs: number): Promise<{
+async function twoScreens(
+  leadMs: number,
+  clocks: { readonly issuing: ScreenClock; readonly following: ScreenClock } = {
+    issuing: trueClock,
+    following: trueClock,
+  },
+): Promise<{
   readonly fired: { readonly device: string; readonly atMs: number }[];
 }> {
   const fired: { device: string; atMs: number }[] = [];
@@ -859,7 +923,8 @@ async function twoScreens(leadMs: number): Promise<{
     deviceId: 'device-a',
     executionDelayMs: leadMs,
     transport: createGroupPlaybackSyncTransport({ channel: publisher }),
-    now: () => Date.now(),
+    now: () => Date.now() + clocks.issuing.skewMs,
+    clockOffsetMs: () => clocks.issuing.offsetMs,
     schedule,
   });
   const following = new PlaybackSyncCoordinator({
@@ -867,7 +932,8 @@ async function twoScreens(leadMs: number): Promise<{
     deviceId: 'device-b',
     executionDelayMs: leadMs,
     transport: createGroupPlaybackSyncTransport({ channel: follower }),
-    now: () => Date.now(),
+    now: () => Date.now() + clocks.following.skewMs,
+    clockOffsetMs: () => clocks.following.offsetMs,
     schedule,
   });
 
