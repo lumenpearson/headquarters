@@ -6495,3 +6495,63 @@ button.is-active {
   letter-spacing: 0.08em;
   text-align: right;
 }
+
+/*
+ * The quality menu (R21, C25).
+ *
+ * One block for both hosts, because it is one control: the file viewer prints
+ * it under the local player's transport row and the video screen prints it in
+ * the channel's secondary bar. Both are grids or wrapping flex rows that were
+ * sized for the children they already had, so the menu takes a row of its own
+ * rather than squeezing a seventh column out of a six-column grid.
+ */
+.material-rendition-menu {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.material-rendition-menu__outcome,
+.material-rendition-menu__single {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-muted);
+  font-size: 7px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-rendition-menu__outcome[data-outcome='rendered'] {
+  color: var(--ops-text-strong);
+}
+
+.material-rendition-menu__outcome[data-outcome='original'],
+.material-rendition-menu__outcome[data-outcome='failed'] {
+  color: var(--ops-orange-bright);
+}
+
+.local-material-player__controls .material-rendition-menu,
+.local-material-player__controls .material-rendition-menu__single {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+.local-material-player__controls .material-rendition-menu .terminal-select {
+  min-height: 24px;
+  font-size: 7px;
+}
+
+.transport-secondary .camera-rendition-menu {
+  flex: 0 1 auto;
+}
+
+.transport-secondary .camera-rendition-menu .terminal-select {
+  width: 104px;
+}
+
+.local-material-preview--image .material-rendition-menu {
+  padding: 4px;
+  border-top: 1px solid var(--ops-line);
+}

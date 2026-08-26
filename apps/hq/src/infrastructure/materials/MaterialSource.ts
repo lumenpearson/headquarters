@@ -1,4 +1,5 @@
 import type { MaterialEntry } from './BridgeMaterialClient';
+import type { MaterialLibraryClient, MaterialRendition } from './materialLibrary';
 import {
   materialPreviewLimits,
   readMaterialBlob,
@@ -10,6 +11,10 @@ export type MaterialTransport = 'BOUNDED_BLOB' | 'RANGE_GRANT';
 export interface ResolvedMaterialSource {
   readonly url: string;
   readonly transport: MaterialTransport;
+  /** The variant that was asked for; empty for the stored object. */
+  readonly variant: string;
+  /** Whether the library answered with something other than the stored object. */
+  readonly rendered: boolean;
 }
 
 export interface MaterialPlaybackGrant {
@@ -64,13 +69,55 @@ export function openMaterialSource(
       const url = URL.createObjectURL(blob);
       revoke = () => URL.revokeObjectURL(url);
       if (released) release();
-      return { url, transport: 'BOUNDED_BLOB' };
+      return { url, transport: 'BOUNDED_BLOB', variant: '', rendered: false };
     }
 
     const grant = await client.getPlaybackGrant(material, signal);
     revoke = () => void client.revokePlaybackGrant(grant.grantId).catch(() => undefined);
     if (released) release();
-    return { url: grant.url, transport: 'RANGE_GRANT' };
+    return { url: grant.url, transport: 'RANGE_GRANT', variant: '', rendered: false };
+  })();
+
+  return { opened, release };
+}
+
+/**
+ * The same, for one named rendition of a material (R21).
+ *
+ * The original goes through `openMaterialSource` unchanged -- for a small file
+ * the blob is still the transport that needs no server-side state. Anything
+ * else is opened through its grant and never as a blob: the blob path streams
+ * the stored object, so reading a rendition that way would serve the original
+ * under the rendition's name, which is the one failure a quality menu must not
+ * have.
+ */
+export function openMaterialRendition(
+  client: MaterialLibraryClient,
+  material: MaterialEntry,
+  rendition: MaterialRendition,
+  signal?: AbortSignal,
+): MaterialSourceHandle {
+  if (rendition.variant.length === 0) return openMaterialSource(client, material, signal);
+
+  let released = false;
+  let revoke: (() => void) | undefined;
+  const release = () => {
+    released = true;
+    const pending = revoke;
+    revoke = undefined;
+    pending?.();
+  };
+
+  const opened = (async (): Promise<ResolvedMaterialSource> => {
+    const source = await client.openRendition(material, rendition, signal);
+    revoke = () => void client.revokePlaybackGrant(source.grantId).catch(() => undefined);
+    if (released) release();
+    return {
+      url: source.url,
+      transport: 'RANGE_GRANT',
+      variant: source.variant,
+      rendered: source.rendered,
+    };
   })();
 
   return { opened, release };

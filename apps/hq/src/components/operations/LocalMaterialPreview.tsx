@@ -2,10 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import type {
-  BridgeMaterialClient,
-  MaterialEntry,
-} from '@/infrastructure/materials/BridgeMaterialClient';
+import type { MaterialEntry } from '@/infrastructure/materials/BridgeMaterialClient';
+import type { MaterialLibraryClient } from '@/infrastructure/materials/materialLibrary';
 import {
   previewModeForMaterial,
   readMaterialBlob,
@@ -14,10 +12,16 @@ import {
 import { useNumberSetting } from '@/application/personalization/useSetting';
 
 import { LocalMaterialPlayer } from './LocalMaterialPlayer';
+import { MaterialRenditionMenu, type RenditionOutcome } from './MaterialRenditionMenu';
 
 type PreviewState =
   | { readonly type: 'loading' }
-  | { readonly type: 'source'; readonly url: string; readonly transport: 'blob' | 'range' }
+  | {
+      readonly type: 'source';
+      readonly url: string;
+      readonly transport: 'blob' | 'range';
+      readonly rendered: boolean;
+    }
   | { readonly type: 'text'; readonly content: string }
   | { readonly type: 'error'; readonly message: string };
 
@@ -26,7 +30,7 @@ export function LocalMaterialPreview({
   client,
 }: {
   readonly material: MaterialEntry;
-  readonly client: BridgeMaterialClient;
+  readonly client: MaterialLibraryClient;
 }) {
   // The operator's own limits reach the reader as an argument; the module that
   // enforces them stays free of the store.
@@ -35,6 +39,18 @@ export function LocalMaterialPreview({
   const limits = useMemo(() => ({ textBytes, binaryBytes }), [binaryBytes, textBytes]);
   const mode = previewModeForMaterial(material, limits);
   const [state, setState] = useState<PreviewState>({ type: 'loading' });
+  const renditions = useMemo(() => client.renditions(material), [client, material]);
+  /*
+   * Reset with the material, not merely on mount: the panel keeps one instance
+   * across selections, and a 720p left over from the previous file would be
+   * requested for a still image the operator had not asked anything about.
+   */
+  const [variant, setVariant] = useState('');
+  const [variantFor, setVariantFor] = useState(material.materialId);
+  if (variantFor !== material.materialId) {
+    setVariantFor(material.materialId);
+    setVariant('');
+  }
 
   useEffect(() => {
     if (
@@ -72,6 +88,29 @@ export function LocalMaterialPreview({
           if (!released) setState({ type: 'text', content });
           return;
         }
+        /*
+         * A named rendition is asked for by name, whatever the material's size:
+         * the bounded blob reads the stored object, so taking that path for a
+         * variant would show the original and call it 720p.
+         */
+        if (variant.length > 0) {
+          const rendition = renditions.find((candidate) => candidate.variant === variant);
+          if (rendition !== undefined) {
+            const source = await client.openRendition(material, rendition, controller.signal);
+            currentGrantId = source.grantId;
+            if (released) {
+              release();
+              return;
+            }
+            setState({
+              type: 'source',
+              url: source.url,
+              transport: 'range',
+              rendered: source.rendered,
+            });
+            return;
+          }
+        }
         if (mode === 'media-stream') {
           const grant = await client.getPlaybackGrant(material, controller.signal);
           currentGrantId = grant.grantId;
@@ -79,7 +118,7 @@ export function LocalMaterialPreview({
             release();
             return;
           }
-          setState({ type: 'source', url: grant.url, transport: 'range' });
+          setState({ type: 'source', url: grant.url, transport: 'range', rendered: false });
           return;
         }
         const blob = await readMaterialBlob(client, material, controller.signal, limits);
@@ -88,7 +127,7 @@ export function LocalMaterialPreview({
           release();
           return;
         }
-        setState({ type: 'source', url: currentObjectUrl, transport: 'blob' });
+        setState({ type: 'source', url: currentObjectUrl, transport: 'blob', rendered: false });
       } catch (error: unknown) {
         if (!released && !controller.signal.aborted) {
           setState({
@@ -104,7 +143,18 @@ export function LocalMaterialPreview({
       controller.abort();
       release();
     };
-  }, [client, limits, material, mode]);
+  }, [client, limits, material, mode, renditions, variant]);
+
+  const outcome: RenditionOutcome =
+    state.type === 'loading'
+      ? 'pending'
+      : state.type === 'error'
+        ? 'failed'
+        : state.type === 'source' && state.rendered
+          ? 'rendered'
+          : variant.length === 0
+            ? 'pending'
+            : 'original';
 
   if (mode === 'unsupported') {
     return <MetadataOnlyPreview reason="ПРЕДПРОСМОТР ЭТОГО ТИПА БУДЕТ ДОБАВЛЕН ОТДЕЛЬНЫМ VIEWER" />;
@@ -129,13 +179,32 @@ export function LocalMaterialPreview({
     );
   }
   if (mode === 'media' || mode === 'media-stream') {
-    return <LocalMaterialPlayer sourceUrl={state.url} title={material.displayName} />;
+    return (
+      <LocalMaterialPlayer
+        sourceUrl={state.url}
+        title={material.displayName}
+        quality={
+          <MaterialRenditionMenu
+            renditions={renditions}
+            variant={variant}
+            onVariantChange={setVariant}
+            outcome={outcome}
+          />
+        }
+      />
+    );
   }
   return mode === 'image' ? (
     <section className="local-material-preview local-material-preview--image">
       {/* Local Blob URLs cannot use Next image optimization without an HTTP grant. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={state.url} alt={`Предпросмотр ${material.displayName}`} />
+      <MaterialRenditionMenu
+        renditions={renditions}
+        variant={variant}
+        onVariantChange={setVariant}
+        outcome={outcome}
+      />
     </section>
   ) : (
     <section className="local-material-preview local-material-preview--pdf">

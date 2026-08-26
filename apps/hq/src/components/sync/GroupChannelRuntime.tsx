@@ -11,6 +11,7 @@ import { ControlPlaneGroupChannel } from '@/infrastructure/controlPlane/ControlP
 import { GroupSettingsClient } from '@/infrastructure/controlPlane/GroupSettingsClient';
 import { liveEditDocumentId } from '@/infrastructure/controlPlane/GroupLiveEditTransport';
 import { RealtimeClient } from '@/infrastructure/controlPlane/RealtimeClient';
+import { ControlPlaneMaterialClient } from '@/infrastructure/materials/ControlPlaneMaterialClient';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { setGroupRuntime } from './groupRuntimeHolder';
@@ -42,6 +43,9 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
   const settingsCapability = useOperationsStore(
     (state) => state.connection.capabilities?.settings ?? false,
   );
+  const materialsCapability = useOperationsStore(
+    (state) => state.connection.capabilities?.materials ?? false,
+  );
 
   useEffect(() => {
     if (mode !== 'online' || groupId === '' || deviceId === '') {
@@ -63,7 +67,27 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
       transport === undefined || !settingsCapability
         ? null
         : new GroupSettingsClient({ groupId, deviceId, transport });
-    setGroupRuntime({ groupId, deviceId, channel, settings });
+    /*
+     * The material library shares the same transport for the same reason, and
+     * is built only when `GetCapabilities` said `materials`: a control plane
+     * without the collaborator refuses every material RPC, and a client built
+     * against it would turn every import into a round trip that could only
+     * fail. Where the bucket answers is configuration and not something any RPC
+     * reports, so the origin is read from the environment here and validated on
+     * every presigned address inside the client.
+     */
+    const materials =
+      transport === undefined || !materialsCapability
+        ? null
+        : new ControlPlaneMaterialClient({
+            groupId,
+            deviceId,
+            transport,
+            ...(materialStorageOrigin() === undefined
+              ? {}
+              : { storageOrigin: materialStorageOrigin() }),
+          });
+    setGroupRuntime({ groupId, deviceId, channel, settings, materials });
 
     let disconnectSettings: (() => void) | undefined;
     if (settings !== null) {
@@ -129,7 +153,29 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
       setGroupRuntime(null);
       operationsStore.getState().patchConnection({ realtime: initialRealtimeLinkState });
     };
-  }, [client, deviceId, groupId, mode, realtimeAdmission, session, settingsCapability]);
+  }, [
+    client,
+    deviceId,
+    groupId,
+    materialsCapability,
+    mode,
+    realtimeAdmission,
+    session,
+    settingsCapability,
+  ]);
 
   return null;
+}
+
+/**
+ * Where the object store answers, if this build was told.
+ *
+ * An environment variable rather than a project-configuration field: the bucket
+ * belongs to the same deployment as the control plane the build already points
+ * at, and adding a field to `packages/config` would put a second owner on a
+ * value that only the material client reads.
+ */
+function materialStorageOrigin(): string | undefined {
+  const configured = process.env.NEXT_PUBLIC_HQ_MATERIAL_STORAGE_ORIGIN;
+  return configured === undefined || configured.length === 0 ? undefined : configured;
 }

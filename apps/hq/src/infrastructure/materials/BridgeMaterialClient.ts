@@ -4,6 +4,13 @@ import { createGrpcWebTransport } from '@connectrpc/connect-web';
 import { FileBridgeService } from '@gremuchaya/protocol';
 
 import { browserBlake3Hasher, type BrowserFileHasher } from './BrowserBlake3Hasher';
+import {
+  originalRendition,
+  type MaterialLibraryClient,
+  type MaterialOrigin,
+  type MaterialRendition,
+  type MaterialRenditionSource,
+} from './materialLibrary';
 
 const defaultBridgeUrl = 'http://127.0.0.1:4177';
 
@@ -139,7 +146,8 @@ export interface MaterialPlaybackGrant {
  * binary gRPC-Web calls and streams a File in bounded chunks, leaving the
  * definitive hash and content-addressed commit to the local bridge.
  */
-export class BridgeMaterialClient {
+export class BridgeMaterialClient implements MaterialLibraryClient {
+  readonly origin: MaterialOrigin = 'local-mirror';
   readonly #client: BridgeMaterialRpcClient;
 
   constructor(
@@ -277,6 +285,44 @@ export class BridgeMaterialClient {
     if (!isMaterialId(grantId)) return false;
     const response = await this.#client.revokeMaterialPlaybackGrant({ grantId }, options(signal));
     return response.revoked;
+  }
+
+  /**
+   * The bridge holds content and has no opinion about it.
+   *
+   * `BeginMaterialImport` names a mount, a file name, a declared MIME type, a
+   * size and an expected digest -- and no category. So this returns the same
+   * client rather than a differently configured one, and the operator's reading
+   * of the content is recorded by the caller in `materials.imported`.
+   */
+  withCategory(): BridgeMaterialClient {
+    return this;
+  }
+
+  /**
+   * One rendition, because the bridge stores exactly what it was given.
+   *
+   * `FileBridgeService` has no variant selector anywhere in it: a playback
+   * grant names a material and nothing else. Offering a ladder here would be a
+   * menu whose entries all resolve to the same bytes with nothing to say so.
+   */
+  renditions(): readonly MaterialRendition[] {
+    return [originalRendition];
+  }
+
+  async openRendition(
+    material: MaterialEntry,
+    _rendition: MaterialRendition,
+    signal?: AbortSignal,
+  ): Promise<MaterialRenditionSource> {
+    const grant = await this.getPlaybackGrant(material, signal);
+    return {
+      grantId: grant.grantId,
+      url: grant.url,
+      mimeType: grant.mimeType,
+      variant: '',
+      rendered: false,
+    };
   }
 
   private async uploadFileChunks(

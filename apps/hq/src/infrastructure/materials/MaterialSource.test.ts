@@ -2,8 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MaterialEntry, MaterialReadChunk } from './BridgeMaterialClient';
+import { originalRendition, type MaterialLibraryClient } from './materialLibrary';
 import { materialPreviewLimits } from './MaterialPreviewReader';
-import { openMaterialSource, type MaterialSourceClient } from './MaterialSource';
+import {
+  openMaterialRendition,
+  openMaterialSource,
+  type MaterialSourceClient,
+} from './MaterialSource';
 
 const material = (byteSize: bigint): MaterialEntry => ({
   materialId: '018f0f1a-8000-7000-8000-000000000000',
@@ -108,3 +113,64 @@ describe('opening a material as a playable source', () => {
     expect(revokedUrls).toEqual([source.url]);
   });
 });
+
+describe('opening one named rendition of a material (R21)', () => {
+  it('asks the library for the variant even when the material would fit in a blob', async () => {
+    const asked: string[] = [];
+    const handle = openMaterialRendition(renditionClient(asked), material(3n), {
+      variant: '720p',
+      label: '720P',
+    });
+    const source = await handle.opened;
+
+    expect(asked).toEqual(['720p']);
+    // The blob path streams the stored object, so taking it for a variant
+    // would show the original and call it 720p.
+    expect(createdUrls).toEqual([]);
+    expect(source).toMatchObject({ transport: 'RANGE_GRANT', variant: '720p', rendered: true });
+  });
+
+  it('leaves the original on the transport its size chooses', async () => {
+    const asked: string[] = [];
+    const handle = openMaterialRendition(renditionClient(asked), material(3n), originalRendition);
+    const source = await handle.opened;
+
+    expect(asked).toEqual([]);
+    expect(source.transport).toBe('BOUNDED_BLOB');
+    expect(source.variant).toBe('');
+  });
+
+  it('hands the rendition grant back on release, including after the caller gave up', async () => {
+    const revoked: string[] = [];
+    const handle = openMaterialRendition(renditionClient([], revoked), material(3n), {
+      variant: '480p',
+      label: '480P',
+    });
+
+    handle.release();
+    await handle.opened.catch(() => undefined);
+
+    expect(revoked).toEqual(['grant-480p']);
+  });
+});
+
+function renditionClient(asked: string[], revoked: string[] = []): MaterialLibraryClient {
+  return {
+    ...client(),
+    origin: 'group-library',
+    revokePlaybackGrant: (grantId: string) => {
+      revoked.push(grantId);
+      return Promise.resolve(false);
+    },
+    openRendition: (_material: MaterialEntry, rendition: { readonly variant: string }) => {
+      asked.push(rendition.variant);
+      return Promise.resolve({
+        grantId: `grant-${rendition.variant}`,
+        url: `https://s3.example.test/${rendition.variant}`,
+        mimeType: 'image/png',
+        variant: rendition.variant,
+        rendered: true,
+      });
+    },
+  } as unknown as MaterialLibraryClient;
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { MediaPlayer, MediaProvider, type MediaPlayerInstance } from '@vidstack/react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
@@ -9,9 +9,15 @@ import { useNumberSetting } from '@/application/personalization/useSetting';
 export function LocalMaterialPlayer({
   sourceUrl,
   title,
+  quality,
 }: {
   readonly sourceUrl: string;
   readonly title: string;
+  /**
+   * The quality menu, passed in rather than built here: which renditions exist
+   * is the library's answer, and this player holds a URL and no library.
+   */
+  readonly quality?: ReactNode;
 }) {
   const playerRef = useRef<MediaPlayerInstance>(null);
   const [paused, setPaused] = useState(true);
@@ -93,6 +99,7 @@ export function LocalMaterialPlayer({
         <span>
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
+        {quality}
       </footer>
     </section>
   );

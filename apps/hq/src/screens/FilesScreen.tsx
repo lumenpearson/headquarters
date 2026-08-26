@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Attachment, FileKind } from '@gremuchaya/domain';
 import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import {
   TerminalButton,
@@ -14,11 +13,18 @@ import {
 import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
 import { LocalMaterialPreview } from '@/components/operations/LocalMaterialPreview';
-import {
-  BridgeMaterialClient,
-  type MaterialEntry,
-  type MaterialImportProgress,
+import type {
+  MaterialEntry,
+  MaterialImportProgress,
 } from '@/infrastructure/materials/BridgeMaterialClient';
+import { materialOriginLabel } from '@/infrastructure/materials/materialLibrary';
+import { useMaterialLibrary } from '@/application/materials/useMaterialLibrary';
+import {
+  formatBytes,
+  importedMaterialToAttachment,
+  toImportedMaterial,
+  toMaterialEntry,
+} from '@/application/materials/importedMaterials';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { useRecordPage } from '@/application/records/useRecordPage';
@@ -96,8 +102,14 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const sort = chosenSort ?? seededSort;
   const rememberImportCategory = useBooleanSetting('materials.rememberImportCategory');
   const [importOpen, setImportOpen] = useState(false);
-  const [bridgeMaterials, setBridgeMaterials] = useState<readonly MaterialEntry[]>([]);
-  const [nextBridgeCursor, setNextBridgeCursor] = useState('');
+  /*
+   * The live listing of the selected library, which is the library's answer and
+   * not this application's record. It exists only while the dialog is open --
+   * what the registry shows comes from `materials.imported`, which outlives the
+   * dialog, the screen and the session.
+   */
+  const [libraryMaterials, setLibraryMaterials] = useState<readonly MaterialEntry[]>([]);
+  const [nextLibraryCursor, setNextLibraryCursor] = useState('');
   const [bridgeStatus, setBridgeStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle');
   const [bridgeMessage, setBridgeMessage] = useState('');
   const [importProgress, setImportProgress] = useState<MaterialImportProgress | null>(null);
@@ -111,26 +123,29 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
    */
   const defaultCategory = useStringSetting('materials.defaultCategory');
   const [importCategory, setImportCategory] = useState(defaultCategory);
-  // Kept beside the mirror listing rather than inside it: the bridge stores
-  // content, and a category is the operator's reading of that content.
-  const [importedCategories, setImportedCategories] = useState<Readonly<Record<string, string>>>(
-    {},
-  );
   const abortImport = useRef<AbortController | null>(null);
-  const materialClient = useMemo(() => new BridgeMaterialClient(), []);
-  const localAttachments = useMemo(
-    () =>
-      bridgeMaterials.map((material) =>
-        materialToAttachment(material, importedCategories[material.materialId]),
-      ),
-    [bridgeMaterials, importedCategories],
+  const materialClient = useMaterialLibrary();
+  const importedMaterials = useOperationsStore((value) => value.materials.imported);
+  /*
+   * The registry reads the store, not the dialog. An import used to reach the
+   * table only while the hidden dialog was open and only for as long as that
+   * screen was mounted; now the record is the store's and the table shows it
+   * whether or not anyone has ever opened the importer.
+   */
+  const importedAttachments = useMemo(
+    () => Object.values(importedMaterials).map(importedMaterialToAttachment),
+    [importedMaterials],
   );
   const allFiles = useMemo(
-    () => [...Object.values(state.attachments), ...localAttachments],
-    [localAttachments, state.attachments],
+    () => [...Object.values(state.attachments), ...importedAttachments],
+    [importedAttachments, state.attachments],
   );
   const selected = allFiles.find((file) => file.id === state.ui.selectedFileId);
-  const selectedMaterial = bridgeMaterials.find((material) => material.materialId === selected?.id);
+  const selectedImport = selected === undefined ? undefined : importedMaterials[selected.id];
+  const selectedMaterial = useMemo(
+    () => (selectedImport === undefined ? undefined : toMaterialEntry(selectedImport)),
+    [selectedImport],
+  );
   const pageSize = useTablePageSize();
   const normalizedQuery = query.toLocaleLowerCase('ru-RU');
   const { page: filePage, goToPage } = useRecordPage(allFiles, {
@@ -166,8 +181,8 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       .list()
       .then((page) => {
         if (cancelled) return;
-        setBridgeMaterials(page.materials);
-        setNextBridgeCursor(page.nextCursor);
+        setLibraryMaterials(page.materials);
+        setNextLibraryCursor(page.nextCursor);
         setBridgeStatus('idle');
       })
       .catch((error: unknown) => {
@@ -180,13 +195,13 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     };
   }, [importOpen, materialClient]);
 
-  const loadMoreBridgeMaterials = async () => {
-    if (nextBridgeCursor.length === 0 || bridgeStatus === 'loading') return;
+  const loadMoreLibraryMaterials = async () => {
+    if (nextLibraryCursor.length === 0 || bridgeStatus === 'loading') return;
     setBridgeStatus('loading');
     try {
-      const page = await materialClient.list(nextBridgeCursor);
-      setBridgeMaterials((current) => [...current, ...page.materials]);
-      setNextBridgeCursor(page.nextCursor);
+      const page = await materialClient.list(nextLibraryCursor);
+      setLibraryMaterials((current) => [...current, ...page.materials]);
+      setNextLibraryCursor(page.nextCursor);
       setBridgeStatus('idle');
     } catch (error: unknown) {
       setBridgeStatus('unavailable');
@@ -202,23 +217,28 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     setImporting(true);
     setBridgeMessage('');
     try {
+      // The category is declared once for the batch: the control plane carries
+      // it on `BeginUpload`, the bridge has no field for it, and either way the
+      // store's record is what the rest of the application reads.
+      const library = materialClient.withCategory(importCategory);
       for (const file of filesToImport) {
-        const completed = await materialClient.importFile(
-          file,
-          setImportProgress,
-          controller.signal,
-        );
-        setBridgeMaterials((current) => [
+        const completed = await library.importFile(file, setImportProgress, controller.signal);
+        setLibraryMaterials((current) => [
           completed.material,
           ...current.filter((entry) => entry.materialId !== completed.material.materialId),
         ]);
-        setImportedCategories((current) => ({
-          ...current,
-          [completed.material.materialId]: importCategory,
-        }));
+        state.recordImportedMaterial(
+          toImportedMaterial(completed.material, {
+            category: importCategory,
+            origin: library.origin,
+            importedAt: new Date().toISOString(),
+          }),
+        );
         state.selectFile(completed.material.materialId);
       }
-      setBridgeMessage(`ЗАГРУЖЕНО: ${filesToImport.length} / LOCAL MIRROR`);
+      setBridgeMessage(
+        `ЗАГРУЖЕНО: ${filesToImport.length} / ${materialOriginLabel(materialClient.origin)}`,
+      );
       setBridgeStatus('idle');
     } catch (error: unknown) {
       setBridgeStatus('unavailable');
@@ -523,9 +543,17 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
         <TileGrid tiles={tiles} columns={12} className="files-layout" screen="files" />
       </div>
       <TerminalDialog
-        title="ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ"
-        eyebrow="[CTRL+SHIFT+ALT+S] / LOOPBACK GRPC-WEB"
-        description="Материалы пишутся только в локальный mirror. Облачная синхронизация и удалённые grants ещё не активированы."
+        title={
+          materialClient.origin === 'group-library'
+            ? 'ИМПОРТ МАТЕРИАЛОВ В ГРУППУ'
+            : 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ'
+        }
+        eyebrow={`[CTRL+SHIFT+ALT+S] / ${materialClient.origin === 'group-library' ? 'CONTROL PLANE GRPC-WEB' : 'LOOPBACK GRPC-WEB'}`}
+        description={
+          materialClient.origin === 'group-library'
+            ? 'Материалы уходят в библиотеку группы: control plane резервирует части, браузер пишет их прямо в объектное хранилище по подписанным адресам.'
+            : 'Материалы пишутся только в локальный mirror. Группа не подключена либо этот control plane не объявляет коллаборатор materials.'
+        }
         open={importOpen}
         onOpenChange={(open) => {
           if (!open && importing) abortImport.current?.abort();
@@ -590,22 +618,24 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           </p>
           <div className="material-import-dialog__recent">
             <header>
-              <span>LOCAL MIRROR / {bridgeMaterials.length} RECORDS</span>
-              {nextBridgeCursor ? (
+              <span>
+                {materialOriginLabel(materialClient.origin)} / {libraryMaterials.length} RECORDS
+              </span>
+              {nextLibraryCursor ? (
                 <TerminalButton
                   size="small"
                   tone="quiet"
-                  onClick={() => void loadMoreBridgeMaterials()}
+                  onClick={() => void loadMoreLibraryMaterials()}
                 >
                   NEXT PAGE
                 </TerminalButton>
               ) : null}
             </header>
-            {bridgeMaterials.length === 0 ? (
-              <EmptyState>ЛОКАЛЬНЫЕ ИМПОРТИРОВАННЫЕ МАТЕРИАЛЫ ОТСУТСТВУЮТ</EmptyState>
+            {libraryMaterials.length === 0 ? (
+              <EmptyState>ИМПОРТИРОВАННЫЕ МАТЕРИАЛЫ ОТСУТСТВУЮТ</EmptyState>
             ) : (
               <ul>
-                {bridgeMaterials.map((material) => (
+                {libraryMaterials.map((material) => (
                   <li key={material.materialId}>
                     <strong>{material.displayName}</strong>
                     <span>
@@ -622,52 +652,6 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       </TerminalDialog>
     </>
   );
-}
-
-/**
- * The mirror entry as the registry sees it.
- *
- * `category` is the one the operator chose in the import dialog, and it is
- * absent for anything the bridge already held: the bridge stores content and
- * has no opinion about it. Carrying it as a tag rather than a column keeps the
- * category searchable from the same box that searches ids and sources.
- */
-function materialToAttachment(material: MaterialEntry, category: string | undefined): Attachment {
-  const mimeType = material.mimeType || 'application/octet-stream';
-  return {
-    id: material.materialId,
-    title: material.displayName,
-    kind: kindForMimeType(material.mimeType, material.displayName),
-    status: 'READY',
-    createdAt: material.createdAt,
-    source: 'LOCAL MIRROR / GRPC-WEB',
-    classification: 'АЛЬФА',
-    tags:
-      category === undefined ? ['local-mirror', mimeType] : ['local-mirror', category, mimeType],
-    linkedCaseIds: [],
-    linkedObjectIds: [],
-    sizeLabel: formatBytes(material.byteSize),
-    preview: `BLAKE3 ${material.contentHash.slice(0, 16)}`,
-  };
-}
-
-function kindForMimeType(mimeType: string, fileName: string): FileKind {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('video/')) return 'video';
-  if (mimeType.startsWith('audio/')) return 'audio';
-  if (mimeType.includes('pdf') || mimeType.startsWith('text/')) return 'document';
-  if (/\.(geojson|kml|kmz|gpx)$/iu.test(fileName)) return 'map';
-  if (/\.(csv|json|xml|ya?ml)$/iu.test(fileName)) return 'data';
-  return 'document';
-}
-
-function formatBytes(value: bigint): string {
-  const bytes = Number(value);
-  if (!Number.isFinite(bytes) || bytes < 0) return 'N/A';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function messageFromBridgeError(error: unknown): string {

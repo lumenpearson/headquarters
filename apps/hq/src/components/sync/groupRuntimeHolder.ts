@@ -1,5 +1,6 @@
 import type { GroupChannel } from '@/application/sync/groupChannel';
 import type { GroupSettingsPort } from '@/application/sync/groupSettingsPort';
+import type { MaterialLibraryClient } from '@/infrastructure/materials/materialLibrary';
 
 /**
  * The group's live collaborators, for the surfaces that need one.
@@ -22,6 +23,18 @@ export interface GroupRuntimeHandle {
   readonly channel: GroupChannel;
   /** `null` on a control plane started without a settings store. */
   readonly settings: GroupSettingsPort | null;
+  /**
+   * The group's material library, or absent when this control plane answers
+   * `GetCapabilities` without `materials`. `selectMaterialLibrary` reads it and
+   * falls back to the loopback bridge, so nothing here is not a screen without
+   * materials -- it is a screen whose materials stay on this machine.
+   *
+   * Optional rather than `| null`, unlike `settings`: a surface that only needs
+   * a channel builds a handle without naming a collaborator it will never ask
+   * for, and every reader goes through `selectMaterialLibrary`, which treats
+   * absent and `null` as the same fact.
+   */
+  readonly materials?: MaterialLibraryClient | null;
 }
 
 let active: GroupRuntimeHandle | null = null;

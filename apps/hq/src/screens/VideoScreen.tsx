@@ -27,14 +27,18 @@ import {
   useStringSetting,
 } from '@/application/personalization/useSetting';
 import { Gauge, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
+import type { MaterialEntry } from '@/infrastructure/materials/BridgeMaterialClient';
+import { useMaterialLibrary } from '@/application/materials/useMaterialLibrary';
 import {
-  BridgeMaterialClient,
-  type MaterialEntry,
-} from '@/infrastructure/materials/BridgeMaterialClient';
+  cameraDeclaredRendition,
+  originalRendition,
+  type MaterialRendition,
+} from '@/infrastructure/materials/materialLibrary';
+import { openMaterialRendition } from '@/infrastructure/materials/MaterialSource';
 import {
-  materialPreviewLimits,
-  readMaterialBlob,
-} from '@/infrastructure/materials/MaterialPreviewReader';
+  MaterialRenditionMenu,
+  type RenditionOutcome,
+} from '@/components/operations/MaterialRenditionMenu';
 import {
   demoCameraMaterialOption,
   isAssignableCameraMaterial,
@@ -118,6 +122,10 @@ interface CameraMaterialSource {
   readonly materialId: string;
   readonly source: string;
   readonly transport: 'BOUNDED_BLOB' | 'RANGE_GRANT';
+  /** The variant this source was opened for; empty for the stored object. */
+  readonly variant: string;
+  /** Whether the library answered with something other than the stored object. */
+  readonly rendered: boolean;
 }
 
 interface CameraMaterialSourceFailure {
@@ -283,6 +291,12 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   );
   const [cameraMaterialSourceFailure, setCameraMaterialSourceFailure] =
     useState<CameraMaterialSourceFailure | null>(null);
+  /*
+   * The rendition the operator asked this channel for (R21, C25). Seeded from
+   * the camera's own declaration below and reset when the assignment moves, so
+   * a 480p chosen for one channel is not silently requested for the next.
+   */
+  const [chosenVariant, setChosenVariant] = useState<string | null>(null);
   const [playbackSyncState, setPlaybackSyncState] = useState<PlaybackSyncState>('CONNECTING');
   /*
    * The group, read as external state exactly as `EditModeRuntime` reads it:
@@ -298,7 +312,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   const cameraMaterialAssignmentsRef = useRef<CameraMaterialAssignments>({});
   const playbackSyncRef = useRef<PlaybackSyncCoordinator | null>(null);
   const playbackCommandHandlerRef = useRef<(command: PlaybackSyncCommand) => void>(() => undefined);
-  const materialClient = useMemo(() => new BridgeMaterialClient(), []);
+  const materialClient = useMaterialLibrary();
   const cameras = useMemo(() => Object.values(state.cameras), [state.cameras]);
   const selected = state.cameras[state.ui.selectedCameraId] ?? Object.values(state.cameras)[0];
   const selectedMaterialId =
@@ -306,10 +320,49 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   const selectedMaterial = cameraMaterials.find(
     (material) => material.materialId === selectedMaterialId,
   );
+  /*
+   * The ladder this channel can be asked for (R21, C25).
+   *
+   * The library names what it can serve; the camera's own declaration is
+   * prepended, which is the one path by which `Camera.codec` and
+   * `Camera.bitrate` reach a grant request at all. It is prepended rather than
+   * appended because a channel whose declaration is honoured is the state the
+   * registry describes, so it is what the menu opens on.
+   */
+  const declaredRendition = useMemo(
+    () =>
+      selected === undefined ? null : cameraDeclaredRendition(selected.codec, selected.bitrate),
+    [selected],
+  );
+  const cameraRenditions = useMemo<readonly MaterialRendition[]>(() => {
+    if (selectedMaterial === undefined) return [originalRendition];
+    const offered = materialClient.renditions(selectedMaterial);
+    if (declaredRendition === null || offered.length <= 1) return offered;
+    return [offered[0] ?? originalRendition, declaredRendition, ...offered.slice(1)];
+  }, [declaredRendition, materialClient, selectedMaterial]);
+  const seededVariant = declaredRendition?.variant ?? '';
+  const [variantSeededFrom, setVariantSeededFrom] = useState(
+    `${selected?.id ?? ''}:${seededVariant}`,
+  );
+  if (variantSeededFrom !== `${selected?.id ?? ''}:${seededVariant}`) {
+    setVariantSeededFrom(`${selected?.id ?? ''}:${seededVariant}`);
+    setChosenVariant(null);
+  }
+  const requestedVariant = chosenVariant ?? seededVariant;
+  const requestedRendition = useMemo<MaterialRendition>(
+    () =>
+      cameraRenditions.find((rendition) => rendition.variant === requestedVariant) ??
+      originalRendition,
+    [cameraRenditions, requestedVariant],
+  );
   const activeCameraMaterialSource =
     cameraMaterialSource !== null &&
     cameraMaterialSource.cameraId === selected?.id &&
-    cameraMaterialSource.materialId === selectedMaterialId
+    cameraMaterialSource.materialId === selectedMaterialId &&
+    // The variant is part of the identity of a source, not a label on it: a
+    // menu that left the previous rendition playing while the next one was
+    // being granted would show a change that had not happened yet.
+    cameraMaterialSource.variant === requestedVariant
       ? cameraMaterialSource
       : null;
   const activeCameraMaterialFailure =
@@ -332,6 +385,23 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
           : activeCameraMaterialFailure === null
             ? 'loading'
             : 'unavailable';
+  /*
+   * What the library answered for the rendition on screen. `original` is the
+   * honest reading of every deployment in this repository: `issuePreview`
+   * presigns the stored object whatever variant it is handed, so a channel set
+   * to `720P` is playing the original and the bar says so rather than letting
+   * the menu imply a change that did not happen.
+   */
+  const renditionOutcome: RenditionOutcome =
+    materialSourceState === 'unavailable' || materialSourceState === 'missing'
+      ? 'failed'
+      : activeCameraMaterialSource === null
+        ? 'pending'
+        : activeCameraMaterialSource.rendered
+          ? 'rendered'
+          : requestedVariant.length === 0
+            ? 'pending'
+            : 'original';
   const cameraLocalSources = useMemo(
     () =>
       activeCameraMaterialSource === null
@@ -492,66 +562,55 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
 
     const controller = new AbortController();
     let released = false;
-    let objectUrl: string | undefined;
-    let playbackGrantId: string | undefined;
-    const releaseSource = () => {
-      if (objectUrl !== undefined) {
-        URL.revokeObjectURL(objectUrl);
-        objectUrl = undefined;
-      }
-      if (playbackGrantId !== undefined) {
-        const grantId = playbackGrantId;
-        playbackGrantId = undefined;
-        void materialClient.revokePlaybackGrant(grantId).catch(() => undefined);
-      }
-    };
+    /*
+     * The blob-versus-grant choice and the undoing of either used to be written
+     * out here as well as in `openMaterialSource`, so a fix to one was a fix to
+     * one of two copies. The seam owns both, and the screen keeps only what is
+     * its own: which camera the source belongs to, and what to show when it
+     * cannot be opened.
+     */
+    const handle = openMaterialRendition(
+      materialClient,
+      selectedMaterial,
+      requestedRendition,
+      controller.signal,
+    );
     void Promise.resolve().then(() => {
       if (!released) setCameraMaterialSourceFailure(null);
     });
-    void (async () => {
-      const useBoundedBlob = selectedMaterial.byteSize <= BigInt(materialPreviewLimits.binaryBytes);
-      if (useBoundedBlob) {
-        const blob = await readMaterialBlob(materialClient, selectedMaterial, controller.signal);
-        objectUrl = URL.createObjectURL(blob);
-        if (released) {
-          releaseSource();
-          return;
-        }
+    void handle.opened
+      .then((source) => {
+        if (released || controller.signal.aborted) return;
         setCameraMaterialSource({
           cameraId,
           materialId: selectedMaterial.materialId,
-          source: objectUrl,
-          transport: 'BOUNDED_BLOB',
+          source: source.url,
+          transport: source.transport,
+          variant: source.variant,
+          rendered: source.rendered,
         });
-        return;
-      }
-
-      const grant = await materialClient.getPlaybackGrant(selectedMaterial, controller.signal);
-      playbackGrantId = grant.grantId;
-      if (released) {
-        releaseSource();
-        return;
-      }
-      setCameraMaterialSource({
-        cameraId,
-        materialId: selectedMaterial.materialId,
-        source: grant.url,
-        transport: 'RANGE_GRANT',
+      })
+      .catch((error: unknown) => {
+        if (released || controller.signal.aborted) return;
+        setCameraMaterialSourceFailure({
+          cameraId,
+          materialId: selectedMaterial.materialId,
+          message: error instanceof Error ? error.message : 'LOCAL MATERIAL STREAM UNAVAILABLE',
+        });
       });
-    })().catch((error: unknown) => {
-      if (released || controller.signal.aborted) return;
-      setCameraMaterialSourceFailure({
-        cameraId,
-        materialId: selectedMaterial.materialId,
-        message: error instanceof Error ? error.message : 'LOCAL MATERIAL STREAM UNAVAILABLE',
-      });
-    });
     return () => {
       released = true;
       controller.abort();
-      releaseSource();
+      handle.release();
     };
-  }, [materialCatalogState, materialClient, selected?.id, selectedMaterial, selectedMaterialId]);
+  }, [
+    materialCatalogState,
+    materialClient,
+    requestedRendition,
+    selected?.id,
+    selectedMaterial,
+    selectedMaterialId,
+  ]);
 
   useEffect(() => {
     selectedCameraIdRef.current = selected?.id;
@@ -1256,6 +1315,14 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 }
                 label="Скорость воспроизведения"
                 disabled={isWebcamSelected}
+              />
+              <MaterialRenditionMenu
+                className="camera-rendition-menu"
+                renditions={cameraRenditions}
+                variant={requestedVariant}
+                onVariantChange={setChosenVariant}
+                outcome={renditionOutcome}
+                disabled={isWebcamSelected || selectedMaterial === undefined}
               />
               <TerminalButton onClick={() => setChosenMuted(!muted)}>
                 {muted ? '[M] MUTED' : '[M] AUDIO'}

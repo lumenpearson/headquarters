@@ -191,6 +191,40 @@ interface ContentEditState {
   readonly overrides: ContentOverrides;
 }
 
+/**
+ * One material this operator imported, as the whole application sees it (R1, R2).
+ *
+ * Before this the record of an import lived in `FilesScreen`'s React state and
+ * was rebuilt from the library each time the hidden dialog opened, so a
+ * material imported five minutes ago was invisible to the registry, to the
+ * video screen and to the next launch, and the operator's chosen category
+ * survived only as a tag on a bridge object. This is the record; the library
+ * still owns the bytes.
+ *
+ * `byteSize` is a decimal string and not a `bigint` on purpose. The slice is
+ * persisted through `JSON.stringify`, which throws on a `bigint` rather than
+ * dropping it, so one imported material would have taken the whole persisted
+ * blob down with it. `toMaterialEntry` converts back at the seam that needs the
+ * wire type.
+ */
+export interface ImportedMaterial {
+  readonly materialId: string;
+  readonly displayName: string;
+  readonly mimeType: string;
+  readonly byteSize: string;
+  readonly contentHash: string;
+  readonly createdAt: string;
+  /** The operator's reading of the content, from the import dialog. */
+  readonly category: string;
+  /** Which library holds the bytes: `local-mirror` or `group-library`. */
+  readonly origin: string;
+  readonly importedAt: string;
+}
+
+interface MaterialLibraryState {
+  readonly imported: Readonly<Record<string, ImportedMaterial>>;
+}
+
 interface ProductionState {
   readonly paused: boolean;
   readonly preset: string;
@@ -242,6 +276,8 @@ export interface OperationsState {
   readonly insights: Readonly<Record<string, AnalyticalInsight>>;
   readonly reports: Readonly<Record<string, OpsReport>>;
   readonly ui: OperationsUiState;
+  /** What this operator has imported, whichever library took the bytes (R1, R2). */
+  readonly materials: MaterialLibraryState;
   readonly production: ProductionState;
   readonly personalization: PersonalizationState;
   readonly edit: EditModeState;
@@ -309,6 +345,15 @@ export interface OperationsState {
    * the service, and the store only records it.
    */
   readonly patchConnection: (patch: Partial<ConnectionState>) => void;
+  /**
+   * Records one finished import. Written by the import dialog and by nothing
+   * else; re-importing the same content replaces the record rather than adding
+   * a second, because both libraries are content-addressed and a repeat import
+   * is the same material under a possibly different category.
+   */
+  readonly recordImportedMaterial: (material: ImportedMaterial) => void;
+  /** Drops one record. The bytes are the library's business, not this slice's. */
+  readonly forgetImportedMaterial: (materialId: string) => void;
   readonly resetWorld: () => void;
   readonly simulationTick: () => void;
 }
@@ -381,6 +426,7 @@ function createBaseState() {
       navCompact: false,
       productionPanelOpen: false,
     },
+    materials: { imported: {} as Readonly<Record<string, ImportedMaterial>> },
     production: {
       paused: false,
       preset: 'ACTIVE_OPERATION',
@@ -1043,15 +1089,35 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       };
     }),
   patchConnection: (patch) => set((state) => ({ connection: { ...state.connection, ...patch } })),
+  recordImportedMaterial: (material) =>
+    set((state) => ({
+      materials: {
+        imported: { ...state.materials.imported, [material.materialId]: material },
+      },
+      audit: [auditEntry('ИМПОРТИРОВАН МАТЕРИАЛ', material.materialId), ...state.audit].slice(
+        0,
+        100,
+      ),
+    })),
+  forgetImportedMaterial: (materialId) =>
+    set((state) => {
+      if (state.materials.imported[materialId] === undefined) return state;
+      const { [materialId]: _dropped, ...imported } = state.materials.imported;
+      return { materials: { imported } };
+    }),
   resetWorld: () => {
     const base = createBaseState();
     // The connection outlives a world reset the way the snapshots do: the
     // group this session is in is not part of the simulated world, and the
     // session service that owns the slice is not told about the reset.
+    // Imported materials outlive it for the stronger reason: they are real
+    // files the operator put somewhere, and a reset of the simulation must not
+    // be the act that loses the record of where they went.
     set({
       ...base,
       production: { ...base.production, snapshots: get().production.snapshots },
       connection: get().connection,
+      materials: get().materials,
     });
   },
   simulationTick: () =>
@@ -1147,6 +1213,8 @@ interface PersistedOperationsState {
   readonly audit?: readonly OpsAuditEntry[];
   /** Absent in a blob written before R4; hydration then applies no content edits. */
   readonly content?: ContentEditState;
+  /** Absent in a blob written before F9; hydration then knows of no imports. */
+  readonly materials?: MaterialLibraryState;
   readonly personalization: PersonalizationState;
 }
 
@@ -1159,6 +1227,14 @@ function persistedSnapshot(state: OperationsState): PersistedOperationsState {
     alerts: state.alerts,
     tasks: state.tasks,
     content: state.content,
+    /*
+     * Imports are written whatever `startup.restoreWorld` says, and read back
+     * the same way. That setting governs what the simulation did -- alerts,
+     * tasks, the trail -- and an imported file is not something the simulation
+     * did. Losing the record on the next launch would leave bytes in a library
+     * with nothing in the application pointing at them.
+     */
+    materials: state.materials,
     /*
      * `privacy.persistAudit` omits the key rather than writing an empty array:
      * an empty trail read back would look like a session that did nothing,
@@ -1202,6 +1278,46 @@ function hydratePersonalization(
     undoStack: persisted.undoStack ?? fallback.undoStack,
     redoStack: persisted.redoStack ?? fallback.redoStack,
   };
+}
+
+/**
+ * The imported-material record as it comes back from a blob or a peer.
+ *
+ * Both are trust boundaries: the key is editable in a browser's devtools and
+ * the channel is open to every same-origin session. Every field is checked,
+ * `byteSize` against the decimal form it is written in, so a hand-edited entry
+ * cannot reach the registry as an attachment with a `NaN` size or a missing id.
+ */
+function isImportedMaterial(value: unknown): value is ImportedMaterial {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  const byteSize = candidate['byteSize'];
+  return (
+    typeof candidate['materialId'] === 'string' &&
+    candidate['materialId'].length > 0 &&
+    typeof candidate['displayName'] === 'string' &&
+    typeof candidate['mimeType'] === 'string' &&
+    typeof byteSize === 'string' &&
+    /^\d+$/u.test(byteSize) &&
+    typeof candidate['contentHash'] === 'string' &&
+    typeof candidate['createdAt'] === 'string' &&
+    typeof candidate['category'] === 'string' &&
+    typeof candidate['origin'] === 'string' &&
+    typeof candidate['importedAt'] === 'string'
+  );
+}
+
+function sanitizeImportedMaterials(value: unknown): MaterialLibraryState | undefined {
+  const record = (value as MaterialLibraryState | undefined)?.imported;
+  if (typeof record !== 'object' || record === null) return undefined;
+  const imported: Record<string, ImportedMaterial> = {};
+  for (const [materialId, entry] of Object.entries(record)) {
+    // The key and the record have to agree: a blob whose key names one material
+    // and whose body names another would put the registry and the library out
+    // of step in a way no screen could notice.
+    if (isImportedMaterial(entry) && entry.materialId === materialId) imported[materialId] = entry;
+  }
+  return { imported };
 }
 
 function isCoordinate(value: unknown): value is readonly [number, number] {
@@ -1270,6 +1386,7 @@ function hydratePersistedState(): void {
         tasks: restoreWorld ? (parsed.tasks ?? state.tasks) : state.tasks,
         audit: restoreWorld ? (parsed.audit ?? state.audit) : state.audit,
         personalization: hydratePersonalization(personalization, state.personalization),
+        materials: sanitizeImportedMaterials(parsed.materials) ?? state.materials,
         /*
          * Content edits come back regardless of `startup.restoreWorld`. That
          * setting names alerts, tasks and the audit trail -- what the session
@@ -1354,6 +1471,11 @@ export function initializeOperationsClient(): () => void {
         // A peer that keeps no trail sends none; this session keeps its own
         // rather than adopting an emptiness the peer never meant to share.
         audit: event.data.audit ?? state.audit,
+        // Imports travel with the world: two screens of one machine read the
+        // same libraries, so a file imported on one is a file the other can
+        // open. The same sanitizer as hydration, because the channel is open to
+        // every same-origin session and is no more trusted than the blob.
+        materials: sanitizeImportedMaterials(event.data.materials) ?? state.materials,
         // Content edits are world, not personalization: a date corrected on
         // one screen is the date on every screen of the group, which is what
         // `advanced.worldSync` -- the gate on this channel -- is for.
