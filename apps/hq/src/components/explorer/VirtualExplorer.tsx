@@ -10,6 +10,8 @@ import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/pr
 import type { TerminalSelectOption } from '@gremuchaya/ui/primitives';
 import { useMemo, useState } from 'react';
 
+import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
+import { useAppLocale } from '@/application/localization/locale';
 import { useRuntime } from '@/components/runtime/RuntimeProvider';
 import { useAppStore } from '@/state/appStore';
 
@@ -33,6 +35,10 @@ const screenOptions: ReadonlyArray<TerminalSelectOption<ScreenId>> = screenIds.m
 }));
 
 export function VirtualExplorer() {
+  // The subscription behind `formatDate` and `filterAndSort` below: both read
+  // the locale at the moment they are called, and this component's other
+  // selectors would not notice it moving.
+  useAppLocale();
   const { controller } = useRuntime();
   const explorer = useAppStore((state) => state.explorer);
   const [targetScreen, setTargetScreen] = useState<ScreenId>('wall-center');
@@ -261,11 +267,11 @@ function filterAndSort(
   sortBy: string,
   direction: 'asc' | 'desc',
 ): readonly ExplorerNode[] {
-  const normalized = query.trim().toLocaleLowerCase('ru-RU');
+  const normalized = foldCase(query.trim());
   const filtered = nodes.filter((node) => {
     if (
       normalized !== '' &&
-      !`${node.name} ${node.tags?.join(' ') ?? ''}`.toLocaleLowerCase('ru-RU').includes(normalized)
+      !foldCase(`${node.name} ${node.tags?.join(' ') ?? ''}`).includes(normalized)
     )
       return false;
     if (filter === 'images') return node.iconHint === 'photo';
@@ -279,7 +285,7 @@ function filterAndSort(
     if (sortBy === 'modifiedAt')
       return (left.modifiedAt ?? '').localeCompare(right.modifiedAt ?? '') * multiplier;
     if (sortBy === 'kind') return left.kind.localeCompare(right.kind) * multiplier;
-    return left.name.localeCompare(right.name, 'ru-RU', { numeric: true }) * multiplier;
+    return compareText(left.name, right.name) * multiplier;
   });
 }
 
@@ -309,7 +315,7 @@ function formatBytes(value?: number): string {
 function formatDate(value?: string): string {
   return value === undefined
     ? '—'
-    : new Intl.DateTimeFormat('ru-RU', {
+    : dateTimeFormat({
         day: '2-digit',
         month: '2-digit',
         hour: '2-digit',

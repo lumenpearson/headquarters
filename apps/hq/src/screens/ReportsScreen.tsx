@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { compareText, dateTimeFormat } from '@/application/localization/intl';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EditableContent } from '@/components/edit/EditableContent';
@@ -11,6 +12,9 @@ import { RecordPagination } from '@/components/operations/RecordPagination';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
+
+/** What `toLocaleString()` printed, named rather than left implicit. */
+const stampParts = { dateStyle: 'short', timeStyle: 'medium' } as const;
 
 export function ReportsScreen() {
   const state = useOperationsStore((value) => value);
@@ -29,7 +33,7 @@ export function ReportsScreen() {
     pageSize,
     filters: [(report) => kind === 'all' || report.kind === kind],
     comparator: (left, right) => {
-      const result = String(left[sortKey]).localeCompare(String(right[sortKey]), 'ru-RU');
+      const result = compareText(String(left[sortKey]), String(right[sortKey]));
       return descending ? -result : result;
     },
   });
@@ -160,7 +164,7 @@ export function ReportsScreen() {
                       <td>{report.kind.toUpperCase()}</td>
                       <td>
                         <EditableContent field="report.createdAt" entityId={report.id}>
-                          {new Date(report.createdAt).toLocaleString('ru-RU')}
+                          {dateTimeFormat(stampParts).format(new Date(report.createdAt))}
                         </EditableContent>
                       </td>
                       <td>

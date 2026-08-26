@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { appLocales, translateWith } from '@/application/localization/messages';
+
 import { formatChord } from './match';
 import { findKeybind, keybindRegistry } from './registry';
 
@@ -19,11 +21,21 @@ describe('keybind registry', () => {
     expect(ids).toEqual([...new Set(ids)]);
   });
 
-  it('gives every keybind something to show in the list', () => {
+  it('gives every keybind something to show in the list, in every language', () => {
     // R11 asks for a list of them. A keybind with no description cannot appear
-    // in one, so the registry is the wrong place to leave that blank.
+    // in one, so the registry is the wrong place to leave that blank. Since
+    // F11 the description is a catalogue id, and an id is only as good as the
+    // message behind it -- so the assertion resolves it rather than measuring
+    // the identifier, which would pass for an id no catalogue declares.
     for (const keybind of keybindRegistry) {
-      expect(keybind.description.length, keybind.id).toBeGreaterThan(0);
+      for (const locale of appLocales) {
+        const description = translateWith(locale, keybind.descriptionId, keybind.descriptionParams);
+        expect(description.length, `${locale}:${keybind.id}`).toBeGreaterThan(0);
+        expect(description, `${locale}:${keybind.id}`).not.toMatch(/^⟦/u);
+        // A description still carrying `{target}` is one whose parameters were
+        // declared in the message and not supplied by the registry.
+        expect(description, `${locale}:${keybind.id}`).not.toMatch(/\{[a-z]/u);
+      }
       expect(keybind.category.length, keybind.id).toBeGreaterThan(0);
     }
   });

@@ -1,3 +1,6 @@
+import { t } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
+
 import { keybindCategories, type Keybind, type KeybindCategory } from './registry';
 
 export interface KeybindGroup {
@@ -21,13 +24,24 @@ export function groupKeybinds(keybinds: readonly Keybind[]): readonly KeybindGro
     .filter((group) => group.keybinds.length > 0);
 }
 
-const categoryLabels: Readonly<Record<KeybindCategory, string>> = {
-  navigation: 'НАВИГАЦИЯ',
-  operation: 'ОПЕРАЦИЯ',
-  editing: 'РЕДАКТИРОВАНИЕ',
-  developer: 'РАЗРАБОТКА',
+/**
+ * A record over the union rather than an id built from the category name.
+ *
+ * `` t(`keybindCategory.${category}`) `` would compile and would silently
+ * render a bracketed missing id the day a fifth category is declared. This
+ * form makes that a type error at the declaration instead.
+ */
+const categoryMessages: Readonly<Record<KeybindCategory, MessageId>> = {
+  navigation: 'keybindCategory.navigation',
+  operation: 'keybindCategory.operation',
+  editing: 'keybindCategory.editing',
+  developer: 'keybindCategory.developer',
 };
 
+/**
+ * Reads the locale in force at the moment of the call. `KeybindList` takes the
+ * subscription with `useAppLocale`, which is what re-renders these headings.
+ */
 export function keybindCategoryLabel(category: KeybindCategory): string {
-  return categoryLabels[category];
+  return t(categoryMessages[category]);
 }

@@ -2,6 +2,9 @@
 
 import { useSyncExternalStore } from 'react';
 
+import { dateTimeFormat } from '@/application/localization/intl';
+import { t, useAppLocale } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
@@ -17,22 +20,34 @@ export const dateTimeModes = ['operation', 'system', 'utc'] as const;
 export type DateTimeMode = (typeof dateTimeModes)[number];
 
 /*
- * The locale is a literal here, deliberately.
+ * The locale is no longer a literal here.
  *
  * `dateTime.mode` chooses which clock is authoritative, not which language
- * names it; `localization.locale` is a separate definition that no locale
- * runtime reads yet, and F11 owns it. This module is the address F11 routes
- * the rest through.
+ * names it, and until F11 the second question had no answer at all: the four
+ * formatters below were built at import from `'ru-RU'`, so nothing could have
+ * re-read `localization.locale` even once it had a reader. They now come from
+ * `localization/intl.ts`, which caches per locale tag -- the tick still costs
+ * one map lookup rather than a constructor, and a locale change misses the
+ * cache and builds what the new locale needs.
  *
- * Routed through here today: the shell clock in `OpsTopBar` and the time stamp
- * in `OpsStatusLine`. Still holding their own `ru-RU` literal and therefore
- * still ignoring the mode: `components/shell/TopBar`, `VirtualExplorer`,
- * `DeveloperPanel`'s rehearsal and snapshot stamps, `SettingsScreen`'s history
- * stamps, `OperationsShell`'s own `formatDateTime` and snapshot button, and
- * the tables and event feeds on the cases, files, objects, overview, reports,
- * communications, search and system screens. F11 owns all of them.
+ * Two worklists, and they are no longer the same list.
+ *
+ * **The locale.** `TopBar`, `VirtualExplorer`, `DeveloperPanel`,
+ * `SettingsScreen`'s history stamps and the tables and feeds on the cases,
+ * files, objects, overview, reports and search screens now take their
+ * formatter from `localization/intl.ts` like this module does. Three still
+ * hold a `'ru-RU'` literal, all of them owned by another agent while F11 slice
+ * one was written: `OperationsShell`'s `formatDateTime` and snapshot button,
+ * `CommunicationsScreen`'s event feed and `SystemScreen`'s log. Two more live
+ * outside this app and cannot read a client setting at all --
+ * `packages/domain/src/explorerTree.ts` is framework-free by design and
+ * `apps/file-bridge/src/BridgeService.ts` is a separate process.
+ *
+ * **The mode.** Only the shell clock in `OpsTopBar` and the stamp in
+ * `OpsStatusLine` follow `dateTime.mode`. Every stamp named above still shows
+ * the machine's own clock whatever the operator chose, which is a separate
+ * defect from the locale and is not closed by F11.
  */
-const locale = 'ru-RU';
 
 /**
  * `hourCycle: 'h23'` rather than `hour12: false`: the latter still lets an
@@ -46,27 +61,24 @@ const timeParts = {
   hourCycle: 'h23',
 } as const;
 
-const systemTime = new Intl.DateTimeFormat(locale, timeParts);
-const utcTime = new Intl.DateTimeFormat(locale, { ...timeParts, timeZone: 'UTC' });
-
-/*
- * `dateTime.showSeconds` off, hoisted rather than constructed per tick: this
- * runs once a second for the life of the session, and building a formatter
- * inside the tick is the cost this module already avoids for the other two.
- */
+/** `dateTime.showSeconds` off. */
 const { second: _second, ...minuteParts } = timeParts;
-const systemMinutes = new Intl.DateTimeFormat(locale, minuteParts);
-const utcMinutes = new Intl.DateTimeFormat(locale, { ...minuteParts, timeZone: 'UTC' });
 
-const modeLabels: Readonly<Record<DateTimeMode, string>> = {
-  operation: 'ОПЕР',
-  system: 'СИСТ',
-  utc: 'UTC',
+const utcParts = { ...timeParts, timeZone: 'UTC' } as const;
+const utcMinuteParts = { ...minuteParts, timeZone: 'UTC' } as const;
+
+const modeLabels: Readonly<Record<DateTimeMode, MessageId>> = {
+  operation: 'clock.mode.operation',
+  system: 'clock.mode.system',
+  // Not `clock.mode.utc`: UTC is the name of a time scale, the same three
+  // letters in every language, so it lives in the catalogue's non-translatable
+  // namespace rather than being translated into something no one looks for.
+  utc: 'token.utc',
 };
 
 /** The marker that says which clock the shell is showing. */
 export function dateTimeModeLabel(mode: DateTimeMode): string {
-  return modeLabels[mode];
+  return t(modeLabels[mode]);
 }
 
 /**
@@ -117,6 +129,11 @@ export function operationSecondsOfDay(
  * `system` and `utc` read the machine, which is the point of the setting's
  * description: the operator sees the real time without the OS clock being
  * touched and without the operation's own time being moved.
+ *
+ * The formatter it takes belongs to whichever locale is in force at the moment
+ * of the call, so this is no longer a function of its arguments alone. That is
+ * deliberate and is what makes the shell clock follow `localization.locale`;
+ * a caller that must pin a reading formats the instant itself.
  */
 export function formatShellClock(
   mode: DateTimeMode,
@@ -131,8 +148,8 @@ export function formatShellClock(
     readonly showSeconds?: boolean;
   },
 ): string {
-  if (mode === 'system') return (showSeconds ? systemTime : systemMinutes).format(now);
-  if (mode === 'utc') return (showSeconds ? utcTime : utcMinutes).format(now);
+  if (mode === 'system') return dateTimeFormat(showSeconds ? timeParts : minuteParts).format(now);
+  if (mode === 'utc') return dateTimeFormat(showSeconds ? utcParts : utcMinuteParts).format(now);
   return formatSecondsOfDay(operationSeconds, showSeconds);
 }
 
@@ -192,10 +209,17 @@ export function useDateTimeMode(): DateTimeMode {
  * Subscribing to the shared tick is what re-renders the caller each second;
  * the reading itself is computed here so both callers cannot disagree about
  * it.
+ *
+ * The locale is subscribed to as well, and not because the reading would
+ * otherwise be stale for long -- a clock re-renders every second anyway. It is
+ * subscribed because `dateTimeModeLabel` beside it does not tick, and a marker
+ * still reading `СИСТ` next to a clock the operator has just switched to
+ * English is the kind of half-applied change that makes a setting look broken.
  */
 export function useShellClock(): string {
   const mode = useDateTimeMode();
   const showSeconds = useBooleanSetting('dateTime.showSeconds');
+  useAppLocale();
   const clockMode = useOperationsStore((state) => state.production.clockMode);
   const fixedTime = useOperationsStore((state) => state.production.fixedTime);
   useSyncExternalStore(subscribeToTick, tickSnapshot, serverTickSnapshot);

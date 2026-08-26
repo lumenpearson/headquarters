@@ -124,7 +124,7 @@ test('R10: no screen can be left blank by a size the operator is allowed to set'
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page
     .getByRole('textbox', { name: 'TILES / SPANS' })
     .fill(
@@ -154,7 +154,7 @@ test('R3: a tile hidden on one screen stays on the screens that share its name',
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('cases:registry');
 
   /*
@@ -180,7 +180,7 @@ test('R3: switching a group off takes every tile in it, on every screen', async 
 
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('textbox', { name: 'TILES / HIDDEN CATEGORIES' }).fill('geo');
 
   await page.goto('/overview');
@@ -202,7 +202,7 @@ test('R3: the operator can cap how rich a tile is drawn', async ({ page }) => {
 
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('combobox', { name: 'TILES / PRESENTATION' }).click();
   await page.getByRole('option', { name: 'MINIMAL', exact: true }).click();
 
@@ -237,7 +237,7 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   // tiles category is a heading inside `layout` rather than an entry in a flat
   // list of all thirty-two categories.
   await panel.getByRole('combobox', { name: 'Раздел' }).click();
-  await page.getByRole('option', { name: 'МАКЕТ И РАЗМЕРЫ / LAYOUT', exact: true }).click();
+  await page.getByRole('option', { name: 'МАКЕТ', exact: true }).click();
 
   const list = panel.locator('.edit-tiles');
   await expect(list).toBeVisible();
@@ -322,7 +322,7 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
 
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'ПЛИТКИ / TILES', exact: true }).click();
+  await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('overview:evidence');
 
   await page.goto('/overview');

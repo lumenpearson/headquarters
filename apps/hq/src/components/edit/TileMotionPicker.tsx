@@ -1,9 +1,11 @@
 'use client';
 
-import { tileCategories, type TileCategory } from '@gremuchaya/settings-schema';
+import { tileCategories } from '@gremuchaya/settings-schema';
 import { TerminalSelect } from '@gremuchaya/ui/primitives';
 
 import { parseContentElementId } from '@/application/edit/contentFields';
+import { useTranslate } from '@/application/localization/locale';
+import { tileCategoryLabel, tileMotionLabel } from '@/application/localization/tileLabels';
 import {
   readCategoryMotions,
   readTileMotions,
@@ -26,30 +28,14 @@ import { operationsStore, useOperationsStore } from '@/state/operationsStore';
  * in the history and in the issue draft with everything else. That is the whole
  * argument for storing it as a setting rather than as a field of edit state.
  */
-const motionLabels: Readonly<Record<TileMotion, string>> = {
-  inherit: 'КАК У ГРУППЫ',
-  none: 'БЕЗ ДВИЖЕНИЯ',
-  fade: 'ПРОЯВЛЕНИЕ',
-  rise: 'ПОДЪЁМ',
-  scan: 'РАЗВЁРТКА',
-};
-
-const categoryLabels: Readonly<Record<TileCategory, string>> = {
-  summary: 'СВОДКА',
-  records: 'РЕЕСТРЫ',
-  detail: 'КАРТОЧКИ',
-  navigation: 'НАВИГАЦИЯ',
-  telemetry: 'ТЕЛЕМЕТРИЯ',
-  events: 'СОБЫТИЯ',
-  geo: 'ГЕО',
-};
-
-const motionOptions = tileMotions.map((motion) => ({
-  value: motion,
-  label: motionLabels[motion],
-}));
-
 export function TileMotionPicker() {
+  // The subscription behind every label here, including the ones
+  // `tileCategoryLabel` and `tileMotionLabel` resolve.
+  const t = useTranslate();
+  const motionOptions = tileMotions.map((motion) => ({
+    value: motion,
+    label: tileMotionLabel(motion),
+  }));
   const selectedElement = useOperationsStore((state) => state.edit.selectedElementId);
   // The selection is shared with content fields (R4); one of those is not a
   // tile and gets no motion.
@@ -67,16 +53,14 @@ export function TileMotionPicker() {
 
   return (
     <div className="edit-tile-motion">
-      <h3>ДВИЖЕНИЕ ПЛИТОК</h3>
+      <h3>{t('edit.tileMotion.heading')}</h3>
       {selected === '' ? (
         // Said rather than hidden: a control that appears only once the operator
         // has already done the thing it needs cannot teach them to do it.
-        <p className="edit-tile-motion__hint">
-          Нажмите на плитку, чтобы задать её собственное движение.
-        </p>
+        <p className="edit-tile-motion__hint">{t('edit.tileMotion.hint')}</p>
       ) : (
         <TerminalSelect
-          label={`Движение плитки ${selected.toUpperCase()}`}
+          label={t('edit.tileMotion.tile', { tile: selected.toUpperCase() })}
           value={perTile.get(`${screen}:${selected}`) ?? 'inherit'}
           options={motionOptions}
           onValueChange={(value) =>
@@ -92,7 +76,7 @@ export function TileMotionPicker() {
       {tileCategories.map((category) => (
         <TerminalSelect
           key={category}
-          label={`Движение группы ${categoryLabels[category]}`}
+          label={t('edit.tileMotion.category', { category: tileCategoryLabel(category) })}
           value={perCategory.get(category) ?? 'inherit'}
           options={motionOptions}
           onValueChange={(value) =>

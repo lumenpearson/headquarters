@@ -11,6 +11,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
 import { buildIssueDraftUrl } from '@/application/edit/issueDraft';
+import { useAppLocale } from '@/application/localization/locale';
 import {
   queryCatalog,
   searchEverySetting,
@@ -18,28 +19,19 @@ import {
   splitByCategory,
   type SettingGroup,
 } from '@/application/personalization/catalog';
+import { repositorySlug } from '@/application/repository';
 import { categoryLabel, groupLabel, SchemaSetting } from '@/components/settings/SchemaSetting';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { ContentEditor } from './ContentEditor';
 import { resolveDockEdge } from './EditPanelDock';
+import { ElementTranslation } from './ElementTranslation';
 import { TileMotionPicker } from './TileMotionPicker';
 import { TileVisibility } from './TileVisibility';
 
-/**
- * The repository the issue draft points at, read from `git remote` rather than
- * guessed: this application has no server-side configuration, and a wrong slug
- * would send the operator to someone else's issue tracker.
- */
-const repository = 'lumenpearson/headquarters';
 const dockThresholdPx = 120;
 /** Below this the press on the header was a click, not a drag. */
 const dragThresholdPx = 6;
-
-const groupOptions = settingGroups.map((group) => ({
-  value: group,
-  label: groupLabel(group),
-}));
 
 /**
  * The floating edit-mode panel.
@@ -78,6 +70,9 @@ export function EditPanel() {
   const draft = useOperationsStore((state) => state.personalization.draft);
   const overrides = useOperationsStore((state) => state.content.overrides);
   const canUndo = useOperationsStore((state) => state.personalization.undoStack.length > 0);
+  // The subscription behind `groupLabel` and `categoryLabel` below, both of
+  // which read the locale at the moment they are called rather than taking it.
+  useAppLocale();
   const [group, setGroup] = useState<SettingGroup>('appearance');
   const [search, setSearch] = useState('');
   const [changedOnly, setChangedOnly] = useState(false);
@@ -103,6 +98,10 @@ export function EditPanel() {
     () => splitByCategory(searching ? found : catalog.definitions),
     [searching, found, catalog.definitions],
   );
+  // Built each render rather than hoisted to module scope, where it was built
+  // once at import and so could never have followed the setting. Seven
+  // entries: a memo over them would cost more than the map does.
+  const groupOptions = settingGroups.map((entry) => ({ value: entry, label: groupLabel(entry) }));
 
   /*
    * The drag starts on the panel header and nowhere else.
@@ -225,6 +224,7 @@ export function EditPanel() {
              */}
             {!searching && run.category === 'tiles' ? <TileVisibility /> : null}
             {!searching && run.category === 'animations' ? <TileMotionPicker /> : null}
+            {!searching && run.category === 'localization' ? <ElementTranslation /> : null}
             {run.definitions.map((definition) => (
               <SchemaSetting
                 key={definition.id}
@@ -255,7 +255,7 @@ export function EditPanel() {
           disabled={!hasChanges}
           onClick={() => {
             window.open(
-              buildIssueDraftUrl({ repository, draft, content: overrides }),
+              buildIssueDraftUrl({ repository: repositorySlug, draft, content: overrides }),
               '_blank',
               'noopener',
             );

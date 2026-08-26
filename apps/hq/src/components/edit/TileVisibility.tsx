@@ -1,20 +1,12 @@
 'use client';
 
-import { tileCategories, type TileCategory } from '@gremuchaya/settings-schema';
+import { tileCategories } from '@gremuchaya/settings-schema';
 import { TerminalSwitch } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
+import { tileCategoryLabel } from '@/application/localization/tileLabels';
 import { useScreenTiles } from '@/components/layout/tileRegistry';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
-
-const categoryLabels: Readonly<Record<TileCategory, string>> = {
-  summary: 'СВОДКА',
-  records: 'ЗАПИСИ',
-  detail: 'КАРТОЧКА',
-  navigation: 'НАВИГАЦИЯ',
-  telemetry: 'ТЕЛЕМЕТРИЯ',
-  events: 'СОБЫТИЯ',
-  geo: 'ГЕОГРАФИЯ',
-};
 
 /**
  * Switching tiles and whole groups off, on the screen the operator is looking
@@ -31,6 +23,7 @@ const categoryLabels: Readonly<Record<TileCategory, string>> = {
  * there.
  */
 export function TileVisibility() {
+  const t = useTranslate();
   const tiles = useScreenTiles();
   const hiddenIds = useOperationsStore((state) =>
     stringList(state.personalization.draft.values['tiles.hiddenIds']),
@@ -50,7 +43,7 @@ export function TileVisibility() {
   return (
     <section className="edit-tiles">
       <header>
-        <strong>ПЛИТКИ ЭКРАНА</strong>
+        <strong>{t('edit.tiles.heading')}</strong>
         <span>{tiles.length}</span>
       </header>
       {tiles.map((tile) => {
@@ -75,13 +68,13 @@ export function TileVisibility() {
         );
       })}
       <header>
-        <strong>ГРУППЫ</strong>
+        <strong>{t('edit.tiles.groups')}</strong>
         <span>{present.length}</span>
       </header>
       {present.map((category) => (
         <TerminalSwitch
           key={category}
-          label={categoryLabels[category]}
+          label={tileCategoryLabel(category)}
           checked={!hiddenCategories.includes(category)}
           onCheckedChange={(shown) => {
             operationsStore.getState().applySettingsPatch([

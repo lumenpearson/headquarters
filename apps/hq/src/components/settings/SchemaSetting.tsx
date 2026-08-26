@@ -9,6 +9,8 @@ import {
 } from '@gremuchaya/ui/primitives';
 import { useEffect, type ReactNode } from 'react';
 
+import { t } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import type { SettingGroup } from '@/application/personalization/catalog';
 
 import { CurveSetting } from './CurveSetting';
@@ -164,56 +166,65 @@ export function settingLabel(id: string): string {
  * layer that implements it. It sits here beside `categoryLabel` rather than in
  * the settings screen because the edit panel navigates the same sections, and
  * two copies of these names would drift the moment one section was renamed.
+ *
+ * Both tables read `ВНЕШНИЙ ВИД / APPEARANCE` -- the name and its own
+ * translation in one string -- because before F11 there was nowhere else to
+ * put the second half. There is now, so each half stands alone and a session
+ * in either language reads one heading rather than two.
+ *
+ * Both resolve the locale at the moment of the call. The two surfaces that
+ * draw them, `SettingsScreen` and `EditPanel`, take the subscription with
+ * `useAppLocale`; that is what re-renders these headings when the locale moves.
  */
+const groupMessages: Readonly<Record<SettingGroup, MessageId>> = {
+  appearance: 'settingsGroup.appearance',
+  layout: 'settingsGroup.layout',
+  motion: 'settingsGroup.motion',
+  information: 'settingsGroup.information',
+  media: 'settingsGroup.media',
+  session: 'settingsGroup.session',
+  system: 'settingsGroup.system',
+};
+
 export function groupLabel(group: SettingGroup): string {
-  return (
-    {
-      appearance: 'ВНЕШНИЙ ВИД / APPEARANCE',
-      layout: 'МАКЕТ И РАЗМЕРЫ / LAYOUT',
-      motion: 'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION',
-      information: 'ИНФОРМАЦИЯ / INFORMATION',
-      media: 'МЕДИА И КАРТА / MEDIA',
-      session: 'СЕССИЯ И УПРАВЛЕНИЕ / SESSION',
-      system: 'СИСТЕМА / SYSTEM',
-    } satisfies Record<SettingGroup, string>
-  )[group];
+  return t(groupMessages[group]);
 }
 
+const categoryMessages: Readonly<Record<SettingCategory, MessageId>> = {
+  general: 'settingsCategory.general',
+  information: 'settingsCategory.information',
+  layout: 'settingsCategory.layout',
+  tiles: 'settingsCategory.tiles',
+  themes: 'settingsCategory.themes',
+  styles: 'settingsCategory.styles',
+  colors: 'settingsCategory.colors',
+  typography: 'settingsCategory.typography',
+  sizes: 'settingsCategory.sizes',
+  backgrounds: 'settingsCategory.backgrounds',
+  patterns: 'settingsCategory.patterns',
+  animations: 'settingsCategory.animations',
+  startup: 'settingsCategory.startup',
+  player: 'settingsCategory.player',
+  cameras: 'settingsCategory.cameras',
+  map: 'settingsCategory.map',
+  tables: 'settingsCategory.tables',
+  popups: 'settingsCategory.popups',
+  keybinds: 'settingsCategory.keybinds',
+  localization: 'settingsCategory.localization',
+  dateTime: 'settingsCategory.dateTime',
+  telemetry: 'settingsCategory.telemetry',
+  simulation: 'settingsCategory.simulation',
+  groups: 'settingsCategory.groups',
+  materials: 'settingsCategory.materials',
+  titlebar: 'settingsCategory.titlebar',
+  accessibility: 'settingsCategory.accessibility',
+  performance: 'settingsCategory.performance',
+  privacy: 'settingsCategory.privacy',
+  diagnostics: 'settingsCategory.diagnostics',
+  github: 'settingsCategory.github',
+  advanced: 'settingsCategory.advanced',
+};
+
 export function categoryLabel(category: SettingCategory): string {
-  return (
-    {
-      general: 'ОБЩИЕ / GENERAL',
-      information: 'ИНФОРМАЦИЯ / INFORMATION',
-      layout: 'МАКЕТ / LAYOUT',
-      tiles: 'ПЛИТКИ / TILES',
-      themes: 'ТЕМЫ / THEMES',
-      styles: 'СТИЛИ / STYLES',
-      colors: 'ЦВЕТА / COLORS',
-      typography: 'ТИПОГРАФИКА / TYPOGRAPHY',
-      sizes: 'РАЗМЕРЫ / SIZES',
-      backgrounds: 'ФОНЫ / BACKGROUNDS',
-      patterns: 'ПАТТЕРНЫ / PATTERNS',
-      animations: 'АНИМАЦИИ / ANIMATIONS',
-      startup: 'ЗАПУСК / STARTUP',
-      player: 'ПЛЕЕР / PLAYER',
-      cameras: 'КАМЕРЫ / CAMERAS',
-      map: 'КАРТА / MAP',
-      tables: 'ТАБЛИЦЫ / TABLES',
-      popups: 'POP-UP / POPUPS',
-      keybinds: 'КЛАВИШИ / KEYBINDS',
-      localization: 'ЛОКАЛИЗАЦИЯ / LOCALIZATION',
-      dateTime: 'ДАТА И ВРЕМЯ / DATE TIME',
-      telemetry: 'ТЕЛЕМЕТРИЯ / TELEMETRY',
-      simulation: 'СИМУЛЯЦИЯ / SIMULATION',
-      groups: 'ГРУППЫ / GROUPS',
-      materials: 'МАТЕРИАЛЫ / MATERIALS',
-      titlebar: 'ВЕРХНЯЯ ПАНЕЛЬ / TITLEBAR',
-      accessibility: 'ДОСТУПНОСТЬ / ACCESSIBILITY',
-      performance: 'ПРОИЗВОДИТЕЛЬНОСТЬ / PERFORMANCE',
-      privacy: 'ПРИВАТНОСТЬ / PRIVACY',
-      diagnostics: 'ДИАГНОСТИКА / DIAGNOSTICS',
-      github: 'GITHUB / ИНТЕГРАЦИЯ',
-      advanced: 'РАСШИРЕННЫЕ / ADVANCED',
-    } satisfies Record<SettingCategory, string>
-  )[category];
+  return t(categoryMessages[category]);
 }

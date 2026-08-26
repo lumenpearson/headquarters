@@ -4,6 +4,7 @@ import { TerminalPointerMenu, type TerminalMenuItem } from '@gremuchaya/ui/primi
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { copyDiagnosticsReport } from '@/application/contextMenus/diagnostics';
+import { readAppLocale } from '@/application/localization/locale';
 import {
   contextMenuFor,
   contextMenuRegistry,
@@ -53,6 +54,13 @@ function announceOwners(): void {
  * does. `privacy.copyDiagnostics` decides whether the diagnostics entry may
  * run, so leaving it out would let a list cached against this string keep
  * answering with the permission the operator gave before they changed it.
+ *
+ * `localization.locale` belongs here on the same argument, and it is what
+ * makes a menu follow the language. `contextMenuFor` resolves a label at the
+ * moment the menu is built, but a subscriber whose snapshot did not change is
+ * never asked to build one -- so without the locale in this string the shell's
+ * commands button would keep the previous language until some unrelated claim
+ * moved.
  */
 function menuOwnerSnapshot(): string {
   const claimed = [...handlers.keys()].filter((id) => (handlers.get(id)?.size ?? 0) > 0);
@@ -69,6 +77,7 @@ function menuOwnerSnapshot(): string {
     ...keybindOwnerIds().map((id) => `k:${id}`),
     ...claimed.map((id) => `a:${id}`),
     ...permitted,
+    `l:${readAppLocale()}`,
   ]
     .sort()
     .join('|');

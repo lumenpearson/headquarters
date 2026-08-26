@@ -3,11 +3,14 @@
 import { useEffect, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { dateTimeFormat } from '@/application/localization/intl';
+import { useAppLocale } from '@/application/localization/locale';
 import { useRuntime } from '@/components/runtime/RuntimeProvider';
 import { useAppStore } from '@/state/appStore';
 
 export function TopBar() {
   const { controller, status } = useRuntime();
+  const locale = useAppLocale();
   const fixedTime = useAppStore((state) => state.operator.fixedTime);
   const clockMode = useAppStore((state) => state.operator.clockMode);
   const sceneId = useAppStore((state) => state.scene.activeSceneId);
@@ -18,17 +21,20 @@ export function TopBar() {
     if (clockMode !== 'real') return;
     const update = () =>
       setClock(
-        new Intl.DateTimeFormat('ru-RU', {
+        dateTimeFormat({
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
-          hour12: false,
+          hourCycle: 'h23',
         }).format(new Date()),
       );
     update();
     const intervalId = window.setInterval(update, 1000);
     return () => window.clearInterval(intervalId);
-  }, [clockMode, fixedTime]);
+    // `locale` is a dependency and not decoration: the reading is written into
+    // component state by the interval, so without a re-subscription the clock
+    // would keep the format it was started with until the mode changed.
+  }, [clockMode, fixedTime, locale]);
 
   return (
     <header className="topbar">

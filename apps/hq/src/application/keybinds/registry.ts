@@ -1,3 +1,5 @@
+import type { MessageId, MessageParams } from '@/application/localization/messages';
+
 import { primaryNavigation } from '../navigation';
 import { matchesChord, type Chord } from './match';
 
@@ -9,7 +11,25 @@ export interface Keybind {
   readonly id: string;
   readonly chord: Chord;
   readonly category: KeybindCategory;
-  readonly description: string;
+  /**
+   * What the list says this keybind does, as a catalogue id rather than as
+   * text.
+   *
+   * The registry is a declaration and the list is a surface; whichever
+   * language the surface is drawing in is not the registry's business. Naming
+   * the field `descriptionId` rather than leaving `description` holding an id
+   * is the difference between a table a reader can trust and one where the
+   * same field means two things depending on the row.
+   */
+  readonly descriptionId: MessageId;
+  /**
+   * The parameters that description takes, for the one that takes any.
+   *
+   * The nine numbered routes read `Перейти: {target}`, and the target is the
+   * rail's own label from `primaryNavigation` -- so the badge, the chord and
+   * the description all still come from one list.
+   */
+  readonly descriptionParams?: MessageParams;
   /**
    * Whether the keybind still fires while a field has focus.
    *
@@ -53,7 +73,8 @@ export const keybindRegistry: readonly Keybind[] = [
     id: `navigate.${entry[0]}`,
     chord: { code: `Digit${(index + 1).toString()}` },
     category: 'navigation' as const,
-    description: `Перейти: ${entry[3]}`,
+    descriptionId: 'keybind.navigate' as const,
+    descriptionParams: { target: entry[3] },
     whileTyping: false,
     preventsDefault: true,
   })),
@@ -61,7 +82,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'shell.search',
     chord: { code: 'KeyK', ctrl: true },
     category: 'navigation',
-    description: 'Глобальный поиск',
+    descriptionId: 'keybind.shell.search',
     whileTyping: true,
     preventsDefault: true,
   },
@@ -69,7 +90,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'shell.dismiss',
     chord: { code: 'Escape' },
     category: 'operation',
-    description: 'Закрыть панель или ящик',
+    descriptionId: 'keybind.shell.dismiss',
     whileTyping: true,
     preventsDefault: false,
   },
@@ -77,7 +98,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'shell.productionPanel',
     chord: { code: 'KeyP', ctrl: true, shift: true },
     category: 'operation',
-    description: 'Панель режиссёра',
+    descriptionId: 'keybind.shell.productionPanel',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -85,7 +106,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'shell.fullscreen',
     chord: { code: 'KeyF' },
     category: 'operation',
-    description: 'Полный экран',
+    descriptionId: 'keybind.shell.fullscreen',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -93,7 +114,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'shell.togglePlayback',
     chord: { code: 'Space' },
     category: 'operation',
-    description: 'Пуск и пауза видео (на видеоэкранах)',
+    descriptionId: 'keybind.shell.togglePlayback',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -101,7 +122,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'edit.toggle',
     chord: { code: 'KeyE', ctrl: true, shift: true },
     category: 'editing',
-    description: 'Режим редактирования',
+    descriptionId: 'keybind.edit.toggle',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -109,7 +130,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'keybinds.list',
     chord: { code: 'Slash', ctrl: true },
     category: 'operation',
-    description: 'Список сочетаний клавиш',
+    descriptionId: 'keybind.keybinds.list',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -117,7 +138,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'files.import',
     chord: { code: 'KeyS', ctrl: true, shift: true, alt: true },
     category: 'editing',
-    description: 'Локальный импорт материалов',
+    descriptionId: 'keybind.files.import',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -125,7 +146,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'scene.commandPalette',
     chord: { code: 'KeyK', ctrl: true, shift: true },
     category: 'developer',
-    description: 'Палитра команд сцены',
+    descriptionId: 'keybind.scene.commandPalette',
     whileTyping: true,
     preventsDefault: true,
   },
@@ -133,7 +154,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'scene.sectionFiles',
     chord: { code: 'F2' },
     category: 'developer',
-    description: 'Раздел: файлы',
+    descriptionId: 'keybind.scene.sectionFiles',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -141,7 +162,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'scene.sectionMap',
     chord: { code: 'F3' },
     category: 'developer',
-    description: 'Раздел: карта',
+    descriptionId: 'keybind.scene.sectionMap',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -149,7 +170,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'scene.previousCue',
     chord: { code: 'F7' },
     category: 'developer',
-    description: 'Предыдущая реплика сцены',
+    descriptionId: 'keybind.scene.previousCue',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -157,7 +178,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'scene.nextCue',
     chord: { code: 'F8' },
     category: 'developer',
-    description: 'Следующая реплика сцены',
+    descriptionId: 'keybind.scene.nextCue',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -165,7 +186,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'scene.resetScene',
     chord: { code: 'F9' },
     category: 'developer',
-    description: 'Сбросить сцену',
+    descriptionId: 'keybind.scene.resetScene',
     whileTyping: false,
     preventsDefault: true,
   },
@@ -173,7 +194,7 @@ export const keybindRegistry: readonly Keybind[] = [
     id: 'developer.toggle',
     chord: { code: 'KeyD', ctrl: true, shift: true, alt: true },
     category: 'developer',
-    description: 'Панель разработчика',
+    descriptionId: 'keybind.developer.toggle',
     whileTyping: false,
     preventsDefault: true,
   },

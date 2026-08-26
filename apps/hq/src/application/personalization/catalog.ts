@@ -5,6 +5,8 @@ import {
   type SettingDefinition,
 } from '@gremuchaya/settings-schema';
 
+import { foldCase } from '@/application/localization/intl';
+
 /**
  * How the settings catalogue is navigated.
  *
@@ -116,13 +118,12 @@ export function queryCatalog(query: CatalogQuery): CatalogResult {
           (definition) => groupByCategory[definition.category] === query.group,
         )
       : settingsDefinitions.filter((definition) => definition.category === query.category);
-  const needle = query.search.trim().toLocaleLowerCase('ru-RU');
+  const needle = foldCase(query.search.trim());
   const definitions = inGroup.filter((definition) => {
     if (query.changedOnly && !changed.has(definition.id)) return false;
     if (needle.length === 0) return true;
     return (
-      definition.id.toLocaleLowerCase('ru-RU').includes(needle) ||
-      definition.description.toLocaleLowerCase('ru-RU').includes(needle)
+      foldCase(definition.id).includes(needle) || foldCase(definition.description).includes(needle)
     );
   });
   return {
@@ -168,14 +169,13 @@ export function searchEverySetting(
   changedIds: readonly string[],
   changedOnly = false,
 ): readonly SettingDefinition[] {
-  const needle = search.trim().toLocaleLowerCase('ru-RU');
+  const needle = foldCase(search.trim());
   if (needle.length === 0) return [];
   const changed = new Set(changedIds);
   return settingsDefinitions.filter((definition) => {
     if (changedOnly && !changed.has(definition.id)) return false;
     return (
-      definition.id.toLocaleLowerCase('ru-RU').includes(needle) ||
-      definition.description.toLocaleLowerCase('ru-RU').includes(needle)
+      foldCase(definition.id).includes(needle) || foldCase(definition.description).includes(needle)
     );
   });
 }

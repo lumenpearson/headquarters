@@ -11,6 +11,7 @@ import {
   type ContentOverrides,
 } from '@/application/edit/contentFields';
 import { readBooleanSetting, readStringSetting } from '@/application/personalization/useSetting';
+import { clampPrefilledBody, codeSpan } from '@/application/prefilledUrl';
 
 export interface IssueDraftInput {
   readonly repository: string;
@@ -97,7 +98,7 @@ export function buildIssueDraftUrl({ repository, draft, content = {} }: IssueDra
     'title',
     `${draftOnly ? '[DRAFT] ' : ''}Personalization: ${total.toString()} change(s)`,
   );
-  url.searchParams.set('body', clampBody(body));
+  url.searchParams.set('body', clampPrefilledBody(body, truncationNotice));
   return url.toString();
 }
 
@@ -107,47 +108,9 @@ function formatValue(value: SettingValue | undefined): string {
 }
 
 /**
- * Renders `text` as a markdown code span that survives whatever it contains.
- *
- * A content value is free operator text of up to 1200 characters, so it can
- * hold backticks and newlines, and a naive pair of backticks would let one
- * value close its own span and rewrite the rest of the list as headings or
- * bullets. Markdown's own rule handles the backticks: a span may be fenced by
- * any number of them, as long as the fence is longer than the longest run
- * inside. Newlines cannot appear in a span at all, so they are shown as `⏎`.
+ * `codeSpan` and the clamp moved to `application/prefilledUrl.ts` when R28's
+ * translation proposal needed the same two: an operator value has to survive
+ * whatever it contains in both links, and a body has to be cut on a code-point
+ * boundary in both. The notice stays here because it is what *this* link says.
  */
-function codeSpan(text: string): string {
-  const flat = text.replaceAll(/\r\n|\r|\n/gu, ' ⏎ ');
-  const longestRun = [...flat.matchAll(/`+/gu)].reduce(
-    (longest, match) => Math.max(longest, match[0].length),
-    0,
-  );
-  const fence = '`'.repeat(longestRun + 1);
-  // A span that begins or ends with a backtick needs a space the renderer eats.
-  const padding = flat.startsWith('`') || flat.endsWith('`') ? ' ' : '';
-  return `${fence}${padding}${flat}${padding}${fence}`;
-}
-
-/**
- * The body a browser will still open. Eleven content fields hold up to 1200
- * characters each, and percent-encoding roughly triples what a value costs, so
- * a long afternoon of edits can outgrow the URL and the link then fails as a
- * whole rather than arriving short. Cut on a code-point boundary: a cut
- * between the halves of a surrogate pair leaves a lone surrogate, and the URL
- * serializer answers that by substituting U+FFFD, so the last character of the
- * list arrives as a replacement mark. The control plane's own prefilled issue
- * hit the same edge and cuts the same way.
- */
-function clampBody(body: string): string {
-  const points = [...body];
-  if (points.length <= issueBodyLimit) return body;
-  const notice = '\n\n_Список обрезан, чтобы ссылка открылась._';
-  return points.slice(0, issueBodyLimit - [...notice].length).join('') + notice;
-}
-
-/**
- * Conservative because the ceiling is not ours to know: browsers differ, and
- * GitHub answers a long query string with its own error page rather than the
- * form. Percent-encoding is what makes this smaller than it looks.
- */
-const issueBodyLimit = 6000;
+const truncationNotice = '\n\n_Список обрезан, чтобы ссылка открылась._';

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
+import { dateTimeFormat, foldCase } from '@/application/localization/intl';
 import { EmptyState, Panel, SeverityBadge, StatusBadge } from '@/components/operations/OpsUi';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useOperationsStore } from '@/state/operationsStore';
@@ -18,15 +19,18 @@ type SearchHit = {
   readonly status?: Parameters<typeof StatusBadge>[0]['status'];
 };
 
+/** What `toLocaleString()` printed, named rather than left implicit. */
+const stampParts = { dateStyle: 'short', timeStyle: 'medium' } as const;
+
 export function SearchScreen() {
   const router = useRouter();
   const inputRef = useRef<HTMLElement>(null);
   const state = useOperationsStore((value) => value);
   useEffect(() => inputRef.current?.focus(), []);
-  const query = state.ui.searchQuery.trim().toLocaleLowerCase('ru-RU');
+  const query = foldCase(state.ui.searchQuery.trim());
   const hits = useMemo<SearchHit[]>(() => {
     if (query.length === 0) return [];
-    const includes = (value: string) => value.toLocaleLowerCase('ru-RU').includes(query);
+    const includes = (value: string) => foldCase(value).includes(query);
     return [
       ...Object.values(state.objects)
         .filter((item) => includes(`${item.id} ${item.name} ${item.callsign} ${item.sectorId}`))
@@ -67,7 +71,7 @@ export function SearchScreen() {
           id: item.id,
           kind: 'event' as const,
           title: item.title,
-          detail: `${item.source} · ${new Date(item.timestamp).toLocaleString('ru-RU')}`,
+          detail: `${item.source} · ${dateTimeFormat(stampParts).format(new Date(item.timestamp))}`,
           severity: item.severity,
         })),
       ...Object.values(state.alerts)

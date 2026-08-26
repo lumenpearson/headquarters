@@ -45,3 +45,15 @@ export function readNumberSetting(id: string): number {
 export function readBooleanSetting(id: string): boolean {
   return booleanSetting(operationsStore.getState().personalization.draft.values, id);
 }
+
+/**
+ * The list form, outside React.
+ *
+ * Added for R28's translation proposal: the link is built from a click
+ * handler and has to read the captures the operator stored, which live in a
+ * `string-list` definition. The other three had non-React readers already;
+ * this one had only its hook.
+ */
+export function readStringListSetting(id: string): readonly string[] {
+  return stringListSetting(operationsStore.getState().personalization.draft.values, id);
+}

@@ -81,8 +81,8 @@ test('R6: every section is reachable from the floating panel and shows its categ
 
   const section = panel.getByRole('combobox', { name: 'Раздел' });
   const sections = [
-    'ВНЕШНИЙ ВИД / APPEARANCE',
-    'МАКЕТ И РАЗМЕРЫ / LAYOUT',
+    'ВНЕШНИЙ ВИД',
+    'МАКЕТ',
     'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION',
     'ИНФОРМАЦИЯ / INFORMATION',
     'МЕДИА И КАРТА / MEDIA',

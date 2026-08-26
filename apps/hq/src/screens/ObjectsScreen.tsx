@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
+import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
@@ -11,6 +12,9 @@ import { RecordPagination } from '@/components/operations/RecordPagination';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useOperationsStore } from '@/state/operationsStore';
+
+/** What `toLocaleTimeString()` printed, named rather than left implicit. */
+const clockParts = { timeStyle: 'medium' } as const;
 
 type ObjectKindFilter = 'all' | 'person' | 'vehicle' | 'device' | 'group';
 
@@ -45,23 +49,21 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   const allObjects = useMemo(() => Object.values(state.objects), [state.objects]);
   const [sortKey, setSortKey] = useState<'id' | 'name' | 'threat' | 'lastSeenAt'>('id');
   const [descending, setDescending] = useState(false);
-  const normalizedQuery = query.toLocaleLowerCase('ru-RU');
+  const normalizedQuery = foldCase(query);
   const { page: objectPage, goToPage } = useRecordPage(allObjects, {
     pageSize,
     filters: [
       (object) => kind === 'all' || object.kind === kind,
       (object) =>
-        `${object.id} ${object.name} ${object.callsign} ${object.sectorId}`
-          .toLocaleLowerCase('ru-RU')
-          .includes(normalizedQuery),
+        foldCase(`${object.id} ${object.name} ${object.callsign} ${object.sectorId}`).includes(
+          normalizedQuery,
+        ),
     ],
     comparator: (left, right) => {
       const a = left[sortKey];
       const b = right[sortKey];
       const result =
-        typeof a === 'number' && typeof b === 'number'
-          ? a - b
-          : String(a).localeCompare(String(b), 'ru-RU');
+        typeof a === 'number' && typeof b === 'number' ? a - b : compareText(String(a), String(b));
       return descending ? -result : result;
     },
   });
@@ -184,7 +186,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
                           <StatusBadge status={object.status} />
                         </td>
                         <td>{object.sectorId}</td>
-                        <td>{new Date(object.lastSeenAt).toLocaleTimeString('ru-RU')}</td>
+                        <td>{dateTimeFormat(clockParts).format(new Date(object.lastSeenAt))}</td>
                         <td>
                           <ProgressBar
                             value={object.threat}
@@ -376,7 +378,7 @@ function ObjectTab({
           .slice(0, 12)
           .map((event) => (
             <TerminalButton key={event.id} onClick={() => state.openDrawer('event', event.id)}>
-              <time>{new Date(event.timestamp).toLocaleTimeString('ru-RU')}</time>
+              <time>{dateTimeFormat(clockParts).format(new Date(event.timestamp))}</time>
               <i className={`severity-dot severity-dot--${event.severity}`} />
               <span>
                 <strong>{event.title}</strong>

@@ -122,3 +122,33 @@ describe('the diagnostics entry in the shell menu', () => {
     expect(shellItems.find((item) => item.id === 'shell.search')?.disabled).toBe(true);
   });
 });
+
+describe('the shell menu and the locale', () => {
+  beforeEach(() => {
+    shellItems = [];
+    operationsStore.getState().resetWorld();
+  });
+
+  it('redraws its labels when the locale changes', () => {
+    render(
+      <>
+        <ContextMenuRuntime />
+        <ShellMenuProbe />
+      </>,
+    );
+    expect(shellItems.find((item) => item.id === 'shell.search')?.label).toBe('Глобальный поиск');
+
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'localization.locale', value: 'en' }]);
+    });
+
+    /*
+     * This is what `l:${locale}` in `menuOwnerSnapshot` buys. `contextMenuFor`
+     * resolves a label at the moment the menu is built, but a subscriber whose
+     * snapshot did not change is never asked to build one -- so without the
+     * locale in that string the shell's commands button keeps the previous
+     * language until some unrelated claim moves.
+     */
+    expect(shellItems.find((item) => item.id === 'shell.search')?.label).toBe('Global search');
+  });
+});

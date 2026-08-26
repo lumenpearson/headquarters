@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { operationsStore } from '@/state/operationsStore';
 
-import { contextMenuFor, entryShortcut, type ContextMenuEntry } from './registry';
+import {
+  contextMenuFor,
+  contextMenuRegistry,
+  entryShortcut,
+  type ContextMenuEntry,
+} from './registry';
 
 function shellEntry(id: string): ContextMenuEntry {
   const entry = contextMenuFor('shell')?.items.find((item) => item.id === id);
@@ -38,5 +43,34 @@ describe('context menu shortcuts', () => {
     // Diagnostics is an action, not a chord. Inventing a shortcut for it would
     // advertise a key that does nothing.
     expect(entryShortcut(shellEntry('shell.diagnostics'))).toBeUndefined();
+  });
+});
+
+describe('context menu labels', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  it('draws the menu and every entry in the language now selected', () => {
+    expect(contextMenuFor('shell')?.label).toBe('Команды штаба');
+    expect(shellEntry('shell.search').label).toBe('Глобальный поиск');
+
+    operationsStore.getState().applySettingsPatch([{ id: 'localization.locale', value: 'en' }]);
+
+    // `OperationsShell` reads `definition.label` straight onto a menu and
+    // `buildContextMenuItems` reads `entry.label` onto each item; neither
+    // knows a locale exists, which is why the registry resolves both here.
+    expect(contextMenuFor('shell')?.label).toBe('Headquarters commands');
+    expect(shellEntry('shell.search').label).toBe('Global search');
+  });
+
+  it('leaves no entry showing an id instead of a label', () => {
+    for (const declaration of contextMenuRegistry) {
+      const definition = contextMenuFor(declaration.surface);
+      expect(definition?.label, declaration.surface).not.toMatch(/^⟦/u);
+      for (const item of definition?.items ?? []) {
+        expect(item.label, item.id).not.toMatch(/^⟦/u);
+      }
+    }
   });
 });

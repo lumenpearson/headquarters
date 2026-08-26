@@ -78,8 +78,8 @@ describe('EditPanel', () => {
     // more than one heading being present is the difference itself.
     const headings = screen.getAllByRole('heading', { level: 3 }).map((node) => node.textContent);
     expect(headings.length).toBeGreaterThan(1);
-    expect(headings).toContain('ТЕМЫ / THEMES');
-    expect(headings).toContain('ТИПОГРАФИКА / TYPOGRAPHY');
+    expect(headings).toContain('ТЕМЫ');
+    expect(headings).toContain('ТИПОГРАФИКА');
 
     // Settings from more than one of those categories are on screen together.
     expect(screen.getByText(settingLabel('themes.id'))).toBeTruthy();

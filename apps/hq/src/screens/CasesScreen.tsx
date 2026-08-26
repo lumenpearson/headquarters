@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
+import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EditableContent } from '@/components/edit/EditableContent';
@@ -68,24 +69,22 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
   );
   const pageSize = useTablePageSize();
   const allCases = useMemo(() => Object.values(state.cases), [state.cases]);
-  const normalizedQuery = query.trim().toLocaleLowerCase('ru-RU');
+  const normalizedQuery = foldCase(query.trim());
   const { page: casePage, goToPage } = useRecordPage(allCases, {
     pageSize,
     filters: [
       (caseFile) => statusFilter === 'all' || caseFile.status === statusFilter,
       (caseFile) =>
         normalizedQuery === '' ||
-        `${caseFile.code} ${caseFile.title} ${caseFile.tags.join(' ')}`
-          .toLocaleLowerCase('ru-RU')
-          .includes(normalizedQuery),
+        foldCase(`${caseFile.code} ${caseFile.title} ${caseFile.tags.join(' ')}`).includes(
+          normalizedQuery,
+        ),
     ],
     comparator: (left, right) => {
       const a = left[sortKey];
       const b = right[sortKey];
       const result =
-        typeof a === 'number' && typeof b === 'number'
-          ? a - b
-          : String(a).localeCompare(String(b), 'ru-RU');
+        typeof a === 'number' && typeof b === 'number' ? a - b : compareText(String(a), String(b));
       return descending ? -result : result;
     },
   });
@@ -225,7 +224,9 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                         </td>
                         <td>
                           <EditableContent field="case.createdAt" entityId={caseFile.id}>
-                            {new Date(caseFile.createdAt).toLocaleDateString('ru-RU')}
+                            {dateTimeFormat({ dateStyle: 'short' }).format(
+                              new Date(caseFile.createdAt),
+                            )}
                           </EditableContent>
                         </td>
                         <td>P{caseFile.priority}</td>

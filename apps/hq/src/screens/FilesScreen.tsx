@@ -10,6 +10,7 @@ import {
   TerminalSelect,
 } from '@gremuchaya/ui/primitives';
 
+import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
 import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
 import { LocalMaterialPreview } from '@/components/operations/LocalMaterialPreview';
@@ -32,6 +33,16 @@ import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { RecordPagination } from '@/components/operations/RecordPagination';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useOperationsStore } from '@/state/operationsStore';
+
+/**
+ * What `toLocaleString()` with no options produced, said explicitly.
+ *
+ * The two stamps below used `new Date(...).toLocaleString('ru-RU')`, whose
+ * shape is the implementation's choice rather than this screen's. Naming the
+ * parts keeps the reading identical across the two locales' own conventions --
+ * short date, seconds visible -- which is what a file's arrival time is for.
+ */
+const stampParts = { dateStyle: 'short', timeStyle: 'medium' } as const;
 
 type FileSort = 'title' | 'createdAt' | 'kind' | 'sizeLabel';
 
@@ -147,18 +158,18 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     [selectedImport],
   );
   const pageSize = useTablePageSize();
-  const normalizedQuery = query.toLocaleLowerCase('ru-RU');
+  const normalizedQuery = foldCase(query);
   const { page: filePage, goToPage } = useRecordPage(allFiles, {
     pageSize,
     filters: [
       (file) => (archive ? file.status === 'ARCHIVED' || file.createdAt < '2026-09-12' : true),
       (file) => state.ui.fileKindFilter === 'all' || file.kind === state.ui.fileKindFilter,
       (file) =>
-        `${file.id} ${file.title} ${file.tags.join(' ')} ${file.source}`
-          .toLocaleLowerCase('ru-RU')
-          .includes(normalizedQuery),
+        foldCase(`${file.id} ${file.title} ${file.tags.join(' ')} ${file.source}`).includes(
+          normalizedQuery,
+        ),
     ],
-    comparator: (left, right) => String(left[sort]).localeCompare(String(right[sort]), 'ru-RU'),
+    comparator: (left, right) => compareText(String(left[sort]), String(right[sort])),
   });
   const files = filePage.items;
 
@@ -382,7 +393,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                       <td>
                         <StatusBadge status={file.status} />
                       </td>
-                      <td>{new Date(file.createdAt).toLocaleString('ru-RU')}</td>
+                      <td>{dateTimeFormat(stampParts).format(new Date(file.createdAt))}</td>
                       <td>{file.source}</td>
                       <td>{file.classification}</td>
                       <td>{file.sizeLabel}</td>
@@ -465,7 +476,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 <dl className="ops-definition-list">
                   <div>
                     <dt>ДАТА</dt>
-                    <dd>{new Date(selected.createdAt).toLocaleString('ru-RU')}</dd>
+                    <dd>{dateTimeFormat(stampParts).format(new Date(selected.createdAt))}</dd>
                   </div>
                   <div>
                     <dt>ИСТОЧНИК</dt>

@@ -6,6 +6,7 @@ import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { groupKeybinds, keybindCategoryLabel } from '@/application/keybinds/grouping';
 import { formatChord } from '@/application/keybinds/match';
 
+import { useTranslate } from '@/application/localization/locale';
 import { useNumberSetting, useStringListSetting } from '@/application/personalization/useSetting';
 
 import { subscribeKeybindFired } from './KeybindRuntime';
@@ -32,6 +33,9 @@ import { subscribeKeybindFired } from './KeybindRuntime';
  */
 export function KeybindList() {
   const keybinds = useActiveKeybinds();
+  // The subscription behind every label below, including the category headings
+  // `keybindCategoryLabel` resolves through the same catalogue.
+  const translate = useTranslate();
   const [firedId, setFiredId] = useState<string | null>(null);
   const highlightMs = useNumberSetting('keybinds.firedHighlight');
   const hiddenCategories = useStringListSetting('keybinds.hiddenCategories');
@@ -66,7 +70,7 @@ export function KeybindList() {
                   data-fired={firedId === keybind.id ? 'true' : 'false'}
                 >
                   <kbd>{formatChord(keybind.chord)}</kbd>
-                  <span>{keybind.description}</span>
+                  <span>{translate(keybind.descriptionId, keybind.descriptionParams)}</span>
                 </li>
               ))}
             </ul>

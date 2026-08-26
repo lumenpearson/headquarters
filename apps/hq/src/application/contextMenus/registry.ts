@@ -1,3 +1,6 @@
+import { t } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
+
 import { activeKeybinds } from '../keybinds/activeScheme';
 import { formatChord } from '../keybinds/match';
 
@@ -15,6 +18,7 @@ export type ContextSurface = (typeof contextSurfaces)[number];
 
 export interface ContextMenuEntry {
   readonly id: string;
+  /** Already in the locale in force -- see {@link contextMenuFor}. */
   readonly label: string;
   /**
    * The keybind this entry runs, when it runs one.
@@ -50,24 +54,53 @@ export interface ContextMenuDefinition {
   readonly items: readonly ContextMenuEntry[];
 }
 
-export const contextMenuRegistry: readonly ContextMenuDefinition[] = [
+/**
+ * What the registry declares, as against what a menu renders.
+ *
+ * The two are separated because the consumers of a rendered menu are not all
+ * reachable from here -- `OperationsShell` draws the shell menu from a
+ * `ContextMenuDefinition` and reads `label` straight onto a `TerminalMenu`.
+ * Resolving the catalogue inside {@link contextMenuFor} keeps every one of
+ * those call sites correct without any of them learning that a locale exists,
+ * and keeps the declaration itself free of text, which is the point.
+ */
+export type ContextMenuEntryDeclaration = Omit<ContextMenuEntry, 'label'> & {
+  readonly labelId: MessageId;
+};
+
+export interface ContextMenuDeclaration {
+  readonly surface: ContextSurface;
+  readonly labelId: MessageId;
+  readonly items: readonly ContextMenuEntryDeclaration[];
+}
+
+export const contextMenuRegistry: readonly ContextMenuDeclaration[] = [
   {
     surface: 'shell',
-    label: 'Команды штаба',
+    labelId: 'menu.shell',
     items: [
-      { id: 'shell.search', label: 'Глобальный поиск', keybind: 'shell.search' },
-      { id: 'shell.keybinds', label: 'Сочетания клавиш', keybind: 'keybinds.list' },
-      { id: 'shell.edit', label: 'Режим редактирования', keybind: 'edit.toggle', tone: 'primary' },
-      { id: 'shell.fullscreen', label: 'Полный экран', keybind: 'shell.fullscreen' },
-      { id: 'shell.production', label: 'Панель режиссёра', keybind: 'shell.productionPanel' },
+      { id: 'shell.search', labelId: 'menu.shell.search', keybind: 'shell.search' },
+      { id: 'shell.keybinds', labelId: 'menu.shell.keybinds', keybind: 'keybinds.list' },
+      {
+        id: 'shell.edit',
+        labelId: 'menu.shell.edit',
+        keybind: 'edit.toggle',
+        tone: 'primary',
+      },
+      { id: 'shell.fullscreen', labelId: 'menu.shell.fullscreen', keybind: 'shell.fullscreen' },
+      {
+        id: 'shell.production',
+        labelId: 'menu.shell.production',
+        keybind: 'shell.productionPanel',
+      },
       {
         id: 'shell.group',
-        label: 'Синхронизация группы',
+        labelId: 'menu.shell.group',
         action: 'shell.groupPairing',
       },
       {
         id: 'shell.diagnostics',
-        label: 'Скопировать диагностику',
+        labelId: 'menu.shell.diagnostics',
         action: 'shell.copyDiagnostics',
         requiresSetting: 'privacy.copyDiagnostics',
       },
@@ -75,17 +108,33 @@ export const contextMenuRegistry: readonly ContextMenuDefinition[] = [
   },
   {
     surface: 'record',
-    label: 'Действия над записью',
+    labelId: 'menu.record',
     items: [
-      { id: 'record.open', label: 'Открыть карточку', action: 'record.open', tone: 'primary' },
-      { id: 'record.select', label: 'Выделить строку', action: 'record.select' },
-      { id: 'record.search', label: 'Найти упоминания', action: 'record.search' },
+      { id: 'record.open', labelId: 'menu.record.open', action: 'record.open', tone: 'primary' },
+      { id: 'record.select', labelId: 'menu.record.select', action: 'record.select' },
+      { id: 'record.search', labelId: 'menu.record.search', action: 'record.search' },
     ],
   },
 ];
 
+/**
+ * The menu for a surface, in the language the operator is reading.
+ *
+ * Resolved here rather than by each caller because the menu is drawn in three
+ * places -- the right-click runtime, the shell's own commands button, and
+ * whatever else claims a surface next -- and a caller that forgot to translate
+ * would show `menu.record.open` on a row. Callers re-render on a locale change
+ * for the same reason they re-render on a claim: `menuOwnerSnapshot` carries
+ * the locale, so the snapshot they subscribe to changes with it.
+ */
 export function contextMenuFor(surface: string): ContextMenuDefinition | undefined {
-  return contextMenuRegistry.find((definition) => definition.surface === surface);
+  const declaration = contextMenuRegistry.find((entry) => entry.surface === surface);
+  if (declaration === undefined) return undefined;
+  return {
+    surface: declaration.surface,
+    label: t(declaration.labelId),
+    items: declaration.items.map(({ labelId, ...entry }) => ({ ...entry, label: t(labelId) })),
+  };
 }
 
 /**

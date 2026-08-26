@@ -18,6 +18,7 @@ import {
   settingGroups,
   type SettingGroup,
 } from '@/application/personalization/catalog';
+import { dateTimeFormat } from '@/application/localization/intl';
 import { KeybindList } from '@/components/keybinds/KeybindList';
 import { Panel } from '@/components/operations/OpsUi';
 import { openGroupPairing } from '@/components/sync/GroupPairingDialog';
@@ -717,8 +718,5 @@ export function SettingsScreen() {
 function formatHistoryDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return value;
-  return new Intl.DateTimeFormat('ru-RU', {
-    dateStyle: 'short',
-    timeStyle: 'medium',
-  }).format(date);
+  return dateTimeFormat({ dateStyle: 'short', timeStyle: 'medium' }).format(date);
 }

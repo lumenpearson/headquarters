@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useMemo } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { dateTimeFormat } from '@/application/localization/intl';
+import { useAppLocale } from '@/application/localization/locale';
 import { EditableContent } from '@/components/edit/EditableContent';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import {
@@ -43,7 +45,13 @@ const directions = ['intelligence', 'collection', 'analysis', 'operations', 'sup
 
 const evidenceKinds = ['video', 'audio', 'document', 'report', 'map', 'image'] as const;
 
+/** What `toLocaleTimeString()` printed, named rather than left implicit. */
+const clockParts = { timeStyle: 'medium' } as const;
+
 export function OverviewScreen() {
+  // The subscription behind the three event stamps below. This screen selects
+  // narrowly, so nothing else here would notice the locale moving.
+  useAppLocale();
   const router = useRouter();
   const operation = useOperationsStore((state) => state.operation);
   const sectors = useOperationsStore((state) => Object.values(state.sectors));
@@ -172,10 +180,9 @@ export function OverviewScreen() {
                   >
                     <i />
                     <time>
-                      {new Date(event.timestamp).toLocaleTimeString('ru-RU', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {dateTimeFormat({ hour: '2-digit', minute: '2-digit' }).format(
+                        new Date(event.timestamp),
+                      )}
                     </time>
                     <strong>{event.title}</strong>
                     <small>{event.source}</small>
@@ -292,7 +299,7 @@ export function OverviewScreen() {
             <div className="event-feed">
               {events.slice(0, listLength[presentation]).map((event) => (
                 <TerminalButton key={event.id} onClick={() => openDrawer('event', event.id)}>
-                  <time>{new Date(event.timestamp).toLocaleTimeString('ru-RU')}</time>
+                  <time>{dateTimeFormat(clockParts).format(new Date(event.timestamp))}</time>
                   <i className={`severity-dot severity-dot--${event.severity}`} />
                   <span>
                     <strong>{event.title}</strong>
@@ -369,7 +376,7 @@ export function OverviewScreen() {
             <div className="milestone-list">
               {events.slice(0, listLength[presentation]).map((event, index) => (
                 <TerminalButton key={event.id} onClick={() => openDrawer('event', event.id)}>
-                  <time>{new Date(event.timestamp).toLocaleTimeString('ru-RU')}</time>
+                  <time>{dateTimeFormat(clockParts).format(new Date(event.timestamp))}</time>
                   <i>{String(5 - index).padStart(2, '0')}</i>
                   <span>
                     <strong>{event.title}</strong>

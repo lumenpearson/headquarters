@@ -9,6 +9,7 @@ import { EditModeRuntime } from '@/components/edit/EditModeRuntime';
 import { EditPanel } from '@/components/edit/EditPanel';
 import { KeybindIntro } from '@/components/keybinds/KeybindIntro';
 import { KeybindRuntime } from '@/components/keybinds/KeybindRuntime';
+import { LocalizationRuntime } from '@/components/localization/LocalizationRuntime';
 import { MaterialCatalogProvider } from '@/components/settings/MaterialCatalog';
 import { ControlPlaneRuntime } from '@/components/sync/ControlPlaneRuntime';
 import { GroupPairingDialog } from '@/components/sync/GroupPairingDialog';
@@ -38,10 +39,16 @@ interface RootLayoutProperties {
 
 export default function RootLayout({ children }: RootLayoutProperties) {
   return (
+    /*
+     * `lang` is the build-time default, not the last word: the static export
+     * has one document for every session, so `LocalizationRuntime` below
+     * corrects the attribute on the client from `localization.locale`.
+     */
     <html lang="ru">
       <body className="terminal-theme">
         <TerminalUiProvider>
           <MaterialCatalogProvider>
+            <LocalizationRuntime />
             <KeybindRuntime />
             <ContextMenuRuntime />
             <EditModeRuntime />
