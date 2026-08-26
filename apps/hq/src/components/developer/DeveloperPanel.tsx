@@ -8,6 +8,8 @@ import {
   TerminalInput,
 } from '@gremuchaya/ui/primitives';
 
+import { dateTimeFormat } from '@/application/localization/intl';
+import { useAppLocale } from '@/application/localization/locale';
 import { useRuntime } from '@/components/runtime/RuntimeProvider';
 import type { NativeMonitor } from '@/infrastructure/tauri/TauriDisplayGateway';
 import { appStore, useAppStore } from '@/state/appStore';
@@ -236,6 +238,9 @@ function NativeDisplayControls() {
 
 function SnapshotTools() {
   const { controller } = useRuntime();
+  // The subscription behind the two stamps below; this panel reads `appStore`,
+  // which knows nothing about a personalization setting moving.
+  useAppLocale();
   const snapshots = useAppStore((state) => state.developer.snapshots);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
@@ -247,7 +252,8 @@ function SnapshotTools() {
     setName('');
   };
   const setOpen = (open: boolean) => {
-    if (open && name === '') setName(`REHEARSAL ${new Date().toLocaleTimeString('ru-RU')}`);
+    if (open && name === '')
+      setName(`REHEARSAL ${dateTimeFormat({ timeStyle: 'medium' }).format(new Date())}`);
     setDialogOpen(open);
   };
   return (
@@ -282,7 +288,11 @@ function SnapshotTools() {
         {snapshots.map((snapshot) => (
           <article key={snapshot.name}>
             <strong>{snapshot.name}</strong>
-            <small>{new Date(snapshot.createdAt).toLocaleString('ru-RU')}</small>
+            <small>
+              {dateTimeFormat({ dateStyle: 'short', timeStyle: 'medium' }).format(
+                new Date(snapshot.createdAt),
+              )}
+            </small>
             <TerminalButton onClick={() => void controller?.restoreSnapshot(snapshot.name)}>
               RESTORE
             </TerminalButton>

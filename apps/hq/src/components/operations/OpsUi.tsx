@@ -157,19 +157,47 @@ export function Gauge({
   );
 }
 
+/** The band of the 38-unit viewBox a series is drawn in, floor first. */
+const sparklineFloor = 34;
+const sparklineCeiling = 2;
+
 export function Sparkline({
   values,
   label,
+  domain,
 }: {
   readonly values: readonly number[];
   readonly label: string;
+  /**
+   * The range the plot's height spans, low bound first.
+   *
+   * Every series used to be divided by three and clipped to `[2, 102]`, so a
+   * caller with megabytes per second had to scale it by hand at the call site
+   * and anything past the ceiling flattened into one line at the top without
+   * saying so. A series states its own range instead; without one the plot
+   * takes the extremes of the values it was handed, which cannot clip because
+   * they are the data.
+   */
+  readonly domain?: readonly [number, number];
 }) {
-  const points = values
-    .map(
-      (value, index) =>
-        `${(index / Math.max(1, values.length - 1)) * 100},${36 - Math.min(34, Math.max(2, value / 3))}`,
-    )
-    .join(' ');
+  const readings = values.filter((value) => Number.isFinite(value));
+  const lowest = domain?.[0] ?? Math.min(...readings);
+  const highest = domain?.[1] ?? Math.max(...readings);
+  const span = highest - lowest;
+  const level = (value: number): number =>
+    // A flat series and a zero-width domain both sit mid-plot: there is no
+    // shape to draw, and pinning them to the floor would read as a collapse.
+    span > 0 ? (Math.min(Math.max(value, lowest), highest) - lowest) / span : 0.5;
+  const height = (value: number): number =>
+    sparklineFloor - level(value) * (sparklineFloor - sparklineCeiling);
+  // One reading is a flat line across the plot rather than a single vertex,
+  // which `polyline` draws as nothing at all.
+  const points =
+    readings.length === 1
+      ? [0, 100].map((x) => `${x},${height(readings[0] ?? 0)}`).join(' ')
+      : readings
+          .map((value, index) => `${(index / (readings.length - 1)) * 100},${height(value)}`)
+          .join(' ');
   return (
     <svg
       className="ops-sparkline"
@@ -178,7 +206,7 @@ export function Sparkline({
       aria-label={label}
     >
       <path d="M0 12H100M0 25H100" />
-      <polyline points={points} />
+      {readings.length === 0 ? null : <polyline points={points} />}
     </svg>
   );
 }

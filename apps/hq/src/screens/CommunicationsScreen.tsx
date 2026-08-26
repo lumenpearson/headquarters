@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { channelDomain } from '@/application/simulation/simulationCurves';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import { useOperationsStore } from '@/state/operationsStore';
@@ -202,7 +203,8 @@ export function CommunicationsScreen() {
                 <small>IN</small>
                 <strong>{state.metrics.networkIn} MB/S</strong>
                 <Sparkline
-                  values={[30, 42, 38, 57, 51, 64, 72, state.metrics.networkIn / 4]}
+                  values={state.metricsHistory.networkIn}
+                  domain={channelDomain('network-in')}
                   label="Входящий трафик"
                 />
               </span>
@@ -210,7 +212,8 @@ export function CommunicationsScreen() {
                 <small>OUT</small>
                 <strong>{state.metrics.networkOut} MB/S</strong>
                 <Sparkline
-                  values={[22, 31, 28, 38, 34, 45, 41, state.metrics.networkOut / 3]}
+                  values={state.metricsHistory.networkOut}
+                  domain={channelDomain('network-out')}
                   label="Исходящий трафик"
                 />
               </span>

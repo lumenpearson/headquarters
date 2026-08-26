@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { channelDomain } from '@/application/simulation/simulationCurves';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import {
   Gauge,
@@ -14,8 +15,6 @@ import {
   Sparkline,
 } from '@/components/operations/OpsUi';
 import { useOperationsStore } from '@/state/operationsStore';
-
-const analyticalSeries = [42, 48, 45, 58, 61, 54, 68, 72, 67, 78, 84, 81, 88, 86, 92, 89];
 
 const riskForecast = [
   ['ПОТЕРЯ СИГНАЛА K-17', 82, 'critical'],
@@ -86,7 +85,8 @@ export function AnalyticsScreen() {
             </div>
             {presentation === 'full' ? (
               <Sparkline
-                values={analyticalSeries}
+                values={state.metricsHistory.readiness}
+                domain={channelDomain('readiness')}
                 label="Динамика индекса оперативной обстановки"
               />
             ) : null}

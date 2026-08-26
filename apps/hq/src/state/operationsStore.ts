@@ -10,12 +10,14 @@ import type {
   OperationalObject,
   OpsEvent,
   OpsReport,
+  OpsSeverity,
   OpsTask,
   Person,
   Sector,
   Sensor,
   SystemNode,
   TacticalRoute,
+  TelemetrySeverityKind,
 } from '@gremuchaya/domain';
 import {
   applyDraftPatch,
@@ -35,6 +37,7 @@ import type {
   SettingsDraft,
   SettingsPatch,
   SettingsSnapshot,
+  SimulationChannelName,
 } from '@gremuchaya/settings-schema';
 import { useStore } from 'zustand/react';
 import { useShallow } from 'zustand/react/shallow';
@@ -48,6 +51,17 @@ import {
   type ContentPatch,
 } from '../application/edit/contentFields';
 import { booleanSetting, numberSetting } from '../application/personalization/settingValue';
+import {
+  curvePhaseAt,
+  deterministicOffset,
+  readSimulationSettings,
+  sessionMetricChannels,
+  sessionMetricNames,
+  simulateChannelReading,
+  simulationChannelRanges,
+  type ChannelReading,
+  type SessionMetricName,
+} from '../application/simulation/simulationCurves';
 import { initialConnectionState, type ConnectionState } from '../application/sync/connection';
 import { publishGroupSettings } from '../application/sync/groupSettingsBus';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
@@ -248,7 +262,74 @@ interface OperationsMetrics {
   readonly networkOut: number;
   readonly readiness: number;
   readonly simulationStep: number;
+  /**
+   * Milliseconds the run has actually spent, which is what the curves are read
+   * at. Counted rather than derived from the step, because the cadence is a
+   * setting and a run that changed it mid-session would otherwise jump.
+   */
+  readonly elapsedMs: number;
+  /**
+   * The moment the last tick was handed, or `null` before the first one.
+   *
+   * The store never asks a clock for it: `simulationTick` takes the moment as
+   * an argument, so a test drives the same run the shell does and a preview
+   * served by the control plane lands on the same phase.
+   */
+  readonly tickAt: number | null;
 }
+
+/**
+ * The last {@link metricsHistoryDepth} readings of each session counter (R31).
+ *
+ * Every sparkline in the application drew a literal array with one live value
+ * appended, because there was nowhere a series could come from. This is that
+ * place. It is bounded by construction — each push slices to the depth — so a
+ * session left open overnight holds the same seven arrays it held at launch.
+ *
+ * Never persisted and never broadcast, for the reason a timer handle is not:
+ * it describes a run, and a run does not survive its window.
+ */
+export type MetricsHistory = Readonly<Record<SessionMetricName, readonly number[]>>;
+
+/**
+ * How many readings each series keeps.
+ *
+ * Sixty is one minute at the default `simulation.updateIntervalMs`, and a
+ * sparkline 100 units wide cannot separate more than that anyway.
+ */
+export const metricsHistoryDepth = 60;
+
+/**
+ * How much simulated time passes between two generated events.
+ *
+ * Tied to the run's own clock rather than to the tick, so raising the sample
+ * rate makes the series smoother without making the operational log noisier.
+ */
+const simulationEventIntervalMs = 15_000;
+
+/** The four telemetry bands in order, so the worst of a set can be picked. */
+const severityRank: Readonly<Record<TelemetrySeverityKind, number>> = {
+  normal: 0,
+  elevated: 1,
+  degraded: 2,
+  critical: 3,
+};
+
+/**
+ * How a telemetry band reads in the operational log.
+ *
+ * The log's `info` means "not a reading at all", so the two lower bands both
+ * arrive as `normal`. With no criticality curve drawn there is no criticality,
+ * and every generated event is `normal` — which is the honest reading of an
+ * empty curve, where the counter this replaced marked every ninth tick a
+ * warning for no reason but its own arithmetic.
+ */
+const eventSeverities: Readonly<Record<TelemetrySeverityKind, OpsSeverity>> = {
+  normal: 'normal',
+  elevated: 'normal',
+  degraded: 'warning',
+  critical: 'critical',
+};
 
 interface PersonalizationState {
   readonly published: SettingsSnapshot;
@@ -289,6 +370,8 @@ export interface OperationsState {
    */
   readonly connection: ConnectionState;
   readonly metrics: OperationsMetrics;
+  /** What every sparkline plots: the bounded series behind {@link metrics} (R31). */
+  readonly metricsHistory: MetricsHistory;
   readonly audit: readonly OpsAuditEntry[];
   readonly setRoute: (route: OperationsRoute) => void;
   readonly selectObject: (id: string) => void;
@@ -355,7 +438,16 @@ export interface OperationsState {
   /** Drops one record. The bytes are the library's business, not this slice's. */
   readonly forgetImportedMaterial: (materialId: string) => void;
   readonly resetWorld: () => void;
-  readonly simulationTick: () => void;
+  /**
+   * Advances the world to `nowMs`.
+   *
+   * The moment is an argument and not a `Date.now()` inside the reducer: the
+   * curve phase, the generated event's timestamp and the tracked object's
+   * `lastSeenAt` all come from it, so a run is a pure function of the moments
+   * it was handed and the settings it read. `OperationsRuntime` is the one
+   * caller that supplies a real clock.
+   */
+  readonly simulationTick: (nowMs: number) => void;
 }
 
 const persistedStateKey = 'gremuchaya-hq:operations:v3';
@@ -381,6 +473,48 @@ function keyed<Value extends { readonly id: string }>(
   return Object.fromEntries(values.map((value) => [value.id, value])) as Readonly<
     Record<string, Value>
   >;
+}
+
+/**
+ * The seven counters at rest, before a single reading has been taken.
+ *
+ * Named separately from the state they go into so the history can be seeded
+ * from them rather than from a second copy of the same seven numbers. The first
+ * entry of each series is the reading at t=0, which is a measurement of the
+ * world as it starts and not an invented sample.
+ */
+const seedMetrics: Readonly<Record<SessionMetricName, number>> = {
+  cpu: 43,
+  ram: 68,
+  storage: 72,
+  gpu: 31,
+  networkIn: 284,
+  networkOut: 118,
+  readiness: 87,
+};
+
+/**
+ * One value per session counter, in the roster's own order.
+ *
+ * The order is not decoration: it is the order sample indices are handed out
+ * in, and the scatter of every series depends on it. The cast is over a record
+ * the loop has just filled for every name the roster declares.
+ */
+function byMetric<Value>(
+  produce: (name: SessionMetricName) => Value,
+): Readonly<Record<SessionMetricName, Value>> {
+  const record: Partial<Record<SessionMetricName, Value>> = {};
+  for (const name of sessionMetricNames) record[name] = produce(name);
+  return record as Record<SessionMetricName, Value>;
+}
+
+function seedMetricsHistory(): MetricsHistory {
+  return byMetric((name): readonly number[] => [seedMetrics[name]]);
+}
+
+/** Appends one reading, dropping the oldest once the buffer is full. */
+function pushReading(series: readonly number[], reading: number): readonly number[] {
+  return [...series, reading].slice(-metricsHistoryDepth);
 }
 
 function createBaseState() {
@@ -458,15 +592,12 @@ function createBaseState() {
     content: { overrides: {} as ContentOverrides },
     connection: initialConnectionState,
     metrics: {
-      cpu: 43,
-      ram: 68,
-      storage: 72,
-      gpu: 31,
-      networkIn: 284,
-      networkOut: 118,
-      readiness: 87,
+      ...seedMetrics,
       simulationStep: 0,
+      elapsedMs: 0,
+      tickAt: null as number | null,
     },
+    metricsHistory: seedMetricsHistory(),
     audit: [
       {
         id: 'AUD-001',
@@ -1120,53 +1251,128 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       materials: get().materials,
     });
   },
-  simulationTick: () =>
+  simulationTick: (nowMs) =>
     set((state) => {
       if (state.production.paused) return state;
+      const settings = readSimulationSettings(state.personalization.draft.values);
+      const previousAt = state.metrics.tickAt;
+      /*
+       * The interval a tick actually spent, capped at four of the intervals it
+       * asked for. A throttled background tab and a resumed pause both hand
+       * back a gap of minutes; spending it would carry the curve past
+       * everything the operator was watching, so four intervals absorbs
+       * ordinary timer jitter and nothing longer.
+       */
+      const interval =
+        previousAt === null ? 0 : clamp(nowMs - previousAt, 0, settings.updateIntervalMs * 4);
+      const elapsedMs = state.metrics.elapsedMs + interval;
       const step = state.metrics.simulationStep + 1;
-      const drift = (seed: number, amplitude: number) =>
-        ((step * seed) % (amplitude * 2 + 1)) - amplitude;
+      const phase = curvePhaseAt(settings, elapsedMs);
+
+      const nodes = Object.values(state.systemNodes);
+      const links = Object.values(state.channels);
+      /*
+       * How far apart two consecutive samples of one series sit in the noise
+       * generator's index space. Every series scatters from the one seed, so
+       * without an ordinal of its own each would take the same offset at the
+       * same step and the whole world would move in lockstep. The two spare
+       * ordinals at the end belong to the tracked object's two axes.
+       */
+      const stride = sessionMetricNames.length + nodes.length * 2 + links.length * 3 + 2;
+      let ordinal = 0;
+      /*
+       * One reading, and the next ordinal. Rounded to whole units because every
+       * counter in this world is whole -- a percentage, a millisecond, a
+       * megabyte per second -- and every screen prints it unformatted.
+       */
+      const read = (channel: SimulationChannelName, previous: number): ChannelReading => {
+        const reading = simulateChannelReading(
+          settings,
+          channel,
+          simulationChannelRanges[channel],
+          phase,
+          step * stride + ordinal,
+          previous,
+        );
+        ordinal += 1;
+        return { value: Math.round(reading.value), severity: reading.severity };
+      };
+
+      let worst: TelemetrySeverityKind = 'normal';
+      const sampledMetrics = byMetric((name) => {
+        const reading = read(sessionMetricChannels[name], state.metrics[name]);
+        if (severityRank[reading.severity] > severityRank[worst]) worst = reading.severity;
+        return reading.value;
+      });
+      const metricsHistory = byMetric((name): readonly number[] =>
+        pushReading(state.metricsHistory[name], sampledMetrics[name]),
+      );
+
       const systemNodes = Object.fromEntries(
-        Object.values(state.systemNodes).map((node, index) => [
+        nodes.map((node) => [
           node.id,
           {
             ...node,
-            load: clamp(node.load + drift(index + 3, 2), 8, 96),
-            temperature: clamp(node.temperature + drift(index + 5, 1), 30, 78),
+            load: read('node-load', node.load).value,
+            temperature: read('node-temperature', node.temperature).value,
           },
         ]),
       );
       const channels = Object.fromEntries(
-        Object.values(state.channels).map((channel, index) => [
+        links.map((channel) => [
           channel.id,
           {
             ...channel,
-            load: clamp(channel.load + drift(index + 7, 3), 4, 99),
-            latency: clamp(channel.latency + drift(index + 2, 2), 5, 210),
-            signal: clamp(channel.signal + drift(index + 11, 2), 8, 100),
+            load: read('link-load', channel.load).value,
+            latency: read('link-latency', channel.latency).value,
+            signal: read('link-signal', channel.signal).value,
           },
         ]),
       );
+
       const objects = { ...state.objects };
       const tracked = objects['K-17'];
       if (tracked !== undefined) {
+        /*
+         * The roster has no channel for a position, and adding one would say a
+         * coordinate is a telemetry reading. The walk keeps its own arithmetic
+         * and answers to `simulation.seed` alone. Every other object stays
+         * where the seed put it, as it did before this.
+         */
         objects['K-17'] = {
           ...tracked,
           position: {
             ...tracked.position,
-            x: clamp(tracked.position.x + drift(3, 1) * 0.32, 4, 96),
-            y: clamp(tracked.position.y + drift(5, 1) * 0.24, 4, 96),
+            x: clamp(
+              tracked.position.x +
+                deterministicOffset(settings.seed, step * stride + stride - 2) * 0.32,
+              4,
+              96,
+            ),
+            y: clamp(
+              tracked.position.y +
+                deterministicOffset(settings.seed, step * stride + stride - 1) * 0.24,
+              4,
+              96,
+            ),
           },
-          lastSeenAt: new Date().toISOString(),
+          lastSeenAt: new Date(nowMs).toISOString(),
         };
       }
+
+      /*
+       * One event per interval of run time, not per third tick. The cadence is
+       * a setting now, and an operator who asked for a smoother series should
+       * not get a log three times as long with it.
+       */
       const generatedEvent: OpsEvent | null =
-        step % 3 === 0
+        Math.floor(elapsedMs / simulationEventIntervalMs) >
+        Math.floor(state.metrics.elapsedMs / simulationEventIntervalMs)
           ? {
               id: `EV-LIVE-${step}`,
               type: 'object.updated',
-              timestamp: new Date().toISOString(),
-              severity: step % 9 === 0 ? 'warning' : 'normal',
+              timestamp: new Date(nowMs).toISOString(),
+              severity: eventSeverities[worst],
               source: 'SIMULATION',
               title: `K-17: ТЕЛЕМЕТРИЯ ОБНОВЛЕНА / TICK ${step}`,
               description: 'Детерминированное обновление локального оперативного мира.',
@@ -1184,15 +1390,12 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         events:
           generatedEvent === null ? state.events : [generatedEvent, ...state.events].slice(0, 160),
         metrics: {
-          cpu: clamp(state.metrics.cpu + drift(5, 3), 12, 94),
-          ram: clamp(state.metrics.ram + drift(7, 2), 24, 92),
-          storage: state.metrics.storage,
-          gpu: clamp(state.metrics.gpu + drift(11, 4), 8, 89),
-          networkIn: clamp(state.metrics.networkIn + drift(13, 18), 80, 620),
-          networkOut: clamp(state.metrics.networkOut + drift(17, 11), 40, 410),
-          readiness: clamp(state.metrics.readiness + drift(19, 1), 71, 96),
+          ...sampledMetrics,
           simulationStep: step,
+          elapsedMs,
+          tickAt: nowMs,
         },
+        metricsHistory,
       };
     }),
 }));

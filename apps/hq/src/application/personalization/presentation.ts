@@ -503,6 +503,17 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
     'Read by CurveSetting, which samples the drawn line through it and offers tangents for two of the four.',
   'simulation.loop': 'Read by CurveSetting, which wraps or holds the drawn line at its ends.',
   'simulation.periodSeconds': 'Read by CurveSetting, which labels the time axis in its seconds.',
+  'simulation.updateIntervalMs':
+    'Read by OperationsRuntime, whose tick timer runs at that cadence.',
+  'simulation.timeScale': 'Read by curvePhaseAt, which turns elapsed milliseconds into a phase.',
+  'simulation.noise':
+    'Read by simulationChannelFor, which simulationTick assembles every channel through.',
+  'simulation.smoothing':
+    'Read by simulationChannelFor, so a reading is carried from the one before it.',
+  'simulation.seed':
+    'Read by simulationChannelFor and by the tracked object’s walk, both seeded from it.',
+  'localization.locale':
+    'Read by locale.ts, which every label, date and collation in the application goes through.',
   'titlebar.elements': 'Read by TitleBar, which draws exactly the elements it names, in order.',
   'titlebar.information': 'Read by TitleBar, which picks the reading its information slot shows.',
   'titlebar.dragRegion': 'Read by TitleBar, which marks that much of the bar as a drag region.',
@@ -528,25 +539,11 @@ export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
   // itself and decide relocation against it.
   'layout.tileMinimumWidth':
     'Needs a minimum-width input in @gremuchaya/layout-engine; the resolver has none.',
-  'localization.locale': 'F11 — no locale runtime exists; every label is a Russian literal.',
-  'simulation.preset': 'F12 — the simulation formula reads no setting at all.',
-  /*
-   * F12 part 1 gave the simulation a curve an operator can store and drag. The
-   * five below are the half a drawn curve cannot exercise on its own: they
-   * belong to the run, not to the drawing, and `simulationTick` still steps on
-   * a counter of its own rather than on a clock or a curve.
-   *
-   * `simulationCurves.ts` already assembles each of them into the
-   * `SimulationChannelLike` the domain evaluator takes — which is a helper
-   * existing, not a consumer running. Naming them as read would be the exact
-   * claim `general.localOnly` used to make.
-   */
-  'simulation.updateIntervalMs':
-    'F12 part 2 — simulationTick steps on its own counter, not a clock.',
-  'simulation.timeScale': 'F12 part 2 — nothing turns elapsed time into a curve phase yet.',
-  'simulation.noise': 'F12 part 2 — simulationChannelFor assembles it; nothing calls that yet.',
-  'simulation.smoothing': 'F12 part 2 — the same channel: no reading is carried forward yet.',
-  'simulation.seed': 'F12 part 2 — the same channel: nothing seeds a deterministic series yet.',
+  // The last of the twelve `simulation` definitions without a reader. The five
+  // that stood beside it moved to `settingsReadElsewhere` when `simulationTick`
+  // started reading the curves; a preset is a named set of values, and nothing
+  // in the schema or the store maps a name onto one yet.
+  'simulation.preset': 'F12 — no reader maps a preset name onto the values it stands for.',
 };
 
 /**

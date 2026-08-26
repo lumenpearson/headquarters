@@ -76,13 +76,13 @@ describe('operationsStore', () => {
 
   it('advances deterministically and freezes when simulation is paused', () => {
     const before = operationsStore.getState();
-    before.simulationTick();
+    before.simulationTick(1_700_000_000_000);
     const afterTick = operationsStore.getState();
     expect(afterTick.metrics.simulationStep).toBe(1);
     expect(afterTick.objects['K-17']?.lastSeenAt).not.toBe(before.objects['K-17']?.lastSeenAt);
 
     afterTick.setProductionOption('paused', true);
-    operationsStore.getState().simulationTick();
+    operationsStore.getState().simulationTick(1_700_000_001_000);
     expect(operationsStore.getState().metrics.simulationStep).toBe(1);
   });
 

@@ -5,18 +5,24 @@ import {
   createSettingsDraft,
   getSettingDefinition,
   maximumCurvePoints,
+  simulationChannels,
 } from '@gremuchaya/settings-schema';
 import { describe, expect, it } from 'vitest';
 
 import {
+  channelDomain,
   curvePhaseAt,
+  deterministicOffset,
   formatCurveNumber,
   readChannelCurve,
   readCurvePoints,
   readSimulationSettings,
   restingCurvePoints,
+  sessionMetricChannels,
+  sessionMetricNames,
   simulateChannelReading,
   simulationChannelFor,
+  simulationChannelRanges,
   withChannelCurve,
 } from './simulationCurves';
 
@@ -412,5 +418,49 @@ describe('resolving the simulation settings', () => {
       { time: 0, value: 0, ...flat },
       { time: 1, value: 0, ...flat },
     ]);
+  });
+});
+
+describe('the bounds a channel’s readings live inside', () => {
+  it('covers every channel the roster declares, and nothing else', () => {
+    // The table is what the ranges became instead of twenty-four settings. A
+    // channel missing from it is a channel the simulation cannot read at all,
+    // and one left in it after the roster drops it is a range for nothing.
+    expect(Object.keys(simulationChannelRanges).sort()).toEqual([...simulationChannels].sort());
+  });
+
+  it('gives every channel a span wide enough to show a curve on', () => {
+    for (const [channel, range] of Object.entries(simulationChannelRanges)) {
+      expect(range.maximum, channel).toBeGreaterThan(range.minimum);
+      // A channel whose whole range rounds to a couple of units is a channel
+      // whose curve cannot be seen: every reading lands on the same number and
+      // the operator's drag changes nothing on any screen.
+      expect(range.maximum - range.minimum, channel).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  it('hands a chart the channel’s own bounds rather than the last minute’s', () => {
+    expect(channelDomain('cpu')).toEqual([
+      simulationChannelRanges.cpu.minimum,
+      simulationChannelRanges.cpu.maximum,
+    ]);
+  });
+
+  it('names a channel of the roster for every session counter', () => {
+    for (const name of sessionMetricNames) {
+      expect(simulationChannelRanges[sessionMetricChannels[name]], name).toBeDefined();
+    }
+    expect(Object.keys(sessionMetricChannels).sort()).toEqual([...sessionMetricNames].sort());
+  });
+});
+
+describe('the offset the parts of the world with no channel take', () => {
+  it('stays inside [-1, 1] and depends on the seed', () => {
+    const first = deterministicOffset(7n, 3);
+    expect(first).toBeGreaterThanOrEqual(-1);
+    expect(first).toBeLessThanOrEqual(1);
+    expect(deterministicOffset(8n, 3)).not.toBe(first);
+    expect(deterministicOffset(7n, 4)).not.toBe(first);
+    expect(deterministicOffset(7n, 3)).toBe(first);
   });
 });

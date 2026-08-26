@@ -9,6 +9,7 @@ import {
   useNumberSetting,
   useStringSetting,
 } from '@/application/personalization/useSetting';
+import { channelDomain } from '@/application/simulation/simulationCurves';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Metric, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import {
@@ -314,23 +315,33 @@ export function SystemScreen() {
               />
             </div>
             {/*
-             * No sample, no charts: a history plotted from the fixed leading
-             * values alone would draw a line the named source never produced.
+             * No sample, no charts. The series is `metricsHistory`, which the
+             * simulation fills reading by reading (R31) — so it is the same
+             * source `sample` is under `simulation` and `hybrid`, and under
+             * `native` there is no sample and nothing is drawn. A host sampler
+             * landing later has to fill a history of its own before these plot
+             * anything, rather than borrowing the simulated one.
              */}
             {presentation === 'full' && showCharts && sample !== null ? (
               <div className="resource-charts">
                 <div>
-                  <span>CPU HISTORY / 60S / {telemetry.seriesTag}</span>
+                  <span>
+                    CPU / {state.metricsHistory.cpu.length} SMP / {telemetry.seriesTag}
+                  </span>
                   <Sparkline
-                    values={[31, 44, 39, 55, 48, 61, 43, sample.cpu]}
+                    values={state.metricsHistory.cpu}
+                    domain={channelDomain('cpu')}
                     label={`CPU / ${telemetry.seriesTag}`}
                   />
                 </div>
                 <div>
-                  <span>NETWORK IN / OUT / {telemetry.seriesTag}</span>
+                  <span>
+                    NETWORK IN / {state.metricsHistory.networkIn.length} SMP / {telemetry.seriesTag}
+                  </span>
                   <Sparkline
-                    values={[24, 31, 28, 42, 56, 49, 67, sample.networkIn / 6]}
-                    label={`Сеть / ${telemetry.seriesTag}`}
+                    values={state.metricsHistory.networkIn}
+                    domain={channelDomain('network-in')}
+                    label={`Входящий трафик / ${telemetry.seriesTag}`}
                   />
                 </div>
               </div>

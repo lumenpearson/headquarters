@@ -2,6 +2,7 @@ import {
   channelSeverity,
   channelValue,
   clampNumber,
+  deterministicUnit,
   evaluateCurve,
   normalizeCurvePoints,
   type CurveInterpolationKind,
@@ -61,6 +62,100 @@ export interface ChannelRange {
 export interface ChannelReading {
   readonly value: number;
   readonly severity: TelemetrySeverityKind;
+}
+
+/**
+ * The bounds each reading lives inside, one entry per channel of the roster.
+ *
+ * A table, and deliberately not twenty-four settings of its own. A range is not
+ * a preference: it is the channel's unit and physical meaning — a node runs
+ * between 30 °C and 78 °C because that is the hardware the seed world models,
+ * and a link reports 5 ms to 210 ms because that is the link. The operator
+ * never has to know any of them, which is the entire reason
+ * `simulation.valueCurve` is drawn as a percentage of the channel's own range:
+ * one curve then reads the same on processor load and on link latency.
+ *
+ * Two bound settings per channel would give that up twice over. They would let
+ * a minimum be set above its maximum, and they would make "percent of the
+ * channel's range" mean a different number of milliseconds in every profile,
+ * so a curve exported from one machine would draw the same line and produce a
+ * different series on another.
+ *
+ * The numbers are the ones `simulationTick` clamped to before it read any of
+ * this, moved here unchanged, so the world keeps the shape it already had.
+ * `storage` is the one addition: the roster declared the channel and the metric
+ * never moved, which is a channel with nothing on the other end of it.
+ */
+export const simulationChannelRanges: Readonly<Record<SimulationChannelName, ChannelRange>> = {
+  cpu: { minimum: 12, maximum: 94 },
+  gpu: { minimum: 8, maximum: 89 },
+  'link-latency': { minimum: 5, maximum: 210 },
+  'link-load': { minimum: 4, maximum: 99 },
+  'link-signal': { minimum: 8, maximum: 100 },
+  'network-in': { minimum: 80, maximum: 620 },
+  'network-out': { minimum: 40, maximum: 410 },
+  'node-load': { minimum: 8, maximum: 96 },
+  'node-temperature': { minimum: 30, maximum: 78 },
+  ram: { minimum: 24, maximum: 92 },
+  readiness: { minimum: 71, maximum: 96 },
+  storage: { minimum: 55, maximum: 95 },
+};
+
+/**
+ * A channel's bounds as a plot domain.
+ *
+ * A chart of a channel's readings spans what the channel can produce, not what
+ * the last minute happened to contain: a run that sat still would otherwise
+ * draw its own scatter as a mountain range, and two charts of the same channel
+ * on two screens would disagree on scale.
+ */
+export function channelDomain(channel: SimulationChannelName): readonly [number, number] {
+  const range = simulationChannelRanges[channel];
+  return [range.minimum, range.maximum];
+}
+
+/**
+ * The seven session counters the shell shows, in the order their readings are
+ * taken.
+ *
+ * Written as a list and a record rather than one object, because both are
+ * needed: the list fixes the order the sample indices are handed out in, and
+ * the record's type makes a channel missing from the mapping a compile error
+ * rather than a metric that quietly stops moving.
+ */
+export const sessionMetricNames = [
+  'cpu',
+  'ram',
+  'storage',
+  'gpu',
+  'networkIn',
+  'networkOut',
+  'readiness',
+] as const;
+
+export type SessionMetricName = (typeof sessionMetricNames)[number];
+
+/** Which channel of the roster each session counter takes its readings from. */
+export const sessionMetricChannels: Readonly<Record<SessionMetricName, SimulationChannelName>> = {
+  cpu: 'cpu',
+  ram: 'ram',
+  storage: 'storage',
+  gpu: 'gpu',
+  networkIn: 'network-in',
+  networkOut: 'network-out',
+  readiness: 'readiness',
+};
+
+/**
+ * A deterministic offset in `[-1, 1]` for one sample of one series.
+ *
+ * The same generator the channel readings scatter with, exposed for the parts
+ * of the world that have no channel in the roster — an object's position is
+ * not a telemetry reading and never will be, but it should still answer to
+ * `simulation.seed` rather than to a tick counter.
+ */
+export function deterministicOffset(seed: bigint, index: number): number {
+  return (deterministicUnit(seed, index) - 0.5) * 2;
 }
 
 /**
