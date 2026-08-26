@@ -1,275 +1,199 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## Project overview
 
 "Гремучая смесь — Оперативный штаб" (`gremuchaya-hq`) is a local-first operational dashboard for a
-film/production shoot: a normalized world of sectors, objects, cases, materials, comms channels and
-simulated events, driven by a deterministic scene/cue engine. It ships as both a Next.js web app and
-a native Tauri 2 desktop shell (static export, offline-first). In-app content and the README are
-Russian; code, identifiers and comments are English.
+film shoot: a normalized world of sectors, objects, cases, materials, comms channels and simulated
+events, driven by a deterministic scene/cue engine. It ships as a Next.js web app and a Tauri 2
+desktop shell (static export, offline-first). **In-app content and the README are Russian; code,
+identifiers and comments are English.**
 
-pnpm + Turborepo monorepo: `apps/{hq,control-plane,file-bridge}` and `packages/{domain,config,
-protocol,ui,layout-engine,settings-schema,test-fixtures}`.
+pnpm + Turborepo monorepo: `apps/{hq,control-plane,file-bridge}`, `packages/{domain,config,protocol,
+ui,layout-engine,settings-schema,test-fixtures}`.
 
 ## Commands
 
-Requires Node 24.3+, pnpm 10.12.3+ (`.tool-versions`, `.nvmrc` and `package.json`'s
-`packageManager` all pin the same versions; `packageManager` is authoritative if they ever
-disagree), Rust/Cargo 1.88+ for desktop builds. The native RTSP gateway additionally needs ffmpeg
-on PATH or a path in `HQ_FFMPEG_PATH`. Primary dev/release target is Windows (NSIS installer,
-WebView2 Runtime required); commands below are PowerShell-oriented.
+Node 24.3+, pnpm 10.12.3+ (`.tool-versions`, `.nvmrc` and `packageManager` pin the same versions;
+`packageManager` wins if they disagree), Rust 1.88+ for desktop builds, ffmpeg on PATH or
+`HQ_FFMPEG_PATH` for the native RTSP gateway. Primary target is Windows (NSIS, WebView2); commands
+are PowerShell-oriented. Setup: `corepack enable && pnpm install`.
 
-```powershell
-corepack enable
-pnpm install
-```
+- `dev:hq` (Next alone, `127.0.0.1:3000`) · `dev:full` (+ bridge + control-plane) · `dev` (all)
+- `build` / `build:web` / `build:desktop:web` — Turbo, web target, Tauri static-export target
+- `typecheck` / `lint` / `format` / `format:check` — across all packages
+- `test` (Vitest) · `test:ui` (Playwright for `apps/hq`, starts its own server) · `test:cargo` (Rust)
+- **`check`** — the local gate: UI boundary, protocol freshness, lint, typecheck, test, build
+- **`check:release`** — `check` + `test:ui` + `build:offline` + `test:cargo`; the shoot-day gate
+  (`docs/release/runbook.md`)
 
-- `pnpm dev:hq` — run only the Next.js app (`http://127.0.0.1:3000`)
-- `pnpm dev:full` — hq + file-bridge + control-plane together
-- `pnpm dev` — every workspace package's `dev` task in parallel
-- `pnpm build` / `pnpm build:web` / `pnpm build:desktop:web` — Turbo build, web target, or Tauri static-export target
-- `pnpm typecheck` / `pnpm lint` — across all packages via Turbo
-- `pnpm test` — unit/integration tests (Vitest) across all packages
-- `pnpm test:ui` — Playwright end-to-end tests for `apps/hq` (starts its own dev server)
-- `pnpm test:cargo` — Rust tests for the Tauri backend (`apps/hq/src-tauri`)
-- `pnpm check` — the full local gate: UI boundary check, protocol-generation freshness check, lint, typecheck, test, build
-- `pnpm check:release` — `check` plus `test:ui`, `build:offline`, `test:cargo`; this is the shoot-day release gate (see `docs/release/runbook.md`)
-- `pnpm format` / `pnpm format:check` — Prettier
+One file: `pnpm --filter @gremuchaya/hq test -- src/state/x.test.ts` (same shape elsewhere).
 
-Single test file, scoped to one package:
-
-```powershell
-pnpm --filter @gremuchaya/hq test -- src/state/someSlice.test.ts
-pnpm --filter @gremuchaya/control-plane test -- src/sync/runtime.test.ts
-pnpm --filter @gremuchaya/hq test:ui -- tests/some-flow.spec.ts
-```
-
-Protobuf codegen (required after editing any `.proto` file, or `check:protocol-generation` fails):
-
-```powershell
-pnpm --filter @gremuchaya/protocol generate
-```
-
-Control-plane DB migrations: `pnpm --filter @gremuchaya/control-plane migrate`.
-
-Desktop packaging: `pnpm tauri:build` (produces the Windows NSIS installer under
-`apps/hq/src-tauri/target/release/bundle/nsis/`); `cargo check --manifest-path apps/hq/src-tauri/Cargo.toml`
-for a quick Rust-only check.
+- **Protobuf codegen** after any `.proto` edit, or `check:protocol-generation` fails:
+  `pnpm --filter @gremuchaya/protocol generate`
+- **Migrations:** `pnpm --filter @gremuchaya/control-plane migrate`
+- **Packaging:** `pnpm tauri:build` (NSIS installer under
+  `apps/hq/src-tauri/target/release/bundle/nsis/`); `cargo check --manifest-path
+apps/hq/src-tauri/Cargo.toml` for a Rust-only check.
 
 ## Architecture
 
-Layered dependency direction (canonical summary in `docs/architecture/dependency-map.md`, read that
-first for anything cross-cutting):
-
-```
-presentation (Next routes, React, CSS)
-        v
-application (scene, explorer, snapshot, asset and screen use cases)
-        v
-domain (plain immutable types, state machines, invariants and ports)
-
-infrastructure (browser, bridge and Tauri adapters) implements domain/application ports
-```
+Dependency direction — **presentation → application → domain**, with infrastructure (browser,
+bridge and Tauri adapters) implementing domain and application ports. Canonical summary in
+`docs/architecture/dependency-map.md`; read it first for anything cross-cutting.
 
 Package ownership:
 
-- `@gremuchaya/domain` — framework-free models, state machines, errors, paths and ports.
-- `@gremuchaya/config` — Zod trust-boundary schemas, parsers and scene validation. It holds no
-  migrations: the only migrations in the repository are the immutable TypeScript constants in
-  `apps/control-plane/src/db/migrations.ts`.
-- `@gremuchaya/protocol` — generated Protobuf messages (`gremuchaya.*.v1`) and the shared
-  `FileBridgeService` descriptor; no runtime policy or UI code.
-- `@gremuchaya/ui` — design tokens and scene-agnostic React primitives (wraps Base UI as the
-  public `Terminal*` component set).
-- `@gremuchaya/layout-engine` — deterministic bounded tile packing / overflow policy, shared across
-  apps instead of relying on document scroll to hide content.
-- `@gremuchaya/settings-schema` — schema-bound personalization draft validation (theme/density/etc.).
+- `@gremuchaya/domain` — framework-free models, state machines, errors, paths, ports, and the
+  shared simulation-curve evaluator.
+- `@gremuchaya/config` — Zod trust-boundary schemas, parsers, scene validation. No migrations: the
+  only ones are the immutable constants in `apps/control-plane/src/db/migrations.ts`.
+- `@gremuchaya/protocol` — generated Protobuf (`gremuchaya.*.v1`) and service descriptors; no
+  runtime policy or UI code.
+- `@gremuchaya/ui` — design tokens and scene-agnostic `Terminal*` primitives over Base UI.
+- `@gremuchaya/layout-engine` — deterministic bounded tile packing and overflow policy.
+- `@gremuchaya/settings-schema` — the `SettingDefinition` registry and draft validation.
 - `@gremuchaya/test-fixtures` — deterministic test data, excluded from production imports.
-- `apps/hq` — composition root: Next.js 16 App Router + React 19 + Tauri 2 desktop shell, Zustand
-  runtime, application services, adapters, and all UI/scene/screen code.
-- `apps/file-bridge` — localhost-only (`127.0.0.1`), read-only-by-default gRPC-Web file projection
-  and server-streaming watcher, with canonical-path traversal/symlink-escape protection.
-- `apps/control-plane` — Node ConnectRPC service: health/capabilities, durable paired-device auth
-  lifecycle, realtime sync hub over WebSocket with binary Protobuf resume, Neon (serverless Postgres)
-  and Upstash (Redis) adapters.
-- `apps/hq/src-tauri` — native Rust layer: monitor/window management, native file watcher, read-only
-  projection.
+- `apps/hq` — composition root: Next.js 16, React 19, Tauri 2 shell, Zustand runtime, application
+  services, adapters, and all UI/scene/screen code.
+- `apps/file-bridge` — localhost-only, read-only-by-default gRPC-Web file projection and watcher,
+  with canonical-path traversal/symlink-escape protection.
+- `apps/control-plane` — Node ConnectRPC: health/capabilities, durable paired-device auth, realtime
+  hub over WebSocket, Neon and Upstash adapters.
+- `apps/hq/src-tauri` — native Rust: monitor/window management, file watcher, read-only projection.
 
 State ownership:
 
-- Zustand owns the current client runtime snapshot across two stores:
-  `apps/hq/src/state/operationsStore.ts` (the runtime — `OperationsUiState`, `ProductionState` and
-  `PersonalizationState` composed into one `OperationsState`) and `apps/hq/src/state/appStore.ts`
-  (a small `runtimeState` holder). It is not yet split into per-domain slices; treat any plan that
-  assumes scene/screens/workspace/explorer/connection slices as describing a target, not the code.
+- Zustand holds the runtime in `state/operationsStore.ts` — `OperationsUiState`,
+  `ProductionState`, `PersonalizationState`, plus `content`, `connection` and `materials` —
+  composed into one `OperationsState`, alongside a small `appStore.ts`. It is one store with
+  named regions, not per-domain slice files; a plan that assumes separate slice modules
+  describes a target, not the code.
 - Scene definitions (52 Zod-validated scenes) are immutable configuration, not runtime state.
 - `localStorage` owns everything the browser persists, under seven keys:
-  `gremuchaya-hq:operations:v3` (runtime state), `gremuchaya-hq:production-snapshots:v3`,
-  `gremuchaya-hq:snapshots:v1` (`LocalSnapshotPersistence`), `gremuchaya-hq:device-session:v2`
-  (`DeviceSessionStore` — the paired control-plane session, refresh token included, which is a
-  stated trade-off of a local-first desktop application; `v2` adds the control-plane installation
-  id the session was minted against, and a `v1` blob is carried forward once with that id empty),
-  `hq.camera-material-assignments.v1`, `hq.keybinds-intro-seen.v1`,
-  and the Yandex Maps key. There is no IndexedDB and no Tauri store plugin anywhere in this
-  repository. Media and timer handles are never persisted.
-- Application services perform all IO and cross-slice transitions; React components only dispatch
-  use cases and select narrow state.
+  `gremuchaya-hq:operations:v3`, `…:production-snapshots:v3`, `…:snapshots:v1`,
+  `…:device-session:v2` (the paired session — refresh token included, a stated trade-off of a
+  local-first desktop app), `hq.camera-material-assignments.v1`, `hq.keybinds-intro-seen.v1`,
+  and the Yandex Maps key. No IndexedDB, no Tauri store plugin; media and timer handles are
+  never persisted.
+- Application services perform all IO and cross-region transitions; components dispatch use
+  cases and select narrow state.
 
-### Enforced boundaries (CI scripts, not just convention)
+### Enforced boundaries (CI scripts, not convention)
 
-Both run as part of `pnpm check` via `scripts/`:
+Both run inside `pnpm check`, from `scripts/`:
 
-- `check-ui-boundary.mjs` — fails if any file outside `packages/ui` imports `@base-ui/react` directly,
-  or uses a raw `<button>/<input>/<select>/<textarea>` JSX element. Use `packages/ui`'s `Terminal*`
-  wrappers everywhere else in `apps/` and `packages/`.
+- `check-ui-boundary.mjs` — fails if a file outside `packages/ui` imports `@base-ui/react` or uses a
+  raw `<button>/<input>/<select>/<textarea>`. Use the `Terminal*` wrappers everywhere else.
 - `check-protocol-generation.mjs` — regenerates `packages/protocol/src/gen` and diffs it against the
-  committed tree; stale generated bindings fail the check. Always run
-  `pnpm --filter @gremuchaya/protocol generate` and commit the result after touching a `.proto` file.
+  committed tree; stale bindings fail. Regenerate and commit after touching a `.proto`.
 
 ### Protocol / RPC surface
 
-Versioned Protobuf contracts live under
-`packages/protocol/proto/gremuchaya/{bridge,common,control,integration,material,realtime,settings,sync,telemetry}/v1/*.proto`,
-generated (buf) into `packages/protocol/src/gen`. Transport is ConnectRPC over binary gRPC-Web only —
-no REST endpoints, no native gRPC, no ad hoc JSON (ADR 0003, ADR 0008). In `apps/control-plane`,
-`ControlPlaneService` (health, getCapabilities) is always registered; `SyncService` (paired-device
-auth, authenticated realtime admission) is only wired up when durable auth config
-(`apps/control-plane/src/config.ts`) is present — otherwise the control plane starts in a reduced,
-health-only/unauthenticated dev mode, and attempting to override auth-configured startup collaborators
-throws. Realtime sync uses a WebSocket hub (`apps/control-plane/src/realtime`) with periodic admitted-
-socket revalidation rather than a persistent per-message auth check.
+Versioned contracts under `packages/protocol/proto/gremuchaya/*/v1/*.proto` (nine packages),
+generated by buf into `packages/protocol/src/gen`. Transport is **ConnectRPC over binary gRPC-Web
+only** — no REST, no native gRPC, no ad hoc JSON (ADR 0003, 0008). `ControlPlaneService` is always
+registered; every other service is wired only when its collaborator exists, so a control plane
+without durable auth config starts in a reduced health-only mode and `getCapabilities` says so.
+The realtime hub revalidates an admitted socket on a timer rather than per message.
 
 ### Local-first / offline-first design
 
-The desktop build uses Next.js `output: 'export'` (fully static) plus Tauri native adapters — no Node
-server at runtime (ADR 0005). Multi-window/display synchronization uses a typed screen-bus port: Tauri
-events in desktop mode, `BroadcastChannel` with a `storage`-event fallback on web — deliberately not
-WebSockets, to avoid a server dependency for cue execution (ADR 0001). All `/screen/:id`, `/wall/:id`
-and `/scene/:id` routes are statically generated at build time since Tauri has no server-side dynamic
-routing fallback (ADR 0006).
+The desktop build is `output: 'export'` plus Tauri adapters — no Node server at runtime (ADR 0005).
+Multi-window sync goes through a typed screen-bus port: Tauri events on desktop, `BroadcastChannel`
+with a `storage` fallback on web, chosen over WebSockets so cue execution needs no server (ADR 0001).
+`/screen/:id`, `/wall/:id` and `/scene/:id` are statically generated: Tauri has no dynamic routing
+fallback (ADR 0006).
 
 ### File access model
 
 A three-tier virtual filesystem (ADR 0002): the browser File System Access API, the localhost
-gRPC-Web file-bridge (`apps/file-bridge`, opt-in, read-only by default — ADR 0003), and native Tauri
-roots. Four `FileSourcePort` adapters are merged by `ExplorerService.list` over the domain's
-`mergeExplorerNodes`, behind branded virtual paths, so physical filesystem paths never leak into
-the UI. Real nodes shadow an emulated/config-defined node at the same virtual path.
+file-bridge (opt-in, read-only by default — ADR 0003) and native Tauri roots. Four `FileSourcePort`
+adapters are merged by `ExplorerService.list` behind branded virtual paths, so physical paths never
+reach the UI; a real node shadows an emulated one at the same virtual path.
 
 ### Further reading
 
 - `docs/architecture/dependency-map.md` — canonical layering summary
-- `docs/adr/0001` through `0008` — multi-screen bus, virtual filesystem, local file bridge,
-  information state machines, offline-first runtime, static route generation, TS/ESLint compatibility
-  pinning, control-plane Protobuf contracts
-- `docs/release/environment.md` — pinned toolchain/dependency versions and why
-- `docs/release/runbook.md` — shoot-day release/rehearsal/recovery procedure
-- `docs/release/known-limitations.md` — e.g. no committed Yandex Maps API key, placeholder media, no
-  production RTSP/HLS/WebRTC endpoints yet
-- `docs/plans/` — active implementation plans
+- `docs/adr/0001`–`0008` — screen bus, virtual filesystem, file bridge, information state machines,
+  offline-first runtime, static route generation, toolchain pinning, control-plane contracts
+- `docs/release/{environment,runbook,known-limitations}.md` — pinned versions, shoot-day procedure,
+  and what is deliberately not built yet
+- `docs/plans/actual_plan.md` — the one plan (see Notes)
 
 ## Delegation: one agent per task
 
-This repository defines seven specialised agents in `.claude/agents/`. **Route work to the
-agent that owns the area instead of doing it inline.** They exist because the layering above
-is wide enough that a single context reading every package reads none of them carefully —
-which is how `CompositeFileSource` stayed in three documents for months after it stopped
-existing.
+Seven agents in `.claude/agents/`. **Route work to the agent that owns the area rather than doing
+it inline:** the layering above is wide enough that one context reading every package reads none
+carefully — which is how `CompositeFileSource` stayed in three documents for months after it
+stopped existing.
 
-| Agent               | Owns                                                                                                                | Writes code |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `architect`         | Where a capability belongs, layering checks, multi-package refactor order, ADRs, plan checkpoints                   | no          |
-| `ui-engineer`       | `apps/hq` presentation, `packages/ui`, `packages/layout-engine`, Zustand slices, tokens/CSS, `Terminal*` primitives | yes         |
-| `scene-engineer`    | Scene/cue engine, the 52 scenes, `packages/config` schemas, `packages/domain` state machines                        | yes         |
-| `protocol-engineer` | `.proto` contracts, `apps/control-plane`, `apps/file-bridge`, pairing/tokens, migrations, the realtime hub          | yes         |
-| `desktop-engineer`  | `apps/hq/src-tauri`, Tauri config and commands, NSIS/WebView2 packaging, native watcher, media gateway              | yes         |
-| `tester`            | Vitest, Playwright, cargo tests, and whether a test proves what it claims                                           | yes         |
-| `reviewer`          | Correctness, security, and the enforced boundaries, before a commit or PR                                           | no          |
-
-Rules that make the habit worth having:
+| Agent               | Owns                                                                         | Writes code |
+| ------------------- | ---------------------------------------------------------------------------- | ----------- |
+| `architect`         | Where a capability belongs, layering, refactor order, ADRs, plan checkpoints | no          |
+| `ui-engineer`       | `apps/hq` presentation, `packages/ui`, `layout-engine`, store, tokens/CSS    | yes         |
+| `scene-engineer`    | Scene/cue engine, the 52 scenes, `config` schemas, `domain` state machines   | yes         |
+| `protocol-engineer` | `.proto`, `apps/control-plane`, `apps/file-bridge`, tokens, migrations, hub  | yes         |
+| `desktop-engineer`  | `apps/hq/src-tauri`, Tauri config/commands, NSIS/WebView2, watcher, gateway  | yes         |
+| `tester`            | Vitest, Playwright, cargo, and whether a test proves what it claims          | yes         |
+| `reviewer`          | Correctness, security, the enforced boundaries — before a commit or PR       | no          |
 
 - **One agent per task, matched to the area.** A task spanning `apps/hq` and
-  `apps/control-plane` is two delegations, not one agent with a wide brief.
-- **Independent tasks go out in one message** so they run concurrently. Dependent ones wait.
-- **`architect` before code when the question is "where does this live"**, not after.
-- **`reviewer` before committing** anything touching credentials, SQL, the file bridge, or
-  the UI boundary. It is read-only by design: it reports, it does not fix.
-- **`tester` establishes evidence**, and is the right agent for "did this test ever fail?" —
-  see rules 2.3 and 2.4 in `docs/plans/actual_plan.md`.
-- Every agent runs `background: true` with `isolation: worktree`. Worktree isolation earns
-  its cost when agents edit in parallel; a single sequential edit does not need it, and the
-  edits still have to be brought back into this tree.
-- **Do not delegate** a one-line fix in a file already open, or a question answerable by
-  reading one module. The dispatch costs more than the work.
+  `apps/control-plane` is two delegations, not one wide brief.
+- **Independent tasks go out in one message** so they run concurrently; dependent ones wait.
+- **`architect` before code** when the question is "where does this live", not after.
+- **`reviewer` before committing** anything touching credentials, SQL, the file bridge or the
+  UI boundary. Read-only by design: it reports, it does not fix.
+- **`tester` establishes evidence** — the right agent for "did this test ever fail?" (rules 2.3
+  and 2.4 in the plan).
+- Agents run `background: true` with `isolation: worktree`; worktree isolation earns its cost
+  only when agents edit in parallel, and the edits still have to come back into this tree.
+- **Do not delegate** a one-line fix in an open file, or a question one module answers. The
+  dispatch costs more than the work.
 
 ### Skills
 
-`.claude/skills/` holds eight skills, tracked in git and pinned by `skills-lock.json`, so a
-clone gets the same set. Each agent's own `## Skills` section says which apply to it. The
-ones that carry repository-specific weight:
+`.claude/skills/` holds eight skills, tracked in git and pinned by `skills-lock.json`. Each
+agent's own `## Skills` section says which apply to it. Three carry repository-specific weight:
 
-- `shadcn` and `migrate-radix-to-base` — always paired. The shadcn CLI pulls Radix
-  primitives; `packages/ui` wraps **Base UI**. Convert before wrapping as a `Terminal*`
-  export, or `check-ui-boundary.mjs` fails.
-- `web-design-guidelines` — accessibility and focus-state review, alongside this repo's own
+- `shadcn` + `migrate-radix-to-base` — **always paired.** The shadcn CLI pulls Radix; `packages/ui`
+  wraps Base UI. Convert before wrapping as a `Terminal*` export, or `check-ui-boundary.mjs` fails.
+- `web-design-guidelines` — accessibility and focus states, alongside this repo's own
   viewport/DPI/density matrix.
 - `writing-guidelines` — prose that outlives a session: docs, ADRs, the plan.
 
-Vercel deployment skills are deliberately absent: this project has no server at runtime
-(ADR 0005) and no deploy target. The React skills kept from that source
-(`vercel-react-best-practices`, `vercel-composition-patterns`,
-`vercel-react-view-transitions`) are framework-generic despite their names.
+The **desktop** profile has no server at runtime (ADR 0005) and must stay static. The **web**
+profile is headed for one: F14 mounts the control plane inside the Next.js app and deploys both.
 
 ## Git commit and pull request conventions
 
-Commit messages, pull request titles and pull request bodies are written in **English**,
-in the register of `CODE_OF_CONDUCT.md`. That file is this repository's house style for
-prose that outlives a session; read it before writing one. The rules below are the parts
-of that style that apply to a commit.
+**English**, in the register of `CODE_OF_CONDUCT.md` — the house style for prose that outlives a
+session. Read it before writing one; every rule below is derived from it.
 
-- **Never** add `Co-Authored-By` lines, "generated by" notes, or any other mention of an
-  AI assistant.
-- **Conventional prefix, imperative subject.** `type(scope): do the thing` — the subject
-  says what the change makes the project do, not what the author did.
-- **Consequence before measure.** The enforcement ladder states the community impact and
-  only then the action taken. A message follows the same order: what was wrong or missing
-  first, what the change does about it second.
-- **Plain declarative sentences.** No hedging, no exclamation marks, no emoji, no jokes,
-  and no praise for the work itself. The document never sells its own rules; a commit does
-  not sell its own diff.
-- **Describe behaviour, never people.** The code of conduct characterises conduct and
-  never a person. A message says what the code did and now does; it does not call earlier
-  work careless, clever, or broken-by-someone.
-- **Name concrete artefacts.** The document names `*.local.json`, `.env` and
-  `docs/release/asset-replacement.md` rather than "sensitive files". A message names the
-  file, setting id, requirement (`R12`) or correction (`C19`) it touches, never "some
-  places" or "various fixes".
-- **Redact, in commits as in issues.** Never put real shoot-machine paths, API keys,
-  tokens, connection strings, or the contents of `*.local.json` and `.env` into a message,
-  issue or pull request; write `<redacted>` in their place.
-- **State scope, including what is out of it.** The document devotes a section to where it
-  applies. When a change deliberately stops short — a requirement half closed, a surface
-  left for a later feature — the message says so rather than letting the reader assume the
-  rest.
-- **Attribute what was borrowed.** The document credits Contributor Covenant and Mozilla
-  by name. When an approach comes from a library's own API or an outside source, name it
-  instead of presenting it as invented here.
-- **One idea per bullet, parallel grammar**, in a body list as in the standards list.
+- **Never** mention an AI assistant: no `Co-Authored-By`, no "generated by".
+- **Conventional prefix, imperative subject** (`type(scope): do the thing`) saying what the
+  change makes the project do, not what the author did.
+- **Consequence before measure:** what was wrong first, what the change does about it second.
+- **Plain declarative sentences.** No hedging, exclamation marks, emoji, jokes, or self-praise.
+- **Describe behaviour, never people.** Never call earlier work careless, clever, or broken.
+- **Name concrete artefacts** — the file, setting id, requirement (`R12`) or correction
+  (`C19`) — never "some places" or "various fixes".
+- **Redact** shoot-machine paths, keys, tokens, connection strings and the contents of
+  `*.local.json` and `.env`; write `<redacted>`.
+- **State scope, including what is out of it.** A change that stops short says so.
+- **Attribute what was borrowed** from a library's API or an outside source.
+- **One idea per bullet, parallel grammar.**
 
 ## Notes
 
 - TypeScript is strict everywhere (`tsconfig.base.json`): `noUncheckedIndexedAccess`,
-  `exactOptionalPropertyTypes`, `noUnusedLocals`/`noUnusedParameters`, `verbatimModuleSyntax` are all on.
-- `apps/hq/AGENTS.md` is regenerated automatically by `next dev`; don't hand-edit it, just commit it
-  if it changes.
-- Before editing any file, read it first. Before modifying a function, grep for all callers. Reresearch before you edit.
-- Keep `docs/plans/actual_plan.md` current as work happens, not afterward. It is the repository's
-  one plan document by design (its own header explains why prior plan files were folded into it and
-  removed): the current state of the project, its proven history and the route ahead all live in one
-  place so they cannot drift apart. When a task finishes, a defect is found, or something the plan
-  claimed turns out wrong, update the plan in the same batch of work — the corrections register (§6)
-  exists because claims left uncorrected are worse than claims never made. A second plan document
-  appearing anywhere is a sign something drifted; fold it back in rather than treating it as a new
-  source of truth.
+  `exactOptionalPropertyTypes`, `noUnusedLocals`/`noUnusedParameters`, `verbatimModuleSyntax`.
+- `apps/hq/AGENTS.md` is regenerated by `next dev`; never hand-edit it, just commit it if it changes.
+- **Read a file before editing it; grep every caller before changing a function.** Re-research
+  rather than trusting memory of this codebase.
+- Keep `docs/plans/actual_plan.md` current **as work happens, not afterward**: state, proven
+  history and route ahead live in one place so they cannot drift apart. When a task finishes, a
+  defect is found, or a claim turns out wrong, update it in the same batch — the corrections
+  register (§6) exists because uncorrected claims are worse than claims never made. A second plan
+  document anywhere is drift: fold it back in rather than treating it as a new source of truth.
