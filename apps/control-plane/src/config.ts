@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 
+import type { SqlDriverName } from './db/database.js';
 import { presign, signHeaders } from './storage/sigv4.js';
 
 export type AuthCredentialKind = 'access' | 'pair' | 'receipt' | 'refresh';
@@ -83,6 +84,17 @@ export interface ControlPlaneConfig {
   readonly host: string;
   readonly allowedOrigins: readonly string[];
   readonly databaseUrl?: string;
+  /**
+   * Which driver reaches {@link databaseUrl}, when the operator has said.
+   *
+   * Absent means the driver this package has always used, and `sqlClientFactoryFor`
+   * resolves it: a deployment that sets nothing gets the Neon HTTP driver and
+   * behaves exactly as it did before the TCP driver existed. It is optional for
+   * the same reason `databaseUrl`, `redis`, `auth` and `storage` are -- the
+   * configuration object says what an operator configured, not what the
+   * defaults are.
+   */
+  readonly databaseDriver?: SqlDriverName;
   readonly redis?: {
     readonly restUrl: string;
     readonly restToken: string;
@@ -165,6 +177,7 @@ export function loadControlPlaneConfig(
   const host = parseHost(environment.HQ_CONTROL_PLANE_HOST);
   const allowedOrigins = parseOrigins(environment.HQ_CONTROL_PLANE_ALLOWED_ORIGINS);
   const databaseUrl = parseDatabaseUrl(environment.HQ_CONTROL_PLANE_DATABASE_URL);
+  const databaseDriver = parseDatabaseDriver(environment.HQ_CONTROL_PLANE_DATABASE_DRIVER);
   const redis = parseRedis(
     environment.HQ_CONTROL_PLANE_REDIS_REST_URL,
     environment.HQ_CONTROL_PLANE_REDIS_REST_TOKEN,
@@ -176,6 +189,7 @@ export function loadControlPlaneConfig(
     host,
     allowedOrigins,
     ...(databaseUrl === undefined ? {} : { databaseUrl }),
+    ...(databaseDriver === undefined ? {} : { databaseDriver }),
     ...(redis === undefined ? {} : { redis }),
     ...(auth === undefined ? {} : { auth }),
     ...(storage === undefined ? {} : { storage }),
@@ -242,6 +256,25 @@ function parseDatabaseUrl(value: string | undefined): string | undefined {
     throw new Error('HQ_CONTROL_PLANE_DATABASE_URL must be a PostgreSQL connection URL');
   }
   return value;
+}
+
+/**
+ * The driver name, or `undefined` when the operator left the choice alone.
+ *
+ * An unrecognised value is refused rather than treated as the default. The two
+ * drivers differ in what they need from the network -- one an open route to the
+ * public internet, the other a route to one machine -- so a typo silently
+ * resolving to `neon` would produce a control plane that works in the office and
+ * has no database at all on the set, which is the failure this whole stage
+ * exists to remove.
+ */
+function parseDatabaseDriver(value: string | undefined): SqlDriverName | undefined {
+  if (value === undefined || value.trim().length === 0) return undefined;
+  const driver = value.trim().toLowerCase();
+  if (driver !== 'neon' && driver !== 'postgres') {
+    throw new Error("HQ_CONTROL_PLANE_DATABASE_DRIVER must be 'neon' or 'postgres'");
+  }
+  return driver;
 }
 
 function parseRedis(

@@ -1,5 +1,10 @@
 import type { ControlPlaneConfig } from '../config.js';
-import { createNeonDatabase, type SqlClient, type SqlClientFactory } from '../db/database.js';
+import {
+  createDatabase,
+  sqlClientFactoryFor,
+  type SqlClient,
+  type SqlClientFactory,
+} from '../db/database.js';
 import { readInstallationId } from '../db/installation.js';
 import { runMigrations, type MigrationRunResult } from '../db/migrations.js';
 import { DurableIntegrationStore } from '../integration/store.js';
@@ -31,13 +36,14 @@ export type MigrationRunner = (database: SqlClient) => Promise<MigrationRunResul
 
 export interface ConfiguredPairedDeviceLifecycleOptions {
   /**
-   * Test seam for a deterministic in-memory SqlClient. Production callers use
-   * the configured Neon client instead.
+   * Test seam for a deterministic in-memory SqlClient. Production callers get
+   * the client the configured driver builds instead.
    */
   readonly database?: SqlClient;
   /**
-   * Optional Neon driver seam. It is used only when `database` is not
-   * supplied, so tests never need a live connection string or network call.
+   * Optional driver seam. It is used only when `database` is not supplied, and
+   * it overrides `config.databaseDriver`, so tests never need a live connection
+   * string or network call.
    */
   readonly databaseFactory?: SqlClientFactory;
   readonly migrationRunner?: MigrationRunner;
@@ -103,7 +109,11 @@ export async function createConfiguredPairedDeviceLifecycle(
   }
 
   const database =
-    options.database ?? createNeonDatabase(config.databaseUrl, options.databaseFactory);
+    options.database ??
+    createDatabase(
+      config.databaseUrl,
+      options.databaseFactory ?? sqlClientFactoryFor(config.databaseDriver),
+    );
   const migrations = await (options.migrationRunner ?? runMigrations)(database);
   // Read after the migration gate and never again: the identity is minted by
   // 0010 and is immutable for the life of the database, so a second read could

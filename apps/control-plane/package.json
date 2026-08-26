@@ -23,11 +23,13 @@
     "@neondatabase/serverless": "1.1.0",
     "@upstash/ratelimit": "2.0.8",
     "@upstash/redis": "1.38.2",
+    "pg": "8.23.0",
     "ws": "8.21.3"
   },
   "devDependencies": {
     "@connectrpc/connect-web": "2.1.2",
     "@types/node": "26.2.0",
+    "@types/pg": "8.23.1",
     "@types/ws": "8.18.1",
     "tsx": "4.23.12",
     "typescript": "6.0.3",

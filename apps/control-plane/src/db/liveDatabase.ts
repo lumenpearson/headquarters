@@ -1,6 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
-import { createNeonDatabase, type SqlClient } from './database.js';
+import {
+  createDatabase,
+  defaultSqlDriver,
+  sqlClientFactoryFor,
+  type SqlClient,
+  type SqlClientFactory,
+  type SqlDriverName,
+} from './database.js';
 import {
   describesSameDatabase,
   disposableDatabaseName,
@@ -54,6 +61,32 @@ export function liveTestDatabaseUrl(
   return testUrl;
 }
 
+/**
+ * Which driver the opt-in suites run through.
+ *
+ * There is one variable and no second copy of the suites, because a driver that
+ * is proved by a suite written for it proves only that the suite matches the
+ * driver. `HQ_CONTROL_PLANE_TEST_DATABASE_DRIVER=postgres` re-runs the same
+ * eight PostgreSQL suites -- migrations, pairing, receipts, realtime events,
+ * settings, materials, telemetry, integrations -- against the TCP adapter,
+ * which is what "the adapter satisfies the same contract" has to mean.
+ *
+ * It defaults to the driver the control plane defaults to, so an unset
+ * environment runs exactly what it ran before.
+ */
+export function liveTestSqlDriver(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): SqlDriverName {
+  const value = environment.HQ_CONTROL_PLANE_TEST_DATABASE_DRIVER?.trim();
+  if (value === undefined || value.length === 0) return defaultSqlDriver;
+  if (value !== 'neon' && value !== 'postgres') {
+    throw new LiveDatabaseMisconfigurationError(
+      `HQ_CONTROL_PLANE_TEST_DATABASE_DRIVER must be 'neon' or 'postgres', not '${value}'`,
+    );
+  }
+  return value;
+}
+
 export interface SweptDatabases {
   readonly dropped: readonly string[];
 }
@@ -68,11 +101,21 @@ export interface SweptDatabases {
 export class DisposableDatabasePool {
   readonly #admin: SqlClient;
   readonly #baseUrl: string;
-  readonly #created: string[] = [];
+  readonly #clientFactory: SqlClientFactory;
+  readonly #created: { readonly name: string; readonly client: SqlClient }[] = [];
 
-  constructor(baseUrl: string) {
+  /**
+   * The admin handle and every database this pool hands out use the same
+   * driver, so a run configured for TCP has no HTTP request in it anywhere and
+   * a failure cannot be attributed to the half that was not under test.
+   */
+  constructor(
+    baseUrl: string,
+    clientFactory: SqlClientFactory = sqlClientFactoryFor(liveTestSqlDriver()),
+  ) {
     this.#baseUrl = baseUrl;
-    this.#admin = createNeonDatabase(baseUrl);
+    this.#clientFactory = clientFactory;
+    this.#admin = createDatabase(baseUrl, clientFactory);
   }
 
   async sweep(
@@ -86,18 +129,28 @@ export class DisposableDatabasePool {
   async create(): Promise<SqlClient> {
     const name = disposableDatabaseName(Date.now(), randomBytes(8).toString('hex'));
     await this.#admin.query({ text: `CREATE DATABASE ${name}` });
-    this.#created.push(name);
     const url = new URL(this.#baseUrl);
     url.pathname = `/${name}`;
-    return createNeonDatabase(url.toString());
+    const client = createDatabase(url.toString(), this.#clientFactory);
+    this.#created.push({ name, client });
+    return client;
   }
 
   async dropAll(): Promise<void> {
-    for (const name of this.#created) {
-      // FORCE is required: the pooled endpoint keeps short-lived connections
-      // that would otherwise make DROP DATABASE fail.
+    for (const { name, client } of this.#created) {
+      // Close before dropping. The TCP driver holds a connection pool open
+      // against exactly the database about to be removed, and giving those
+      // connections back deliberately is what keeps the teardown a decision
+      // rather than a race against an idle timeout. The HTTP driver holds
+      // nothing and its `close` is absent, which is why the call is optional.
+      await client.close?.();
+      // FORCE is still required: the pooled endpoint keeps short-lived
+      // connections of its own that would otherwise make DROP DATABASE fail.
       await this.#admin.query({ text: `DROP DATABASE IF EXISTS ${name} WITH (FORCE)` });
     }
     this.#created.length = 0;
+    // The admin handle goes last, and only after the drops it was needed for.
+    // It is lazy, so a pool reused after this simply builds a fresh client.
+    await this.#admin.close?.();
   }
 }

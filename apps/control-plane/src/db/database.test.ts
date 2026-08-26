@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  createNeonDatabase,
+  createDatabase,
   DatabaseConfigurationError,
   type SqlClient,
   type SqlClientFactory,
   type SqlTransactionResults,
 } from './database.js';
 
-describe('lazy Neon database', () => {
+describe('lazy database handle', () => {
   it('does not create a driver client until a database operation is requested', async () => {
     const client: SqlClient = {
       query: async () => [{ ok: 1 }],
       transaction: async () => undefined,
     };
     const factory = vi.fn<SqlClientFactory>(() => client);
-    const database = createNeonDatabase(
+    const database = createDatabase(
       'postgresql://role:password@ep-hq.neon.tech/headquarters',
       factory,
     );
@@ -39,7 +39,7 @@ describe('lazy Neon database', () => {
       query: async () => [],
       transaction: async () => expected,
     };
-    const database = createNeonDatabase(
+    const database = createDatabase(
       'postgresql://role:password@ep-hq.neon.tech/headquarters',
       () => client,
     );
@@ -48,8 +48,8 @@ describe('lazy Neon database', () => {
       database.transaction([{ text: 'SELECT 1' }, { text: 'SELECT 2 AS migration' }]),
     ).resolves.toEqual(expected);
   });
-  it('rejects database operations without a configured Neon connection string', () => {
-    const database = createNeonDatabase(undefined);
+  it('rejects database operations without a configured connection string', () => {
+    const database = createDatabase(undefined);
 
     expect(() => database.query({ text: 'SELECT 1' })).toThrow(DatabaseConfigurationError);
     expect(database.configured).toBe(false);
