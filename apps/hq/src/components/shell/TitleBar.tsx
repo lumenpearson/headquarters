@@ -8,6 +8,7 @@ import { useShellClock } from '@/application/dateTime';
 import { routeLabels } from '@/application/navigation';
 import { useStringListSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { connectionModeToken, realtimeStatusToken } from '@/application/sync/connection';
+import { linkStatusTokens } from '@/application/sync/controlPlaneLinks';
 import {
   applyWindowCorners,
   readHostWindowProfile,
@@ -225,9 +226,11 @@ function OperationReading() {
 function ConnectionReading() {
   const connection = useOperationsStore((state) => state.connection);
   // One token rather than two adjacent expressions, so the slash between the
-  // mode and the link cannot be lost to JSX whitespace collapsing -- the same
-  // reason the status line's transport probe composes it in one string.
-  const token = `${connectionModeToken(connection.mode)}/${realtimeStatusToken(connection.realtime.status)}`;
+  // mode and the links cannot be lost to JSX whitespace collapsing -- the same
+  // reason the status line's transport probe composes it in one string. The
+  // links are a set since F14 stage 7: `ONLINE/LIVE+POLL` is a screen holding
+  // the plane on the set's LAN and the one on the internet at once.
+  const token = `${connectionModeToken(connection.mode)}/${linkStatusTokens(connection.links, realtimeStatusToken)}`;
   return <>{token}</>;
 }
 

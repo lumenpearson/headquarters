@@ -56,6 +56,7 @@ import {
   realtimeStatusLabel,
   realtimeStatusToken,
 } from '@/application/sync/connection';
+import { linkStatusTokens } from '@/application/sync/controlPlaneLinks';
 
 import { EditableContent } from '@/components/edit/EditableContent';
 import { TitleBar } from '@/components/shell/TitleBar';
@@ -528,7 +529,7 @@ function TransportProbe({ bus }: { readonly bus: string }) {
   const connection = useOperationsStore((state) => state.connection);
   // One token rather than two adjacent expressions, so the slash between the
   // mode and the link cannot be lost to JSX whitespace collapsing.
-  const syncToken = `${connectionModeToken(connection.mode)}/${realtimeStatusToken(connection.realtime.status)}`;
+  const syncToken = `${connectionModeToken(connection.mode)}/${linkStatusTokens(connection.links, realtimeStatusToken)}`;
   return (
     <TerminalPopover
       side="top"
@@ -572,18 +573,33 @@ function TransportProbe({ bus }: { readonly bus: string }) {
               : authorityModeLabel(connection.authority)}
           </dd>
         </div>
-        <div>
-          <dt>КАНАЛ СОБЫТИЙ</dt>
-          <dd>
-            {realtimeStatusLabel(connection.realtime.status)}
-            {connection.realtime.lastSequence === 0
-              ? ''
-              : ` — событие ${connection.realtime.lastSequence}`}
-            {connection.realtime.resyncCount === 0
-              ? ''
-              : `, пересинхронизаций ${connection.realtime.resyncCount}`}
-          </dd>
-        </div>
+        {/* One row per link, with the address on it. A screen on the set's
+            LAN holds the near plane and the cloud plane at once, and the two
+            report different things about the same group: which of them is
+            carrying, and where each of them answers, is what an operator asks
+            when a screen is behind. A session with no group keeps the single
+            row the block had before there was a set. */}
+        {connection.links.length === 0 ? (
+          <div>
+            <dt>КАНАЛ СОБЫТИЙ</dt>
+            <dd>{realtimeStatusLabel('off')}</dd>
+          </div>
+        ) : (
+          connection.links.map((link) => (
+            <div key={link.linkId}>
+              <dt>{link.role === 'primary' ? 'СВЯЗЬ · ОСНОВНАЯ' : 'СВЯЗЬ · ЗАПАСНАЯ'}</dt>
+              <dd>
+                {link.baseUrl}
+                {' — '}
+                {link.admitted
+                  ? realtimeStatusLabel(link.status)
+                  : 'ДРУГАЯ БАЗА CONTROL PLANE — НЕ ИСПОЛЬЗУЕТСЯ'}
+                {link.lastSequence === 0 ? '' : ` — событие ${link.lastSequence}`}
+                {link.resyncCount === 0 ? '' : `, пересинхронизаций ${link.resyncCount}`}
+              </dd>
+            </div>
+          ))
+        )}
         <div>
           <dt>ЧАСЫ ГРУППЫ</dt>
           <dd>

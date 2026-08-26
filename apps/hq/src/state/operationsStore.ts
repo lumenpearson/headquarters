@@ -62,7 +62,12 @@ import {
   type ChannelReading,
   type SessionMetricName,
 } from '../application/simulation/simulationCurves';
-import { initialConnectionState, type ConnectionState } from '../application/sync/connection';
+import {
+  initialConnectionState,
+  type ConnectionState,
+  type ControlPlaneLinkState,
+} from '../application/sync/connection';
+import { withLinkPatch, withLinksIdle } from '../application/sync/controlPlaneLinks';
 import { publishGroupSettings } from '../application/sync/groupSettingsBus';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
@@ -428,6 +433,26 @@ export interface OperationsState {
    * the service, and the store only records it.
    */
   readonly patchConnection: (patch: Partial<ConnectionState>) => void;
+  /**
+   * Replaces one control-plane link's fields, leaving every other link alone.
+   *
+   * A device may hold more than one link to one group, and both report at the
+   * same time: the near plane's socket says `live` while the cloud plane's feed
+   * says `polling`. A generic `patchConnection` would need every caller to
+   * read the list, map it and write it back, which is the same reducer written
+   * once per caller. It is written here instead, where reducers live.
+   */
+  readonly patchConnectionLink: (
+    linkId: string,
+    patch: Partial<Omit<ControlPlaneLinkState, 'linkId'>>,
+  ) => void;
+  /**
+   * Puts every link back to carrying nothing, keeping the addresses on show.
+   *
+   * What a link is -- its address, its role and what its control plane can do --
+   * outlives a session; the socket, the sequence and the resync count do not.
+   */
+  readonly idleConnectionLinks: () => void;
   /**
    * Records one finished import. Written by the import dialog and by nothing
    * else; re-importing the same content replaces the record rather than adding
@@ -1228,6 +1253,17 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       };
     }),
   patchConnection: (patch) => set((state) => ({ connection: { ...state.connection, ...patch } })),
+  patchConnectionLink: (linkId, patch) =>
+    set((state) => ({
+      connection: {
+        ...state.connection,
+        links: withLinkPatch(state.connection.links, linkId, patch),
+      },
+    })),
+  idleConnectionLinks: () =>
+    set((state) => ({
+      connection: { ...state.connection, links: withLinksIdle(state.connection.links) },
+    })),
   recordImportedMaterial: (material) =>
     set((state) => ({
       materials: {

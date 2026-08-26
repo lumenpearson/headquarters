@@ -222,8 +222,8 @@ class FakeControlPlane implements ControlPlanePort {
   }
 }
 
-function session(client: FakeControlPlane, now = () => 0) {
-  let state: ConnectionState = initialConnectionState;
+function session(client: FakeControlPlane, now = () => 0, from = initialConnectionState) {
+  let state: ConnectionState = from;
   const created = new ControlPlaneSession({
     client,
     apply: (patch) => {
@@ -237,6 +237,36 @@ function session(client: FakeControlPlane, now = () => 0) {
 }
 
 describe('ControlPlaneSession', () => {
+  it('leaves the configured addresses on show when a session ends', async () => {
+    /*
+     * The addresses are a fact about the configuration, not about the session:
+     * they are what an operator reads when a screen is alone, and giving up a
+     * pairing does not make the group unreachable at them. Clearing them here
+     * would empty the transport popover and the pairing dialog at exactly the
+     * moment they are being looked at.
+     */
+    const client = new FakeControlPlane();
+    const links = [
+      {
+        linkId: 'link-0',
+        baseUrl: 'http://127.0.0.1:4100',
+        role: 'primary' as const,
+        admitted: true,
+        delivery: 'socket' as const,
+        status: 'live' as const,
+        connectionId: 'conn-1',
+        lastSequence: 4,
+        resyncCount: 0,
+      },
+    ];
+    const { created, read } = session(client, () => 0, { ...initialConnectionState, links });
+
+    created.unpair();
+
+    expect(read().mode).toBe('reauth-required');
+    expect(read().links).toEqual(links);
+  });
+
   it('makes no request at all while general.localOnly is on', async () => {
     const client = new FakeControlPlane();
     const { created, read } = session(client);

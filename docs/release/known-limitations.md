@@ -75,6 +75,39 @@ This is the largest gap in the build and the one most likely to be planned aroun
   group at all. The setting cannot express the polling floor — it is declared
   0–400 ms — so the floor lives in code. This is a deliberate trade, not a defect:
   six seconds of waiting buys screens that start together.
+- **In a group reachable both on the set's LAN and over the internet, the six-second
+  lead applies to every screen — and the rule depends on each screen being
+  configured with both addresses.** A playback lead belongs to the publisher: it
+  stamps the execution instant and every other screen obeys it. A screen therefore
+  publishes with the lead its own slowest link needs, so a screen holding both the
+  near plane and the cloud plane publishes at six seconds, and a session outside
+  the LAN does the same. That makes every member of a mixed group agree, which is
+  what makes them converge. The failure mode this cannot detect: a screen on the
+  LAN configured with the near address **only**, in a group that also has a cloud
+  plane, publishes at 40 ms, and the screens outside the LAN receive a command
+  whose instant has already passed and run it on arrival — a different moment on
+  each of them. Presence names devices, not how each of them is fed, so no client
+  can notice. **Configure every screen of a mixed group with both addresses, in the
+  order near-then-cloud.** A group that has no cloud plane keeps the operator's own
+  lead, unchanged.
+- **The two planes must share a token pepper and a token hash version.** An access
+  token minted by one plane is presented to the other, and the verifying query
+  filters by the verifier's own `hash_version` with no issuer recorded on the row.
+  Two planes configured with different `HQ_CONTROL_PLANE_AUTH_TOKEN_PEPPER` or
+  `HQ_CONTROL_PLANE_AUTH_TOKEN_HASH_VERSION` values would refuse each other's
+  sessions, and the refusal would read to the operator as a revoked device.
+- **A link whose control plane answers for a different database is shown and never
+  followed.** The client compares each address's `installationId` with the one the
+  session was checked against; a disagreement is two groups rather than two ways to
+  one, so the link is left in the list with its address on show and carries and
+  publishes nothing.
+- **The session state machine does not fail over between the planes.** Pairing,
+  refresh, join, presence and the clock all run on the first configured address. A
+  publication moves to the second plane while the first is not carrying, and both
+  planes feed the event channel, but if the first plane stops answering entirely
+  the session goes `offline` and the group is left through the local copy rather
+  than through the second plane. Nothing in this stage rebuilds the session on
+  another address.
 - **Without Upstash, presence cannot report a device gone** and publications are unbounded. The
   service still runs; `Health` says which of the two modes is in force.
 - `layout_documents`, `layout_versions` and `conversion_jobs` are created by migrations and

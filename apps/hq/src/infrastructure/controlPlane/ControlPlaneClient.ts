@@ -251,9 +251,31 @@ export interface SyncRpcClient {
   }>;
 }
 
+/**
+ * What a client may do with the shared session store.
+ *
+ * `owner` is the whole of today's behaviour and stays the default, so a single
+ * link -- the only shape that existed before F14 stage 7 -- is unchanged.
+ * `reader` presents the stored credentials and never writes them: it makes no
+ * `PairDevice` and, above all, no `RefreshDeviceSession` call.
+ *
+ * That one rule is what keeps two planes safe. Rotation is single-writer by
+ * construction on the server: `refresh_token_hash` is unique, the retired hash
+ * has a partial unique index of its own, and presenting a rotated token with a
+ * *different* `request_id` is classified as a stolen-token replay and revokes
+ * the whole session family (`durable-runtime.ts`, `refreshDeviceSession`). Two
+ * clients sharing one session store would each mint an id of their own and do
+ * exactly that to themselves, in the middle of a shoot. A retry from one client
+ * is safe across both planes because the id is persisted before the call and
+ * answered by the receipt in the shared database; a second *minter* is not.
+ */
+export type ControlPlaneCredentialRole = 'owner' | 'reader';
+
 export interface ControlPlaneClientOptions {
   readonly baseUrl: string;
   readonly sessionStore?: DeviceSessionStore;
+  /** Defaults to `owner`; see {@link ControlPlaneCredentialRole}. */
+  readonly credentials?: ControlPlaneCredentialRole;
   /** Injected by tests; built from the transport when absent. */
   readonly clients?: {
     readonly control: ControlRpcClient;
@@ -278,6 +300,8 @@ export interface ControlPlaneClientOptions {
  */
 export class ControlPlaneClient implements ControlPlanePort {
   readonly baseUrl: string;
+  /** Whether this client may write the session store. */
+  readonly credentials: ControlPlaneCredentialRole;
   readonly #store: DeviceSessionStore;
   readonly #control: ControlRpcClient;
   readonly #sync: SyncRpcClient;
@@ -296,6 +320,7 @@ export class ControlPlaneClient implements ControlPlanePort {
 
   constructor(options: ControlPlaneClientOptions) {
     this.baseUrl = options.baseUrl;
+    this.credentials = options.credentials ?? 'owner';
     this.#store = options.sessionStore ?? new DeviceSessionStore();
     this.#device = options.device ?? { platform: 'web', applicationVersion: '' };
     this.#mintRequestId = options.mintRequestId ?? (() => crypto.randomUUID());
@@ -363,8 +388,15 @@ export class ControlPlaneClient implements ControlPlanePort {
     return this.#stored()?.accessToken;
   }
 
-  /** Drops the session for good. The next connection needs a pairing code. */
+  /**
+   * Drops the session for good. The next connection needs a pairing code.
+   *
+   * A reader does nothing: the credentials belong to the owner link, and a
+   * follower clearing them would end the session for every link at once from a
+   * failure that concerned only its own plane.
+   */
   forgetSession(): void {
+    if (this.credentials === 'reader') return;
     this.#store.clear();
   }
 
@@ -377,8 +409,15 @@ export class ControlPlaneClient implements ControlPlanePort {
     return this.#stored()?.controlPlaneInstallationId ?? null;
   }
 
-  /** Records the installation on a session that holds none; never replaces one. */
+  /**
+   * Records the installation on a session that holds none; never replaces one.
+   *
+   * A reader records nothing. The identity a session is scoped to is the one
+   * the owner link probed, and letting a second plane fill in the blank would
+   * decide the question this field exists to ask.
+   */
   adoptInstallationId(installationId: string): void {
+    if (this.credentials === 'reader') return;
     this.#store.adoptInstallationId(installationId);
   }
 
@@ -416,6 +455,7 @@ export class ControlPlaneClient implements ControlPlanePort {
     deviceName: string,
     signal?: AbortSignal,
   ): Promise<PairingResult> {
+    this.#requireCredentialOwner('pair');
     const response = await call(() =>
       this.#sync.pairDevice(
         {
@@ -433,8 +473,8 @@ export class ControlPlaneClient implements ControlPlanePort {
     const group = required(response.group, 'Control plane returned no group.');
     const device = required(response.device, 'Control plane returned no device.');
     const stored: StoredDeviceSession = {
-      version: 2,
-      controlPlaneUrl: this.baseUrl,
+      version: 3,
+      pairedAtUrl: this.baseUrl,
       // Which database this pairing belongs to, from the probe that preceded
       // it. Recorded at the one moment it is certainly true: the group and the
       // tokens being written here exist in that database and nowhere else.
@@ -467,6 +507,11 @@ export class ControlPlaneClient implements ControlPlanePort {
    * refusal clears the whole session because nothing in it is usable any more.
    */
   async refresh(signal?: AbortSignal): Promise<ConnectionSession> {
+    // Before anything is read, and above all before anything is sent: a reader
+    // that reached the wire here would mint a second `request_id` against a
+    // token the owner is rotating, which the server reads as a stolen-token
+    // replay and answers by revoking the whole session family.
+    this.#requireCredentialOwner('refresh');
     const stored = this.#stored();
     if (stored === null) throw new ControlPlaneError('unauthenticated', 'No paired session.');
     const requestId = this.#store.beginRefresh(this.#mintRequestId);
@@ -741,12 +786,42 @@ export class ControlPlaneClient implements ControlPlanePort {
     };
   }
 
+  /**
+   * The stored session, whatever address earned it.
+   *
+   * Up to `v2` this hid a session paired against another address, on the
+   * reasoning that the token would be refused there. That reasoning does not
+   * survive a group reachable two ways at once: an access token is verified by
+   * `token_hash` and `hash_version` against `device_access_tokens`, with no
+   * process, origin or issuer recorded anywhere in the row
+   * (`durable-runtime.ts`, `authenticate`), so a token minted by the plane on
+   * the set's LAN is accepted by the plane on the internet in front of the same
+   * database. What still has to agree is the database itself, and
+   * `ControlPlaneSession` checks that by installation identity rather than by
+   * address -- a check an address filter would have hidden rather than made.
+   *
+   * Two preconditions of the deployment ride on this and are stated where they
+   * can be read: both planes must carry the same token pepper and the same
+   * `HQ_CONTROL_PLANE_AUTH_TOKEN_HASH_VERSION`, because the verifying query
+   * filters by the verifier's own version.
+   */
   #stored(): StoredDeviceSession | null {
-    const stored = this.#store.read();
-    // A session earned from another control plane is not presented to this
-    // one: the token would be refused, and the refusal would read as a
-    // revoked session rather than a changed address.
-    return stored === null || stored.controlPlaneUrl !== this.baseUrl ? null : stored;
+    return this.#store.read();
+  }
+
+  /**
+   * Refuses an act that writes credentials on a client that may only read them.
+   *
+   * `failed-precondition` rather than `permission-denied`: nothing was refused
+   * by the control plane and no call was made. It is this client's role that
+   * makes the act wrong, and the kind says so.
+   */
+  #requireCredentialOwner(operation: string): void {
+    if (this.credentials === 'owner') return;
+    throw new ControlPlaneError(
+      'failed-precondition',
+      `This control plane link reads credentials and does not ${operation}.`,
+    );
   }
 
   #requireSession(): StoredDeviceSession {

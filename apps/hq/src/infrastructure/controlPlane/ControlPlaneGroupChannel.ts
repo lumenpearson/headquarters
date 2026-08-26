@@ -10,7 +10,16 @@ import type {
 } from '@/application/sync/groupChannel';
 
 export interface ControlPlaneGroupChannelOptions {
-  readonly port: ControlPlanePort;
+  /**
+   * Which link a publication goes out on, asked at the moment of publishing.
+   *
+   * A function and not a port, because a device may hold more than one link to
+   * one group and the answer changes while the channel lives: the near plane on
+   * the set's LAN while it is carrying, the cloud plane while it is not, and the
+   * near plane again when it returns. Asking at publication time is what makes
+   * that switch cost nothing -- no rebuild, no reconnect, no second channel.
+   */
+  readonly selectPort: () => ControlPlanePort;
   readonly groupId: string;
   readonly deviceId: string;
 }
@@ -19,9 +28,15 @@ export interface ControlPlaneGroupChannelOptions {
  * The group channel, assembled from the two transports that serve it.
  *
  * Publication is a unary RPC over binary gRPC-Web; delivery is the realtime
- * socket. Nothing here decides which of them a caller wanted, because a caller
- * wants both and always has: `PublishDocumentDelta` returns a sequence and the
- * event carrying it arrives on the socket, including to the publisher itself.
+ * socket, the polling feed, or both at once. Nothing here decides which of them
+ * a caller wanted, because a caller wants both and always has:
+ * `PublishDocumentDelta` returns a sequence and the event carrying it arrives
+ * on every feed, including to the publisher itself.
+ *
+ * Publication goes to exactly one link, chosen by `selectPort` at the moment of
+ * the call. Sending the same mutation to both planes would be safe -- the
+ * receipt in the shared database answers the repeat instead of appending a
+ * second event -- but it would spend a metered invocation to learn nothing.
  *
  * `deliver` is the seam a transport writes into. The channel is built first and
  * the client is given `channel.deliver` as its `onEvent`, so a subscriber that
@@ -43,22 +58,22 @@ export interface ControlPlaneGroupChannelOptions {
 export class ControlPlaneGroupChannel implements GroupChannel, GroupEventCursor {
   readonly groupId: string;
   readonly deviceId: string;
-  readonly #port: ControlPlanePort;
+  readonly #selectPort: () => ControlPlanePort;
   readonly #listeners = new Set<(event: GroupEventEnvelope) => void>();
   #appliedSequence = 0n;
 
   constructor(options: ControlPlaneGroupChannelOptions) {
-    this.#port = options.port;
+    this.#selectPort = options.selectPort;
     this.groupId = options.groupId;
     this.deviceId = options.deviceId;
   }
 
   publishDocumentDelta(publication: DocumentDeltaPublication): Promise<DocumentDeltaReceipt> {
-    return this.#port.publishDocumentDelta(publication);
+    return this.#selectPort().publishDocumentDelta(publication);
   }
 
   publishSessionCommand(publication: SessionCommandPublication): Promise<GroupSessionCommand> {
-    return this.#port.publishSessionCommand(publication);
+    return this.#selectPort().publishSessionCommand(publication);
   }
 
   subscribe(listener: (event: GroupEventEnvelope) => void): () => void {

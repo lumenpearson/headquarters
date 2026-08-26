@@ -42,12 +42,18 @@ export interface AuthorityOutcome {
  * The connection to the group, as a sequence of decisions rather than a
  * component (R27).
  *
- * It owns every transition of the `connection` slice and is its only writer;
- * `ControlPlaneRuntime` supplies the mount, the timers and the settings, and
- * components read the slice. The service keeps its own copy of what it has
- * written, so a decision is taken against what it knows rather than by
- * reaching back into the store — which is also what lets a test drive it with
- * no store at all.
+ * It owns every mode transition of the `connection` slice; `ControlPlaneRuntime`
+ * supplies the mount, the timers and the settings, and components read the
+ * slice. The service keeps its own copy of what it has written, so a decision is
+ * taken against what it knows rather than by reaching back into the store —
+ * which is also what lets a test drive it with no store at all.
+ *
+ * Two fields of the slice are not the service's, and are named here so the
+ * ownership can be read in one place. `links` is installed by the runtime from
+ * the configured addresses, and every feed reports its own entry of it.
+ * `mirror` is a fact about the disk. The runtime also moves the mode to
+ * `connecting` on its own before it probes those links, because that probe now
+ * precedes {@link ControlPlaneSession.connect}.
  *
  * Nothing here opens a socket. The realtime channel, live edit over
  * `PublishDocumentDelta` and group settings are the second half of F10; they

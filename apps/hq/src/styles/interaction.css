@@ -214,11 +214,13 @@ body.terminal-theme textarea:focus {
 }
 
 .group-pairing__devices,
+.group-pairing__links,
 .group-pairing__presence {
   margin-top: var(--space-3);
 }
 
 .group-pairing__devices h3,
+.group-pairing__links h3,
 .group-pairing__presence h3 {
   margin: 0 0 var(--space-2);
   color: var(--text-2);
@@ -241,9 +243,26 @@ body.terminal-theme textarea:focus {
 }
 
 .group-pairing__devices small,
+.group-pairing__links small,
 .group-pairing__presence small {
   color: var(--text-2);
   font-size: var(--font-xs);
+}
+
+/* One row per address this device holds for the group. The address is the
+   longest thing on the line and the one that must not be truncated, so the row
+   is a single column that wraps rather than a grid that clips. */
+.group-pairing__links article {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+  border-bottom: 1px dotted var(--ops-line);
+  overflow-wrap: anywhere;
+}
+
+.group-pairing__links article span {
+  display: grid;
+  min-width: 0;
 }
 
 .group-pairing__presence article {

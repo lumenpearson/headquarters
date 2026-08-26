@@ -75,7 +75,7 @@ State ownership:
   a test fails on a definition that is neither.
 - `localStorage` owns everything the browser persists, under eight keys:
   `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
-  `gremuchaya-hq:snapshots:v1`, `gremuchaya-hq:device-session:v2` (the paired control-plane session,
+  `gremuchaya-hq:snapshots:v1`, `gremuchaya-hq:device-session:v3` (the paired control-plane session,
   refresh token included, with the installation id it was minted against),
   `gremuchaya-hq:group-mirror:v1` (the last group state the device downloaded, plus a draft
   companion that lives for one download), `hq.camera-material-assignments.v1`,

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { groupMirrorStorageKey } from '@/infrastructure/controlPlane/GroupSnapshotDownloader';
 import { operationsStore } from '@/state/operationsStore';
 
-import { ControlPlaneRuntime } from './ControlPlaneRuntime';
+import { ControlPlaneRuntime, currentControlPlaneLinks } from './ControlPlaneRuntime';
 
 /** Lets the mount effect's promise chain settle before the assertion. */
 async function settle(): Promise<void> {
@@ -65,6 +65,108 @@ describe('ControlPlaneRuntime', () => {
 
     // No address is the same fact as local-only: there is no group to be out of.
     expect(operationsStore.getState().connection.mode).toBe('local-only');
+    // And no link is held, which is what the status line prints as a single
+    // `OFF` rather than as a set.
+    expect(operationsStore.getState().connection.links).toEqual([]);
+  });
+});
+
+describe('ControlPlaneRuntime and the addresses a group answers at', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    operationsStore.getState().resetWorld();
+    operationsStore.getState().patchConnection({ mode: 'connecting' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Serves the committed default with the override an operator would write. */
+  function configure(values: Readonly<Record<string, unknown>>): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url === '/runtime/project.override.json') {
+          return new Response(JSON.stringify({ version: 1, values, assetOverrides: {} }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url === '/runtime/project.default.json') {
+          return new Response(JSON.stringify(projectDefault), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        // The probe. Nothing here is a control plane, so it answers as an
+        // unreachable one would; what is under test is the link set, which is
+        // installed before anything is asked.
+        return new Response(null, { status: 503 });
+      }),
+    );
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'general.localOnly', value: false }]);
+    });
+  }
+
+  it('holds one link for one address, exactly as it did before there was a set', async () => {
+    configure({ controlPlaneUrl: nearPlane });
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    // The regression guard for every installation that has no second plane:
+    // one address is one primary link and nothing else changed.
+    expect(operationsStore.getState().connection.links).toMatchObject([
+      { linkId: 'link-0', baseUrl: nearPlane, role: 'primary', admitted: true },
+    ]);
+    expect(currentControlPlaneLinks().map((link) => link.client.credentials)).toEqual(['owner']);
+  });
+
+  it('holds one link per address, in the order the operator wrote them', async () => {
+    configure({ controlPlaneUrl: [nearPlane, cloudPlane] });
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    /*
+     * The plane on the set's LAN and the plane on the internet, in front of one
+     * database. The first is the primary: the session runs on it and it is the
+     * only client permitted to rotate the refresh token, because two clients
+     * minting request ids against one stored token would be read by the server
+     * as a stolen-token replay.
+     */
+    expect(operationsStore.getState().connection.links).toMatchObject([
+      { linkId: 'link-0', baseUrl: nearPlane, role: 'primary' },
+      { linkId: 'link-1', baseUrl: cloudPlane, role: 'secondary' },
+    ]);
+    // Exactly one client may write the shared credentials. Two of them minting
+    // refresh request ids against one stored token is what the server reads as
+    // a stolen-token replay, and it answers by revoking the session family.
+    expect(currentControlPlaneLinks().map((link) => link.client.credentials)).toEqual([
+      'owner',
+      'reader',
+    ]);
+  });
+
+  it('keeps the addresses on show once the session is out of the group', async () => {
+    configure({ controlPlaneUrl: [nearPlane, cloudPlane] });
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+    act(() => {
+      operationsStore.getState().patchConnection({ mode: 'offline' });
+    });
+
+    // The addresses are a fact about the configuration and do not stop existing
+    // because a probe failed -- an operator looking at an offline screen is
+    // looking for exactly them.
+    expect(operationsStore.getState().connection.links.map((link) => link.baseUrl)).toEqual([
+      nearPlane,
+      cloudPlane,
+    ]);
   });
 });
 
@@ -185,6 +287,10 @@ describe('ControlPlaneRuntime and the local copy of the group', () => {
     expect(operationsStore.getState().connection.mirror.revision).toBe(7);
   });
 });
+
+/* Placeholder addresses: the plane on the set's LAN, and the cloud plane. */
+const nearPlane = 'http://127.0.0.1:4100';
+const cloudPlane = 'https://plane.example';
 
 const projectDefault = {
   version: 1,

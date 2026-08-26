@@ -16,9 +16,9 @@ import { ControlPlaneGroupChannel } from './ControlPlaneGroupChannel';
  */
 function channel(): ControlPlaneGroupChannel {
   return new ControlPlaneGroupChannel({
-    // Publication is not under test here; the port answers nothing because
-    // nothing asks it to.
-    port: {} as ControlPlanePort,
+    // Publication is under test in its own case below; here the port answers
+    // nothing because nothing asks it to.
+    selectPort: () => ({}) as ControlPlanePort,
     groupId: 'group-1',
     deviceId: 'device-1',
   });
@@ -97,5 +97,75 @@ describe('ControlPlaneGroupChannel', () => {
     subject.deliver(event(1n));
 
     expect(seen).toEqual([]);
+  });
+});
+
+describe('one group, two planes to publish to', () => {
+  /**
+   * A port that records nothing but which plane it is, so the assertion is
+   * about the address a publication left by rather than about a call count.
+   */
+  function plane(name: string, sent: string[]): ControlPlanePort {
+    return {
+      async publishDocumentDelta() {
+        sent.push(name);
+        return { sequence: 1n, stateVector: new Uint8Array(0) };
+      },
+      async publishSessionCommand() {
+        sent.push(name);
+        return {} as Awaited<ReturnType<ControlPlanePort['publishSessionCommand']>>;
+      },
+    } as unknown as ControlPlanePort;
+  }
+
+  it('publishes to the near plane while it carries, the cloud plane when it does not', async () => {
+    const sent: string[] = [];
+    const near = plane('near', sent);
+    const cloud = plane('cloud', sent);
+    let carrying = 'near';
+    const subject = new ControlPlaneGroupChannel({
+      selectPort: () => (carrying === 'near' ? near : cloud),
+      groupId: 'group-1',
+      deviceId: 'device-1',
+    });
+    const delta = {
+      documentId: 'doc-1',
+      documentType: 'settings' as const,
+      delta: new Uint8Array(0),
+    };
+
+    await subject.publishDocumentDelta(delta);
+    // The near plane's socket dropped. The mutation receipt in the shared
+    // database makes the switch safe -- both planes stand in front of one
+    // database -- so the failover is a choice rather than a risk.
+    carrying = 'cloud';
+    await subject.publishDocumentDelta(delta);
+    await subject.publishSessionCommand({ action: 'play', target: 'wall-1' });
+    // And back, the moment the near plane carries again.
+    carrying = 'near';
+    await subject.publishDocumentDelta(delta);
+
+    expect(sent).toEqual(['near', 'cloud', 'cloud', 'near']);
+  });
+
+  it('asks for the plane per publication rather than remembering the first answer', async () => {
+    const sent: string[] = [];
+    let asked = 0;
+    const near = plane('near', sent);
+    const subject = new ControlPlaneGroupChannel({
+      selectPort: () => {
+        asked += 1;
+        return near;
+      },
+      groupId: 'group-1',
+      deviceId: 'device-1',
+    });
+
+    await subject.publishSessionCommand({ action: 'pause', target: 'wall-1' });
+    await subject.publishSessionCommand({ action: 'play', target: 'wall-1' });
+
+    // A channel that resolved the plane once at construction would answer 1
+    // here, and would keep publishing to a plane that had gone away.
+    expect(asked).toBe(2);
   });
 });

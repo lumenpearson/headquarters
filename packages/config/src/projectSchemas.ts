@@ -43,6 +43,23 @@ export const assetManifestSchema = z
     }
   });
 
+/**
+ * One control-plane address.
+ *
+ * Split out of {@link projectConfigSchema} because the field now holds either a
+ * single address or a list of them and both branches have to enforce exactly
+ * the same rule; two copies of the refinement would be two places for "no
+ * credentials in the URL" to drift apart.
+ */
+const controlPlaneAddressSchema = z.url().refine((value) => {
+  const url = new URL(value);
+  return (
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    url.username === '' &&
+    url.password === ''
+  );
+}, 'Control plane URL must be an http(s) URL without credentials');
+
 export const screenWindowSchema = z.object({
   screenId: screenIdSchema,
   monitorIndex: z.number().int().nonnegative(),
@@ -70,28 +87,47 @@ export const projectConfigSchema = z.object({
   /**
    * Where the control plane answers, when this client is meant to join a group.
    *
-   * Absent means local-only: no client is built and no request leaves the
-   * machine. Unlike `bridgeUrl` this may name any host, because on a shoot day
-   * the control plane is one machine on the set's LAN and every other screen
-   * pairs with it over that network. The trust that follows is deliberate and
-   * has to be known: the pairing code and the tokens it earns travel to
-   * whatever this URL names, so the address comes from the project
+   * An empty list means local-only: no client is built and no request leaves
+   * the machine. Unlike `bridgeUrl` these may name any host, because on a shoot
+   * day the control plane is one machine on the set's LAN and every other
+   * screen pairs with it over that network. The trust that follows is
+   * deliberate and has to be known: the pairing code and the tokens it earns
+   * travel to whatever these URLs name, so the addresses come from the project
    * configuration an operator controls, never from a query string or a page.
    * `https` is accepted and `http` is not refused, since a LAN with no
    * certificate authority is the normal case there; the tokens are then
    * protected only by the network they cross.
+   *
+   * **A list, because one group may be reachable two ways at once** (F14,
+   * stage 7). A control plane on the set's LAN and one deployed to the public
+   * internet in front of *the same database* are two addresses for one group:
+   * the near one answers in milliseconds over a socket, the far one on a poll
+   * cadence, and a screen on the LAN holds both so that the group behaves the
+   * same for everybody in it. Order is the operator's statement of preference
+   * and the only thing that ranks the addresses -- there is no discovery on the
+   * LAN and there is not going to be one, so the near plane is the one the
+   * operator writes first.
+   *
+   * **The singular key is kept on purpose.** A bare string is accepted and read
+   * as a list of one, because `project.override.json` on a shoot machine
+   * already carries `controlPlaneUrl` as a string, and an object schema strips
+   * a key it does not know: renaming the field would make that override
+   * silently do nothing, which is the worst way for a shoot-day file to fail.
+   * Absent, one address and several therefore all parse, and the first two
+   * behave exactly as they did before this field could hold more than one.
+   *
+   * The ceiling of four is not a guess about topology: every address costs a
+   * client, a probe and -- where the plane serves no socket -- a poll on a
+   * metered invocation budget, so a mistyped list must not be able to spend it.
    */
   controlPlaneUrl: z
-    .url()
-    .refine((value) => {
-      const url = new URL(value);
-      return (
-        (url.protocol === 'http:' || url.protocol === 'https:') &&
-        url.username === '' &&
-        url.password === ''
-      );
-    }, 'Control plane URL must be an http(s) URL without credentials')
-    .optional(),
+    .union([controlPlaneAddressSchema, z.array(controlPlaneAddressSchema).max(4)])
+    .transform((value) => (typeof value === 'string' ? [value] : value))
+    .refine(
+      (value) => new Set(value).size === value.length,
+      'Control plane URLs must not repeat an address',
+    )
+    .default([]),
   screenWindows: z.array(screenWindowSchema),
   virtualMountRules: z.array(virtualMountRuleSchema),
   fileDisplayOverrides: z.array(fileDisplayOverrideSchema),
@@ -101,7 +137,20 @@ export const projectConfigSchema = z.object({
 
 export const productionOverrideSchema = z.object({
   version: z.literal(1),
-  values: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  /**
+   * The project-configuration fields this shoot machine overrides.
+   *
+   * Scalars, and one array of strings: `controlPlaneUrl` may name more than one
+   * address (F14, stage 7), and the override file is where an operator names
+   * the second one. Arrays of objects are still out -- `screenWindows` and the
+   * explorer rules are structures the override was never meant to carry -- and
+   * the result is re-parsed by `projectConfigSchema`, which is what actually
+   * decides whether a value belongs in the field it was written for.
+   */
+  values: z.record(
+    z.string(),
+    z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.string())]),
+  ),
   assetOverrides: z.record(
     z.string(),
     z.discriminatedUnion('kind', [

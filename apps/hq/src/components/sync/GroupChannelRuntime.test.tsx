@@ -1,0 +1,290 @@
+// @vitest-environment jsdom
+import { act, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { ControlPlaneLinkState } from '@/application/sync/connection';
+import type { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
+import { ControlPlaneClient } from '@/infrastructure/controlPlane/ControlPlaneClient';
+import {
+  DeviceSessionStore,
+  memoryStorage,
+} from '@/infrastructure/controlPlane/DeviceSessionStore';
+import { operationsStore } from '@/state/operationsStore';
+
+import type { ControlPlaneLink } from './ControlPlaneRuntime';
+import { GroupChannelRuntime } from './GroupChannelRuntime';
+import { currentGroupRuntime } from './groupRuntimeHolder';
+
+/* Placeholder addresses: the plane on the set's LAN, and the cloud plane. */
+const nearPlane = 'http://127.0.0.1:4100';
+const cloudPlane = 'https://plane.example';
+
+const installationId = '3f1c2b7a-0d4e-4f6a-9c2b-8e1d5a7c9f30';
+
+/**
+ * The session state machine as this component uses it, which is only
+ * `ensureFreshSession` on a socket that was refused. Nothing in these cases
+ * opens one, so the stub records the fact that it was never needed.
+ */
+function sessionStub(refreshes: string[]): ControlPlaneSession {
+  return {
+    ensureFreshSession: async () => {
+      refreshes.push('called');
+      return true;
+    },
+  } as unknown as ControlPlaneSession;
+}
+
+/**
+ * Every address the runtime reached, in order.
+ *
+ * The clients are built with real transports rather than injected RPC clients,
+ * because the claim under test is *which plane* a collaborator was built
+ * against, and an injected client has no address at all. Every call is refused
+ * with `503`, which is what an unreachable plane answers; the transcript is
+ * what the assertions read.
+ */
+function recordFetch(): string[] {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(typeof input === 'string' ? input : input.toString());
+      return new Response(null, { status: 503 });
+    }),
+  );
+  return urls;
+}
+
+function linkState(overrides: Partial<ControlPlaneLinkState>): ControlPlaneLinkState {
+  return {
+    linkId: 'link-0',
+    baseUrl: nearPlane,
+    role: 'primary',
+    admitted: true,
+    delivery: 'poll',
+    status: 'off',
+    connectionId: '',
+    lastSequence: 0,
+    resyncCount: 0,
+    ...overrides,
+  };
+}
+
+/** A device holding both planes, with a paired session both may present. */
+function twoLinks(): { readonly links: readonly ControlPlaneLink[] } {
+  const sessionStore = new DeviceSessionStore(memoryStorage());
+  sessionStore.write({
+    version: 3,
+    pairedAtUrl: nearPlane,
+    controlPlaneInstallationId: installationId,
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    accessTokenExpiresAt: Date.now() + 600_000,
+    refreshTokenExpiresAt: Date.now() + 6_000_000,
+    deviceId: 'device-a',
+    groupId: 'group-a',
+    role: 'EDITOR',
+  });
+  return {
+    links: [
+      {
+        linkId: 'link-0',
+        baseUrl: nearPlane,
+        role: 'primary',
+        client: new ControlPlaneClient({ baseUrl: nearPlane, sessionStore, credentials: 'owner' }),
+      },
+      {
+        linkId: 'link-1',
+        baseUrl: cloudPlane,
+        role: 'secondary',
+        client: new ControlPlaneClient({
+          baseUrl: cloudPlane,
+          sessionStore,
+          credentials: 'reader',
+        }),
+      },
+    ],
+  };
+}
+
+function joinGroup(links: readonly ControlPlaneLinkState[]): void {
+  act(() => {
+    operationsStore.getState().patchConnection({
+      mode: 'online',
+      session: { deviceId: 'device-a', groupId: 'group-a', role: 'EDITOR' },
+      capabilities: {
+        installationId,
+        sync: true,
+        deviceLifecycle: true,
+        realtimeAdmission: false,
+        settings: true,
+        materials: false,
+      },
+      links,
+    });
+  });
+}
+
+/**
+ * Lets the mount effect run and the feeds take their first tick.
+ *
+ * A real macrotask and not three microtasks: `GroupEventPoller` arms a
+ * `setTimeout` for its first read, and a test that only flushed promises would
+ * assert that nothing was asked -- which every one of these cases would then
+ * pass for the wrong reason.
+ */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
+}
+
+describe('GroupChannelRuntime over two planes of one group', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    operationsStore.getState().resetWorld();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('follows every admitted plane and asks each of them for the log', async () => {
+    const urls = recordFetch();
+    const { links } = twoLinks();
+    joinGroup([
+      linkState({}),
+      linkState({ linkId: 'link-1', baseUrl: cloudPlane, role: 'secondary' }),
+    ]);
+
+    render(<GroupChannelRuntime links={links} session={sessionStub([])} />);
+    await settle();
+
+    // Both planes carry the same durable log out of the same database, so both
+    // are read; the channel is what makes an event that arrived twice apply
+    // once.
+    expect(urls.some((url) => url.startsWith(nearPlane) && url.includes('ReadGroupEvents'))).toBe(
+      true,
+    );
+    expect(urls.some((url) => url.startsWith(cloudPlane) && url.includes('ReadGroupEvents'))).toBe(
+      true,
+    );
+  });
+
+  it('never reads or publishes to a plane answering for a different database', async () => {
+    const urls = recordFetch();
+    const { links } = twoLinks();
+    joinGroup([
+      linkState({}),
+      linkState({ linkId: 'link-1', baseUrl: cloudPlane, role: 'secondary', admitted: false }),
+    ]);
+
+    render(<GroupChannelRuntime links={links} session={sessionStub([])} />);
+    await settle();
+
+    /*
+     * Two databases share no sequence allocator, no token table and no
+     * receipts. Merging the second log into this cursor would drop every other
+     * event as already applied, so the link is held, shown, and asked nothing.
+     */
+    expect(urls.some((url) => url.startsWith(nearPlane))).toBe(true);
+    expect(urls.filter((url) => url.startsWith(cloudPlane))).toEqual([]);
+  });
+
+  it('builds the group settings on the primary plane and on no other', async () => {
+    const urls = recordFetch();
+    const { links } = twoLinks();
+    joinGroup([
+      linkState({}),
+      linkState({ linkId: 'link-1', baseUrl: cloudPlane, role: 'secondary' }),
+    ]);
+
+    render(<GroupChannelRuntime links={links} session={sessionStub([])} />);
+    await settle();
+
+    /*
+     * `GroupSettingsSync` overwrites this machine's draft with the group's
+     * values on join. Two of them against two planes would be two writers of
+     * one draft, racing over the same values, so exactly one is built and it is
+     * the primary link's.
+     */
+    const settingsCalls = urls.filter((url) => url.includes('GetEffectiveSettings'));
+    expect(settingsCalls).toHaveLength(1);
+    expect(settingsCalls[0]?.startsWith(nearPlane)).toBe(true);
+  });
+
+  it('moves publication to the cloud plane while the near one is not carrying, and back', async () => {
+    const urls = recordFetch();
+    const { links } = twoLinks();
+    joinGroup([
+      linkState({ status: 'polling' }),
+      linkState({
+        linkId: 'link-1',
+        baseUrl: cloudPlane,
+        role: 'secondary',
+        status: 'polling',
+      }),
+    ]);
+
+    render(<GroupChannelRuntime links={links} session={sessionStub([])} />);
+    await settle();
+    const channel = currentGroupRuntime()?.channel;
+    if (channel === undefined) throw new Error('The group runtime holds no channel.');
+
+    const publishedTo = async (): Promise<string | undefined> => {
+      const before = urls.length;
+      // Every plane refuses with `503` here; where the call went is the claim,
+      // and the failure is what a call to an unreachable plane looks like.
+      await channel
+        .publishSessionCommand({ action: 'play', target: 'wall-1' })
+        .catch(() => undefined);
+      return urls.slice(before).find((url) => url.includes('PublishSessionCommand'));
+    };
+    const setStatus = (linkId: string, status: ControlPlaneLinkState['status']) => {
+      act(() => {
+        const state = operationsStore.getState();
+        state.patchConnection({
+          links: state.connection.links.map((link) =>
+            link.linkId === linkId ? { ...link, status } : link,
+          ),
+        });
+      });
+    };
+
+    expect(await publishedTo()).toContain(nearPlane);
+
+    /*
+     * The near plane's socket dropped. The switch is safe because both planes
+     * stand in front of one database and a repeated mutation is answered by its
+     * receipt; and it costs nothing, because the plane is chosen at the moment
+     * of the call rather than when the channel was built. A status change does
+     * not rebuild the feeds, which is why the channel here is still the same
+     * object.
+     */
+    setStatus('link-0', 'reconnecting');
+    expect(await publishedTo()).toContain(cloudPlane);
+
+    setStatus('link-0', 'polling');
+    expect(await publishedTo()).toContain(nearPlane);
+    expect(currentGroupRuntime()?.channel).toBe(channel);
+  });
+
+  it('asks the session to refresh from no feed of its own accord', async () => {
+    const refreshes: string[] = [];
+    recordFetch();
+    const { links } = twoLinks();
+    joinGroup([
+      linkState({}),
+      linkState({ linkId: 'link-1', baseUrl: cloudPlane, role: 'secondary' }),
+    ]);
+
+    render(<GroupChannelRuntime links={links} session={sessionStub(refreshes)} />);
+    await settle();
+
+    // Rotation is single-writer. A feed that reached for it would be a second
+    // minter of refresh request ids against one stored token, which the server
+    // reads as a stolen-token replay.
+    expect(refreshes).toEqual([]);
+  });
+});

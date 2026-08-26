@@ -1,3 +1,5 @@
+import type { GroupEventDelivery } from './groupEventFeed';
+
 /**
  * What this session knows about its synchronization group (R27).
  *
@@ -117,6 +119,65 @@ export const initialRealtimeLinkState: RealtimeLinkState = {
   resyncCount: 0,
 };
 
+/**
+ * Which of a device's links owns the session (F14, stage 7).
+ *
+ * `primary` is the first address the operator configured and the only client
+ * allowed to write credentials: it probes, pairs, refreshes, joins, and carries
+ * the group's settings. `secondary` links present the same credentials, deliver
+ * the same group log and may be published to, and write nothing.
+ *
+ * The ranking is the operator's order and nothing else. There is no discovery
+ * on the LAN and there is not going to be one, so the near plane is the address
+ * written first, and the ordering is a statement rather than a guess.
+ */
+export type ControlPlaneLinkRole = 'primary' | 'secondary';
+
+/**
+ * One link to the group, and what it is currently doing.
+ *
+ * A device may hold more than one at a time, because a group may be reachable
+ * two ways at once: a control plane on the set's LAN that admits a realtime
+ * socket, and one on the public internet that does not, standing in front of
+ * the same database. A screen on the LAN holds both -- the socket for
+ * promptness and the poll so that it experiences the group exactly as the
+ * members outside the LAN do.
+ *
+ * The live fields are {@link RealtimeLinkState}, unchanged, because they are
+ * what a transport reports and both transports already report them. What is
+ * added is the identity of the link they belong to, so that two reports can no
+ * longer overwrite one another -- which is what a single record meant.
+ */
+export interface ControlPlaneLinkState extends RealtimeLinkState {
+  /** Stable for the life of the runtime; assigned from the configured order. */
+  readonly linkId: string;
+  readonly baseUrl: string;
+  readonly role: ControlPlaneLinkRole;
+  /**
+   * Whether this link's control plane reported the group's own database.
+   *
+   * True for the primary by definition -- it is the one the session's
+   * installation identity was checked against -- and true for a secondary whose
+   * `GetCapabilities` reported the same identity, or reported none. False is a
+   * second address standing in front of a *different* database, which is not a
+   * second way to this group but another group: it shares no sequence
+   * allocator, no token table and no receipts, so following it would merge two
+   * logs into one cursor. Such a link is kept in the list, with its address and
+   * what it answered, and is never followed or published to.
+   */
+  readonly admitted: boolean;
+  /**
+   * How this link carries the group's events, as its own probe reported it.
+   *
+   * Per link and not per connection: the near plane answers
+   * `sync.realtime-admission` true and the cloud plane answers it false, and a
+   * single record of the answer meant the second probe erased the first.
+   */
+  readonly delivery: GroupEventDelivery;
+  /** What this link's own `GetCapabilities` said; absent until it answers. */
+  readonly capabilities?: ControlPlaneCapabilities | undefined;
+}
+
 export interface ConnectionSession {
   readonly deviceId: string;
   readonly groupId: string;
@@ -195,8 +256,15 @@ export interface ConnectionState {
   readonly presence: readonly PresenceEntry[];
   readonly devices: readonly GroupDevice[];
   readonly clock: ClockEstimate;
-  /** The realtime socket, which is a separate fact from the session's mode. */
-  readonly realtime: RealtimeLinkState;
+  /**
+   * Every link this device holds to the group, in the operator's order.
+   *
+   * A set rather than one record, and installed by `ControlPlaneRuntime` from
+   * the configured addresses rather than by a transport, so the addresses stay
+   * readable while nothing is connected -- which is exactly when an operator
+   * needs to see them.
+   */
+  readonly links: readonly ControlPlaneLinkState[];
   /**
    * The local copy of the group's state, which is a fact about the disk rather
    * than about the connection and survives every mode this slice can take.
@@ -217,7 +285,7 @@ export const initialConnectionState: ConnectionState = {
   presence: [],
   devices: [],
   clock: { offsetMs: 0, latencyMs: 0, sampledAt: '' },
-  realtime: initialRealtimeLinkState,
+  links: [],
   mirror: initialGroupMirrorSummary,
   failure: '',
 };
@@ -232,13 +300,19 @@ export const initialConnectionState: ConnectionState = {
  * it when there is no connection to reset -- `general.localOnly` is on, or no
  * control plane address is configured at all.
  *
- * `mirror` is the one field left out, and deliberately: the local copy is a
- * fact about the disk rather than about the connection, and clearing it here
- * would make the status line report "no local copy" for a session that has one
- * -- at exactly the moment the operator most needs to know it does.
+ * `mirror` and `links` are the two fields left out, and deliberately. The local
+ * copy is a fact about the disk rather than about the connection, and clearing
+ * it here would make the status line report "no local copy" for a session that
+ * has one -- at exactly the moment the operator most needs to know it does. The
+ * links are a fact about the configuration: the addresses this device was told
+ * to try do not stop existing because a probe failed, and an operator looking
+ * at an offline screen is looking for exactly those addresses. Their *live*
+ * fields are reset by whoever owns them, through `resetLinkDelivery`.
  */
-export function disconnectedConnection(mode: ConnectionMode): Omit<ConnectionState, 'mirror'> {
-  const { mirror: _mirror, ...cleared } = initialConnectionState;
+export function disconnectedConnection(
+  mode: ConnectionMode,
+): Omit<ConnectionState, 'mirror' | 'links'> {
+  const { mirror: _mirror, links: _links, ...cleared } = initialConnectionState;
   return {
     ...cleared,
     mode,

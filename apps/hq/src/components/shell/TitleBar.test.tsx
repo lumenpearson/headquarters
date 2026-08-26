@@ -207,6 +207,55 @@ describe('R25: the bar an operator arranged', () => {
     expect(elementOrder()).toEqual(['title', 'minimize', 'maximize', 'close']);
   });
 
+  it('prints one token per link a device holds, so a mixed group reads as one', async () => {
+    mockNativeShell(profiles.win11);
+    patch('titlebar.information', 'connection');
+    await mountTitleBar();
+
+    /*
+     * A screen on the set's LAN holding the near plane and the cloud plane at
+     * once. Before the link state was a set the row printed one of them and the
+     * other was invisible, which on set reads as "this screen is following"
+     * when only half of it is.
+     */
+    act(() => {
+      operationsStore.getState().patchConnection({
+        mode: 'online',
+        links: [
+          {
+            linkId: 'link-0',
+            baseUrl: 'http://127.0.0.1:4100',
+            role: 'primary',
+            admitted: true,
+            delivery: 'socket',
+            status: 'live',
+            connectionId: 'conn-1',
+            lastSequence: 12,
+            resyncCount: 0,
+          },
+          {
+            linkId: 'link-1',
+            baseUrl: 'https://plane.example',
+            role: 'secondary',
+            admitted: true,
+            delivery: 'poll',
+            status: 'polling',
+            connectionId: '',
+            lastSequence: 12,
+            resyncCount: 0,
+          },
+        ],
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('.ops-titlebar__information')?.textContent).toBe(
+      'ONLINE/LIVE+POLL',
+    );
+  });
+
   it('marks the drag region titlebar.dragRegion asks for, and only that much', async () => {
     mockNativeShell(profiles.win11);
     await mountTitleBar();

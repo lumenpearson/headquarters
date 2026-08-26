@@ -23,13 +23,19 @@ export interface GroupRuntimeHandle {
   readonly deviceId: string;
   readonly channel: GroupChannel;
   /**
-   * How the group's events reach this session.
+   * How the group's events reach this session, over every link it holds.
    *
    * On the handle rather than inferred from the capabilities, because it is the
    * one fact a surface downstream has to act on: a command carried by a feed
    * polled every few seconds needs a longer execution lead than one pushed down
    * a socket, or the screens run it at whatever moment it happened to arrive on
    * each of them. `playbackLeadForDelivery` is the rule; this is the input.
+   *
+   * A device may hold more than one link, so this is the slowest of them and
+   * not any one of them -- `aggregateDelivery` states why the maximum is the
+   * answer. It is taken from what the links *are*, not from what they are doing
+   * this second, so a socket dropping and returning does not change the lead
+   * mid-session and leave the screens scheduling against two different rules.
    */
   readonly delivery: GroupEventDelivery;
   /** `null` on a control plane started without a settings store. */

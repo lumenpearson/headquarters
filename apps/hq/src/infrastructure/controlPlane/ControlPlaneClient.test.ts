@@ -378,11 +378,11 @@ describe('ControlPlaneClient', () => {
     expect(created.storedInstallationId()).toBeNull();
   });
 
-  it('refuses a session earned from a different control plane', async () => {
+  it('presents a session earned at another address of the same group', async () => {
     const store = new DeviceSessionStore(memoryStorage());
     store.write({
-      version: 2,
-      controlPlaneUrl: 'http://192.168.10.5:4100',
+      version: 3,
+      pairedAtUrl: 'http://192.168.10.5:4100',
       controlPlaneInstallationId: installationId,
       accessToken: 'access-elsewhere',
       refreshToken: 'refresh-elsewhere',
@@ -401,10 +401,21 @@ describe('ControlPlaneClient', () => {
       },
     });
 
-    // Presenting it would earn a refusal that reads like a revoked device
-    // rather than what it is: a changed address.
-    expect(created.session()).toBeNull();
-    expect(created.accessToken()).toBeUndefined();
+    /*
+     * A group may stand behind two addresses at once -- the plane on the set's
+     * LAN and the one on the internet, in front of one database -- and an
+     * access token is verified by hash with no issuer recorded on the row. The
+     * store used to hide such a session from every address but the one that
+     * minted it, which would hide a group's own plane from it. What still has
+     * to agree is the database, and that is checked by installation identity.
+     */
+    expect(created.session()).toEqual({
+      deviceId: 'device-a',
+      groupId: 'group-a',
+      role: 'EDITOR',
+    });
+    expect(created.accessToken()).toBe('access-elsewhere');
+    expect(created.storedInstallationId()).toBe(installationId);
   });
 
   it('turns a transport failure that never reached the host into an unavailable kind', async () => {
@@ -443,5 +454,110 @@ describe('ControlPlaneClient', () => {
         observedAt: new Date(1_000).toISOString(),
       },
     ]);
+  });
+});
+
+/**
+ * Two clients over one session store, which is what a device holds when its
+ * group is reachable both over the set's LAN and over the internet.
+ *
+ * The whole danger of this stage lives here. Rotation is single-writer on the
+ * server: `refresh_token_hash` is unique, the retired hash has a partial unique
+ * index of its own, and a rotated token presented with a *different*
+ * `request_id` is classified as a stolen-token replay and revokes the entire
+ * session family. Two clients each minting an id would do that to themselves
+ * in the middle of a shoot, so exactly one of them may refresh -- and the other
+ * must not reach the wire even when the token it can see has already expired.
+ */
+describe('two links over one session store', () => {
+  function pair(now: () => number) {
+    const recorded: Recorded = { refreshRequestIds: [], mutationContexts: [] };
+    const store = new DeviceSessionStore(memoryStorage());
+    const sync = syncClient(recorded);
+    let minted = 0;
+    const shared = {
+      sessionStore: store,
+      clients: { control: controlClient, sync },
+      mintRequestId: () => {
+        minted += 1;
+        return `request-${minted}`;
+      },
+      now,
+    };
+    return {
+      recorded,
+      store,
+      owner: new ControlPlaneClient({ baseUrl: 'http://127.0.0.1:4100', ...shared }),
+      reader: new ControlPlaneClient({
+        baseUrl: 'https://plane.example',
+        credentials: 'reader',
+        ...shared,
+      }),
+    };
+  }
+
+  it('lets the reader present the credentials the owner earned', async () => {
+    const { owner, reader } = pair(() => 0);
+
+    await owner.pair('CODE-1', 'MON-01');
+
+    // The token is verified by hash against `device_access_tokens`, with no
+    // issuer, process or origin recorded on the row, so the plane on the
+    // internet accepts what the plane on the LAN minted.
+    expect(reader.session()).toEqual(owner.session());
+    expect(reader.accessToken()).toBe('access-1');
+    expect(reader.realtimeIdentity()).toEqual(owner.realtimeIdentity());
+  });
+
+  it('never lets the reader refresh, even with an access token long expired', async () => {
+    // The stored token expires at 60 s; this clock is a full minute past it, so
+    // every guard that might have skipped the call is already open.
+    const { owner, reader, recorded, store } = pair(() => 120_000);
+    await owner.pair('CODE-1', 'MON-01');
+    const before = store.read();
+
+    await expect(reader.refresh()).rejects.toMatchObject({ kind: 'failed-precondition' });
+
+    // Nothing crossed the wire, and nothing in the store moved -- not even the
+    // pending request id, which a client that got as far as `beginRefresh`
+    // would have written before sending.
+    expect(recorded.refreshRequestIds).toEqual([]);
+    expect(store.read()).toEqual(before);
+  });
+
+  it('refreshes exactly once, from the owner, when the token has expired', async () => {
+    const { owner, reader, recorded } = pair(() => 120_000);
+    await owner.pair('CODE-1', 'MON-01');
+
+    await expect(reader.refresh()).rejects.toThrow();
+    await owner.refresh();
+    await expect(reader.refresh()).rejects.toThrow();
+
+    // One rotation, one identifier. A second minted identifier against the
+    // rotated token is what the server reads as a replay.
+    expect(recorded.refreshRequestIds).toHaveLength(1);
+    expect(owner.accessToken()).toBe('access-2');
+    expect(reader.accessToken()).toBe('access-2');
+  });
+
+  it('refuses to let the reader pair, forget the session or name its database', async () => {
+    const { owner, reader, recorded, store } = pair(() => 0);
+    await owner.pair('CODE-1', 'MON-01');
+    store.write({
+      ...(store.read() as NonNullable<ReturnType<typeof store.read>>),
+      controlPlaneInstallationId: '',
+    });
+
+    await expect(reader.pair('CODE-2', 'MON-02')).rejects.toMatchObject({
+      kind: 'failed-precondition',
+    });
+    reader.adoptInstallationId('another-database');
+    reader.forgetSession();
+
+    // One `PairDevice` -- the owner's -- and the session is still on disk with
+    // the blank the owner's own probe will fill.
+    expect(recorded.mutationContexts).toHaveLength(1);
+    expect(store.read()?.controlPlaneInstallationId).toBe('');
+    expect(reader.session()).not.toBeNull();
   });
 });

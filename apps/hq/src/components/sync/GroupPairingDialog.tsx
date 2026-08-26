@@ -12,7 +12,11 @@ import {
   authorityModeLabel,
   connectionModeLabel,
   deviceRoleLabel,
+  realtimeStatusLabel,
+  realtimeStatusToken,
   type ConnectionState,
+  type ControlPlaneCapabilities,
+  type ControlPlaneLinkState,
 } from '@/application/sync/connection';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
@@ -134,6 +138,8 @@ export function GroupPairingDialog() {
       }
     >
       <ConnectionSummary connection={connection} />
+
+      <ControlPlaneLinks links={connection.links} />
 
       {foreignInstallation ? (
         <p className="group-pairing__failure" role="status">
@@ -311,20 +317,62 @@ function ConnectionSummary({ connection }: { readonly connection: ConnectionStat
       </div>
       <div>
         <dt>ВОЗМОЖНОСТИ</dt>
-        <dd>
-          {capabilities === undefined
-            ? '—'
-            : [
-                capabilities.deviceLifecycle ? 'DEVICE-LIFECYCLE' : '',
-                capabilities.sync ? 'SYNC' : '',
-                capabilities.realtimeAdmission ? 'REALTIME' : '',
-                capabilities.settings ? 'SETTINGS' : '',
-                capabilities.materials ? 'MATERIALS' : '',
-              ]
-                .filter((entry) => entry !== '')
-                .join(' · ') || 'НЕТ'}
-        </dd>
+        <dd>{capabilityList(capabilities)}</dd>
       </div>
     </dl>
+  );
+}
+
+/**
+ * Every address this device holds for the group, and what each of them is.
+ *
+ * A group may be reachable over the set's LAN and over the internet at once,
+ * and the two planes answer differently about the same group: the near one
+ * admits a realtime socket and the far one does not. Showing one line for the
+ * connection made the second probe look like a correction of the first. The
+ * address is on every line because it is the fact an operator needs and the one
+ * this surface never showed -- a screen that is behind is a question about which
+ * plane it is following.
+ *
+ * Nothing is rendered when there is no link, which is a local-only session or
+ * one with no address configured; the note above already says so.
+ */
+function ControlPlaneLinks({ links }: { readonly links: readonly ControlPlaneLinkState[] }) {
+  if (links.length === 0) return null;
+  return (
+    <section className="group-pairing__links">
+      <h3>СВЯЗИ С ГРУППОЙ</h3>
+      {links.map((link) => (
+        <article key={link.linkId}>
+          <span>
+            <strong>{link.baseUrl}</strong>
+            <small>
+              {link.role === 'primary' ? 'ОСНОВНАЯ' : 'ЗАПАСНАЯ'} ·{' '}
+              {realtimeStatusToken(link.status)} ·{' '}
+              {link.admitted
+                ? realtimeStatusLabel(link.status)
+                : 'ДРУГАЯ БАЗА CONTROL PLANE — СВЯЗЬ НЕ ИСПОЛЬЗУЕТСЯ'}
+            </small>
+            <small>{capabilityList(link.capabilities)}</small>
+          </span>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+/** What one control plane answered, in the register the rest of the dialog uses. */
+function capabilityList(capabilities: ControlPlaneCapabilities | undefined): string {
+  if (capabilities === undefined) return '—';
+  return (
+    [
+      capabilities.deviceLifecycle ? 'DEVICE-LIFECYCLE' : '',
+      capabilities.sync ? 'SYNC' : '',
+      capabilities.realtimeAdmission ? 'REALTIME' : '',
+      capabilities.settings ? 'SETTINGS' : '',
+      capabilities.materials ? 'MATERIALS' : '',
+    ]
+      .filter((entry) => entry !== '')
+      .join(' · ') || 'НЕТ'
   );
 }

@@ -38,7 +38,7 @@ describe('RuntimeConfigLoader', () => {
 
     const project = await loadProjectConfiguration();
 
-    expect(project.config.controlPlaneUrl).toBeUndefined();
+    expect(project.config.controlPlaneUrl).toEqual([]);
     expect(project.override).toBeNull();
   });
 
@@ -57,8 +57,34 @@ describe('RuntimeConfigLoader', () => {
     const project = await loadProjectConfiguration();
 
     // The override is the file an operator edits on the shoot machine; the
-    // default stays committed without an address on purpose.
-    expect(project.config.controlPlaneUrl).toBe('http://192.168.10.5:4100');
+    // default stays committed without an address on purpose. A shoot machine's
+    // override carries this key as a bare string, and it keeps working: the
+    // field became a list without renaming, which is what stops an existing
+    // override from being stripped as an unknown key.
+    expect(project.config.controlPlaneUrl).toEqual(['http://192.168.10.5:4100']);
+  });
+
+  it('takes two control plane addresses from the override, in the order written', async () => {
+    vi.stubGlobal(
+      'fetch',
+      createRuntimeFetch(
+        JSON.stringify({
+          version: 1,
+          values: { controlPlaneUrl: ['http://192.168.10.5:4100', 'https://plane.example'] },
+          assetOverrides: {},
+        }),
+      ),
+    );
+
+    const project = await loadProjectConfiguration();
+
+    // The near plane on the set's LAN and the cloud plane in front of the same
+    // database. Order is the operator's statement of preference, and there is
+    // no discovery to reorder it.
+    expect(project.config.controlPlaneUrl).toEqual([
+      'http://192.168.10.5:4100',
+      'https://plane.example',
+    ]);
   });
 
   it('reports an application-shell fallback for a required config as unavailable', async () => {

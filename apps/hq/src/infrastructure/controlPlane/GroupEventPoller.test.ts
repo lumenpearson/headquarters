@@ -8,6 +8,8 @@ import type {
   GroupEventEnvelope,
   GroupSessionCommand,
 } from '@/application/sync/groupChannel';
+import type { ControlPlaneLinkState } from '@/application/sync/connection';
+import { aggregateDelivery, createLinkStates } from '@/application/sync/controlPlaneLinks';
 import type { GroupEventPage } from '@/application/sync/groupEventFeed';
 import { playbackLeadForDelivery } from '@/application/sync/groupEventFeed';
 import {
@@ -25,6 +27,10 @@ import { RealtimeClient, type RealtimeSocketLike } from './RealtimeClient';
 
 /** A wall-clock base every instant in this file is measured from. */
 const baseMs = 1_700_000_000_000;
+
+/* Placeholder addresses: the plane on the set's LAN, and the cloud plane. */
+const nearPlane = 'http://127.0.0.1:4100';
+const cloudPlane = 'https://plane.example';
 
 /**
  * The group log as a log, not as a mock.
@@ -591,6 +597,67 @@ describe('one order, two transports', () => {
     expect(after[0]?.changedIds).toEqual(['popups.longPress']);
     expect(operationsStore.getState().personalization.draft.values['popups.longPress']).toBe(false);
   });
+
+  it('applies an event carried by both planes of one group exactly once', async () => {
+    /*
+     * The shape this stage is for: one device, two links, one group. The plane
+     * on the set's LAN and the plane on the internet stand in front of the same
+     * database, so both carry the same log with the same sequence numbers --
+     * the allocator hands them out under a row lock, which is what makes the
+     * numbers the commit order rather than two opinions about it.
+     *
+     * Two logs and two feeds here, and one channel. The claim is again about
+     * the settings history rather than a call count: a duplicate that reached
+     * `applySettingsPatch` twice writes two entries for one change, which is
+     * the defect the shared cursor exists to prevent, and
+     * `GroupLiveEditTransport` is exactly the subscriber that is not
+     * idempotent.
+     */
+    const channel = groupChannel();
+    const liveEdit = createGroupLiveEditTransport({ channel });
+    liveEdit.subscribe((patches) => operationsStore.getState().applySettingsPatch(patches));
+
+    const event = envelope(1n, { documentDelta: liveEditDelta(false) });
+    const nearLog = new FakeGroupLog();
+    const cloudLog = new FakeGroupLog();
+    nearLog.append(event);
+    cloudLog.append(event);
+    const feeds = [nearLog, cloudLog].map(
+      (log) =>
+        new GroupEventPoller({
+          reader: log,
+          cursor: channel,
+          deliver: channel.deliver,
+          isVisible: () => true,
+          subscribeVisibility: () => () => {},
+        }),
+    );
+
+    // Both pages are held until both feeds are in flight, so both asked from
+    // the same cursor position -- the window a second cursor would fall
+    // through, and the one a sequential test would never open.
+    nearLog.hold();
+    cloudLog.hold();
+    const before = operationsStore.getState().personalization.history.length;
+    for (const feed of feeds) feed.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(nearLog.requests.map((request) => request.afterSequence)).toEqual([0n]);
+    expect(cloudLog.requests.map((request) => request.afterSequence)).toEqual([0n]);
+
+    nearLog.release();
+    cloudLog.release();
+    await vi.advanceTimersByTimeAsync(0);
+    for (const feed of feeds) feed.stop();
+    liveEdit.close();
+
+    const after = operationsStore.getState().personalization.history;
+    expect(after.length - before).toBe(1);
+    expect(after[0]?.changedIds).toEqual(['popups.longPress']);
+    expect(operationsStore.getState().personalization.draft.values['popups.longPress']).toBe(false);
+    // Both planes carried the event to the merge point; only the first of them
+    // reached a subscriber.
+    expect(channel.appliedSequence()).toBe(1n);
+  });
 });
 
 describe('playback across a polled group', () => {
@@ -619,11 +686,43 @@ describe('playback across a polled group', () => {
     expect(fired[1]?.atMs).toBeGreaterThanOrEqual(baseMs + 5_000);
     expect(fired[0]?.atMs).not.toBe(fired[1]?.atMs);
   });
+
+  it('converges a screen that holds both planes at once, on the lead its own set asks for', async () => {
+    /*
+     * The mixed group, end to end: a screen on the set's LAN holding the near
+     * plane and the cloud plane, publishing to members that are fed by one or
+     * the other. The lead is not chosen by this test -- it is what the device's
+     * own link set says, through the two functions that decide it -- so the
+     * assertion covers the rule and not a number written twice.
+     *
+     * Taking the minimum over the links instead of the maximum would give 40 ms
+     * here, and the counter-case above shows what that does to the two screens.
+     */
+    const mixed: readonly ControlPlaneLinkState[] = [
+      {
+        ...(createLinkStates([nearPlane, cloudPlane])[0] as ControlPlaneLinkState),
+        delivery: 'socket',
+      },
+      {
+        ...(createLinkStates([nearPlane, cloudPlane])[1] as ControlPlaneLinkState),
+        delivery: 'poll',
+      },
+    ];
+    const configuredLeadMs = 40;
+
+    const { fired } = await twoScreens(
+      playbackLeadForDelivery(aggregateDelivery(mixed), configuredLeadMs),
+    );
+
+    expect(fired).toHaveLength(2);
+    expect(fired[0]?.atMs).toBe(fired[1]?.atMs);
+    expect(fired[0]?.atMs).toBe(baseMs + 6_000);
+  });
 });
 
 function groupChannel(deviceId = 'device-a', port?: ControlPlanePort): ControlPlaneGroupChannel {
   return new ControlPlaneGroupChannel({
-    port: port ?? ({} as ControlPlanePort),
+    selectPort: () => port ?? ({} as ControlPlanePort),
     groupId: 'group-a',
     deviceId,
   });
