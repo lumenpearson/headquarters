@@ -351,6 +351,68 @@ describe('domain content edits (R4)', () => {
     });
   });
 
+  it('refuses a ledger checkpoint the persisted blob could have carried', () => {
+    const store = operationsStore.getState();
+    store.applyContentPatch([
+      { id: 'operation.title', entityId: 'OP-GS-042', value: 'ГРЕМУЧАЯ СМЕСЬ II' },
+    ]);
+    const entry = operationsStore.getState().personalization.history[0];
+    // The ledger is hydrated verbatim from localStorage, so a checkpoint can
+    // hold anything a hand-edited blob or an older build put there: a value
+    // past its validator, a field this build no longer declares, an entity
+    // that never existed, and a key whose name is a prototype member.
+    operationsStore.setState((state) => ({
+      personalization: {
+        ...state.personalization,
+        history: state.personalization.history.map((candidate) =>
+          candidate.id === entry?.id
+            ? {
+                ...candidate,
+                content: {
+                  before: {},
+                  after: {
+                    'operation.title@OP-GS-042': 'Т'.repeat(4000),
+                    'case.title@__proto__': 'ФАНТОМ',
+                    'nosuch.field@CASE-01': 'НЕТ ТАКОГО ПОЛЯ',
+                    'case.createdAt@CASE-01': 'не дата',
+                  } as unknown as Record<string, string>,
+                },
+              }
+            : candidate,
+        ),
+      },
+    }));
+    store.resetContentEdits();
+
+    operationsStore.getState().restoreSettingsHistoryEntry(entry?.id ?? 'missing');
+
+    const current = operationsStore.getState();
+    expect(current.operation.title).toBe('ГРЕМУЧАЯ СМЕСЬ');
+    expect(current.content.overrides).toEqual({});
+    expect(Object.hasOwn(current.cases, '__proto__')).toBe(false);
+    expect(current.cases['CASE-01']?.createdAt).toBe(operationsSeed.cases[0]?.createdAt);
+  });
+
+  it('survives a checkpoint whose halves the blob lost', () => {
+    const store = operationsStore.getState();
+    store.applyContentPatch([
+      { id: 'operation.title', entityId: 'OP-GS-042', value: 'ГРЕМУЧАЯ СМЕСЬ II' },
+    ]);
+    operationsStore.setState((state) => ({
+      personalization: {
+        ...state.personalization,
+        undoStack: state.personalization.undoStack.map((candidate, index) =>
+          index === state.personalization.undoStack.length - 1
+            ? { ...candidate, content: {} as unknown as { before: never; after: never } }
+            : candidate,
+        ),
+      },
+    }));
+
+    expect(() => operationsStore.getState().undoSettingsDraft()).not.toThrow();
+    expect(operationsStore.getState().content.overrides).toEqual({});
+  });
+
   it('is found by the history query under the information category and by its key', () => {
     operationsStore
       .getState()

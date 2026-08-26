@@ -471,13 +471,22 @@ function appendSettingsHistory(
 }
 
 /**
- * Moves the content overrides to `overrides` and projects the move onto the
+ * Moves the content overrides to `candidate` and projects the move onto the
  * world: what the store has to set, and what the ledger records about it.
+ *
+ * The candidate is sanitized here rather than by each caller, because three of
+ * the callers carry a checkpoint out of the persisted blob -- undo, redo and
+ * restore all replay `entry.content`, and the ledger is hydrated verbatim.
+ * A settings checkpoint is re-validated on the same click by
+ * `parseSettingsSnapshot`; a content checkpoint has to be, too, or a key from
+ * an older build, a value past its validator or an entity that no longer
+ * exists would reach the world, be persisted and be broadcast to peers.
  */
 function contentTransition(
   state: OperationsState,
-  overrides: ContentOverrides,
+  candidate: unknown,
 ): { readonly patch: Partial<OperationsState>; readonly record: ContentHistoryCheckpoint } {
+  const overrides = sanitizeContentOverrides(candidate);
   return {
     patch: {
       ...projectContentOverrides(state, state.content.overrides, overrides),
@@ -1237,11 +1246,11 @@ function hydratePersistedState(): void {
          * Content edits come back regardless of `startup.restoreWorld`. That
          * setting names alerts, tasks and the audit trail -- what the session
          * did -- where a date the operator corrected is a decision, kept the
-         * way a setting is. Sanitized first: the blob is a trust boundary, and
-         * a key from an older build or a hand-edited value must not reach the
-         * world.
+         * way a setting is. The blob is a trust boundary; `contentTransition`
+         * sanitizes what it is handed, so a key from an older build or a
+         * hand-edited value cannot reach the world through any of its callers.
          */
-        ...contentTransition(state, sanitizeContentOverrides(parsed.content?.overrides)).patch,
+        ...contentTransition(state, parsed.content?.overrides).patch,
       }));
     }
   } catch {
@@ -1320,7 +1329,7 @@ export function initializeOperationsClient(): () => void {
         // Content edits are world, not personalization: a date corrected on
         // one screen is the date on every screen of the group, which is what
         // `advanced.worldSync` -- the gate on this channel -- is for.
-        ...contentTransition(state, sanitizeContentOverrides(event.data.content?.overrides)).patch,
+        ...contentTransition(state, event.data.content?.overrides).patch,
         // Personalization is deliberately not taken from the world snapshot.
         // `advanced.liveEdit` is the opt-in that decides whether a settings
         // change reaches the other sessions, and it defaults to off — but this
