@@ -18,6 +18,7 @@ import {
   resetDraftCategory,
   restoreSettingsDraft,
   simulationChannels,
+  titlebarElements,
 } from './index.js';
 
 const event = (id: string) => ({ id, at: '2026-08-15T12:00:00.000Z' });
@@ -428,5 +429,68 @@ describe('simulation timing and variation settings', () => {
       ),
     ).toBe(true);
     expect(getSettingsDefinitionsForCategory('simulation').length).toBeGreaterThan(1);
+  });
+});
+
+describe('titlebar settings', () => {
+  const patch = (id: string, value: unknown) =>
+    applyDraftPatch(createSettingsDraft(createFactorySnapshot()), [{ id, value }], event('bar-1'));
+
+  it('opens with every element the bar can draw, in the order it draws them', () => {
+    // The default is the whole roster rather than an empty list: `tiles.order`
+    // can start empty because a screen already knows its own tiles, and the
+    // title bar's arrangement is the setting itself.
+    expect(getSettingDefinition('titlebar.elements')?.defaultValue).toEqual(titlebarElements);
+    expect(getSettingDefinition('titlebar.elements')?.editor).toEqual({
+      kind: 'string-list',
+      delimiter: ',',
+    });
+  });
+
+  it('accepts an arrangement over the roster, including dropping a control entirely', () => {
+    expect(patch('titlebar.elements', ['close', 'title']).values['titlebar.elements']).toEqual([
+      'close',
+      'title',
+    ]);
+    expect(patch('titlebar.elements', []).values['titlebar.elements']).toEqual([]);
+  });
+
+  it('refuses an element the bar has no way to draw', () => {
+    expect(() => patch('titlebar.elements', ['pin'])).toThrow(InvalidSettingValueError);
+    expect(() => patch('titlebar.elements', [17])).toThrow(InvalidSettingValueError);
+  });
+
+  it('refuses the same element twice, because the bar keys its elements by name', () => {
+    expect(() => patch('titlebar.elements', ['close', 'close'])).toThrow(InvalidSettingValueError);
+  });
+
+  it('offers only the four arrangements, the four readings and the three drag regions', () => {
+    expect(getSettingDefinition('titlebar.alignment')?.editor).toEqual({
+      kind: 'enum',
+      options: ['left', 'center', 'split', 'right'],
+    });
+    expect(getSettingDefinition('titlebar.information')?.editor).toEqual({
+      kind: 'enum',
+      options: ['route', 'clock', 'operation', 'connection', 'none'],
+    });
+    expect(getSettingDefinition('titlebar.dragRegion')?.editor).toEqual({
+      kind: 'enum',
+      options: ['full', 'title', 'none'],
+    });
+    // A reading the shell cannot supply would be an operator choosing a slot
+    // that stays empty.
+    expect(() => patch('titlebar.information', 'weather')).toThrow(InvalidSettingValueError);
+  });
+
+  it('keeps the whole bar a per-device choice, as titlebar.alignment already was', () => {
+    // The bar belongs to the window in front of one operator; a group that
+    // pushed its own arrangement would move the close button on a machine
+    // nobody is standing at.
+    expect(
+      getSettingsDefinitionsForCategory('titlebar').every(
+        (definition) => definition.scope === 'device',
+      ),
+    ).toBe(true);
+    expect(getSettingsDefinitionsForCategory('titlebar')).toHaveLength(4);
   });
 });

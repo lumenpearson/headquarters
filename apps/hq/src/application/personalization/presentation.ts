@@ -403,6 +403,11 @@ export const presentationBindings: readonly PresentationBinding[] = [
     attribute: 'data-ascii-field',
     toAttribute: toggle,
   },
+  // R25's alignment. An attribute rather than a value read in the title bar:
+  // the four arrangements are `justify-content` and, for `split`, one auto
+  // margin on the first control -- a layout the stylesheet already expresses
+  // and a component would only re-express as inline styles.
+  { kind: 'attribute', setting: 'titlebar.alignment', attribute: 'data-titlebar-alignment' },
 ];
 
 /**
@@ -498,6 +503,9 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
     'Read by CurveSetting, which samples the drawn line through it and offers tangents for two of the four.',
   'simulation.loop': 'Read by CurveSetting, which wraps or holds the drawn line at its ends.',
   'simulation.periodSeconds': 'Read by CurveSetting, which labels the time axis in its seconds.',
+  'titlebar.elements': 'Read by TitleBar, which draws exactly the elements it names, in order.',
+  'titlebar.information': 'Read by TitleBar, which picks the reading its information slot shows.',
+  'titlebar.dragRegion': 'Read by TitleBar, which marks that much of the bar as a drag region.',
 };
 
 /**
@@ -539,7 +547,6 @@ export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
   'simulation.noise': 'F12 part 2 — simulationChannelFor assembles it; nothing calls that yet.',
   'simulation.smoothing': 'F12 part 2 — the same channel: no reading is carried forward yet.',
   'simulation.seed': 'F12 part 2 — the same channel: nothing seeds a deterministic series yet.',
-  'titlebar.alignment': 'F13 — no custom titlebar exists in Rust or in TypeScript.',
 };
 
 /**

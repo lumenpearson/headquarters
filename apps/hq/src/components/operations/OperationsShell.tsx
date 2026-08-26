@@ -15,7 +15,7 @@ import {
 import { dateTimeModeLabel, useDateTimeMode, useShellClock } from '@/application/dateTime';
 import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { formatChord } from '@/application/keybinds/match';
-import { primaryNavigation } from '@/application/navigation';
+import { primaryNavigation, routeLabels } from '@/application/navigation';
 import {
   booleanSetting,
   numberSetting,
@@ -58,6 +58,7 @@ import {
 } from '@/application/sync/connection';
 
 import { EditableContent } from '@/components/edit/EditableContent';
+import { TitleBar } from '@/components/shell/TitleBar';
 
 import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
@@ -80,27 +81,6 @@ const routePaths: Readonly<Partial<Record<OperationsRoute, string>>> = {
   settings: '/settings',
   system: '/system',
   'ui-gallery': '/dev/ui',
-};
-
-const routeLabels: Readonly<Record<OperationsRoute, string>> = {
-  overview: 'СВОДКА ОПЕРАЦИИ',
-  objects: 'РЕЕСТР ОБЪЕКТОВ',
-  'object-detail': 'КАРТОЧКА ОБЪЕКТА',
-  cases: 'ДЕЛА И ДОСЬЕ',
-  'case-detail': 'КАРТОЧКА ДЕЛА',
-  map: 'ТАКТИЧЕСКАЯ КАРТА',
-  video: 'ВИДЕО / ПРЯМОЙ ЭФИР',
-  cameras: 'ЦЕНТР КАМЕР',
-  'video-archive': 'ВИДЕОАРХИВ',
-  communications: 'ЗАЩИЩЁННАЯ СВЯЗЬ',
-  files: 'ФАЙЛЫ',
-  archive: 'АРХИВ',
-  analytics: 'АНАЛИТИКА',
-  reports: 'ОТЧЁТЫ',
-  search: 'ГЛОБАЛЬНЫЙ ПОИСК',
-  settings: 'НАСТРОЙКИ',
-  system: 'СИСТЕМА И РЕСУРСЫ',
-  'ui-gallery': 'ВНУТРЕННИЙ UI КАТАЛОГ',
 };
 
 const productionPresets = [
@@ -305,6 +285,7 @@ export function OperationsShell({
         {asciiSignalField}
       </pre>
       <div className="ops-shell__frame" aria-hidden="true" />
+      <TitleBar route={route} />
       <OpsTopBar route={route} />
       <OpsNavigation route={route} />
       <main className="ops-workspace" data-route={route}>

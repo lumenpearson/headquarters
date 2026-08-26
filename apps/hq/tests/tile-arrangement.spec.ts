@@ -162,6 +162,14 @@ test('R23: a tile is resized by the handle whose cursor says so', async ({ page 
    * bound captured beforehand is one row out of date by the time the drag
    * ends -- measured, after asserting the stale number and watching it miss
    * by exactly that.
+   *
+   * The span is compared to the grid rather than to a row count written here.
+   * The claim is that the size stops at the grid; how many rows the grid has is
+   * the shell chrome's business, and the number moved from eight to seven the
+   * day the custom title bar (R24) took a row of the window. Columns stay a
+   * literal: four is the overview screen's own coordinate system, which no
+   * chrome can change. The floor is what keeps a collapsed grid from passing
+   * the comparison by agreeing with a collapsed span.
    */
   await expect
     .poll(async () => {
@@ -172,9 +180,15 @@ test('R23: a tile is resized by the handle whose cursor says so', async ({ page 
           rows: styles.gridTemplateRows.split(' ').length,
         };
       });
-      return { spans: await settingValue(page, 'tiles.spans'), bounds };
+      const spans = await settingValue(page, 'tiles.spans');
+      const filled = `overview:brief=${bounds.columns}x${bounds.rows}`;
+      return {
+        columns: bounds.columns,
+        roomy: bounds.rows >= 4,
+        spanFillsTheGrid: Array.isArray(spans) && spans.length === 1 && spans[0] === filled,
+      };
     })
-    .toEqual({ spans: ['overview:brief=4x8'], bounds: { columns: 4, rows: 8 } });
+    .toEqual({ columns: 4, roomy: true, spanFillsTheGrid: true });
 });
 
 test('R7: a press that does not travel selects the tile instead of moving it', async ({ page }) => {

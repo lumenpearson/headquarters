@@ -976,3 +976,103 @@ test('R6: popups.fieldMenu decides whether a text field keeps the browser menu',
   // see; `application` is the operator asking for this one instead.
   await expect(page.locator('[role="menu"], .terminal-pointer-menu').first()).toBeVisible();
 });
+
+test('R25: the titlebar alignment decides where the bar puts its elements', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  await settled(page, 'data-titlebar-alignment', 'split');
+
+  const bar = page.locator('.ops-titlebar');
+  await expect(bar).toBeVisible();
+
+  /*
+   * The bar is one ordered row, so alignment is measured as where its elements
+   * sit inside it rather than as a class on a container. `split` is the
+   * arrangement a window title bar normally has: the name at the left edge and
+   * the window commands against the right one, which is one auto margin on the
+   * first control rather than two lists in the markup.
+   */
+  const geometry = () =>
+    page.evaluate(() => {
+      const element = document.querySelector('.ops-titlebar');
+      const title = document.querySelector('.ops-titlebar__title');
+      const close = document.querySelector('[data-titlebar-element="close"]');
+      if (element === null || title === null || close === null) return null;
+      const bounds = element.getBoundingClientRect();
+      return {
+        titleGap: title.getBoundingClientRect().left - bounds.left,
+        closeGap: bounds.right - close.getBoundingClientRect().right,
+        width: bounds.width,
+      };
+    });
+
+  const split = await geometry();
+  if (split === null) throw new Error('the title bar is not drawn');
+  expect(split.titleGap).toBeLessThan(4);
+  expect(split.closeGap).toBeLessThan(4);
+
+  await seedSettings(page, { 'titlebar.alignment': 'center' });
+  await page.reload();
+  await settled(page, 'data-titlebar-alignment', 'center');
+  const centred = await geometry();
+  if (centred === null) throw new Error('the title bar is not drawn');
+  // Centred: the row is pulled in from both edges by roughly the same amount.
+  expect(centred.titleGap).toBeGreaterThan(split.titleGap);
+  expect(Math.abs(centred.titleGap - centred.closeGap)).toBeLessThan(4);
+
+  await seedSettings(page, { 'titlebar.alignment': 'right' });
+  await page.reload();
+  await settled(page, 'data-titlebar-alignment', 'right');
+  const right = await geometry();
+  if (right === null) throw new Error('the title bar is not drawn');
+  expect(right.closeGap).toBeLessThan(4);
+  expect(right.titleGap).toBeGreaterThan(centred.titleGap);
+});
+
+test('R24: the title bar takes a row of the window rather than covering one', async ({ page }) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+
+  const boxes = await page.evaluate(() =>
+    // The five rows of the shell, top to bottom. The navigation is a row and
+    // not a rail: the Signal Mesh grid is one column wide.
+    ['.ops-titlebar', '.ops-topbar', '.ops-nav', '.ops-workspace', '.ops-statusline'].map(
+      (selector) => {
+        const element = document.querySelector(selector);
+        if (element === null) return null;
+        const bounds = element.getBoundingClientRect();
+        return { top: bounds.top, bottom: bounds.bottom, height: bounds.height };
+      },
+    ),
+  );
+
+  /*
+   * R26 bounds the workspace by what is left of the window, so the bar has to
+   * be a row of the grid rather than something drawn over one: an overlay
+   * would take its height from nothing and the workspace would keep the space
+   * the bar is standing on.
+   *
+   * The five rows are therefore asserted to tile the window — each starting
+   * where the one before ends, and the last ending at the bottom edge. Their
+   * heights summing to the viewport is what rules out both faults at once: an
+   * overlap means the bar is covering a row, and a gap is the unexplained empty
+   * grid area R26 forbids.
+   */
+  let filled = 0;
+  for (const [index, box] of boxes.entries()) {
+    if (box === null) throw new Error(`the shell is missing row ${index}`);
+    expect(box.height).toBeGreaterThan(0);
+    filled += box.height;
+    const next = boxes[index + 1];
+    if (next !== null && next !== undefined) expect(next.top).toBeGreaterThanOrEqual(box.bottom);
+  }
+  expect(boxes[0]?.top).toBe(0);
+  expect(boxes.at(-1)?.bottom).toBeCloseTo(1440, 0);
+  expect(filled).toBeCloseTo(1440, 0);
+
+  // Tiling alone would also be satisfied by a shell that gave the bar the row
+  // the workspace was meant to have. The workspace is the `1fr` track, so it
+  // takes more of the window than all four chrome rows together.
+  const workspace = boxes[3]?.height ?? 0;
+  expect(workspace).toBeGreaterThan(filled - workspace);
+});

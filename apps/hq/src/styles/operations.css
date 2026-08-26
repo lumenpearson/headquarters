@@ -3,6 +3,18 @@
  * A hard-edged, character-cell visual system inspired by terminal operators.
  */
 
+/*
+ * The custom title bar's own row (R24).
+ *
+ * Declared at the document root rather than on `.ops-shell` because
+ * `.ops-drawer` and `.production-panel` are portalled outside the shell, where
+ * the `--ops-*` family is not declared at all, and both offset themselves below
+ * the chrome. One name means the row and those offsets cannot disagree.
+ */
+:root {
+  --ops-titlebar-height: 28px;
+}
+
 .ops-shell {
   --ops-bg: #050706;
   --ops-bg-1: #080c09;
@@ -38,7 +50,7 @@
   --ops-yellow: #d3b45e;
   --ops-cell: 8px;
   display: grid;
-  grid-template: 54px minmax(0, 1fr) 24px / 178px minmax(0, 1fr);
+  grid-template: var(--ops-titlebar-height) 54px minmax(0, 1fr) 24px / 178px minmax(0, 1fr);
   width: 100vw;
   height: 100dvh;
   overflow: hidden;
@@ -163,9 +175,92 @@
   cursor: none !important;
 }
 
+/*
+ * The application's own title bar (R24, R25).
+ *
+ * `decorations: false` on the `control` window leaves the shell responsible for
+ * the whole frame, so this row carries the window's name, the one reading R25
+ * calls useful information, and the three window commands. It is a grid row and
+ * not an overlay: R26 bounds the workspace by what is left of the window, and a
+ * bar drawn over it would take its height from nothing.
+ *
+ * Windows 11 and Windows 10 draw the same bar. The corners are the only thing
+ * R24 lets differ between them, and those are DWM's own -- asked for by
+ * `apply_window_corners` and never redrawn here.
+ */
+.ops-titlebar {
+  z-index: 35;
+  grid-area: 1 / 1 / 2 / 3;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ops-line-strong);
+  border-bottom: 0;
+  background: #050805;
+  color: var(--ops-muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.ops-titlebar__title,
+.ops-titlebar__information {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 12px;
+  text-overflow: ellipsis;
+}
+
+.ops-titlebar__title {
+  color: var(--ops-text-strong);
+}
+
+.ops-titlebar__information {
+  color: var(--ops-orange);
+}
+
+/* A window command is the only control the bar carries, which is what lets the
+   split alignment find the first of them with `button:first-of-type` instead of
+   splitting the roster into two lists the operator cannot reorder across. */
+.ops-titlebar .ops-titlebar__control {
+  display: grid;
+  flex: 0 0 auto;
+  width: 40px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--ops-line);
+  background: transparent;
+}
+
+.ops-titlebar .ops-titlebar__control b {
+  color: var(--ops-text);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover {
+  border-color: var(--ops-red);
+  background: var(--ops-red);
+}
+
+.ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover b {
+  color: #0b0504;
+}
+
+/* `titlebar.dragRegion`. The pointer says where the window can be picked up
+   from; `none` leaves the bar an ordinary strip of chrome. */
+.ops-titlebar[data-drag-region='none'] {
+  cursor: default;
+}
+
 .ops-topbar {
   z-index: 30;
-  grid-area: 1 / 1 / 2 / 3;
+  grid-area: 2 / 1 / 3 / 3;
   display: grid;
   grid-template-columns: 248px minmax(250px, 1fr) auto 116px;
   min-width: 0;
@@ -283,7 +378,7 @@
 
 .ops-nav {
   z-index: 20;
-  grid-area: 2 / 1 / 3 / 2;
+  grid-area: 3 / 1 / 4 / 2;
   display: grid;
   grid-template-rows: 28px minmax(0, 1fr) 42px;
   min-height: 0;
@@ -367,7 +462,7 @@
 }
 
 .ops-workspace {
-  grid-area: 2 / 2 / 3 / 3;
+  grid-area: 3 / 2 / 4 / 3;
   min-width: 0;
   min-height: 0;
   /* R26: the workspace is the page. It clips; panels resolve their own overflow. */
@@ -377,7 +472,7 @@
 
 .ops-statusline {
   z-index: 40;
-  grid-area: 3 / 1 / 4 / 3;
+  grid-area: 4 / 1 / 5 / 3;
   display: flex;
   align-items: center;
   gap: 0;
@@ -851,7 +946,7 @@ button.is-active {
 .ops-drawer {
   position: fixed;
   z-index: 300;
-  top: 54px;
+  top: calc(54px + var(--ops-titlebar-height));
   right: 0;
   bottom: 24px;
   display: grid;
@@ -864,7 +959,7 @@ button.is-active {
 .ops-drawer::before {
   position: fixed;
   z-index: -1;
-  inset: 54px 0 24px;
+  inset: calc(54px + var(--ops-titlebar-height)) 0 24px;
   background: rgb(0 0 0 / 34%);
   content: '';
 }
@@ -925,7 +1020,7 @@ button.is-active {
 .production-panel {
   position: fixed;
   z-index: 500;
-  inset: 54px 0 24px 178px;
+  inset: calc(54px + var(--ops-titlebar-height)) 0 24px 178px;
   overflow: auto;
   border: 1px solid var(--ops-orange);
   background: rgb(4 7 5 / 97%);
@@ -3180,7 +3275,7 @@ button.is-active {
 
 @media (min-width: 2500px) {
   .ops-shell {
-    grid-template: 76px minmax(0, 1fr) 32px / 250px minmax(0, 1fr);
+    grid-template: var(--ops-titlebar-height) 76px minmax(0, 1fr) 32px / 250px minmax(0, 1fr);
     font-size: 15px;
   }
   .ops-topbar {
@@ -3276,18 +3371,18 @@ button.is-active {
     grid-template-columns: minmax(820px, 1.5fr) 360px 370px;
   }
   .ops-drawer {
-    top: 76px;
+    top: calc(76px + var(--ops-titlebar-height));
     bottom: 32px;
     width: min(600px, 40vw);
   }
   .production-panel {
-    inset: 76px 0 32px 250px;
+    inset: calc(76px + var(--ops-titlebar-height)) 0 32px 250px;
   }
 }
 
 @media (max-height: 820px) {
   .ops-shell {
-    grid-template-rows: 48px minmax(0, 1fr) 22px;
+    grid-template-rows: var(--ops-titlebar-height) 48px minmax(0, 1fr) 22px;
   }
   .ops-topbar {
     grid-template-columns: 220px minmax(220px, 1fr) auto 105px;
@@ -3296,11 +3391,11 @@ button.is-active {
     min-height: 40px;
   }
   .ops-drawer {
-    top: 48px;
+    top: calc(48px + var(--ops-titlebar-height));
     bottom: 22px;
   }
   .production-panel {
-    top: 48px;
+    top: calc(48px + var(--ops-titlebar-height));
     bottom: 22px;
   }
 }
@@ -3882,14 +3977,13 @@ button.is-active {
  */
 
 .ops-shell {
-  grid-template-rows: clamp(50px, 3.1vw, 72px) clamp(38px, 2.3vw, 52px) minmax(0, 1fr) clamp(
-      22px,
-      1.4vw,
-      30px
-    );
+  grid-template-rows:
+    var(--ops-titlebar-height) clamp(50px, 3.1vw, 72px) clamp(38px, 2.3vw, 52px)
+    minmax(0, 1fr) clamp(22px, 1.4vw, 30px);
   font-size: clamp(10px, 0.56vw, 15px);
 }
 
+.ops-titlebar,
 .ops-topbar,
 .ops-nav,
 .ops-workspace,
@@ -4560,7 +4654,7 @@ button.is-active {
   --ops-yellow: #ff7a38;
   position: relative;
   isolation: isolate;
-  grid-template: 58px 42px minmax(0, 1fr) 24px / minmax(0, 1fr);
+  grid-template: var(--ops-titlebar-height) 58px 42px minmax(0, 1fr) 24px / minmax(0, 1fr);
   background:
     linear-gradient(90deg, #111 1px, transparent 1px) center / 25% 100%,
     radial-gradient(circle at 50% 24%, rgb(255 61 0 / 3%), transparent 34%),
@@ -4655,6 +4749,7 @@ button.is-active {
   outline-offset: 2px;
 }
 
+.ops-titlebar,
 .ops-topbar,
 .ops-nav,
 .ops-workspace,
@@ -4664,9 +4759,25 @@ button.is-active {
   margin-inline: auto;
 }
 
+/* The title bar in Signal Mesh: the same row, in the surfaces this design
+   system uses. The shell is one column here, so the bar spans it. */
+.ops-titlebar {
+  z-index: 35;
+  grid-area: 1 / 1;
+  border: 0;
+  border-inline: 1px solid #202020;
+  border-top: 1px solid #222;
+  background: rgb(3 3 3 / 97%);
+  color: #55575d;
+}
+
+.ops-titlebar .ops-titlebar__control {
+  border-left-color: #1d1d1d;
+}
+
 .ops-topbar {
   z-index: 30;
-  grid-area: 1 / 1;
+  grid-area: 2 / 1;
   grid-template-columns: 270px minmax(220px, 1fr) auto 122px;
   border: 0;
   border-inline: 1px solid #202020;
@@ -4754,7 +4865,7 @@ button.is-active {
 
 .ops-nav {
   z-index: 25;
-  grid-area: 2 / 1;
+  grid-area: 3 / 1;
   display: grid;
   grid-template: 1fr / 44px minmax(0, 1fr) 94px;
   min-height: 0;
@@ -4850,7 +4961,7 @@ button.is-active {
 .ops-workspace {
   z-index: 2;
   position: relative;
-  grid-area: 3 / 1;
+  grid-area: 4 / 1;
   border-inline: 1px solid #202020;
   background:
     linear-gradient(rgb(255 255 255 / 1.5%) 1px, transparent 1px) 0 0 / 100% 32px,
@@ -4873,7 +4984,7 @@ button.is-active {
 
 .ops-statusline {
   z-index: 40;
-  grid-area: 4 / 1;
+  grid-area: 5 / 1;
   border: 1px solid #252525;
   border-top-color: #303030;
   background: #070707;
@@ -5180,7 +5291,7 @@ button.is-active {
 }
 
 .ops-drawer {
-  top: 100px;
+  top: calc(100px + var(--ops-titlebar-height));
   right: max(24px, calc((100vw - 2200px) / 2));
   bottom: 24px;
   width: min(500px, 38vw);
@@ -5205,7 +5316,7 @@ button.is-active {
 }
 
 .production-panel {
-  inset: 100px max(24px, calc((100vw - 2200px) / 2)) 24px;
+  inset: calc(100px + var(--ops-titlebar-height)) max(24px, calc((100vw - 2200px) / 2)) 24px;
   border-color: #303030;
   border-top: 3px solid var(--ops-orange);
   background: #050505;
@@ -5317,8 +5428,15 @@ button.is-active {
 }
 
 @media (min-width: 2500px) {
+  /* The title bar scales with the rest of the chrome. Declared at the root
+     because the drawer and the production panel offset themselves by it from
+     outside the shell. */
+  :root {
+    --ops-titlebar-height: 36px;
+  }
+
   .ops-shell {
-    grid-template-rows: 74px 54px minmax(0, 1fr) 32px;
+    grid-template-rows: var(--ops-titlebar-height) 74px 54px minmax(0, 1fr) 32px;
     font-size: 14px;
   }
 
@@ -5359,7 +5477,7 @@ button.is-active {
 
   .ops-drawer,
   .production-panel {
-    top: 128px;
+    top: calc(128px + var(--ops-titlebar-height));
     bottom: 32px;
   }
 }
@@ -5401,8 +5519,12 @@ button.is-active {
 }
 
 @media (max-height: 820px) {
+  :root {
+    --ops-titlebar-height: 24px;
+  }
+
   .ops-shell {
-    grid-template-rows: 52px 38px minmax(0, 1fr) 22px;
+    grid-template-rows: var(--ops-titlebar-height) 52px 38px minmax(0, 1fr) 22px;
   }
 
   .ops-screen__title {
@@ -5411,21 +5533,20 @@ button.is-active {
 
   .ops-drawer,
   .production-panel {
-    top: 90px;
+    top: calc(90px + var(--ops-titlebar-height));
   }
 }
 
 /* Final cascade lock: keep the fluid matrix above the legacy compatibility media rules. */
 
 .ops-shell {
-  grid-template-rows: clamp(50px, 3.1vw, 72px) clamp(38px, 2.3vw, 52px) minmax(0, 1fr) clamp(
-      22px,
-      1.4vw,
-      30px
-    );
+  grid-template-rows:
+    var(--ops-titlebar-height) clamp(50px, 3.1vw, 72px) clamp(38px, 2.3vw, 52px)
+    minmax(0, 1fr) clamp(22px, 1.4vw, 30px);
   font-size: clamp(10px, 0.56vw, 15px);
 }
 
+.ops-titlebar,
 .ops-topbar,
 .ops-nav,
 .ops-workspace,
@@ -6268,6 +6389,28 @@ button.is-active {
 
 .ops-shell[data-keybind-hints='off'] .ops-statusline [data-keybind-hint] {
   display: none;
+}
+
+/* `titlebar.alignment` (R25). `split` is the arrangement a window title bar
+   normally has — everything to the left, the window commands to the right —
+   and it is one auto margin on the first control rather than two lists in the
+   markup, because the roster `titlebar.elements` stores is a single order and
+   an operator may put a control anywhere in it. */
+.ops-shell[data-titlebar-alignment='left'] .ops-titlebar,
+.ops-shell[data-titlebar-alignment='split'] .ops-titlebar {
+  justify-content: flex-start;
+}
+
+.ops-shell[data-titlebar-alignment='center'] .ops-titlebar {
+  justify-content: center;
+}
+
+.ops-shell[data-titlebar-alignment='right'] .ops-titlebar {
+  justify-content: flex-end;
+}
+
+.ops-shell[data-titlebar-alignment='split'] .ops-titlebar > button:first-of-type {
+  margin-left: auto;
 }
 
 /* `cameras.feedOverlay` — the telemetry burned over the live feed. Only `off`

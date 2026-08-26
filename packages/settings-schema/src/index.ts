@@ -257,6 +257,32 @@ const isSpanList = withEditor(
   (value): value is readonly string[] =>
     Array.isArray(value) && value.every((item) => typeof item === 'string' && spanEntry.test(item)),
 );
+/**
+ * Everything the custom title bar can draw, in the order it draws them by
+ * default (R25).
+ *
+ * Declared here with the rest of the vocabulary the safe editor is allowed to
+ * offer, the way `tileCategories` is. `titlebar.elements` is an arrangement of
+ * this roster and nothing else: an operator may drop a control or move it, and
+ * cannot name an element the bar has no way to draw.
+ */
+export const titlebarElements = ['title', 'information', 'minimize', 'maximize', 'close'] as const;
+
+export type TitlebarElement = (typeof titlebarElements)[number];
+
+/**
+ * An arrangement of the roster: each entry declared, and each at most once.
+ *
+ * Repetition is refused rather than tolerated because the bar keys its elements
+ * by name, and two `close` entries would be one React key twice.
+ */
+const isTitlebarElementList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    new Set(value).size === value.length &&
+    value.every((item) => (titlebarElements as readonly string[]).includes(item as string)),
+);
 const oneOfNumbers = (values: readonly number[]) =>
   withEditor(
     { kind: 'enum', options: values.map(String) },
@@ -1221,6 +1247,30 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Titlebar information alignment.',
     oneOf(['left', 'center', 'split', 'right']),
+  ),
+  definition(
+    'titlebar.elements',
+    'titlebar',
+    [...titlebarElements],
+    'device',
+    `Titlebar elements the operator kept, in the order drawn: ${titlebarElements.join(', ')}.`,
+    isTitlebarElementList,
+  ),
+  definition(
+    'titlebar.information',
+    'titlebar',
+    'route',
+    'device',
+    'What the titlebar information slot reports.',
+    oneOf(['route', 'clock', 'operation', 'connection', 'none']),
+  ),
+  definition(
+    'titlebar.dragRegion',
+    'titlebar',
+    'full',
+    'device',
+    'How much of the titlebar drags the window: the whole bar, the title alone, or nothing.',
+    oneOf(['full', 'title', 'none']),
   ),
   definition(
     'accessibility.reducedMotion',

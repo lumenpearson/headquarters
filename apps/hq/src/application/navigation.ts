@@ -1,3 +1,5 @@
+import type { OperationsRoute } from '@/state/operationsStore';
+
 /**
  * The primary navigation, in the order it is drawn and numbered.
  *
@@ -25,3 +27,34 @@ export const primaryNavigation = [
 ] as const;
 
 export type PrimaryNavigationEntry = (typeof primaryNavigation)[number];
+
+/**
+ * What a route is called, including the six that the rail never lists.
+ *
+ * Lived inside `OperationsShell` until the title bar needed the same names:
+ * `titlebar.information` can put the current route in the bar, and a second
+ * table of route names is how the header and the bar begin to disagree about
+ * what the operator is looking at. `primaryNavigation` cannot serve this --
+ * its labels are rail-width abbreviations, and it lists thirteen of the
+ * eighteen routes.
+ */
+export const routeLabels: Readonly<Record<OperationsRoute, string>> = {
+  overview: 'СВОДКА ОПЕРАЦИИ',
+  objects: 'РЕЕСТР ОБЪЕКТОВ',
+  'object-detail': 'КАРТОЧКА ОБЪЕКТА',
+  cases: 'ДЕЛА И ДОСЬЕ',
+  'case-detail': 'КАРТОЧКА ДЕЛА',
+  map: 'ТАКТИЧЕСКАЯ КАРТА',
+  video: 'ВИДЕО / ПРЯМОЙ ЭФИР',
+  cameras: 'ЦЕНТР КАМЕР',
+  'video-archive': 'ВИДЕОАРХИВ',
+  communications: 'ЗАЩИЩЁННАЯ СВЯЗЬ',
+  files: 'ФАЙЛЫ',
+  archive: 'АРХИВ',
+  analytics: 'АНАЛИТИКА',
+  reports: 'ОТЧЁТЫ',
+  search: 'ГЛОБАЛЬНЫЙ ПОИСК',
+  settings: 'НАСТРОЙКИ',
+  system: 'СИСТЕМА И РЕСУРСЫ',
+  'ui-gallery': 'ВНУТРЕННИЙ UI КАТАЛОГ',
+};
