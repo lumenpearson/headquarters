@@ -83,6 +83,19 @@ export interface ControlPlaneConfig {
    */
   readonly host: string;
   readonly allowedOrigins: readonly string[];
+  /**
+   * Whether auth-configured startup applies the schema migrations itself.
+   *
+   * `true` — and absent means `true` — so a long-lived process keeps the
+   * behaviour it has always had: the migration transaction completes before a
+   * single RPC is served. A serverless deployment sets it `false` and runs
+   * `pnpm --filter @gremuchaya/control-plane migrate` as a build step instead,
+   * because there every cold start would otherwise open the same
+   * `pg_advisory_xact_lock` transaction, and cold starts are frequent and
+   * concurrent. Setting it `false` without running that step leaves the
+   * process serving against whatever schema the database happens to have.
+   */
+  readonly runMigrationsOnStart?: boolean;
   readonly databaseUrl?: string;
   /**
    * Which driver reaches {@link databaseUrl}, when the operator has said.
@@ -184,10 +197,14 @@ export function loadControlPlaneConfig(
   );
   const auth = parseAuth(environment, databaseUrl);
   const storage = parseStorage(environment);
+  const runMigrationsOnStart = parseRunMigrationsOnStart(
+    environment.HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START,
+  );
   return {
     port,
     host,
     allowedOrigins,
+    runMigrationsOnStart,
     ...(databaseUrl === undefined ? {} : { databaseUrl }),
     ...(databaseDriver === undefined ? {} : { databaseDriver }),
     ...(redis === undefined ? {} : { redis }),
@@ -227,6 +244,19 @@ function parseHost(value: string | undefined): string {
   throw new Error(
     'HQ_CONTROL_PLANE_HOST must be an IPv4 address, an IPv6 address or a hostname, without a scheme or port',
   );
+}
+
+/**
+ * Defaults to `true`, unlike {@link parseBoolean}, because an unset variable
+ * must leave every existing deployment running migrations exactly as it did.
+ * Only an explicit `false` moves them to a build step.
+ */
+function parseRunMigrationsOnStart(value: string | undefined): boolean {
+  if (value === undefined || value.trim().length === 0) return true;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  throw new Error('HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START must be true or false');
 }
 
 function parseOrigins(value: string | undefined): readonly string[] {

@@ -114,7 +114,15 @@ export async function createConfiguredPairedDeviceLifecycle(
       config.databaseUrl,
       options.databaseFactory ?? sqlClientFactoryFor(config.databaseDriver),
     );
-  const migrations = await (options.migrationRunner ?? runMigrations)(database);
+  // A deployment that applies the sequence as a build step says so, and this
+  // startup then touches no ledger at all: `applied` and `skipped` are both
+  // empty because no migration was considered, not because none was pending.
+  // What an operator reads instead is the `database` dependency detail, which
+  // names which of the two happened.
+  const migrations =
+    config.runMigrationsOnStart === false
+      ? { applied: [], skipped: [] }
+      : await (options.migrationRunner ?? runMigrations)(database);
   // Read after the migration gate and never again: the identity is minted by
   // 0010 and is immutable for the life of the database, so a second read could
   // only ever return the same value at the cost of a query on an

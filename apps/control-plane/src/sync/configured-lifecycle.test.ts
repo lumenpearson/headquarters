@@ -152,6 +152,30 @@ describe('configured paired-device lifecycle', () => {
     expect(database.queries).toHaveLength(0);
   });
 
+  /*
+   * A serverless web deployment cold-starts often and concurrently, and each
+   * start would otherwise open the same `pg_advisory_xact_lock` transaction.
+   * `runMigrationsOnStart: false` says the sequence ran as a deployment step,
+   * and this startup must then touch no ledger at all -- while still reading
+   * the installation identity, because `GetCapabilities` reports it and a
+   * client compares it before it trusts anything.
+   */
+  it('leaves the migration transaction to the deployment when the operator moved it there', async () => {
+    const database = new RecordingSqlClient([
+      [{ installation_id: '7d0a4e18-4b7c-4a51-9f2e-3c6b1d8a05f4' }],
+    ]);
+    const migrationRunner = vi.fn<MigrationRunner>(async () => emptyMigrationResult());
+
+    const configured = await createConfiguredPairedDeviceLifecycle(
+      { ...authenticatedConfig(), runMigrationsOnStart: false },
+      { database, migrationRunner },
+    );
+
+    expect(migrationRunner).not.toHaveBeenCalled();
+    expect(configured?.migrations).toEqual({ applied: [], skipped: [] });
+    expect(configured?.installationId).toBe('7d0a4e18-4b7c-4a51-9f2e-3c6b1d8a05f4');
+  });
+
   it('leaves presence on the durable store and reports Redis unconfigured when no Redis is set', async () => {
     const database = new RecordingSqlClient();
 

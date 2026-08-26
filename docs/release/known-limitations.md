@@ -65,6 +65,17 @@ This is the largest gap in the build and the one most likely to be planned aroun
   service still runs; `Health` says which of the two modes is in force.
 - `layout_documents`, `layout_versions` and `conversion_jobs` are created by migrations and
   reached by no code. No RPC in the current contract can fill them.
+- **Mounted in the web build, a request or response body above 4.5 MB fails.** The Fetch adapter
+  (`apps/control-plane/src/fetch-adapter.ts`) is mounted at `apps/hq/app/api/[[...rpc]]/route.web.ts`
+  in the web target, and Vercel caps a Function's request body and its response body at 4.5 MB
+  each; over that the platform answers `FUNCTION_PAYLOAD_TOO_LARGE` before the handler is reached,
+  so no control-plane error names the cause. The two RPCs that can produce a body that large are
+  `GetDocumentSnapshot`, whose reply carries the whole serialized document, and
+  `PublishDocumentDelta`, whose request carries an update. Nothing in the repository enforces a
+  ceiling below the platform's, and no document in any fixture approaches it, so this has not been
+  observed — it is recorded here rather than found on a shoot day. The Node process
+  (`apps/control-plane/src/server.ts`) has no such cap: it is the same router behind a socket the
+  deployment owns.
 
 ## Personalization
 

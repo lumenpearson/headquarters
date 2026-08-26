@@ -24,6 +24,7 @@
     "@connectrpc/connect": "2.1.2",
     "@connectrpc/connect-web": "2.1.2",
     "@gremuchaya/config": "workspace:*",
+    "@gremuchaya/control-plane": "workspace:*",
     "@gremuchaya/domain": "workspace:*",
     "@gremuchaya/layout-engine": "workspace:*",
     "@gremuchaya/protocol": "workspace:*",

@@ -34,6 +34,7 @@ describe('control-plane configuration', () => {
       port: 0,
       host: '127.0.0.1',
       allowedOrigins: ['http://127.0.0.1:3000', 'https://hq.example.test'],
+      runMigrationsOnStart: true,
       databaseUrl,
       redis: { restUrl: 'https://hq-redis.upstash.io', restToken: 'upstash-token' },
     });
@@ -49,6 +50,7 @@ describe('control-plane configuration', () => {
         'http://tauri.localhost',
         'https://tauri.localhost',
       ],
+      runMigrationsOnStart: true,
     });
     expect(
       loadControlPlaneConfig({ HQ_CONTROL_PLANE_DATABASE_URL: databaseUrl }).auth,
@@ -63,6 +65,38 @@ describe('control-plane configuration', () => {
    * looks down. The default is asserted rather than the parser, because the
    * default is the thing that was wrong.
    */
+  /*
+   * A serverless deployment cold-starts often and concurrently, and every one
+   * of those starts would otherwise open the same `pg_advisory_xact_lock`
+   * transaction. Moving the sequence to a build step is therefore a deployment
+   * decision -- but an unset variable must not quietly make an existing
+   * long-lived process stop migrating, so the default is the old behaviour and
+   * only an explicit `false` changes it.
+   */
+  it('runs migrations at startup unless a deployment explicitly moved them', () => {
+    expect(loadControlPlaneConfig({}).runMigrationsOnStart).toBe(true);
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START: '' }).runMigrationsOnStart,
+    ).toBe(true);
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START: 'true' })
+        .runMigrationsOnStart,
+    ).toBe(true);
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START: 'false' })
+        .runMigrationsOnStart,
+    ).toBe(false);
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START: ' 0 ' })
+        .runMigrationsOnStart,
+    ).toBe(false);
+    // Anything else is named rather than read as one of the two, because
+    // guessing here decides whether a schema is migrated at all.
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START: 'no' }),
+    ).toThrow('HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START must be true or false');
+  });
+
   it('admits the packaged desktop shell by default, in both schemes', () => {
     const origins = loadControlPlaneConfig({}).allowedOrigins;
 

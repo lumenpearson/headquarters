@@ -5,6 +5,25 @@
   "type": "module",
   "sideEffects": false,
   "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./routes": {
+      "types": "./dist/routes.d.ts",
+      "import": "./dist/routes.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    },
+    "./fetch": {
+      "types": "./dist/fetch-adapter.d.ts",
+      "import": "./dist/fetch-adapter.js"
+    }
+  },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
