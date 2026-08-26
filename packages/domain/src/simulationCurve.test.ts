@@ -4,6 +4,7 @@ import {
   channelSeverity,
   channelValue,
   clampNumber,
+  curvePhaseAt,
   deterministicUnit,
   evaluateCurve,
   monotoneTangents,
@@ -353,6 +354,51 @@ describe('deterministicUnit', () => {
 
   it('reads only the low 32 bits of the seed', () => {
     expect(deterministicUnit(1n, 0)).toBe(deterministicUnit(1n + (1n << 32n), 0));
+  });
+});
+
+describe('curvePhaseAt', () => {
+  /*
+   * The formula both sides of the wire read their curves at. It lives here so
+   * that the control plane's preview sampler and the client's own tick share
+   * one arithmetic rather than two that currently agree: the client used to
+   * carry its own copy, and a copy is only ever as correct as the last time
+   * someone compared the two.
+   *
+   * The cases state the phase in terms the formula does not: a period is how
+   * long one pass takes in seconds, and a time scale multiplies the clock. Half
+   * a period at double speed is a quarter of the wall-clock period, and that
+   * relation is the contract — not the expression it happens to be written as.
+   */
+  it('reads a full period at the end of that many seconds', () => {
+    expect(curvePhaseAt({ periodSeconds: 60, timeScale: 1 }, 60_000)).toBe(1);
+    expect(curvePhaseAt({ periodSeconds: 60, timeScale: 1 }, 30_000)).toBe(0.5);
+    expect(curvePhaseAt({ periodSeconds: 60, timeScale: 1 }, 0)).toBe(0);
+  });
+
+  it('spends the timeline faster or slower as the time scale says', () => {
+    // The same elapsed moment, three scales: the phase is the only thing that
+    // moves, which is what makes the scale a control rather than a stored number.
+    expect(curvePhaseAt({ periodSeconds: 60, timeScale: 2 }, 30_000)).toBe(1);
+    expect(curvePhaseAt({ periodSeconds: 60, timeScale: 0.5 }, 30_000)).toBe(0.25);
+    expect(curvePhaseAt({ periodSeconds: 60, timeScale: 0 }, 30_000)).toBe(0);
+  });
+
+  it('holds a timeline still rather than dividing by a period of zero', () => {
+    // Proto3 writes an unset numeric field as zero, so a profile that never
+    // named a period arrives with one. A second falls in, which is the shortest
+    // period the schema allows; the alternative is an infinite phase.
+    expect(curvePhaseAt({ periodSeconds: 0, timeScale: 1 }, 2_000)).toBe(2);
+    expect(Number.isFinite(curvePhaseAt({ periodSeconds: -5, timeScale: 1 }, 1_000))).toBe(true);
+  });
+
+  it('is linear in elapsed time, so splitting an interval cannot change it', () => {
+    const timeline = { periodSeconds: 7, timeScale: 1.5 };
+
+    expect(curvePhaseAt(timeline, 4_000)).toBeCloseTo(
+      curvePhaseAt(timeline, 1_000) + curvePhaseAt(timeline, 3_000),
+      12,
+    );
   });
 });
 

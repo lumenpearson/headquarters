@@ -37,10 +37,12 @@ import {
  * follows `tiles.spans` and `tiles.animations` deliberately — anything
  * addressed per element has to state its address in the entry or lose it.
  *
- * Everything here is a pure function of its arguments. The evaluator is the
- * domain's, not a second copy: a preview drawn on one machine and a simulation
- * running on another have to agree reading for reading, and they only can while
- * there is one arithmetic.
+ * Everything here is a pure function of its arguments. Neither the evaluator
+ * nor `curvePhaseAt` is written here: both are the domain's, because a preview
+ * drawn on one machine and a simulation running on another have to agree
+ * reading for reading, and they only can while there is one arithmetic. What
+ * this module owns is the translation either side of it — the stored entry
+ * form, and the percentage-of-range scale a drawn curve is read on.
  */
 
 /** The decimals an entry may carry, matching the schema's own entry pattern. */
@@ -349,19 +351,6 @@ export function restingCurvePoints(
     inTangent: 0,
     outTangent: 0,
   }));
-}
-
-/**
- * Where the curves are read at a given moment of the run.
- *
- * The formula is the control plane's own (`previewSimulationProfile`): elapsed
- * seconds, scaled, over the period. A preview served from the control plane and
- * a simulation running here therefore land on the same phase for the same
- * moment, which is the only reason the two ever agree.
- */
-export function curvePhaseAt(settings: SimulationSettings, elapsedMs: number): number {
-  const period = settings.periodSeconds > 0 ? settings.periodSeconds : 1;
-  return ((elapsedMs / 1_000) * settings.timeScale) / period;
 }
 
 /**

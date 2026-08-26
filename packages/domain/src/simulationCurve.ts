@@ -268,6 +268,39 @@ export function deterministicUnit(seed: bigint, index: number): number {
   return state / 0x1_0000_0000;
 }
 
+/**
+ * The two fields of a profile that decide how fast its timeline runs, and
+ * nothing else. `gremuchaya.telemetry.v1.SimulationProfile` satisfies it as it
+ * is, and so does the client's own resolved settings record, so neither side
+ * has to convert anything to reach the one formula.
+ */
+export interface CurveTimelineLike {
+  /** How long one pass of the curves takes, in seconds. */
+  readonly periodSeconds: number;
+  /** How fast the curve timeline runs against the clock. */
+  readonly timeScale: number;
+}
+
+/**
+ * Where the curves are read after a run has spent `elapsedMs`.
+ *
+ * This is the other half of the shared arithmetic, and it lives here for the
+ * reason the evaluator does: the control plane previews a profile by sampling
+ * its timeline, and the client drives its own simulation along the same
+ * timeline. A preview and a run can only land on the same reading if they first
+ * land on the same phase, and they can only be relied on to do that while there
+ * is one formula rather than two that currently agree.
+ *
+ * A non-positive period is the proto3 default for a field a client left alone,
+ * and it would divide the timeline by zero. One second stands in, which is the
+ * shortest period the schema allows; a caller with a better default of its own
+ * substitutes it before calling rather than teaching this a second rule.
+ */
+export function curvePhaseAt(timeline: CurveTimelineLike, elapsedMs: number): number {
+  const period = timeline.periodSeconds > 0 ? timeline.periodSeconds : 1;
+  return ((elapsedMs / 1_000) * timeline.timeScale) / period;
+}
+
 /** The remainder of `value` modulo `span` in `[0, span)`, for a negative `value` too. */
 export function positiveRemainder(value: number, span: number): number {
   return ((value % span) + span) % span;

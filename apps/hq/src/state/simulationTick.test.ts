@@ -172,6 +172,27 @@ describe('the moment is an argument, so a run is reproducible', () => {
     expect(operationsStore.getState().metrics.elapsedMs).toBe(1_000);
   });
 
+  it('spends the timeline at the scale the operator asked for', () => {
+    // The same elapsed second, twice, at two scales. The phase is the only
+    // thing between them, so a run that stored `simulation.timeScale` without
+    // reading it would land on one reading both times.
+    const { minimum, maximum } = simulationChannelRanges.cpu;
+    settleRun([{ id: 'simulation.valueCurve', value: ramp('cpu', 0, 100) }]);
+    tickAt(start, start + 1_000);
+    const atOne = metric('cpu');
+
+    settleRun([
+      { id: 'simulation.valueCurve', value: ramp('cpu', 0, 100) },
+      { id: 'simulation.timeScale', value: 2 },
+    ]);
+    tickAt(start, start + 1_000);
+
+    // The period is ten seconds: one second of it is a tenth of the curve at
+    // scale 1 and a fifth at scale 2.
+    expect(atOne).toBe(Math.round(minimum + 0.1 * (maximum - minimum)));
+    expect(metric('cpu')).toBe(Math.round(minimum + 0.2 * (maximum - minimum)));
+  });
+
   it('timestamps the world from the moment it was handed, not from a clock', () => {
     settleRun();
 
@@ -201,6 +222,45 @@ describe('the moment is an argument, so a run is reproducible', () => {
     expect(operationsStore.getState().metricsHistory.cpu).toEqual(first);
   });
 
+  it('produces one series per seed, and the same one every time for a seed', () => {
+    /*
+     * Reproducibility alone is not determinism. A run that ignored
+     * `simulation.seed` entirely would replay identically too, and would then
+     * report the same world on a machine the operator had seeded differently.
+     * The pair of claims is the whole property: same seed, same series; other
+     * seed, other series.
+     *
+     * The readings are taken tick by tick rather than from the history, because
+     * the history opens on the reading `resetWorld` seeded the world with,
+     * which no seed setting reaches and which both runs therefore share.
+     */
+    const scattered = (seed: number): readonly number[] => {
+      settleRun([
+        // A flat curve, so every difference between the two runs is scatter and
+        // not the curve moving underneath it.
+        { id: 'simulation.valueCurve', value: ramp('cpu', 50, 50) },
+        { id: 'simulation.noise', value: 0.3 },
+        { id: 'simulation.seed', value: seed },
+      ]);
+      const readings: number[] = [];
+      for (const moment of [start, start + 1_000, start + 2_000, start + 3_000]) {
+        operationsStore.getState().simulationTick(moment);
+        readings.push(metric('cpu'));
+      }
+      return readings;
+    };
+
+    const first = scattered(1);
+    const again = scattered(1);
+    const other = scattered(4_242);
+
+    expect(again).toEqual(first);
+    // Every reading moved, not merely the series as a whole: a seed that
+    // reached only the first sample would leave the rest in step.
+    expect(other).toHaveLength(first.length);
+    expect(other.filter((value, index) => value === first[index])).toEqual([]);
+  });
+
   it('scatters two series of one channel differently from one seed', () => {
     // Every node reads the same curve, at the same phase, from the same seed,
     // and their range is the one range of `node-load`. Only the sample index
@@ -216,6 +276,21 @@ describe('the moment is an argument, so a run is reproducible', () => {
     const loads = Object.values(operationsStore.getState().systemNodes).map((node) => node.load);
     expect(loads.length).toBeGreaterThan(1);
     expect(new Set(loads).size).toBeGreaterThan(1);
+  });
+
+  it('draws the curve and nothing around it once the scatter is off', () => {
+    // The other half of the case above, and the reason the two are worth
+    // stating together: with `simulation.noise` at zero the same nodes collapse
+    // onto one number, so the spread above is the setting's doing and not the
+    // fixture's.
+    settleRun([{ id: 'simulation.valueCurve', value: ramp('node-load', 50, 50) }]);
+
+    tickAt(start);
+
+    const { minimum, maximum } = simulationChannelRanges['node-load'];
+    const loads = Object.values(operationsStore.getState().systemNodes).map((node) => node.load);
+    expect(loads.length).toBeGreaterThan(1);
+    expect(new Set(loads)).toEqual(new Set([Math.round(minimum + 0.5 * (maximum - minimum))]));
   });
 });
 

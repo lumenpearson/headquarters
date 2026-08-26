@@ -505,7 +505,8 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'simulation.periodSeconds': 'Read by CurveSetting, which labels the time axis in its seconds.',
   'simulation.updateIntervalMs':
     'Read by OperationsRuntime, whose tick timer runs at that cadence.',
-  'simulation.timeScale': 'Read by curvePhaseAt, which turns elapsed milliseconds into a phase.',
+  'simulation.timeScale':
+    'Passed to the domain’s curvePhaseAt, which turns elapsed milliseconds into a phase.',
   'simulation.noise':
     'Read by simulationChannelFor, which simulationTick assembles every channel through.',
   'simulation.smoothing':

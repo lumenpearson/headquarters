@@ -1,5 +1,6 @@
 'use client';
 
+import { curvePhaseAt } from '@gremuchaya/domain';
 import type {
   Alert,
   AnalyticalInsight,
@@ -52,7 +53,6 @@ import {
 } from '../application/edit/contentFields';
 import { booleanSetting, numberSetting } from '../application/personalization/settingValue';
 import {
-  curvePhaseAt,
   deterministicOffset,
   readSimulationSettings,
   sessionMetricChannels,

@@ -6,6 +6,7 @@ import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@conn
 import {
   channelSeverity,
   channelValue,
+  curvePhaseAt,
   type CurveInterpolationKind,
   type SimulationChannelLike,
   type SimulationCurveLike,
@@ -573,7 +574,7 @@ function requireSampleCount(requested: number): number {
  * default for a field the client left alone, so each falls back to its own
  * sensible value rather than freezing the timeline or dividing by zero.
  */
-function previewSnapshots(
+export function previewSnapshots(
   profile: telemetryV1.SimulationProfile,
   sampleCount: number,
   capturedAt: Date,
@@ -593,7 +594,11 @@ function previewSnapshots(
   for (let index = 0; index < sampleCount; index += 1) {
     const elapsedMs = index * intervalMs;
     const observedAt = new Date(capturedAt.getTime() + elapsedMs);
-    const phase = ((elapsedMs / 1_000) * timeScale) / periodSeconds;
+    // The same function the client's own simulation runs on, not the same
+    // arithmetic written twice: a preview an operator judges a curve by and the
+    // reading that curve produces on a screen have to be the same number, and
+    // two copies of one formula agree only until one of them is edited.
+    const phase = curvePhaseAt({ periodSeconds, timeScale }, elapsedMs);
     const samples = channels.map((channel, channelIndex) => {
       const value = channelValue(channel.simulated, phase, index, previous[channelIndex]);
       previous[channelIndex] = value;

@@ -18,8 +18,12 @@ infrastructure (browser, bridge and Tauri adapters)
 Package ownership:
 
 - `@gremuchaya/domain`: framework-free models, state machines, errors, paths and ports, and the
-  simulation-curve evaluator (`simulationCurve.ts`), the one copy of the curve arithmetic in the
-  repository.
+  simulation-curve evaluator (`simulationCurve.ts`) — the one copy of the curve arithmetic in the
+  repository, including the phase `curvePhaseAt` derives. Both callers reach it: the client's
+  `simulationTick` and the control plane's `previewSnapshots`, so a preview an operator judges a
+  curve by and the reading that curve produces on a screen are the same number by construction.
+  This sentence was overstated until 2026-08-26, when the second copy of the phase was removed
+  from `apps/control-plane/src/telemetry/service.ts`.
 - `@gremuchaya/config`: Zod trust-boundary schemas, parsers and scene validation. It holds no
   migrations; the only migrations in the repository live in
   `apps/control-plane/src/db/migrations.ts`.

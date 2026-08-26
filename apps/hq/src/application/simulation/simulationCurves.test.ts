@@ -1,4 +1,4 @@
-import { evaluateCurve } from '@gremuchaya/domain';
+import { curvePhaseAt, evaluateCurve } from '@gremuchaya/domain';
 import {
   applyDraftPatch,
   createFactorySnapshot,
@@ -11,7 +11,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   channelDomain,
-  curvePhaseAt,
   deterministicOffset,
   formatCurveNumber,
   readChannelCurve,
@@ -360,7 +359,14 @@ describe('one reading and the band it falls in', () => {
     expect(reading.value).toBeCloseTo(level * 100, 10);
   });
 
-  it('follows the same phase formula the control plane previews with', () => {
+  it('hands the resolved settings to the domain’s phase formula unchanged', () => {
+    /*
+     * The formula itself is pinned in `@gremuchaya/domain`, which is where it
+     * lives now, and this checks the other half: that the record
+     * `readSimulationSettings` produces is a `CurveTimelineLike` the shared
+     * function reads directly. A conversion here would be a second place for
+     * the two sides to drift.
+     */
     const timed = readSimulationSettings({
       'simulation.periodSeconds': 60,
       'simulation.timeScale': 2,
