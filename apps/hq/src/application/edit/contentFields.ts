@@ -161,6 +161,29 @@ function parseInstant(stored: string): Date | undefined {
 
 const identity: Codec = { read: (stored) => stored, write: (_stored, value) => value };
 
+/**
+ * The calendar day of an instant, in the machine's local zone.
+ *
+ * What the operator edited is a **date**, so what has to survive the edit is
+ * the **wall-clock time of day** -- the time the screen prints beside it --
+ * and not the elapsed offset from the stored instant. Moving a 09:00 briefing
+ * from a winter day to a summer one leaves a 09:00 briefing; keeping the
+ * offset instead would leave a 10:00 one the operator never typed.
+ *
+ * `Date.prototype.setFullYear` is exactly that operation: it decomposes the
+ * instant in local time, replaces year, month and day, keeps the time within
+ * the day, and converts back through the offset in force on the **new** date.
+ * The naive alternatives do not: `setUTCFullYear` keeps the UTC time of day,
+ * and adding a whole number of days to the epoch value keeps the offset. Both
+ * move the printed time by an hour across a transition, which is why the
+ * choice is written down here rather than left to look accidental.
+ *
+ * One case cannot be honoured, and is not a defect of this codec: when the
+ * kept time of day does not exist on the target date, because the local clock
+ * jumps over it going into summer time. 02:30 moved onto a spring-forward day
+ * in a zone that skips 02:00-03:00 becomes 03:30. There is no 02:30 that day
+ * to land on, and the calendar date the operator asked for is still correct.
+ */
 const localDatePart: Codec = {
   read: (stored) => {
     const date = parseInstant(stored);
@@ -178,6 +201,18 @@ const localDatePart: Codec = {
   },
 };
 
+/**
+ * The time of day of an instant, in the machine's local zone.
+ *
+ * The mirror of {@link localDatePart}, and the same reasoning read the other
+ * way: the operator edited a **time**, so the **local calendar date** has to
+ * survive it. `setHours` keeps the local day and replaces the time within it,
+ * so a time set on a transition day stays on that day even where the local
+ * clock skips or repeats an hour -- including the zones whose offset moves by
+ * thirty or forty-five minutes rather than sixty. `setUTCHours` would not: on
+ * an evening east of Greenwich or a morning west of it, the UTC day and the
+ * local day are different days.
+ */
 const localTimePart: Codec = {
   read: (stored) => {
     const date = parseInstant(stored);

@@ -624,18 +624,37 @@ function auditEntry(action: string, entityId: string): OpsAuditEntry {
   };
 }
 
+let settingsMillisecond = 0;
 let settingsSequence = 0;
+
+/** Four digits hold every entry one millisecond can realistically produce. */
+const settingsSequenceWidth = 4;
 
 /**
  * The sequence is what keeps two ids apart within one millisecond. The history
  * list keys its rows by id and `restoreSettingsHistoryEntry` finds an entry by
  * it, and a content reset followed by a restore lands in the same tick.
+ *
+ * It is zero-padded and restarted on each new millisecond because the id is
+ * also the tie-break `querySettingsHistory` sorts by when two entries share an
+ * `at`, and that comparison is `localeCompare` over the whole string. An
+ * unpadded counter put `-10` before `-9`, so from the tenth entry of a
+ * millisecond onward the ledger listed that millisecond in the wrong order.
+ * Restarting keeps the counter inside its width instead of letting a long
+ * session walk past it and reintroduce the same ordering fault at `-10000`.
  */
 function settingsMetadata(prefix: string): { readonly id: string; readonly at: string } {
-  settingsSequence += 1;
+  const now = Date.now();
+  if (now === settingsMillisecond) settingsSequence += 1;
+  else {
+    settingsMillisecond = now;
+    settingsSequence = 0;
+  }
   return {
-    id: `${prefix}-${Date.now()}-${settingsSequence}`,
-    at: new Date().toISOString(),
+    // One clock reading for both, so the instant the id names and the instant
+    // the entry is sorted by cannot disagree across a millisecond boundary.
+    id: `${prefix}-${now}-${String(settingsSequence).padStart(settingsSequenceWidth, '0')}`,
+    at: new Date(now).toISOString(),
   };
 }
 
@@ -881,8 +900,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         state.personalization,
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'patch',
           // The category the settings about what the shell shows already
           // use: both are about the information on screen, and the history
@@ -916,8 +934,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         state.personalization,
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'reset-category',
           category: 'information',
           changedIds,
@@ -941,8 +958,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'patch',
           category: getSettingDefinition(patches[0]?.id ?? '')?.category,
           changedIds: patches.map((patch) => patch.id),
@@ -984,8 +1000,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'reset-category',
           category,
           changedIds: draft.history.at(-1)?.changedIds ?? [],
@@ -1006,8 +1021,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'reset-all',
           changedIds: draft.history.at(-1)?.changedIds ?? [],
           before,
@@ -1027,8 +1041,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'discard',
           changedIds: before.changedIds,
           before,
@@ -1049,8 +1062,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         { ...state.personalization, published, draft },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'publish',
           changedIds: before.changedIds,
           before,
@@ -1091,8 +1103,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           undoStack: state.personalization.undoStack.slice(0, -1),
         },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'undo',
           category: entry.category,
           changedIds: entry.changedIds,
@@ -1135,8 +1146,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           redoStack: state.personalization.redoStack.slice(0, -1),
         },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'redo',
           category: entry.category,
           changedIds: entry.changedIds,
@@ -1170,8 +1180,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'restore',
           category: entry.category,
           changedIds: entry.changedIds,
@@ -1202,8 +1211,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
-          id: settingsMetadata('SET-HISTORY').id,
-          at: new Date().toISOString(),
+          ...settingsMetadata('SET-HISTORY'),
           operation: 'import',
           changedIds: draft.history.at(-1)?.changedIds ?? [],
           before,
@@ -1682,7 +1690,17 @@ export function initializeOperationsClient(): () => void {
         // Content edits are world, not personalization: a date corrected on
         // one screen is the date on every screen of the group, which is what
         // `advanced.worldSync` -- the gate on this channel -- is for.
-        ...contentTransition(state, event.data.content?.overrides).patch,
+        //
+        // Absent means the peer said nothing about content, the same reading
+        // `audit` gets two lines up. A session on a build from before R4
+        // broadcasts no `content` member at all, and taking that for "the
+        // peer has none" made it erase the edits of a session on a newer
+        // build -- and the erasure was then written to storage by the
+        // subscriber below. An explicit `{ overrides: {} }` still clears: a
+        // peer that reset its content said so, where an omission says nothing.
+        ...(event.data.content === undefined
+          ? {}
+          : contentTransition(state, event.data.content.overrides).patch),
         // Personalization is deliberately not taken from the world snapshot.
         // `advanced.liveEdit` is the opt-in that decides whether a settings
         // change reaches the other sessions, and it defaults to off — but this

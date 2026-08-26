@@ -59,6 +59,15 @@ export function EditableContent({ field, entityId, children }: EditableContentPr
         event.stopPropagation();
         operationsStore.getState().selectEditElement(selected ? '' : elementId);
       }}
+      onDoubleClick={(event) => {
+        // A row that opens its record on a double click sees two corrections
+        // made in quick succession as one, and throws the operator onto
+        // another screen mid-edit. `dblclick` is a separate native event from
+        // the two `click`s already stopped above, so it needs its own stop.
+        // The affordance itself does nothing on a double click: selecting a
+        // field twice is selecting it.
+        event.stopPropagation();
+      }}
     >
       {children}
     </TerminalButton>

@@ -70,4 +70,26 @@ describe('EditableContent', () => {
     // edit is a different act and must not also change the selected case.
     expect(rowClick).not.toHaveBeenCalled();
   });
+
+  it('does not open the record when two quick corrections reach a row that opens on a double click', () => {
+    operationsStore.getState().enterEditMode();
+    const rowOpen = vi.fn();
+    render(
+      <div onDoubleClick={rowOpen}>
+        <EditableContent field="case.title" entityId="CASE-01">
+          НАБЛЮДЕНИЕ / K-01
+        </EditableContent>
+      </div>,
+    );
+
+    const control = screen.getByRole('button', { name: 'НАБЛЮДЕНИЕ / K-01' });
+    fireEvent.click(control);
+    fireEvent.click(control);
+    fireEvent.doubleClick(control);
+
+    // The case registry opens a case on a double click on its row. Two
+    // corrections made in quick succession are two selections, not a request
+    // to leave the screen the operator is editing.
+    expect(rowOpen).not.toHaveBeenCalled();
+  });
 });

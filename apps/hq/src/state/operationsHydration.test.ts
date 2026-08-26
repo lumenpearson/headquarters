@@ -6,6 +6,46 @@ import { initializeOperationsClient, operationsStore } from './operationsStore';
 const persistedStateKey = 'gremuchaya-hq:operations:v3';
 const snapshotStateKey = 'gremuchaya-hq:production-snapshots:v3';
 
+type WorldMessage = Record<string, unknown>;
+
+/**
+ * A stand-in for the world channel that both records what this session posts
+ * and hands back the receiving end, so the branch that applies another
+ * session's world can be driven directly. `BroadcastChannel` delivers to every
+ * *other* context, never to the sender, which is why the receiving side had no
+ * test at all until this one.
+ */
+function installChannel(): {
+  readonly posted: readonly WorldMessage[];
+  readonly deliver: (message: WorldMessage) => void;
+  readonly restore: () => void;
+} {
+  const posted: WorldMessage[] = [];
+  let receiver: ((event: MessageEvent<unknown>) => void) | null = null;
+  class RecordingChannel {
+    set onmessage(handler: ((event: MessageEvent<unknown>) => void) | null) {
+      receiver = handler;
+    }
+    constructor(readonly name: string) {}
+    postMessage(message: unknown): void {
+      posted.push(message as WorldMessage);
+    }
+    close(): void {}
+  }
+  const original = globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel = RecordingChannel as unknown as typeof BroadcastChannel;
+  return {
+    posted,
+    // Structured-cloned on the wire, so the peer's message is never the
+    // sender's own object graph.
+    deliver: (message) =>
+      receiver?.({ data: JSON.parse(JSON.stringify(message)) } as MessageEvent<unknown>),
+    restore: () => {
+      globalThis.BroadcastChannel = original;
+    },
+  };
+}
+
 describe('initializeOperationsClient', () => {
   let dispose: () => void = () => undefined;
 
@@ -121,6 +161,70 @@ describe('initializeOperationsClient', () => {
     expect(operationsStore.getState().content.overrides).toEqual({
       'case.title@CASE-03': 'МАРШРУТ / ПРОВЕРЕНО',
     });
+  });
+
+  it('keeps this session content edits when a peer says nothing about content', () => {
+    const channel = installChannel();
+    try {
+      dispose = initializeOperationsClient();
+      operationsStore
+        .getState()
+        .applyContentPatch([
+          { id: 'case.title', entityId: 'CASE-03', value: 'МАРШРУТ / ПРОВЕРЕНО' },
+        ]);
+      const world = channel.posted.at(-1);
+      expect(world?.['content']).toBeDefined();
+
+      // A session on a build from before R4 broadcasts no `content` member.
+      const { content: _content, ...withoutContent } = world ?? {};
+      channel.deliver(withoutContent);
+    } finally {
+      channel.restore();
+    }
+
+    // Absent is not empty. The peer said nothing about content, so this
+    // session keeps its own -- the reading `audit` already gets.
+    expect(operationsStore.getState().content.overrides).toEqual({
+      'case.title@CASE-03': 'МАРШРУТ / ПРОВЕРЕНО',
+    });
+    expect(operationsStore.getState().cases['CASE-03']?.title).toBe('МАРШРУТ / ПРОВЕРЕНО');
+    // The receive path writes through the same subscriber as every other
+    // change, so an erasure here was an erasure on disk on the next launch.
+    const stored = JSON.parse(localStorage.getItem(persistedStateKey) ?? '{}') as {
+      content?: { overrides?: Record<string, unknown> };
+    };
+    expect(stored.content?.overrides).toEqual({ 'case.title@CASE-03': 'МАРШРУТ / ПРОВЕРЕНО' });
+  });
+
+  it('clears content when a peer states it has none, and adopts the overrides it does send', () => {
+    const channel = installChannel();
+    const seedTitle = operationsStore.getState().cases['CASE-03']?.title;
+    try {
+      dispose = initializeOperationsClient();
+      operationsStore
+        .getState()
+        .applyContentPatch([
+          { id: 'case.title', entityId: 'CASE-03', value: 'МАРШРУТ / ПРОВЕРЕНО' },
+        ]);
+      const world = channel.posted.at(-1) ?? {};
+
+      // A peer that reset its content said so, and a statement still clears.
+      channel.deliver({ ...world, content: { overrides: {} } });
+      expect(operationsStore.getState().content.overrides).toEqual({});
+      expect(operationsStore.getState().cases['CASE-03']?.title).toBe(seedTitle);
+
+      channel.deliver({
+        ...world,
+        content: { overrides: { 'case.title@CASE-03': 'МАРШРУТ / СОСЕД' } },
+      });
+    } finally {
+      channel.restore();
+    }
+
+    expect(operationsStore.getState().content.overrides).toEqual({
+      'case.title@CASE-03': 'МАРШРУТ / СОСЕД',
+    });
+    expect(operationsStore.getState().cases['CASE-03']?.title).toBe('МАРШРУТ / СОСЕД');
   });
 
   it('drops a stored content override it cannot validate and keeps the rest', () => {

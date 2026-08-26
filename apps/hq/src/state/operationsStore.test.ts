@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ContentPatchError, seedContentValue } from '../application/edit/contentFields';
 import { operationsSeed } from '../data/operationsSeed';
@@ -431,14 +431,79 @@ describe('domain content edits (R4)', () => {
     expect(page.items[0]?.changedIds).toEqual(['case.createdAt@CASE-04']);
   });
 
-  it('gives consecutive ledger entries distinct ids even within one millisecond', () => {
-    const store = operationsStore.getState();
-    store.applyContentPatch([{ id: 'case.title', entityId: 'CASE-05', value: 'ДЕЛО / А' }]);
-    store.applyContentPatch([{ id: 'case.title', entityId: 'CASE-05', value: 'ДЕЛО / Б' }]);
+  it('gives ledger entries within one millisecond distinct ids that still sort in order', () => {
+    /*
+     * The clock is frozen rather than raced. The earlier version of this test
+     * made two changes back to back and hoped they landed in the same
+     * millisecond; when they did not -- 3 to 8 percent of runs -- the
+     * timestamps alone told the ids apart and an implementation with no
+     * sequence at all passed. Frozen, every entry below is in one millisecond
+     * by construction, which is the only case the sequence exists for.
+     */
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2031-04-17T08:15:22.000Z'));
+    try {
+      const store = operationsStore.getState();
+      // More than nine, because nine is where an unpadded counter still
+      // sorted correctly and ten is where '-10' started preceding '-9'.
+      for (let index = 0; index < 12; index += 1) {
+        store.applyContentPatch([
+          { id: 'case.title', entityId: 'CASE-05', value: `ДЕЛО / ${index}` },
+        ]);
+      }
 
-    const ids = operationsStore.getState().personalization.history.map((entry) => entry.id);
-    // The history list keys rows by id and restore finds an entry by it; two
-    // changes in the same millisecond used to share one.
-    expect(new Set(ids).size).toBe(ids.length);
+      const history = operationsStore.getState().personalization.history;
+      expect(history).toHaveLength(12);
+      // One millisecond by construction: the tie-break is the whole subject.
+      expect(new Set(history.map((entry) => entry.at)).size).toBe(1);
+
+      // The history list keys rows by id and restore finds an entry by it; two
+      // changes in the same millisecond used to share one.
+      const newestFirst = history.map((entry) => entry.id);
+      expect(new Set(newestFirst).size).toBe(newestFirst.length);
+
+      // querySettingsHistory falls back to the id when the timestamps match,
+      // and compares it as text. Unpadded, the tenth entry of a millisecond
+      // sorted before the ninth and the ledger listed that millisecond wrong.
+      const oldestFirst = querySettingsHistory(history, {
+        page: 1,
+        pageSize: 50,
+        order: 'oldest',
+      });
+      expect(oldestFirst.items.map((entry) => entry.id)).toEqual([...newestFirst].reverse());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restarts the sequence on a new millisecond, so it never outgrows its width', () => {
+    // A distinct frozen instant from the test above: the counter is module
+    // state, and reusing that millisecond would continue it rather than
+    // restart it.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2031-04-17T09:00:00.000Z'));
+    try {
+      const store = operationsStore.getState();
+      for (let index = 0; index < 3; index += 1) {
+        store.applyContentPatch([
+          { id: 'case.title', entityId: 'CASE-06', value: `ДЕЛО / ${index}` },
+        ]);
+      }
+      vi.setSystemTime(new Date('2031-04-17T09:00:00.001Z'));
+      store.applyContentPatch([
+        { id: 'case.title', entityId: 'CASE-06', value: 'ДЕЛО / СЛЕДУЮЩАЯ МС' },
+      ]);
+
+      const sequenceOf = (id: string): string => id.slice(id.lastIndexOf('-') + 1);
+      const sequences = operationsStore
+        .getState()
+        .personalization.history.map((entry) => sequenceOf(entry.id));
+      // Newest first. The new millisecond starts over at zero, and a padded
+      // four-digit counter that starts over cannot reach the width where the
+      // ordering fault would come back.
+      expect(sequences).toEqual(['0000', '0002', '0001', '0000']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
