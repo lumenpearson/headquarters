@@ -167,6 +167,16 @@ export function TileGrid({
     );
   }, [screen, tiles]);
 
+  /*
+   * Cleared when the grid leaves, and only then: the effect above republishes
+   * on every change of `tiles`, so clearing there would empty the table for a
+   * tick on each republication. `EditPanel` lives in the root layout and
+   * outlives every screen, so without this the routes that draw no grid --
+   * `/video`, `/settings`, `/dev/ui` -- offered the tiles of whichever screen
+   * was shown last and wrote `screen:tile` keys for a screen out of view.
+   */
+  useEffect(() => () => publishScreenTiles([]), []);
+
   const visible = useMemo(
     () =>
       tiles.filter(
