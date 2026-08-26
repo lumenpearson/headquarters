@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { TilePresentation } from '@gremuchaya/layout-engine';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
 import {
@@ -10,10 +11,70 @@ import {
 } from '@/application/personalization/useSetting';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Metric, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
+import {
+  readNativeMediaGatewayStatus,
+  type NativeMediaGatewayStatus,
+} from '@/infrastructure/tauri/nativeMediaGatewayStatus';
 import { useOperationsStore, type OperationsState } from '@/state/operationsStore';
 
 const storageAreas = ['CORE', 'EVENTS', 'VIDEO', 'EVIDENCE', 'ARCHIVE', 'SNAPSHOTS'] as const;
 const storageUse = [48, 63, 82, 57, 74, 12] as const;
+
+/**
+ * How often the native media gateway is re-read.
+ *
+ * Slow on purpose: the counters describe ffmpeg workers whose state changes on
+ * the scale of a reconnect, and each read crosses the IPC boundary and takes
+ * the gateway's worker lock.
+ */
+const nativeMediaGatewayPollMs = 5_000;
+
+interface NativeMediaReading {
+  readonly status: NativeMediaGatewayStatus | null;
+  readonly error: string | null;
+}
+
+/**
+ * Reads `get_media_gateway_status` from the native shell.
+ *
+ * The command was registered when the RTSP→HLS gateway landed and called from
+ * nowhere, so the only way to learn that a camera was reconnecting was to read
+ * ffmpeg's output in a terminal. A `null` status means there is no native shell
+ * in this session, which is different from a gateway that answered with zero
+ * streams and is reported as such.
+ */
+function useNativeMediaGateway(): NativeMediaReading {
+  const [reading, setReading] = useState<NativeMediaReading>({ status: null, error: null });
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    const read = (): void => {
+      void readNativeMediaGatewayStatus()
+        .then((status) => {
+          if (cancelled) return;
+          setReading({ status, error: null });
+          // Without a native shell one read is the whole answer, and a poll
+          // would be a timer that can never change its own result.
+          if (status !== null && timer === null) {
+            timer = window.setInterval(read, nativeMediaGatewayPollMs);
+          }
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          setReading({
+            status: null,
+            error: error instanceof Error ? error.message : 'MEDIA_GATEWAY_ERROR',
+          });
+        });
+    };
+    read();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearInterval(timer);
+    };
+  }, []);
+  return reading;
+}
 
 /** The host counters this screen reports, however they were obtained. */
 type HostSample = OperationsState['metrics'];
@@ -84,6 +145,94 @@ function readTelemetry(source: string, simulated: HostSample): TelemetryReading 
   };
 }
 
+function NativeMediaGatewayReport({
+  reading,
+  presentation,
+}: {
+  readonly reading: NativeMediaReading;
+  readonly presentation: TilePresentation;
+}) {
+  if (reading.error !== null) {
+    return <p className="system-native-media__notice">ШЛЮЗ НЕ ОТВЕЧАЕТ: {reading.error}</p>;
+  }
+  const status = reading.status;
+  if (status === null) {
+    return (
+      <p className="system-native-media__notice">
+        НАТИВНЫЙ МЕДИАШЛЮЗ ЕСТЬ ТОЛЬКО В ДЕСКТОП-СБОРКЕ: В ВЕБ-СЕССИИ СЧЁТЧИКОВ ШЛЮЗА НЕТ.
+      </p>
+    );
+  }
+  return (
+    <>
+      {status.available ? null : (
+        <p className="system-native-media__notice">ШЛЮЗ ОСТАНОВЛЕН: ПОТОКИ НЕ ОБСЛУЖИВАЮТСЯ.</p>
+      )}
+      <div className="metric-grid metric-grid--four">
+        <Metric
+          label="ИСТОЧНИКОВ"
+          value={status.configuredStreams}
+          detail={`ЛИМИТ ${status.maxWorkers}`}
+        />
+        <Metric
+          label="АКТИВНО"
+          value={status.activeStreams}
+          detail={status.startingStreams > 0 ? `ЗАПУСК ${status.startingStreams}` : 'УСТОЙЧИВО'}
+          tone={status.activeStreams > 0 ? 'ok' : 'normal'}
+        />
+        <Metric
+          label="ПЕРЕПОДКЛЮЧЕНИЕ"
+          value={status.reconnectingStreams}
+          detail="BACKOFF"
+          tone={status.reconnectingStreams > 0 ? 'warning' : 'normal'}
+        />
+        <Metric
+          label="ОТКАЗ"
+          value={status.failedStreams}
+          detail="DEGRADED"
+          tone={status.failedStreams > 0 ? 'critical' : 'normal'}
+        />
+      </div>
+      {presentation === 'full' && status.streams.length > 0 ? (
+        <table className="ops-table">
+          <thead>
+            <tr>
+              <th>КАМЕРА</th>
+              <th>СОСТОЯНИЕ</th>
+              <th>ЗРИТЕЛИ</th>
+              <th>СБОЕВ / ПЕРЕЗАПУСКОВ</th>
+              <th>МАНИФЕСТ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {status.streams.map((stream) => (
+              <tr key={stream.cameraId}>
+                <td>
+                  <strong>{stream.cameraId}</strong>
+                  <small>{stream.streamId}</small>
+                </td>
+                <td className={stream.state === 'degraded' ? 'is-critical' : ''}>
+                  {stream.state.toUpperCase()}
+                </td>
+                <td>{stream.consumers}</td>
+                <td>
+                  {stream.consecutiveFailures} / {stream.totalRestarts}
+                </td>
+                <td>
+                  {stream.manifestAgeMs === null
+                    ? 'НЕТ'
+                    : `${Math.round(stream.manifestAgeMs / 1000)} С`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      <p className="system-native-media__notice">ORIGIN: {status.origin}</p>
+    </>
+  );
+}
+
 export function SystemScreen() {
   const state = useOperationsStore((value) => value);
   const nodes = Object.values(state.systemNodes);
@@ -103,6 +252,7 @@ export function SystemScreen() {
   const auditRows = useNumberSetting('diagnostics.auditRows');
   const telemetry = readTelemetry(telemetrySource, state.metrics);
   const sample = telemetry.sample;
+  const nativeMedia = useNativeMediaGateway();
 
   /*
    * `systemNodes` and `audit` are read by this screen and no other, so both
@@ -339,11 +489,35 @@ export function SystemScreen() {
           </Panel>
         ),
       },
+      {
+        title: 'НАТИВНЫЙ МЕДИАШЛЮЗ',
+        category: 'telemetry',
+        descriptor: {
+          id: 'native-media',
+          priority: 70,
+          variants: [
+            { presentation: 'full', columns: 2, rows: 1 },
+            { presentation: 'minimal', columns: 1, rows: 1 },
+          ],
+          canStretchHorizontally: true,
+          hideWhenOverflow: true,
+        },
+        render: (presentation) => (
+          <Panel
+            title="НАТИВНЫЙ МЕДИАШЛЮЗ"
+            eyebrow="NATIVE GATEWAY / RTSP TO HLS"
+            className="system-native-media"
+          >
+            <NativeMediaGatewayReport reading={nativeMedia} presentation={presentation} />
+          </Panel>
+        ),
+      },
     ],
     [
       auditRows,
       channels,
       loadWarningPercent,
+      nativeMedia,
       nodeTemperatureLimit,
       nodes,
       sample,

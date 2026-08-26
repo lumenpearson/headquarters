@@ -1,10 +1,10 @@
+import type { ScreenBusListener, ScreenBusPayload, ScreenBusPort } from '@gremuchaya/domain';
+
 import {
-  screenBusProtocolVersion,
-  type ScreenBusListener,
-  type ScreenBusMessage,
-  type ScreenBusPayload,
-  type ScreenBusPort,
-} from '@gremuchaya/domain';
+  createScreenBusMessage,
+  isScreenBusMessage,
+  SeenScreenBusIds,
+} from '@/infrastructure/tauri/screenBusEnvelope';
 
 const channelName = 'gremuchaya-hq-screen-bus-v1';
 const storageKey = '__gremuchaya_screen_bus_v1__';
@@ -12,6 +12,7 @@ const storageKey = '__gremuchaya_screen_bus_v1__';
 export class BrowserScreenBus implements ScreenBusPort {
   readonly #senderId = crypto.randomUUID();
   readonly #listeners = new Set<ScreenBusListener>();
+  readonly #seen = new SeenScreenBusIds();
   readonly #channel: BroadcastChannel | null;
 
   constructor() {
@@ -22,13 +23,7 @@ export class BrowserScreenBus implements ScreenBusPort {
   }
 
   publish(payload: ScreenBusPayload): void {
-    const message: ScreenBusMessage = {
-      protocol: screenBusProtocolVersion,
-      id: crypto.randomUUID(),
-      issuedAt: Date.now(),
-      senderId: this.#senderId,
-      payload,
-    };
+    const message = createScreenBusMessage(this.#senderId, payload);
     this.#channel?.postMessage(message);
     try {
       localStorage.setItem(storageKey, JSON.stringify(message));
@@ -48,6 +43,7 @@ export class BrowserScreenBus implements ScreenBusPort {
     this.#channel?.close();
     window.removeEventListener('storage', this.#handleStorageMessage);
     this.#listeners.clear();
+    this.#seen.clear();
   }
 
   readonly #handleChannelMessage = (event: MessageEvent<unknown>): void => {
@@ -63,25 +59,17 @@ export class BrowserScreenBus implements ScreenBusPort {
     }
   };
 
+  /*
+   * The seen-id set is the defect ADR 0001 recorded against this adapter, and
+   * it is fixed here rather than only in the new Tauri adapter: `publish` sends
+   * over both `BroadcastChannel` and `localStorage`, so a peer window with both
+   * transports live dispatched every message twice and ran every cue twice.
+   * Adding the set to `TauriScreenBus` alone would have left the transport the
+   * web build actually runs on with the duplicate.
+   */
   #dispatch(value: unknown): void {
     if (!isScreenBusMessage(value) || value.senderId === this.#senderId) return;
+    if (!this.#seen.accept(value.id)) return;
     for (const listener of this.#listeners) listener(value);
   }
-}
-
-function isScreenBusMessage(value: unknown): value is ScreenBusMessage {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as {
-    protocol?: unknown;
-    id?: unknown;
-    senderId?: unknown;
-    payload?: unknown;
-  };
-  return (
-    candidate.protocol === screenBusProtocolVersion &&
-    typeof candidate.id === 'string' &&
-    typeof candidate.senderId === 'string' &&
-    typeof candidate.payload === 'object' &&
-    candidate.payload !== null
-  );
 }

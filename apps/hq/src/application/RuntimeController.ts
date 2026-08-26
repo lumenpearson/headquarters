@@ -1,16 +1,23 @@
 import {
   createSceneId,
   createVirtualPath,
+  type Disposable,
   type ExplorerNode,
   type ModulePreset,
   type SceneDefinition,
   type SceneId,
+  type ScreenBusPort,
   type ScreenId,
   type VirtualPath,
 } from '@gremuchaya/domain';
 
 import { sceneRepository } from '@/config/scenes';
-import { BrowserScreenBus } from '@/infrastructure/browser/BrowserScreenBus';
+import { createScreenBus } from '@/infrastructure/tauri/createScreenBus';
+import {
+  TauriDisplayGateway,
+  type NativeMonitor,
+  type NativeWindowResult,
+} from '@/infrastructure/tauri/TauriDisplayGateway';
 import { StaticAssetResolver } from '@/infrastructure/assets/StaticAssetResolver';
 import {
   loadRuntimeConfiguration,
@@ -28,22 +35,38 @@ import { SceneService } from './SceneService';
 import { SnapshotService } from './SnapshotService';
 import { applyCueAction } from './sceneState';
 
+/**
+ * How long file-change events are collected before the explorer re-lists.
+ *
+ * A single save produces a burst -- the Windows watcher reports the temporary
+ * file, the rename and the metadata write as separate events -- and one listing
+ * per event would put three round trips through the native layer on screen for
+ * one operator action.
+ */
+const explorerRefreshDebounceMs = 180;
+
 export class RuntimeController {
-  readonly bus: BrowserScreenBus;
+  readonly bus: ScreenBusPort;
   readonly sceneService: SceneService;
   readonly explorerService: ExplorerService;
   readonly browserDirectory: BrowserDirectorySource;
+  readonly nativeFiles: TauriFileSource;
+  readonly displays: TauriDisplayGateway;
   readonly snapshotService: SnapshotService;
   readonly #unsubscribeBus: () => void;
+  #explorerWatch: Disposable | null = null;
+  #explorerRefreshTimer: number | null = null;
 
   private constructor(readonly config: RuntimeConfiguration) {
-    this.bus = new BrowserScreenBus();
+    this.bus = createScreenBus();
     this.browserDirectory = new BrowserDirectorySource();
+    this.nativeFiles = new TauriFileSource();
+    this.displays = new TauriDisplayGateway();
     this.explorerService = new ExplorerService([
       new EmulatedFileSource(config.emulatedRoots),
       this.browserDirectory,
       new BridgeFileSource(config.project.bridgeUrl),
-      new TauriFileSource(),
+      this.nativeFiles,
     ]);
     this.sceneService = new SceneService(
       sceneRepository,
@@ -162,6 +185,97 @@ export class RuntimeController {
         },
       });
     }
+    await this.#watchActivePath(normalized);
+  }
+
+  /**
+   * Moves the native watcher to the directory the operator is looking at.
+   *
+   * One watch at a time on purpose: the native watcher is recursive, so a
+   * watcher per visited directory would report the same change several times
+   * over, and the explorer only ever shows one path.
+   */
+  async #watchActivePath(path: VirtualPath): Promise<void> {
+    this.#explorerWatch?.dispose();
+    this.#explorerWatch = null;
+    if (!this.nativeFiles.isAvailable()) return;
+    try {
+      const watch = await this.nativeFiles.watch(path, () => {
+        this.#scheduleExplorerRefresh(path);
+      });
+      // Navigation can have moved on while the native call was in flight; the
+      // watch that arrives late belongs to a directory nobody is looking at.
+      if (appStore.getState().explorer.activePath === path) this.#explorerWatch = watch;
+      else watch.dispose();
+    } catch {
+      // A directory the native layer will not watch still lists and reads. The
+      // explorer simply keeps the refresh-on-navigate behaviour it had before.
+    }
+  }
+
+  #scheduleExplorerRefresh(path: VirtualPath): void {
+    if (this.#explorerRefreshTimer !== null) window.clearTimeout(this.#explorerRefreshTimer);
+    this.#explorerRefreshTimer = window.setTimeout(() => {
+      this.#explorerRefreshTimer = null;
+      void this.refreshExplorer(path);
+    }, explorerRefreshDebounceMs);
+  }
+
+  /**
+   * Re-lists a directory in place, without the loading flag or a new watch.
+   *
+   * `navigate` cannot be reused here: it would clear the selection under the
+   * operator's cursor and tear down the very watch that asked for the refresh.
+   */
+  async refreshExplorer(path: VirtualPath): Promise<void> {
+    if (appStore.getState().explorer.activePath !== path) return;
+    try {
+      const view = await this.explorerService.list(path);
+      const current = appStore.getState();
+      if (current.explorer.activePath !== path) return;
+      current.replaceRuntimeState({
+        ...current,
+        explorer: {
+          ...current.explorer,
+          nodes: view.nodes,
+          collisions: view.collisions,
+          sourceStatuses: view.sourceStatuses,
+        },
+      });
+    } catch {
+      // A failed refresh leaves the last good listing on screen rather than
+      // replacing a directory the operator is reading with an error.
+    }
+  }
+
+  /** The displays the native shell reports; empty on the web build. */
+  listMonitors(): Promise<readonly NativeMonitor[]> {
+    return this.displays.listMonitors();
+  }
+
+  /**
+   * Opens the managed window for every entry in `project.screenWindows`.
+   *
+   * Those entries have been parsed and validated by `projectConfigSchema` since
+   * the config was written and acted on by nothing: the desktop shell could
+   * open a screen window on a named monitor, and no caller ever asked it to.
+   */
+  async openConfiguredScreenWindows(): Promise<readonly NativeWindowResult[]> {
+    const results: NativeWindowResult[] = [];
+    for (const request of this.config.project.screenWindows) {
+      results.push(
+        await this.displays.openScreenWindow(
+          request.screenId,
+          request.monitorIndex,
+          request.fullscreen,
+        ),
+      );
+    }
+    return results;
+  }
+
+  closeManagedWindows(): Promise<NativeWindowResult> {
+    return this.displays.closeManagedWindows();
   }
 
   selectNode(nodeId: string | null): void {
@@ -304,6 +418,13 @@ export class RuntimeController {
   }
 
   close(): void {
+    if (this.#explorerRefreshTimer !== null) window.clearTimeout(this.#explorerRefreshTimer);
+    this.#explorerRefreshTimer = null;
+    // Disposing the watch also releases the native watcher: `unwatch_directory`
+    // is what stops the OS handle, and a reloaded window would otherwise leave
+    // one behind for every navigation of the previous session.
+    this.#explorerWatch?.dispose();
+    this.#explorerWatch = null;
     this.#unsubscribeBus();
     this.bus.close();
   }

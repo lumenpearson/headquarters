@@ -9,6 +9,7 @@ import {
 } from '@gremuchaya/ui/primitives';
 
 import { useRuntime } from '@/components/runtime/RuntimeProvider';
+import type { NativeMonitor } from '@/infrastructure/tauri/TauriDisplayGateway';
 import { appStore, useAppStore } from '@/state/appStore';
 
 const tabs = [
@@ -107,14 +108,128 @@ function SimulationControls() {
 function ScreenDiagnostics() {
   const screens = useAppStore((state) => state.screens.byId);
   return (
-    <div className="dev-screen-grid">
-      {Object.values(screens).map((screen) => (
-        <div key={screen.id}>
-          <span>{screen.id}</span>
-          <strong>{screen.module}</strong>
-          <small>REV {screen.revision}</small>
+    <>
+      <div className="dev-screen-grid">
+        {Object.values(screens).map((screen) => (
+          <div key={screen.id}>
+            <span>{screen.id}</span>
+            <strong>{screen.module}</strong>
+            <small>REV {screen.revision}</small>
+          </div>
+        ))}
+      </div>
+      <NativeDisplayControls />
+    </>
+  );
+}
+
+/**
+ * The operator-facing entry to the native window layer.
+ *
+ * `list_monitors`, `open_screen_window` and `close_managed_windows` existed in
+ * `src-tauri` with no caller, and `project.screenWindows` was validated and
+ * never acted on. The engineering panel is where they become reachable today;
+ * a shell menu entry is the better home, because opening the display windows is
+ * a shoot-day action and not a diagnostic, and the developer contour is behind
+ * an access code.
+ */
+function NativeDisplayControls() {
+  const { controller } = useRuntime();
+  const [monitors, setMonitors] = useState<readonly NativeMonitor[]>([]);
+  const [report, setReport] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const run = (action: () => Promise<string>) => {
+    setBusy(true);
+    void action()
+      .then((message) => setReport(message))
+      .catch((error: unknown) =>
+        setReport(error instanceof Error ? error.message : 'NATIVE_WINDOW_ERROR'),
+      )
+      .finally(() => setBusy(false));
+  };
+
+  // The panel only mounts inside a booted runtime, but the context types the
+  // controller as nullable for the boot window and a failed boot.
+  if (controller === null) return null;
+  const available = controller.displays.isAvailable();
+  const planned = controller.config.project.screenWindows;
+
+  return (
+    <div className="dev-controls">
+      <h3>NATIVE DISPLAYS</h3>
+      {available ? null : (
+        <p>
+          НАТИВНАЯ ОБОЛОЧКА НЕДОСТУПНА В ЭТОЙ СЕССИИ: УПРАВЛЕНИЕ ОКНАМИ ЕСТЬ ТОЛЬКО В
+          ДЕСКТОП-СБОРКЕ.
+        </p>
+      )}
+      <div className="dev-controls__row">
+        <TerminalButton
+          disabled={!available || busy}
+          onClick={() =>
+            run(async () => {
+              const found = await controller.listMonitors();
+              setMonitors(found);
+              return `МОНИТОРОВ НАЙДЕНО: ${found.length}`;
+            })
+          }
+        >
+          ОПРОСИТЬ МОНИТОРЫ
+        </TerminalButton>
+        <TerminalButton
+          disabled={!available || busy || planned.length === 0}
+          onClick={() =>
+            run(async () => {
+              const results = await controller.openConfiguredScreenWindows();
+              const opened = results.filter((result) => result.status === 'opened').length;
+              const failures = results.flatMap((result) =>
+                result.status === 'failed' ? [result.reason] : [],
+              );
+              return failures.length === 0
+                ? `ОКОН ОТКРЫТО: ${opened} ИЗ ${results.length}`
+                : `ОКОН ОТКРЫТО: ${opened} ИЗ ${results.length}. ОТКАЗЫ: ${failures.join('; ')}`;
+            })
+          }
+        >
+          ОТКРЫТЬ ОКНА ЭКРАНОВ ({planned.length})
+        </TerminalButton>
+        <TerminalButton
+          tone="critical"
+          disabled={!available || busy}
+          onClick={() =>
+            run(async () => {
+              const result = await controller.closeManagedWindows();
+              return result.status === 'closed'
+                ? 'УПРАВЛЯЕМЫЕ ОКНА ЗАКРЫТЫ'
+                : result.status === 'failed'
+                  ? `ОТКАЗ: ${result.reason}`
+                  : 'НАТИВНАЯ ОБОЛОЧКА НЕДОСТУПНА';
+            })
+          }
+        >
+          ЗАКРЫТЬ УПРАВЛЯЕМЫЕ ОКНА
+        </TerminalButton>
+      </div>
+      {report === null ? null : <p>{report}</p>}
+      {monitors.length === 0 ? null : (
+        <div className="dev-screen-grid">
+          {monitors.map((monitor, index) => (
+            <div key={`${monitor.x}:${monitor.y}:${String(index)}`}>
+              <span>
+                [{index}] {monitor.name ?? 'БЕЗ ИМЕНИ'}
+              </span>
+              <strong>
+                {monitor.width}×{monitor.height}
+              </strong>
+              <small>
+                {monitor.x},{monitor.y} · ×{monitor.scaleFactor}
+                {monitor.primary ? ' · PRIMARY' : ''}
+              </small>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
