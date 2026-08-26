@@ -233,7 +233,7 @@ describe('a library that offers no ladder', () => {
   });
 
   it('opens the channel on the original instead of waiting for a variant nobody serves', async () => {
-    const { container } = render(<VideoScreen />);
+    const { container } = render(<VideoScreen mode="cameras" />);
 
     // The declared codec named a variant the library does not offer. Seeding it
     // anyway left the channel loading forever, because the grant that came back
