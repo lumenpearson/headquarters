@@ -151,6 +151,14 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
         ],
       };
     },
+    async readGroupEvents() {
+      return {
+        events: [],
+        earliestAvailableSequence: 0n,
+        hasMore: false,
+        resyncRequired: false,
+      };
+    },
   };
   return { ...base, ...overrides };
 }

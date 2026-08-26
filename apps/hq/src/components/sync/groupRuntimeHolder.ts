@@ -1,4 +1,5 @@
 import type { GroupChannel } from '@/application/sync/groupChannel';
+import type { GroupEventDelivery } from '@/application/sync/groupEventFeed';
 import type { GroupSettingsPort } from '@/application/sync/groupSettingsPort';
 import type { MaterialLibraryClient } from '@/infrastructure/materials/materialLibrary';
 
@@ -21,6 +22,16 @@ export interface GroupRuntimeHandle {
   readonly groupId: string;
   readonly deviceId: string;
   readonly channel: GroupChannel;
+  /**
+   * How the group's events reach this session.
+   *
+   * On the handle rather than inferred from the capabilities, because it is the
+   * one fact a surface downstream has to act on: a command carried by a feed
+   * polled every few seconds needs a longer execution lead than one pushed down
+   * a socket, or the screens run it at whatever moment it happened to arrive on
+   * each of them. `playbackLeadForDelivery` is the rule; this is the input.
+   */
+  readonly delivery: GroupEventDelivery;
   /** `null` on a control plane started without a settings store. */
   readonly settings: GroupSettingsPort | null;
   /**

@@ -66,6 +66,15 @@ This is the largest gap in the build and the one most likely to be planned aroun
   having no pub/sub, which is wrong — it documents `POST /subscribe/{channel}` over Server-Sent
   Events, and the pinned `@upstash/redis` exposes `subscribe()`. The limitation is one nobody has
   lifted, not one that cannot be lifted.
+- **On a group fed by polling, a playback command executes six seconds after it is
+  pressed — on every screen, including the one that issued it.** The lead has to
+  exceed the poll interval or the screens diverge by however long the page took to
+  arrive, so `playbackLeadForDelivery` raises the floor to 6000 ms whenever the
+  group's delivery is `poll`. A group on a socket keeps whatever the operator set
+  (`performance.playbackLeadMs`, 40 ms by default), and so does a session in no
+  group at all. The setting cannot express the polling floor — it is declared
+  0–400 ms — so the floor lives in code. This is a deliberate trade, not a defect:
+  six seconds of waiting buys screens that start together.
 - **Without Upstash, presence cannot report a device gone** and publications are unbounded. The
   service still runs; `Health` says which of the two modes is in force.
 - `layout_documents`, `layout_versions` and `conversion_jobs` are created by migrations and

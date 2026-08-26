@@ -2,7 +2,14 @@ import { isMaterialId } from '@gremuchaya/domain';
 const protocolVersion = 1 as const;
 const defaultGroupId = 'local-browser';
 const defaultExecutionDelayMs = 40;
-const maximumExecutionDelayMs = 5_000;
+/**
+ * The ceiling on a lead, which exists to refuse a nonsense value rather than to
+ * express a policy. It sits above the lead a polled group log needs
+ * (`pollingPlaybackLeadMs`, one second past the 5 s foreground cadence),
+ * because a rejected lead falls back to the socket's 40 ms silently -- and a
+ * silent fallback there is precisely the divergence the lead prevents.
+ */
+const maximumExecutionDelayMs = 30_000;
 const storagePrefix = '__gremuchaya_playback_sync_v1__:';
 
 export type PlaybackSyncAction = 'PLAY' | 'PAUSE' | 'SEEK' | 'SET_RATE' | 'SELECT';

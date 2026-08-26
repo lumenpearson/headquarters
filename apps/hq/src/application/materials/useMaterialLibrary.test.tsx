@@ -83,6 +83,7 @@ function joinGroup(capabilities: { readonly materials?: boolean } = {}): void {
     groupId: 'group',
     deviceId: 'device',
     channel: {} as unknown as GroupChannel,
+    delivery: 'socket',
     settings: null,
     materials: groupLibrary,
   });

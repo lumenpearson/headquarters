@@ -210,6 +210,16 @@ class FakeControlPlane implements ControlPlanePort {
     this.calls.push('getDocumentSnapshot');
     return null;
   }
+
+  async readGroupEvents() {
+    this.calls.push('readGroupEvents');
+    return {
+      events: [],
+      earliestAvailableSequence: 0n,
+      hasMore: false,
+      resyncRequired: false,
+    };
+  }
 }
 
 function session(client: FakeControlPlane, now = () => 0) {

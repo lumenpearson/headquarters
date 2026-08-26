@@ -27,6 +27,7 @@ import type {
   GroupSessionCommand,
   SessionCommandPublication,
 } from '@/application/sync/groupChannel';
+import type { GroupEventPage } from '@/application/sync/groupEventFeed';
 
 import { createBearerInterceptor } from './authInterceptor';
 import { DeviceSessionStore, type StoredDeviceSession } from './DeviceSessionStore';
@@ -34,6 +35,7 @@ import {
   fromGroupSessionAction,
   fromSynchronizedDocumentType,
   toEpochMs,
+  toGroupEventEnvelope,
   toGroupSessionCommand,
   toSynchronizedDocumentType,
   toWireTimestamp,
@@ -233,6 +235,19 @@ export interface SyncRpcClient {
     readonly stateVector: Uint8Array;
     readonly sequence: bigint;
     readonly documentType: syncV1.SynchronizedDocumentType;
+  }>;
+  readGroupEvents(
+    request: {
+      readonly groupId: WireResourceId;
+      readonly afterSequence: bigint;
+      readonly limit: number;
+    },
+    options?: CallOptions,
+  ): Promise<{
+    readonly events: readonly syncV1.GroupEvent[];
+    readonly earliestAvailableSequence: bigint;
+    readonly hasMore: boolean;
+    readonly resyncRequired: boolean;
   }>;
 }
 
@@ -694,6 +709,36 @@ export class ControlPlaneClient implements ControlPlanePort {
       if (isControlPlaneError(error, 'not-found')) return null;
       throw error;
     }
+  }
+
+  /**
+   * One page of the group log, for the feed that has no socket to follow.
+   *
+   * `limit` is sent as zero, which the contract defines as the server's own
+   * default. The retained-window ceiling is the control plane's
+   * (`defaultRealtimeReplayLimit`), and naming a number here would be a second
+   * copy of it -- one that a client built against an older deployment could
+   * exceed, at which point the request is refused rather than clamped.
+   *
+   * A refusal is not swallowed. Unlike `getDocumentSnapshot`, which turns
+   * `NOT_FOUND` into `null` because a group with no snapshot is ordinary, every
+   * failure here is one the feed has to see: it must not advance its cursor
+   * past a page it never read.
+   */
+  async readGroupEvents(afterSequence: bigint, signal?: AbortSignal): Promise<GroupEventPage> {
+    const stored = this.#requireSession();
+    const response = await call(() =>
+      this.#sync.readGroupEvents(
+        { groupId: { value: stored.groupId }, afterSequence, limit: 0 },
+        options(signal),
+      ),
+    );
+    return {
+      events: response.events.map(toGroupEventEnvelope),
+      earliestAvailableSequence: response.earliestAvailableSequence,
+      hasMore: response.hasMore,
+      resyncRequired: response.resyncRequired,
+    };
   }
 
   #stored(): StoredDeviceSession | null {

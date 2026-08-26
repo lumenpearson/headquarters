@@ -9,6 +9,7 @@ import { GroupSettingsSync } from '@/application/sync/GroupSettingsSync';
 import { mirrorSummary } from '@/application/sync/localMirror';
 import type { ControlPlaneClient } from '@/infrastructure/controlPlane/ControlPlaneClient';
 import { ControlPlaneGroupChannel } from '@/infrastructure/controlPlane/ControlPlaneGroupChannel';
+import { GroupEventPoller } from '@/infrastructure/controlPlane/GroupEventPoller';
 import { GroupSettingsClient } from '@/infrastructure/controlPlane/GroupSettingsClient';
 import { liveEditDocumentId } from '@/infrastructure/controlPlane/GroupLiveEditTransport';
 import { GroupSnapshotDownloader } from '@/infrastructure/controlPlane/GroupSnapshotDownloader';
@@ -95,7 +96,34 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
               ? {}
               : { storageOrigin: materialStorageOrigin() }),
           });
-    setGroupRuntime({ groupId, deviceId, channel, settings, materials });
+    /*
+     * A control plane that admits no realtime socket is still followed, by
+     * reading the durable log instead of being pushed to. The label is what a
+     * surface downstream acts on -- `VideoScreen` widens the playback lead for
+     * it -- so it is decided once, here, beside the transport it describes.
+     */
+    const delivery = realtimeAdmission ? 'socket' : 'poll';
+    setGroupRuntime({ groupId, deviceId, channel, delivery, settings, materials });
+
+    /*
+     * The resume point when the retained log no longer covers the cursor. One
+     * function for both transports: the socket reports the verdict as a
+     * `ResyncRequired` frame and the feed as the `resync_required` field of a
+     * page, but what follows is the same snapshot call, and two copies of it
+     * would be two places for the document identifier to drift.
+     *
+     * The only document this client publishes is live edit; a control plane
+     * that has recorded no snapshot answers `null`, and both transports then
+     * resume from the oldest sequence still held -- which is the most either
+     * can honestly claim to have seen.
+     */
+    const resumeFromSnapshot = async (
+      _resync: unknown,
+      signal: AbortSignal,
+    ): Promise<{ readonly afterSequence: bigint } | null> => {
+      const snapshot = await client.getDocumentSnapshot(liveEditDocumentId, signal);
+      return snapshot === null ? null : { afterSequence: snapshot.sequence };
+    };
 
     let disconnectSettings: (() => void) | undefined;
     if (settings !== null) {
@@ -137,17 +165,7 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
         // order and may come to have more than one transport carrying it.
         cursor: channel,
         onStatus: (state) => operationsStore.getState().patchConnection({ realtime: state }),
-        onResync: async (_resync, signal) => {
-          /*
-           * The resume point fell off the retained log. The snapshot is asked
-           * for by document, and the only document this client publishes is
-           * live edit; a control plane that has recorded none answers `null`,
-           * and the socket then resumes from the oldest sequence still held --
-           * which is the most it can honestly claim to have seen.
-           */
-          const snapshot = await client.getDocumentSnapshot(liveEditDocumentId, signal);
-          return snapshot === null ? null : { afterSequence: snapshot.sequence };
-        },
+        onResync: resumeFromSnapshot,
         onReauthenticationRequired: () => {
           /*
            * The server closed the socket because the triple no longer checks
@@ -161,21 +179,47 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
         },
       });
       realtime.start();
-    } else {
-      /*
-       * A control plane started without realtime admission serves no socket at
-       * all -- the upgrade is refused `403` (`isRealtimeUpgrade`). The session
-       * is still in the group and still reads it, on the presence and clock
-       * timers, so the link says `POLL` rather than pretending to be live.
-       */
+    }
+
+    /*
+     * A control plane started without realtime admission serves no socket at
+     * all -- the upgrade is refused `403` (`isRealtimeUpgrade`) -- and on a
+     * deployment whose instances do not share a listener map it could not serve
+     * a useful one anyway. The group log is still there and still durable, so
+     * the session follows it by asking: `ReadGroupEvents` needs no hub.
+     *
+     * The feed hands its pages to `channel.deliver` and reads its position from
+     * the same channel, so an event that arrived by both paths is applied once.
+     * Without `SyncService` there is no log to read and no poller is built; the
+     * link still says `POLL`, because the session is in the group and reads it
+     * on the presence and clock timers, and saying `LIVE` would claim a
+     * promptness that is not there.
+     */
+    let poller: GroupEventPoller | null = null;
+    if (!realtimeAdmission) {
       operationsStore
         .getState()
         .patchConnection({ realtime: { ...initialRealtimeLinkState, status: 'polling' } });
+      if (syncCapability) {
+        poller = new GroupEventPoller({
+          reader: client,
+          cursor: channel,
+          deliver: channel.deliver,
+          onResync: resumeFromSnapshot,
+          onStatus: (state) => operationsStore.getState().patchConnection({ realtime: state }),
+          subscribeVisibility: (listener) => {
+            document.addEventListener('visibilitychange', listener);
+            return () => document.removeEventListener('visibilitychange', listener);
+          },
+        });
+        poller.start();
+      }
     }
 
     return () => {
       controller.abort();
       realtime?.stop();
+      poller?.stop();
       disconnectSettings?.();
       channel.close();
       setGroupRuntime(null);

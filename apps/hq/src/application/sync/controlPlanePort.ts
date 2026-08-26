@@ -12,6 +12,7 @@ import type {
   GroupSessionCommand,
   SessionCommandPublication,
 } from './groupChannel';
+import type { GroupEventPage } from './groupEventFeed';
 
 /**
  * What the session service needs of the control plane, stated here so the
@@ -81,6 +82,20 @@ export interface ControlPlanePort {
    * ordinary state of a group whose log has never been pruned.
    */
   getDocumentSnapshot(documentId: string, signal?: AbortSignal): Promise<DocumentSnapshot | null>;
+  /**
+   * One page of the group log after `afterSequence`.
+   *
+   * Not a second `WatchGroup`: that one means "push what arrives" and needs the
+   * realtime hub's process-local listener set, which a deployment answering
+   * successive requests on different instances cannot keep. This one means
+   * "give me the page after N", needs no hub, and is what makes the log
+   * readable where no socket can exist.
+   *
+   * `limit` is omitted rather than filled in, so the ceiling stays the server's
+   * one. A value above it is refused rather than clamped, because a silently
+   * shortened page looks exactly like the end of the log.
+   */
+  readGroupEvents(afterSequence: bigint, signal?: AbortSignal): Promise<GroupEventPage>;
 }
 
 export interface GroupSummary {

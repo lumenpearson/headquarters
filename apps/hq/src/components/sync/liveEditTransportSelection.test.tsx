@@ -66,7 +66,13 @@ function fakeChannel(): FakeChannel {
 
 function join(channel: GroupChannel): void {
   act(() => {
-    setGroupRuntime({ groupId: 'group-a', deviceId: 'device-a', channel, settings: null });
+    setGroupRuntime({
+      groupId: 'group-a',
+      deviceId: 'device-a',
+      channel,
+      delivery: 'socket',
+      settings: null,
+    });
   });
 }
 

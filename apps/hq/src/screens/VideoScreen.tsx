@@ -75,6 +75,7 @@ import {
   subscribeGroupRuntime,
 } from '@/components/sync/groupRuntimeHolder';
 import { createGroupPlaybackSyncTransport } from '@/infrastructure/controlPlane/GroupPlaybackSyncTransport';
+import { playbackLeadForDelivery } from '@/application/sync/groupEventFeed';
 import { useOperationsStore } from '@/state/operationsStore';
 
 const playbackRateOptions = [0.5, 1, 1.5, 2, 4].map((rate) => ({
@@ -817,6 +818,13 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
        * it. A lead gives a slower screen time to arrive at the same instant as
        * a fast one, which is the point of synchronised playback.
        *
+       * How long a lead depends on how the command travels. A socket pushes it
+       * within milliseconds of the append; a poll feed reads the log on a
+       * cadence measured in seconds, and a command whose instant has already
+       * passed when it arrives is executed on arrival -- a different moment on
+       * every screen. `playbackLeadForDelivery` raises the floor for the poll
+       * feed and leaves a socket group on whatever the operator set.
+       *
        * The transport is the group's while this session is in one, and the
        * browser's otherwise. That is what moves `epoch` and `sequence` off this
        * machine: the group transport answers each publication with the pair the
@@ -833,7 +841,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             });
       const coordinator = new PlaybackSyncCoordinator({
         onCommand: (command) => playbackCommandHandlerRef.current(command),
-        executionDelayMs: playbackLeadMs,
+        executionDelayMs: playbackLeadForDelivery(group?.delivery ?? 'socket', playbackLeadMs),
         ...(groupTransport === undefined ? {} : { transport: groupTransport }),
         ...(group === null ? {} : { deviceId: group.deviceId }),
         ...(authority === undefined

@@ -73,7 +73,13 @@ function fakeSettings(pages: readonly GroupSettingsHistoryPage[]): GroupSettings
 
 function join(settings: GroupSettingsPort): void {
   act(() => {
-    setGroupRuntime({ groupId: 'group-a', deviceId: 'device-a', channel, settings });
+    setGroupRuntime({
+      groupId: 'group-a',
+      deviceId: 'device-a',
+      channel,
+      delivery: 'socket',
+      settings,
+    });
   });
 }
 
