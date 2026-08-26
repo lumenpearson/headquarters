@@ -208,13 +208,20 @@ export async function resolveControlPlaneCollaborators(
       {
         name: 'database',
         configured: true,
-        // Which of the two happened is the difference between "the schema is
-        // known good" and "the schema is whatever the deployment step left",
-        // and an operator reading Health has no other way to tell them apart.
-        detail:
+        // Two facts an operator has no other way to read off an
+        // unauthenticated Health. Which driver reaches the database: the HTTP
+        // one needs a route to the public internet on every statement, the TCP
+        // one a route to a single machine, and a plane on the set that reports
+        // the wrong one is a plane whose group will stop existing when the
+        // internet does. And whether the schema underneath is one this process
+        // migrated itself or one a deployment step left behind.
+        detail: `${
+          config.databaseDriver === 'postgres' ? 'PostgreSQL over TCP' : 'Neon PostgreSQL over HTTP'
+        }; ${
           config.runMigrationsOnStart === false
-            ? 'PostgreSQL; migrations are applied as a deployment step, not by this process'
-            : 'Neon PostgreSQL; migrations applied before this endpoint began serving',
+            ? 'migrations are applied as a deployment step, not by this process'
+            : 'migrations applied before this endpoint began serving'
+        }`,
       },
       {
         name: 'redis',
