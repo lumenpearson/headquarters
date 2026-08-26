@@ -7,7 +7,7 @@ Checked on 2026-08-25 in the production development worktree.
 | Node.js              | 24.3.0                     | Pinned LTS runtime; Next.js requires Node 20.9 or newer.                                                                                                                                                           |
 | pnpm                 | 10.12.3                    | Pinned in `packageManager`.                                                                                                                                                                                        |
 | Corepack             | 0.33.0                     | Development-machine bootstrap only.                                                                                                                                                                                |
-| Next.js              | 16.3.1                     | Exact dependency; App Router and default Turbopack path.                                                                                                                                                           |
+| Next.js              | 16.3.2                     | Exact dependency; App Router and default Turbopack path.                                                                                                                                                           |
 | React / React DOM    | 19.2.8                     | Exact application dependencies.                                                                                                                                                                                    |
 | TypeScript           | 6.0.3                      | Latest release accepted by `typescript-eslint` 8.67.0.                                                                                                                                                             |
 | Zustand              | 5.0.15                     | Exact application dependency.                                                                                                                                                                                      |
@@ -20,17 +20,17 @@ Checked on 2026-08-25 in the production development worktree.
 | Tauri JavaScript CLI | 2.11.4                     | Project-local dependency; no global CLI is required.                                                                                                                                                               |
 | Tauri Rust crate     | 2.11.5                     | Exact Cargo dependency.                                                                                                                                                                                            |
 | Tauri JavaScript API | 2.11.1                     | Exact application dependency.                                                                                                                                                                                      |
-| ESLint               | 9.39.5                     | Newest major accepted by every plugin in `eslint-config-next@16.3.1`.                                                                                                                                              |
+| ESLint               | 9.39.5                     | Newest major accepted by every plugin in `eslint-config-next@16.3.2`.                                                                                                                                              |
 | ffmpeg               | resolved at run time       | External. The desktop RTSP gateway resolves `HQ_FFMPEG_PATH` or `ffmpeg` on PATH; without it the gateway fails with `FfmpegUnavailable`.                                                                           |
 
 ## Compatibility decision
 
 The registry's newest TypeScript release was 7.0.2, while `typescript-eslint@8.67.0`, used by
-`eslint-config-next@16.3.1`, declares `typescript >=4.8.4 <6.1.0`. TypeScript 6.0.3 is therefore
+`eslint-config-next@16.3.2`, declares `typescript >=4.8.4 <6.1.0`. TypeScript 6.0.3 is therefore
 the newest compatible release for this production baseline. See ADR 0007.
 
 The registry's newest ESLint release was 10.8.1, but `eslint-plugin-react`,
-`eslint-plugin-import` and `eslint-plugin-jsx-a11y`, bundled by `eslint-config-next@16.3.1`, still
+`eslint-plugin-import` and `eslint-plugin-jsx-a11y`, bundled by `eslint-config-next@16.3.2`, still
 declare ESLint 9 as their maximum supported major. `eslint-plugin-react-hooks@7.1.1` and
 `typescript-eslint@8.67.0` already accept 10; three plugins are what holds the baseline, and naming
 them is what lets the next reader check whether it still does. ESLint 9.39.5 is pinned so the lint
