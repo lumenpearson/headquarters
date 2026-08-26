@@ -6261,9 +6261,17 @@ button.is-active {
   display: grid;
   min-height: 0;
   flex: 1 1 auto;
-  /* The resolver hands each screen its own spacing, so the fallback is
-     `normal` and the setting only takes over once the operator moves it. */
-  gap: var(--ops-tile-gap, normal);
+  /* The fallback is the schema's own default for `sizes.tileGap`, because a
+     custom property is written only when the operator moves it: whatever stands
+     here *is* the default an operator sees, so it has to be the number the
+     schema names. The comment this replaces said the resolver hands each screen
+     its own spacing and left the fallback at `normal`. Measured on 2026-08-27
+     at 1920 and 2560: computed `row-gap` and `column-gap` were `normal`, that
+     is zero, on every laid-out screen. `TileGrid` sets only
+     `gridTemplateColumns` and `gridTemplateRows` inline, and the thirteen
+     layout rules that declare a gap all sit earlier in this file, so this
+     declaration was overriding every one of them. */
+  gap: var(--ops-tile-gap, 6px);
 }
 
 .tile-grid__cell {

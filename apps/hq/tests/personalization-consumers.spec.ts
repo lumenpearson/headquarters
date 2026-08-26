@@ -274,6 +274,44 @@ for (const viewport of geometryViewports) {
     await expect.poll(() => typeScaleProperty(page)).toBe('1.15');
     expect(await shellFontSize(page)).toBeCloseTo(before * 1.15, 2);
   });
+
+  test(`R6: the tile gap the operator sets is the gap the grid draws at ${viewport.label}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport.size);
+    await page.goto('/overview');
+    await expect(page.locator('.tile-grid').first()).toBeVisible();
+    const before = await tileGridGap(page);
+
+    /*
+     * 17 is inside the schema's 0..20 and is none of the numbers the stylesheet
+     * writes for a laid-out screen — 7, 10, 12 and `clamp(6px, 0.55vw, 14px)`
+     * all appear on the layout classes, and 6 is the schema's own default, so
+     * seeding any of them would let a declaration answer for the setting.
+     *
+     * The default itself is asserted below rather than assumed: this grid drew
+     * `normal`, that is zero, until 2026-08-27, because `.tile-grid` sits later
+     * in `operations.css` than every layout rule that gives it a gap.
+     */
+    await seedSettings(page, { 'sizes.tileGap': 17 });
+    await page.reload();
+    await expect(page.locator('.tile-grid').first()).toBeVisible();
+    await expect.poll(() => tileGridGap(page).then((gap) => gap.rowGap)).toBe('17px');
+    const after = await tileGridGap(page);
+
+    expect(after.columnGap).toBe('17px');
+    expect(before.rowGap).toBe('6px');
+    expect(before.columnGap).toBe('6px');
+  });
+}
+
+async function tileGridGap(page: Page): Promise<{ rowGap: string; columnGap: string }> {
+  return page.evaluate(() => {
+    const grid = document.querySelector('.tile-grid');
+    if (grid === null) throw new Error('no tile grid is laid out');
+    const style = window.getComputedStyle(grid);
+    return { rowGap: style.rowGap, columnGap: style.columnGap };
+  });
 }
 
 test('R6: the focus ring is drawn at the width the operator set', async ({ page }) => {
