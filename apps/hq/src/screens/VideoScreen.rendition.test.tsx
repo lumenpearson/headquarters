@@ -24,6 +24,8 @@ const library = vi.hoisted(() => ({
   materialId: '018f0f1a-8000-7000-8000-000000000000',
   /** When set, a grant is withheld until the test releases it. */
   hold: null as null | (() => void),
+  /** The bridge serves one stored object and offers no ladder at all. */
+  onlyOriginal: false,
 }));
 const materialId = library.materialId;
 
@@ -75,6 +77,7 @@ vi.mock('@/infrastructure/materials/BridgeMaterialClient', () => {
     // A ladder with more than one entry, which is what makes the declared
     // rendition worth prepending rather than being the whole menu.
     renditions(): readonly { readonly variant: string; readonly label: string }[] {
+      if (library.onlyOriginal) return [{ variant: '', label: 'ORIGINAL' }];
       return [
         { variant: '', label: 'ORIGINAL' },
         { variant: '1080p', label: '1080P' },
@@ -133,6 +136,7 @@ describe('the declared codec and bitrate of a camera (C25)', () => {
   beforeEach(() => {
     library.asked.length = 0;
     library.hold = null;
+    library.onlyOriginal = false;
     localStorage.clear();
     localStorage.setItem(
       cameraMaterialAssignmentsStorageKey,
@@ -202,6 +206,42 @@ describe('the declared codec and bitrate of a camera (C25)', () => {
     // material alone.
     expect(library.asked).toContain('1080p');
     await waitFor(() => expect(cameraMaterialStatus(container)).toContain('LOADING'));
+  });
+});
+
+describe('a library that offers no ladder', () => {
+  beforeEach(() => {
+    library.asked.length = 0;
+    library.hold = null;
+    library.onlyOriginal = true;
+    localStorage.clear();
+    localStorage.setItem(
+      cameraMaterialAssignmentsStorageKey,
+      JSON.stringify({ 'K-17': materialId }),
+    );
+    globalThis.IntersectionObserver =
+      StubIntersectionObserver as unknown as typeof IntersectionObserver;
+    operationsStore.getState().resetWorld();
+  });
+
+  afterEach(() => {
+    if (nativeIntersectionObserver === undefined) {
+      delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
+    } else {
+      globalThis.IntersectionObserver = nativeIntersectionObserver;
+    }
+  });
+
+  it('opens the channel on the original instead of waiting for a variant nobody serves', async () => {
+    const { container } = render(<VideoScreen />);
+
+    // The declared codec named a variant the library does not offer. Seeding it
+    // anyway left the channel loading forever, because the grant that came back
+    // always described the original and never matched what was asked for.
+    await waitFor(() => expect(cameraMaterialStatus(container)).toContain('READY'));
+    // The original travels the plain grant path, so no variant is asked for at
+    // all -- and in particular not the declared one, which nothing would serve.
+    expect(library.asked).toEqual([]);
   });
 });
 

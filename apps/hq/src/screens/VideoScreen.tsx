@@ -26,6 +26,7 @@ import {
   useNumberSetting,
   useStringSetting,
 } from '@/application/personalization/useSetting';
+import { channelDomain } from '@/application/simulation/simulationCurves';
 import { Gauge, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import type { MaterialEntry } from '@/infrastructure/materials/BridgeMaterialClient';
 import { useMaterialLibrary } from '@/application/materials/useMaterialLibrary';
@@ -340,7 +341,18 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     if (declaredRendition === null || offered.length <= 1) return offered;
     return [offered[0] ?? originalRendition, declaredRendition, ...offered.slice(1)];
   }, [declaredRendition, materialClient, selectedMaterial]);
-  const seededVariant = declaredRendition?.variant ?? '';
+  /*
+   * A channel opens on the rendition its own codec and bitrate name -- but
+   * only when the library actually offers that rendition. The bridge serves
+   * one stored object and answers every request with the original, so seeding
+   * a variant it will never return leaves the channel waiting for a source
+   * that cannot arrive, and the status line says LOADING forever.
+   */
+  const seededVariant =
+    declaredRendition !== null &&
+    cameraRenditions.some((rendition) => rendition.variant === declaredRendition.variant)
+      ? declaredRendition.variant
+      : (cameraRenditions[0]?.variant ?? '');
   const [variantSeededFrom, setVariantSeededFrom] = useState(
     `${selected?.id ?? ''}:${seededVariant}`,
   );
@@ -1718,7 +1730,8 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 <strong>{state.metrics.networkIn} Mb/s</strong>
                 <Sparkline
                   label="Входящий трафик"
-                  values={[38, 56, 42, 69, 54, 82, 71, state.metrics.networkIn / 4]}
+                  values={state.metricsHistory.networkIn}
+                  domain={channelDomain('network-in')}
                 />
               </span>
               <span>
@@ -1726,7 +1739,8 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 <strong>{state.metrics.networkOut} Mb/s</strong>
                 <Sparkline
                   label="Исходящий трафик"
-                  values={[28, 35, 30, 44, 38, 52, 47, state.metrics.networkOut / 3]}
+                  values={state.metricsHistory.networkOut}
+                  domain={channelDomain('network-out')}
                 />
               </span>
               <span>
