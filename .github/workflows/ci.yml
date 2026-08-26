@@ -84,8 +84,32 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The browser is ~150 MB and the same for every run that does not move
+      # @playwright/test. The key is the lockfile, so a version bump misses the
+      # cache and a source change does not.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @gremuchaya/hq exec playwright install --with-deps chromium
+
+      # The cache carries the browser, not the system libraries it links
+      # against, and those belong to the runner image rather than to the
+      # workspace. This is the apt half of `--with-deps` on its own.
+      - name: Install Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @gremuchaya/hq exec playwright install-deps chromium
+
+      # `playwright.config.ts` serves the built application in CI rather than
+      # the dev server, so the routes are compiled once here instead of one at
+      # a time while the browsers wait for them.
+      - name: Build (web)
+        run: pnpm build:web
 
       - name: Run end-to-end suite
         run: pnpm test:ui
