@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' https://api-maps.yandex.ru https://yastatic.net; img-src 'self' asset: http://asset.localhost blob: data: https://api-maps.yandex.ru https://yastatic.net https://*.maps.yandex.net https://*.maps.yandex.com; media-src 'self' asset: http://asset.localhost http://127.0.0.1:* blob:; font-src 'self' data: https://yastatic.net; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* https://api-maps.yandex.ru https://yastatic.net https://yandex.ru https://*.maps.yandex.net https://*.maps.yandex.com; worker-src 'self' blob:; frame-src https://api-maps.yandex.ru https://yandex.ru; object-src 'none'; frame-ancestors 'none'; style-src 'self' 'unsafe-inline' blob:"
+      "csp": "default-src 'self'; script-src 'self' https://api-maps.yandex.ru https://yastatic.net; img-src 'self' asset: http://asset.localhost blob: data: https://*.public.blob.vercel-storage.com https://api-maps.yandex.ru https://yastatic.net https://*.maps.yandex.net https://*.maps.yandex.com; media-src 'self' asset: http://asset.localhost http://127.0.0.1:* https://*.public.blob.vercel-storage.com blob:; font-src 'self' data: https://yastatic.net; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* https://*.vercel.app wss://*.vercel.app https://*.public.blob.vercel-storage.com https://api-maps.yandex.ru https://yastatic.net https://yandex.ru https://*.maps.yandex.net https://*.maps.yandex.com; worker-src 'self' blob:; frame-src https://api-maps.yandex.ru https://yandex.ru; object-src 'none'; frame-ancestors 'none'; style-src 'self' 'unsafe-inline' blob:"
     }
   },
   "bundle": {

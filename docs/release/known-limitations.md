@@ -88,6 +88,16 @@ This is the largest gap in the build and the one most likely to be planned aroun
 - Local production mount paths are intentionally uncommitted and configured per shoot machine.
 - `FREEZE` and `BLACKOUT` are one-way in the interface. `resetScene` is the only exit, which is
   what the runbook prescribes — but an operator reaching for a toggle will not find one.
+- **The desktop CSP cannot name an arbitrary LAN control plane.** `tauri.conf.json`'s
+  `connect-src` now admits loopback, `https://*.vercel.app` and `wss://*.vercel.app`, which
+  covers the deployed control plane and the socket. It cannot cover a control plane at an
+  address like `http://192.168.10.5:4100`: CSP wildcards only the leftmost label of a hostname
+  and cannot wildcard an IP address at all, so "any private range" is not expressible. The
+  address is blocked in the webview **before a request is made**, which reads as a network
+  failure rather than a policy one. Three ways out, in the order they cost: build the desktop
+  bundle with that address baked in (`tauri build --config`), put the LAN control plane behind
+  a name under a domain the CSP already admits, or route the traffic through a Tauri command so
+  the webview only ever talks to `ipc:` — the last is the R18-aligned answer and is not built.
 
 ## Verification that cannot be done here
 
