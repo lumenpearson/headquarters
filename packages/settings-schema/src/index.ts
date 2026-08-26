@@ -1,4 +1,4 @@
-import { isMaterialId } from '@gremuchaya/domain';
+import { isMaterialId, type CurveInterpolationKind } from '@gremuchaya/domain';
 
 export const settingCategories = [
   'general',
@@ -61,7 +61,27 @@ export type SettingEditor =
    * application already holds rather than naming a location. The stored value
    * is an opaque identifier -- never a path, a URL, or CSS.
    */
-  | { readonly kind: 'material'; readonly accept: readonly string[] };
+  | { readonly kind: 'material'; readonly accept: readonly string[] }
+  /**
+   * A curve the operator drags, stored as one entry per control point.
+   *
+   * Every bound the control needs is declared here rather than assumed at the
+   * call site: `timeDomain` is the curve's own timeline, one period wide;
+   * `valueDomain` is the scale a point is read on; `restingValue` is where a
+   * channel with nothing drawn for it starts, which is the reading the domain
+   * evaluator produces when it is handed no curve at all; `unit` is what the
+   * value is measured in. A control that had to know those numbers itself
+   * would be a second copy of them.
+   */
+  | {
+      readonly kind: 'curve';
+      readonly channels: readonly string[];
+      readonly timeDomain: readonly [number, number];
+      readonly valueDomain: readonly [number, number];
+      readonly restingValue: number;
+      readonly unit: string;
+      readonly maximumPoints: number;
+    };
 
 export interface SettingDefinition {
   readonly id: string;
@@ -149,16 +169,33 @@ const isBoolean = withEditor(
   { kind: 'boolean' },
   (value): value is boolean => typeof value === 'boolean',
 );
-const numberWithin = (minimum: number, maximum: number) =>
+/**
+ * `step` is inferred from the bounds and can be overridden, because the
+ * inference is a guess about the units and it is wrong whenever a scale that
+ * runs between two whole numbers is nevertheless read in fractions -- a time
+ * scale of 0 to 1000 that only ever steps by 1 cannot express half speed.
+ */
+const numberWithin = (minimum: number, maximum: number, step?: number) =>
   withEditor(
     {
       kind: 'number',
       minimum,
       maximum,
-      step: Number.isInteger(minimum) && Number.isInteger(maximum) ? 1 : 0.01,
+      step: step ?? (Number.isInteger(minimum) && Number.isInteger(maximum) ? 1 : 0.01),
     },
     (value): value is number =>
       typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum,
+  );
+/**
+ * A whole number within bounds, for the settings that mirror a `uint32` on the
+ * wire. `numberWithin` would accept 1.5 seconds of period and hand the control
+ * plane something its own field cannot carry.
+ */
+const integerWithin = (minimum: number, maximum: number) =>
+  withEditor(
+    { kind: 'number', minimum, maximum, step: 1 },
+    (value): value is number =>
+      typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum,
   );
 const isStringList = withEditor(
   { kind: 'string-list', delimiter: ',' },
@@ -224,6 +261,124 @@ const oneOfNumbers = (values: readonly number[]) =>
   withEditor(
     { kind: 'enum', options: values.map(String) },
     (value): value is number => typeof value === 'number' && values.includes(value),
+  );
+
+/**
+ * The readings the simulation drives, and the address a curve point carries.
+ *
+ * Declared here with the rest of the vocabulary the safe editor may offer, the
+ * way `tileCategories` is. The list is the world the shell already simulates:
+ * the seven session metrics, the two a system node reports, and the three a
+ * comms channel reports.
+ */
+export const simulationChannels = [
+  'cpu',
+  'gpu',
+  'link-latency',
+  'link-load',
+  'link-signal',
+  'network-in',
+  'network-out',
+  'node-load',
+  'node-temperature',
+  'ram',
+  'readiness',
+  'storage',
+] as const;
+
+export type SimulationChannelName = (typeof simulationChannels)[number];
+
+/**
+ * The four interpolations `evaluateCurve` implements, offered by name.
+ *
+ * Constrained to the domain's own union rather than restated as free strings,
+ * so a kind renamed there stops compiling here instead of becoming an option
+ * that selects an interpolation no evaluator has.
+ */
+export const curveInterpolations = [
+  'linear',
+  'step',
+  'hermite',
+  'bezier',
+] as const satisfies readonly CurveInterpolationKind[];
+
+/**
+ * The ceiling `TelemetryService.assertCurve` enforces on the wire, per curve.
+ * Refused here too, so a curve an operator drew locally cannot be one the
+ * control plane will later reject as too long to preview.
+ */
+export const maximumCurvePoints = 512;
+
+/**
+ * A control point, as `channel=time,value,inTangent,outTangent`.
+ *
+ * A point carries its channel for the same reason a tile span carries its
+ * screen: a `SettingValue` is a flat list of strings, and anything addressed
+ * per element has to state its address in the entry or lose it.
+ *
+ * The number shape is deliberately narrow -- at most seven whole digits and six
+ * decimals -- because the list is the whole storage budget of a curve and an
+ * unbounded literal is an unbounded entry.
+ */
+const curveNumber = String.raw`-?(?:0|[1-9][0-9]{0,6})(?:\.[0-9]{1,6})?`;
+const curvePointEntry = new RegExp(
+  `^([a-z][a-z0-9-]*)=(${curveNumber}),(${curveNumber}),(${curveNumber}),(${curveNumber})$`,
+);
+
+export interface CurveEditorShape {
+  readonly channels: readonly string[];
+  readonly timeDomain: readonly [number, number];
+  readonly valueDomain: readonly [number, number];
+  readonly restingValue: number;
+  readonly unit: string;
+}
+
+const within = (value: number, bounds: readonly [number, number]): boolean =>
+  value >= bounds[0] && value <= bounds[1];
+
+/**
+ * Accepts a canonical curve: channels in ascending order, each channel's points
+ * in ascending time with no two points sharing one, every coordinate inside the
+ * declared domain, and no channel longer than the wire's own ceiling.
+ *
+ * Order is part of the contract rather than a courtesy of the writer. Two lists
+ * that describe the same curve are then the same list, which is what lets undo,
+ * the settings history and the issue draft treat a curve as one value instead
+ * of as a set that happens to compare unequal.
+ */
+function isCurveList(value: unknown, shape: CurveEditorShape): boolean {
+  if (!Array.isArray(value)) return false;
+  let channel = '';
+  let previousTime = Number.NEGATIVE_INFINITY;
+  let points = 0;
+  for (const entry of value) {
+    if (typeof entry !== 'string') return false;
+    const match = curvePointEntry.exec(entry);
+    if (match === null) return false;
+    const [, name, rawTime, rawValue] = match;
+    if (name === undefined || rawTime === undefined || rawValue === undefined) return false;
+    if (!shape.channels.includes(name)) return false;
+    if (name < channel) return false;
+    if (name !== channel) {
+      channel = name;
+      previousTime = Number.NEGATIVE_INFINITY;
+      points = 0;
+    }
+    const time = Number(rawTime);
+    if (time <= previousTime) return false;
+    previousTime = time;
+    points += 1;
+    if (points > maximumCurvePoints) return false;
+    if (!within(time, shape.timeDomain)) return false;
+    if (!within(Number(rawValue), shape.valueDomain)) return false;
+  }
+  return true;
+}
+
+const curveOver = (shape: CurveEditorShape): SettingValidator =>
+  withEditor(
+    { kind: 'curve', ...shape, maximumPoints: maximumCurvePoints },
+    (value): value is readonly string[] => isCurveList(value, shape),
   );
 
 export const settingsDefinitions: readonly SettingDefinition[] = [
@@ -929,6 +1084,106 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
       'storage-exhaustion',
       'cpu-overload',
     ]),
+  ),
+  definition(
+    'simulation.channel',
+    'simulation',
+    'cpu',
+    'group',
+    'Channel whose two curves the editor shows; the others keep the points already drawn for them.',
+    oneOf(simulationChannels),
+  ),
+  definition(
+    'simulation.valueCurve',
+    'simulation',
+    [],
+    'group',
+    'Reading per channel over one period, as `channel=time,value,inTangent,outTangent`; the value is a percentage of that channel’s own range, so one curve reads the same on every channel.',
+    curveOver({
+      channels: simulationChannels,
+      timeDomain: [0, 1],
+      valueDomain: [0, 100],
+      restingValue: 50,
+      unit: '%',
+    }),
+  ),
+  definition(
+    'simulation.criticalityCurve',
+    'simulation',
+    [],
+    'group',
+    'Criticality per channel on the same timeline, in the same entry form. It sets the severity band and caps how high a reading may climb within the channel’s range.',
+    curveOver({
+      channels: simulationChannels,
+      timeDomain: [0, 1],
+      valueDomain: [0, 1],
+      restingValue: 0,
+      unit: '',
+    }),
+  ),
+  definition(
+    'simulation.interpolation',
+    'simulation',
+    'hermite',
+    'group',
+    'How both curves are read between their points.',
+    oneOf(curveInterpolations),
+  ),
+  definition(
+    'simulation.loop',
+    'simulation',
+    true,
+    'group',
+    'Repeat both curves over their own span instead of holding their end points.',
+    isBoolean,
+  ),
+  definition(
+    'simulation.periodSeconds',
+    'simulation',
+    60,
+    'group',
+    'How long one pass of the curves takes, in seconds. Bounded as `TelemetryService` bounds `period_seconds`.',
+    integerWithin(1, 86_400),
+  ),
+  definition(
+    'simulation.updateIntervalMs',
+    'simulation',
+    1_000,
+    'group',
+    'How often a new reading is taken, in milliseconds. Bounded as `TelemetryService` bounds `update_interval_ms`.',
+    integerWithin(1, 3_600_000),
+  ),
+  definition(
+    'simulation.timeScale',
+    'simulation',
+    1,
+    'group',
+    'How fast the curve timeline runs against the clock. Bounded as `TelemetryService` bounds `time_scale`.',
+    numberWithin(0, 1_000, 0.1),
+  ),
+  definition(
+    'simulation.noise',
+    'simulation',
+    0.05,
+    'group',
+    'Scatter added around the curve, as a fraction of the channel range.',
+    numberWithin(0, 1, 0.01),
+  ),
+  definition(
+    'simulation.smoothing',
+    'simulation',
+    0.5,
+    'group',
+    'Weight the previous reading keeps; 0 follows the curve exactly and 1 never moves.',
+    numberWithin(0, 1, 0.01),
+  ),
+  definition(
+    'simulation.seed',
+    'simulation',
+    1,
+    'group',
+    'Seed of the scatter, so one profile produces the same series on every machine.',
+    integerWithin(0, 4_294_967_295),
   ),
   definition(
     'groups.authority',

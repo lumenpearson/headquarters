@@ -7,14 +7,17 @@ import {
   createFactorySnapshot,
   createSettingsDraft,
   createSettingsDraftCheckpoint,
+  curveInterpolations,
   exportDraft,
   getSettingDefinition,
   getSettingsDefinitionsForCategory,
   importDraft,
+  maximumCurvePoints,
   publishDraft,
   resetDraftAll,
   resetDraftCategory,
   restoreSettingsDraft,
+  simulationChannels,
 } from './index.js';
 
 const event = (id: string) => ({ id, at: '2026-08-15T12:00:00.000Z' });
@@ -234,5 +237,196 @@ describe('background source settings', () => {
     ['a number', 3],
   ])('rejects %s', (_reason, value) => {
     expect(() => patch('backgrounds.imageSource', value)).toThrow(InvalidSettingValueError);
+  });
+});
+
+describe('simulation curve settings', () => {
+  const patch = (id: string, value: unknown) =>
+    applyDraftPatch(createSettingsDraft(createFactorySnapshot()), [{ id, value }], event('sim-1'));
+
+  const pointsFor = (channel: string, count: number): readonly string[] =>
+    Array.from(
+      { length: count },
+      (_unused, index) => `${channel}=${(index / 1000).toFixed(3)},20,0,0`,
+    );
+
+  it('declares a curve editor carrying every bound the control needs, and no free-text mode', () => {
+    // The editor catalogue is the whole of what the safe editor may render, and
+    // a curve joins it as a declaration rather than as typed coordinates: the
+    // control reads its domains from here, so nothing downstream carries a
+    // constant of its own.
+    expect(getSettingDefinition('simulation.valueCurve')?.editor).toEqual({
+      kind: 'curve',
+      channels: simulationChannels,
+      timeDomain: [0, 1],
+      valueDomain: [0, 100],
+      restingValue: 50,
+      unit: '%',
+      maximumPoints: maximumCurvePoints,
+    });
+    expect(getSettingDefinition('simulation.criticalityCurve')?.editor).toEqual({
+      kind: 'curve',
+      channels: simulationChannels,
+      timeDomain: [0, 1],
+      valueDomain: [0, 1],
+      restingValue: 0,
+      unit: '',
+      maximumPoints: maximumCurvePoints,
+    });
+  });
+
+  it('starts with no curve at all, which is how a channel says nothing is scripted', () => {
+    expect(getSettingDefinition('simulation.valueCurve')?.defaultValue).toEqual([]);
+    expect(getSettingDefinition('simulation.criticalityCurve')?.defaultValue).toEqual([]);
+  });
+
+  it('accepts a canonical curve over several channels', () => {
+    const entries = [
+      'cpu=0,20,0,0',
+      'cpu=0.5,88.25,0,0',
+      'cpu=1,20,0,0',
+      'ram=0,40,0,0',
+      'ram=1,40,-12.5,3',
+    ];
+
+    expect(patch('simulation.valueCurve', entries).values['simulation.valueCurve']).toEqual(
+      entries,
+    );
+  });
+
+  it('accepts a single-point curve, which the evaluator holds everywhere', () => {
+    expect(patch('simulation.valueCurve', ['gpu=0.25,10,0,0']).values['simulation.valueCurve']) //
+      .toEqual(['gpu=0.25,10,0,0']);
+  });
+
+  it.each([
+    ['a point with no channel', ['0,20,0,0']],
+    ['a channel the schema does not declare', ['disk=0,20,0,0']],
+    ['a channel in the wrong case', ['CPU=0,20,0,0']],
+    ['three coordinates instead of four', ['cpu=0,20,0']],
+    ['five coordinates', ['cpu=0,20,0,0,0']],
+    ['a coordinate that is not a number', ['cpu=0,high,0,0']],
+    ['a coordinate in exponent form', ['cpu=0,1e2,0,0']],
+    ['a leading zero, which is not the canonical spelling', ['cpu=0,007,0,0']],
+    ['more decimals than an entry may carry', ['cpu=0.1234567,20,0,0']],
+    ['a time past the end of the period', ['cpu=1.5,20,0,0']],
+    ['a negative time', ['cpu=-0.5,20,0,0']],
+    ['a value above the declared domain', ['cpu=0,120,0,0']],
+    ['a value below the declared domain', ['cpu=0,-1,0,0']],
+    ['two points at one time', ['cpu=0.5,20,0,0', 'cpu=0.5,30,0,0']],
+    ['points in descending time', ['cpu=0.5,20,0,0', 'cpu=0.25,30,0,0']],
+    ['channels out of order', ['ram=0,20,0,0', 'cpu=0,20,0,0']],
+    ['one channel interrupted and resumed', ['cpu=0,20,0,0', 'ram=0,20,0,0', 'cpu=1,20,0,0']],
+    ['a bare string rather than a list', 'cpu=0,20,0,0'],
+    ['a list holding something that is not a string', [42]],
+    ['a separator that is not a comma', ['cpu=0;20;0;0']],
+    ['whitespace around an entry', [' cpu=0,20,0,0 ']],
+  ])('refuses %s', (_reason, value) => {
+    expect(() => patch('simulation.valueCurve', value)).toThrow(InvalidSettingValueError);
+  });
+
+  it('holds each curve to its own declared value domain', () => {
+    // The two curves share one entry form and differ only in the domain they
+    // declare, so the same coordinate is legal on one and refused on the other.
+    expect(
+      patch('simulation.valueCurve', ['cpu=0,50,0,0']).values['simulation.valueCurve'],
+    ).toEqual(['cpu=0,50,0,0']);
+    expect(() => patch('simulation.criticalityCurve', ['cpu=0,50,0,0'])).toThrow(
+      InvalidSettingValueError,
+    );
+  });
+
+  it('accepts exactly the wire’s point ceiling, and refuses one more', () => {
+    expect(
+      patch('simulation.valueCurve', pointsFor('cpu', maximumCurvePoints)).values[
+        'simulation.valueCurve'
+      ],
+    ).toHaveLength(maximumCurvePoints);
+    expect(() => patch('simulation.valueCurve', pointsFor('cpu', maximumCurvePoints + 1))).toThrow(
+      InvalidSettingValueError,
+    );
+  });
+
+  it('counts the ceiling per channel rather than over the whole list', () => {
+    // The ceiling the control plane enforces is a bound on one curve. Two full
+    // channels are two curves, and refusing them here would refuse a profile
+    // the server accepts.
+    const both = [...pointsFor('cpu', maximumCurvePoints), ...pointsFor('ram', maximumCurvePoints)];
+
+    expect(patch('simulation.valueCurve', both).values['simulation.valueCurve']).toHaveLength(
+      maximumCurvePoints * 2,
+    );
+  });
+});
+
+describe('simulation timing and variation settings', () => {
+  const patch = (id: string, value: unknown) =>
+    applyDraftPatch(createSettingsDraft(createFactorySnapshot()), [{ id, value }], event('sim-2'));
+
+  it('mirrors the bounds TelemetryService validates on the wire', () => {
+    expect(getSettingDefinition('simulation.periodSeconds')?.editor).toEqual({
+      kind: 'number',
+      minimum: 1,
+      maximum: 86_400,
+      step: 1,
+    });
+    expect(getSettingDefinition('simulation.updateIntervalMs')?.editor).toEqual({
+      kind: 'number',
+      minimum: 1,
+      maximum: 3_600_000,
+      step: 1,
+    });
+    expect(getSettingDefinition('simulation.timeScale')?.editor).toEqual({
+      kind: 'number',
+      minimum: 0,
+      maximum: 1_000,
+      step: 0.1,
+    });
+  });
+
+  it.each([
+    ['simulation.periodSeconds', 86_401],
+    ['simulation.periodSeconds', 0],
+    ['simulation.updateIntervalMs', 3_600_001],
+    ['simulation.updateIntervalMs', 0],
+    ['simulation.timeScale', 1_000.5],
+    ['simulation.timeScale', -0.5],
+    ['simulation.noise', 1.5],
+    ['simulation.smoothing', -0.1],
+    ['simulation.seed', 4_294_967_296],
+  ])('refuses %s outside its bound: %s', (id, value) => {
+    expect(() => patch(id, value)).toThrow(InvalidSettingValueError);
+  });
+
+  it('refuses a fractional period, because the wire field is a uint32', () => {
+    // `numberWithin` would have accepted 1.5 seconds and handed the control
+    // plane something `period_seconds` cannot carry.
+    expect(() => patch('simulation.periodSeconds', 1.5)).toThrow(InvalidSettingValueError);
+    expect(() => patch('simulation.updateIntervalMs', 250.5)).toThrow(InvalidSettingValueError);
+    expect(() => patch('simulation.seed', 1.5)).toThrow(InvalidSettingValueError);
+    // A time scale is not a wire integer, and half speed has to stay expressible.
+    expect(patch('simulation.timeScale', 0.5).values['simulation.timeScale']).toBe(0.5);
+  });
+
+  it('offers exactly the interpolations the domain evaluator implements', () => {
+    expect(getSettingDefinition('simulation.interpolation')?.editor).toEqual({
+      kind: 'enum',
+      options: curveInterpolations,
+    });
+    expect(() => patch('simulation.interpolation', 'catmull-rom')).toThrow(
+      InvalidSettingValueError,
+    );
+  });
+
+  it('scopes the whole simulation to the group, as simulation.preset already was', () => {
+    // A curve one operator drags and another never sees is two shoots, not one.
+    // Asserted over the category rather than over a roster that would have to
+    // be edited every time the category grows.
+    expect(
+      getSettingsDefinitionsForCategory('simulation').every(
+        (definition) => definition.scope === 'group',
+      ),
+    ).toBe(true);
+    expect(getSettingsDefinitionsForCategory('simulation').length).toBeGreaterThan(1);
   });
 });

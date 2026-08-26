@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from 'react';
 
 import type { SettingGroup } from '@/application/personalization/catalog';
 
+import { CurveSetting } from './CurveSetting';
 import { useMaterialCatalog } from './MaterialCatalog';
 import { materialOptionsFor, unsetMaterialOption } from './MaterialOptions';
 
@@ -97,6 +98,10 @@ export function SchemaSetting({
           />
         );
       }
+      case 'curve':
+        return (
+          <CurveSetting editor={editor} label={label} value={value} onValueChange={onValueChange} />
+        );
       case 'string-list':
         return (
           <TerminalInput
