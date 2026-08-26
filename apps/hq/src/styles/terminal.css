@@ -83,11 +83,22 @@ body.terminal-theme kbd {
   font-variant-ligatures: none;
 }
 
+/*
+ * This is the focus ring every control in the shell actually gets:
+ * `body.terminal-theme button:focus-visible` is (0,2,2) and outranks
+ * `.ops-shell button:focus-visible` in operations.css, which is (0,2,1). While
+ * the width was written as `1px` here, `accessibility.focusRingWidth` moved
+ * nothing anywhere -- the rule that read it never applied to a button, a field
+ * or a select.
+ *
+ * The property is declared on `.ops-shell`, so it reaches the controls inside
+ * the shell and the fallback stands for the portalled surfaces outside it.
+ */
 body.terminal-theme button:focus-visible,
 body.terminal-theme input:focus-visible,
 body.terminal-theme select:focus-visible,
 body.terminal-theme textarea:focus-visible {
-  outline: 1px solid var(--accent-strong);
+  outline: var(--ops-focus-ring-width, 1px) solid var(--accent-strong);
   outline-offset: -2px;
 }
 

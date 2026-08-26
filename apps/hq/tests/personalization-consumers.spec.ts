@@ -9,12 +9,30 @@ import { expect, test, type Page } from '@playwright/test';
  * the value persists, and the application looks exactly the same. These tests
  * assert the only thing that separates a working setting from an inert one.
  *
- * Every case runs at 2560x1440. The status line clips what does not fit
+ * Most cases run at 2560x1440. The status line clips what does not fit
  * (`overflow: hidden`, `white-space: nowrap`) and the header drops two metadata
  * entries below 1600px, so a narrow window hides these elements for reasons
  * that have nothing to do with the setting under test.
+ *
+ * The cases that measure geometry run on both sides of the 2500px breakpoint
+ * instead, because one width is where a case went wrong: the geometry test
+ * below seeded a body padding of 16px at 2560x1440, where the responsive block
+ * already wrote 16px, and passed on the coincidence. It would have passed with
+ * `sizes.panelPadding` deleted from the schema.
  */
 const wide = { width: 2560, height: 1440 } as const;
+
+/**
+ * Both sides of the 2500px breakpoint.
+ *
+ * A responsive block that writes a number outranks the base rule reading the
+ * setting, so a geometry case proves nothing unless it runs both where such a
+ * block applies and where none does.
+ */
+const geometryViewports = [
+  { label: '1920x1080', size: { width: 1920, height: 1080 } },
+  { label: '2560x1440', size: wide },
+] as const;
 
 /**
  * Seeds the persisted draft before the application boots.
@@ -160,43 +178,133 @@ test('R14: a theme and an accent both reach the document and neither breaks the 
   );
 });
 
-test('R6/R19: geometry settings resize the interface without letting the page scroll', async ({
-  page,
-}) => {
+for (const viewport of geometryViewports) {
+  test(`R6/R19: geometry settings resize the interface at ${viewport.label} without letting the page scroll`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport.size);
+    await page.goto('/overview');
+    await expect(page.locator('.ops-panel').first()).toBeVisible();
+    const before = await panelMetrics(page);
+
+    await seedSettings(page, {
+      /*
+       * Neither number is one `operations.css` writes for the role it moves.
+       * The stylesheet gives a panel body 8, 11, 12 or 16 pixels of padding and
+       * a header a minimum of 31, 42, 43 or 54, depending on the breakpoint;
+       * seeding any of those lets a hardcoded declaration answer for the
+       * setting. 19 and 46 sit inside the schema's ranges — 2..20 and 24..48 —
+       * and outside both sets. 46 is also above the tallest header content at
+       * either width, so the minimum decides the box rather than the title
+       * inside it.
+       *
+       * `typography.letterSpacing` is seeded separately below rather than here:
+       * it widens the header's own title, and a wider title would decide the
+       * header's box in place of the height under test.
+       */
+      'sizes.panelHeader': 46,
+      'sizes.panelPadding': 19,
+      'sizes.borderWidth': 3,
+      'colors.panelOpacity': 0.6,
+    });
+    await page.reload();
+    await expect(page.locator('.ops-panel').first()).toBeVisible();
+    await expect.poll(() => panelMetrics(page).then((metrics) => metrics.borderWidth)).toBe('3px');
+    const after = await panelMetrics(page);
+
+    // The header is asserted here, on both sides of the breakpoint. It used to
+    // be exempted on the grounds that "the wide breakpoint sets its own" — true
+    // of the stylesheet as it stood, and the defect itself: the responsive
+    // block wrote 54px rather than reading `--ops-panel-header`, so the setting
+    // reached the shell and stopped there.
+    expect(after.headerMinHeight).toBe('46px');
+    // The declared minimum and the drawn box, because only the second is what
+    // the operator sees. The default is 42px below the breakpoint and 54px
+    // above it, so one number moving the box in both directions is what says
+    // the setting decided it.
+    expect(after.headerHeight).toBe(46);
+    expect(after.bodyPadding).toBe('19px');
+    // Before and after, not after alone: a value already on the screen proves
+    // nothing about the setting that claims to have put it there.
+    expect(before.headerMinHeight).not.toBe(after.headerMinHeight);
+    expect(before.headerHeight).not.toBe(after.headerHeight);
+    expect(before.bodyPadding).not.toBe(after.bodyPadding);
+    expect(before.borderWidth).toBe('1px');
+
+    // The typography hook is asserted twice: that the property reaches the
+    // shell, and that the shell's own text is spaced by it. The design sets its
+    // own spacing on several descendants, so only the root is measured — but
+    // measuring the property alone is what let a dead declaration pass, so the
+    // ratio is read back from the computed style as well.
+    await seedSettings(page, { 'typography.letterSpacing': 0.15 });
+    await page.reload();
+    await expect(page.locator('.ops-panel').first()).toBeVisible();
+    await expect
+      .poll(() => panelMetrics(page).then((metrics) => metrics.letterSpacingProperty))
+      .toBe('0.15em');
+    const spaced = await panelMetrics(page);
+    expect(before.letterSpacingProperty).toBe('');
+    expect(spaced.letterSpacingEm).toBeCloseTo(0.15, 3);
+    expect(before.letterSpacingEm).toBeCloseTo(0.01, 3);
+    // R19 asks for per-element size settings "within reason": the reason is that
+    // the layout stays bounded, which is R26 and is the property that would break
+    // first if a size setting were unbounded.
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(
+      await page.evaluate(() => window.innerHeight),
+    );
+  });
+
+  test(`R19: both scale settings resize the shell's text at ${viewport.label}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport.size);
+    await page.goto('/overview');
+    await expect(page.locator('.ops-shell')).toBeVisible();
+    const before = await shellFontSize(page);
+
+    // The two settings reach the document as one bounded product, so each is
+    // seeded on its own: a dead binding would otherwise hide behind the other.
+    await seedSettings(page, { 'typography.scale': 1.2 });
+    await page.reload();
+    await expect.poll(() => typeScaleProperty(page)).toBe('1.2');
+    expect(await shellFontSize(page)).toBeCloseTo(before * 1.2, 2);
+
+    await seedSettings(page, { 'sizes.scale': 1.15 });
+    await page.reload();
+    await expect.poll(() => typeScaleProperty(page)).toBe('1.15');
+    expect(await shellFontSize(page)).toBeCloseTo(before * 1.15, 2);
+  });
+}
+
+test('R6: the focus ring is drawn at the width the operator set', async ({ page }) => {
   await page.setViewportSize(wide);
   await page.goto('/overview');
-  await expect(page.locator('.ops-panel').first()).toBeVisible();
-  const before = await panelMetrics(page);
+  await expect(page.locator('.ops-shell')).toBeVisible();
+  /*
+   * A control and a link, because two different rules answer for the ring and
+   * neither covers the other's elements. `body.terminal-theme button:focus-visible`
+   * in terminal.css is (0,2,2) and outranks `.ops-shell button:focus-visible` in
+   * operations.css, which is (0,2,1); operations.css is alone on `a`. Measuring
+   * only the button would leave the second declaration unproven.
+   *
+   * Tab rather than `focus()`: the rules are written for `:focus-visible`, which
+   * Chromium grants to keyboard focus and withholds from a programmatic one.
+   */
+  await page.keyboard.press('Tab');
+  expect(await focusedOutlineWidth(page)).toBe('1px');
+  await tabTo(page, '.ops-nav a');
+  expect(await focusedOutlineWidth(page)).toBe('1px');
 
-  await seedSettings(page, {
-    'sizes.panelHeader': 44,
-    'sizes.panelPadding': 16,
-    'sizes.borderWidth': 3,
-    'typography.letterSpacing': 0.15,
-    'colors.panelOpacity': 0.6,
-  });
+  await seedSettings(page, { 'accessibility.focusRingWidth': 3 });
   await page.reload();
-  await expect(page.locator('.ops-panel').first()).toBeVisible();
-  await expect.poll(() => panelMetrics(page).then((metrics) => metrics.borderWidth)).toBe('3px');
-  const after = await panelMetrics(page);
-
-  // Header height is deliberately not asserted here: the wide breakpoint sets
-  // its own, and a responsive rule outranking the base declaration is correct
-  // rather than a setting failing to apply.
-  expect(after.bodyPadding).toBe('16px');
-  // The typography hook is asserted as the property reaching the shell rather
-  // than as a computed letter spacing: the design sets its own on several
-  // descendants, so measuring one of those would report no change however far
-  // the setting moved. The two geometry values above are what prove a hook
-  // actually redraws something.
-  expect(after.letterSpacingProperty).toBe('0.15em');
-  expect(before.letterSpacingProperty).toBe('');
-  // R19 asks for per-element size settings "within reason": the reason is that
-  // the layout stays bounded, which is R26 and is the property that would break
-  // first if a size setting were unbounded.
-  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(
-    await page.evaluate(() => window.innerHeight),
-  );
+  // The property arrives an effect after the first paint, and 3 is not a width
+  // any rule writes, so waiting for it is what separates "the ring is thin" from
+  // "the page has not hydrated yet".
+  await expect.poll(() => shellProperty(page, '--ops-focus-ring-width')).toBe('3px');
+  await page.keyboard.press('Tab');
+  expect(await focusedOutlineWidth(page)).toBe('3px');
+  await tabTo(page, '.ops-nav a');
+  expect(await focusedOutlineWidth(page)).toBe('3px');
 });
 
 test('R13: a background pattern appears only when one is chosen', async ({ page }) => {
@@ -243,26 +351,96 @@ test('R19: switching a kind of motion off leaves the rest of the interface movin
 
 async function panelMetrics(page: Page): Promise<{
   headerHeight: number;
+  headerMinHeight: string;
   bodyPadding: string;
   borderWidth: string;
   letterSpacingProperty: string;
+  letterSpacingEm: number;
 }> {
   return page.evaluate(() => {
-    const panel = document.querySelector('.ops-panel');
-    const header = document.querySelector('.ops-panel__header');
-    const body = document.querySelector('.ops-panel__body');
-    if (panel === null || header === null || body === null) {
+    /*
+     * The first panel whose header carries no control.
+     *
+     * `sizes.panelHeader` is a minimum, so a header holding a 31px button is
+     * 46px tall whatever the minimum says, and measuring that one would report
+     * no change however far the setting moved. Every other panel on /overview
+     * has a title and nothing else, and its box is exactly the minimum.
+     */
+    const panel = [...document.querySelectorAll('.ops-panel')].find(
+      (candidate) => candidate.querySelector('.ops-panel__header button') === null,
+    );
+    const header = panel?.querySelector('.ops-panel__header') ?? null;
+    const body = panel?.querySelector('.ops-panel__body') ?? null;
+    if (panel === undefined || header === null || body === null) {
       throw new Error('no panel is laid out');
     }
+    const shell = window.getComputedStyle(document.querySelector('.ops-shell') as Element);
+    const spacing = Number.parseFloat(shell.letterSpacing);
     return {
       headerHeight: Math.round(header.getBoundingClientRect().height),
+      // Both the declared minimum and the drawn box. The minimum is what the
+      // setting owns; the box is what the operator sees, and a rule that read
+      // the setting under a taller content box would satisfy one and not the
+      // other.
+      headerMinHeight: window.getComputedStyle(header).minHeight,
       bodyPadding: window.getComputedStyle(body).paddingTop,
       borderWidth: window.getComputedStyle(panel).borderTopWidth,
-      letterSpacingProperty: window
-        .getComputedStyle(document.querySelector('.ops-shell') as Element)
-        .getPropertyValue('--ops-letter-spacing')
-        .trim(),
+      letterSpacingProperty: shell.getPropertyValue('--ops-letter-spacing').trim(),
+      letterSpacingEm: Number.isFinite(spacing) ? spacing / Number.parseFloat(shell.fontSize) : 0,
     };
+  });
+}
+
+/** The shell's own font size, which both scale settings multiply. */
+function shellFontSize(page: Page): Promise<number> {
+  return page.evaluate(() =>
+    Number.parseFloat(
+      window.getComputedStyle(document.querySelector('.ops-shell') as Element).fontSize,
+    ),
+  );
+}
+
+/** The bounded product of the two scale settings, as the shell publishes it. */
+function typeScaleProperty(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    window
+      .getComputedStyle(document.querySelector('.ops-shell') as Element)
+      .getPropertyValue('--ops-type-scale')
+      .trim(),
+  );
+}
+
+/** One custom property as the shell publishes it. */
+function shellProperty(page: Page, property: string): Promise<string> {
+  return page.evaluate(
+    (name) =>
+      window
+        .getComputedStyle(document.querySelector('.ops-shell') as Element)
+        .getPropertyValue(name)
+        .trim(),
+    property,
+  );
+}
+
+/** Presses Tab until the keyboard lands on an element the selector matches. */
+async function tabTo(page: Page, selector: string, limit = 40): Promise<void> {
+  for (let step = 0; step < limit; step += 1) {
+    await page.keyboard.press('Tab');
+    const landed = await page.evaluate(
+      (css) => document.activeElement !== null && document.activeElement.matches(css),
+      selector,
+    );
+    if (landed) return;
+  }
+  throw new Error(`the keyboard never reached ${selector}`);
+}
+
+/** The outline of whatever the keyboard has just focused. */
+function focusedOutlineWidth(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const active = document.activeElement;
+    if (active === null || active === document.body) return 'nothing is focused';
+    return window.getComputedStyle(active).outlineWidth;
   });
 }
 
