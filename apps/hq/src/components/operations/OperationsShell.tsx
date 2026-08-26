@@ -592,6 +592,20 @@ function TransportProbe({ bus }: { readonly bus: string }) {
               : `Сдвиг ${connection.clock.offsetMs} мс, задержка ${connection.clock.latencyMs} мс`}
           </dd>
         </div>
+        {/* The third fact of the row, beside the mode and the link: whether
+            this screen has a local copy of what the group agreed, and when it
+            was last refreshed. Without it `SYNC:OFFLINE` reads the same on a
+            screen showing the group's last agreement and on one showing the
+            compiled-in constants, which are different states to be in on a
+            shoot day. */}
+        <div>
+          <dt>ЛОКАЛЬНАЯ КОПИЯ</dt>
+          <dd>
+            {connection.mirror.refreshedAt === ''
+              ? 'Нет — значения берутся из сборки'
+              : `Обновлена ${formatDateTime(connection.mirror.refreshedAt)}, ревизия ${connection.mirror.revision}`}
+          </dd>
+        </div>
       </dl>
     </TerminalPopover>
   );

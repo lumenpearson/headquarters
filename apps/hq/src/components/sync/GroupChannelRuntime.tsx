@@ -6,10 +6,12 @@ import { initialRealtimeLinkState } from '@/application/sync/connection';
 import type { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
 import { connectGroupSettings } from '@/application/sync/groupSettingsBus';
 import { GroupSettingsSync } from '@/application/sync/GroupSettingsSync';
+import { mirrorSummary } from '@/application/sync/localMirror';
 import type { ControlPlaneClient } from '@/infrastructure/controlPlane/ControlPlaneClient';
 import { ControlPlaneGroupChannel } from '@/infrastructure/controlPlane/ControlPlaneGroupChannel';
 import { GroupSettingsClient } from '@/infrastructure/controlPlane/GroupSettingsClient';
 import { liveEditDocumentId } from '@/infrastructure/controlPlane/GroupLiveEditTransport';
+import { GroupSnapshotDownloader } from '@/infrastructure/controlPlane/GroupSnapshotDownloader';
 import { RealtimeClient } from '@/infrastructure/controlPlane/RealtimeClient';
 import { ControlPlaneMaterialClient } from '@/infrastructure/materials/ControlPlaneMaterialClient';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
@@ -45,6 +47,12 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
   );
   const materialsCapability = useOperationsStore(
     (state) => state.connection.capabilities?.materials ?? false,
+  );
+  const syncCapability = useOperationsStore(
+    (state) => state.connection.capabilities?.sync ?? false,
+  );
+  const installationId = useOperationsStore(
+    (state) => state.connection.capabilities?.installationId ?? '',
   );
 
   useEffect(() => {
@@ -91,11 +99,28 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
 
     let disconnectSettings: (() => void) | undefined;
     if (settings !== null) {
+      /*
+       * The local copy of the group's state (F14, stage 9). It is offered the
+       * answer `GetEffectiveSettings` gives and decides for itself whether the
+       * answer is newer, complete and readable; nothing here can make it accept
+       * one that is not. `documents` is passed only when this deployment
+       * registered `SyncService`, because the group-log position it stamps the
+       * copy with comes from `GetDocumentSnapshot`, and a call that could only
+       * be refused would stop every refresh instead of stamping one.
+       */
+      const mirror = new GroupSnapshotDownloader({
+        groupId,
+        installationId,
+        ...(syncCapability ? { documents: client } : {}),
+      });
       const sync = new GroupSettingsSync({
         port: settings,
         apply: (patches) => operationsStore.getState().applySettingsPatch(patches),
         readDraftValue: (id) => operationsStore.getState().personalization.draft.values[id],
         onFailure: (failure) => operationsStore.getState().patchConnection({ failure }),
+        mirror,
+        onMirrorChanged: () =>
+          operationsStore.getState().patchConnection({ mirror: mirrorSummary(mirror.read()) }),
       });
       disconnectSettings = connectGroupSettings(sync);
       // The group wins on join; see `GroupSettingsSync`'s precedence note.
@@ -160,11 +185,13 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
     client,
     deviceId,
     groupId,
+    installationId,
     materialsCapability,
     mode,
     realtimeAdmission,
     session,
     settingsCapability,
+    syncCapability,
   ]);
 
   return null;

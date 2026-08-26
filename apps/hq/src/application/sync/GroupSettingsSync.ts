@@ -3,6 +3,10 @@ import type { SettingsPatch, SettingValue } from '@gremuchaya/settings-schema';
 
 import { isControlPlaneError } from './controlPlanePort';
 import type { GroupSettingsOperation, GroupSettingsPort } from './groupSettingsPort';
+// Type-only, and it has to stay that way: `localMirror` imports
+// `isGroupScopedSetting` from here as a value, and `verbatimModuleSyntax`
+// erases this line, so the two modules never form a cycle at runtime.
+import type { GroupMirrorPort } from './localMirror';
 
 /**
  * The settings whose scope says they belong to the group, not the machine.
@@ -36,6 +40,23 @@ export interface GroupSettingsSyncOptions {
   readonly readDraftValue: (id: string) => SettingValue | undefined;
   /** Where a refusal is recorded, in the operator's language. */
   readonly onFailure?: (message: string) => void;
+  /**
+   * The local copy of what the group agreed (F14, stage 9).
+   *
+   * Absent in a session that has none -- and the service then behaves exactly
+   * as it did before there was one: it reads the group or it reads nothing.
+   * With a copy present, the cloud's answer is offered to it on the way past,
+   * and the copy is what a join falls back to when the cloud does not answer.
+   */
+  readonly mirror?: GroupMirrorPort;
+  /**
+   * Called once per join attempt, after the copy has had its chance to move.
+   *
+   * It carries no argument on purpose: the caller re-reads `mirror.read()`, so
+   * there is one account of what the copy holds rather than one account and a
+   * message about it.
+   */
+  readonly onMirrorChanged?: () => void;
 }
 
 /**
@@ -94,33 +115,8 @@ export class GroupSettingsSync {
    * lands, which is the same rule the live-edit bus applies to the wire.
    */
   async adoptGroupSettings(signal?: AbortSignal): Promise<readonly SettingsPatch[]> {
-    let document;
-    try {
-      document = await this.#options.port.getEffectiveSettings(false, signal);
-    } catch (error: unknown) {
-      this.#record(error, 'НАСТРОЙКИ ГРУППЫ НЕ ПРОЧИТАНЫ');
-      return [];
-    }
-    const patches: SettingsPatch[] = [];
-    for (const id of groupScopedSettingIds()) {
-      const value = document.values[id];
-      /*
-       * A value the group does not hold is skipped, so a document with no
-       * values at all produces no patches and this method is a no-op.
-       *
-       * That is load-bearing rather than incidental. A control plane whose
-       * database was replaced -- a Neon project re-provisioned, migrations run
-       * against a fresh branch -- answers `GetEffectiveSettings` for a group
-       * that holds nothing, and adopting "nothing" as the group's decision
-       * would blank every group-scoped setting on every joined device. Absent
-       * is not a decision. `GroupSettingsSync.test.ts` holds the case.
-       */
-      if (value === undefined) continue;
-      const definition = getSettingDefinition(id);
-      if (definition === undefined || !definition.validate(value)) continue;
-      if (sameValue(this.#options.readDraftValue(id), value)) continue;
-      patches.push({ id, value });
-    }
+    const values = await this.#readGroupValues(signal);
+    const patches = values === null ? [] : groupValuePatches(values, this.#options.readDraftValue);
     if (patches.length === 0) return [];
     this.#applyingRemote = true;
     try {
@@ -129,6 +125,36 @@ export class GroupSettingsSync {
       this.#applyingRemote = false;
     }
     return patches;
+  }
+
+  /**
+   * What the group says, from the cloud if it answers and from the local copy
+   * if it does not.
+   *
+   * **The order is the seniority the whole stage is about** -- cloud, then
+   * local copy, then (by simply doing nothing) the compiled-in constants the
+   * draft already holds. The cloud's answer is offered to the copy on the way
+   * past; whether the copy takes it is the copy's decision and not this
+   * service's, because "is this newer than what I have" is a question only the
+   * copy has both sides of.
+   *
+   * A failed read is silence and never a rollback. Nothing about the draft or
+   * the copy is worse afterwards than it was before the call: at worst the
+   * session goes on holding what it already held.
+   */
+  async #readGroupValues(
+    signal?: AbortSignal,
+  ): Promise<Readonly<Record<string, SettingValue>> | null> {
+    try {
+      const document = await this.#options.port.getEffectiveSettings(false, signal);
+      await this.#options.mirror?.absorb(document, signal);
+      return document.values;
+    } catch (error: unknown) {
+      this.#record(error, 'НАСТРОЙКИ ГРУППЫ НЕ ПРОЧИТАНЫ');
+      return this.#options.mirror?.read()?.values ?? null;
+    } finally {
+      this.#options.onMirrorChanged?.();
+    }
   }
 
   /**
@@ -171,6 +197,41 @@ export class GroupSettingsSync {
     const message = error instanceof Error ? error.message.trim() : '';
     onFailure(message.length === 0 ? fallback : `${fallback}: ${message}`);
   }
+}
+
+/**
+ * The group's values as patches against this machine's draft.
+ *
+ * One rule with two callers, and that is the point of it being a function.
+ * `adoptGroupSettings` applies it to what `GetEffectiveSettings` answered;
+ * `ControlPlaneRuntime` applies it to what the local copy holds when the
+ * control plane cannot be reached at all. Two loops would be two chances for
+ * the offline path to accept something the online path refuses.
+ *
+ * A value the group does not hold is skipped, so a record with no values at
+ * all produces no patches and every caller of this function is a no-op on one.
+ *
+ * That is load-bearing rather than incidental. A control plane whose database
+ * was replaced -- a Neon project re-provisioned, migrations run against a fresh
+ * branch -- answers `GetEffectiveSettings` for a group that holds nothing, and
+ * adopting "nothing" as the group's decision would blank every group-scoped
+ * setting on every joined device. Absent is not a decision.
+ * `GroupSettingsSync.test.ts` holds the case.
+ */
+export function groupValuePatches(
+  values: Readonly<Record<string, SettingValue>>,
+  readDraftValue: (id: string) => SettingValue | undefined,
+): readonly SettingsPatch[] {
+  const patches: SettingsPatch[] = [];
+  for (const id of groupScopedSettingIds()) {
+    const value = values[id];
+    if (value === undefined) continue;
+    const definition = getSettingDefinition(id);
+    if (definition === undefined || !definition.validate(value)) continue;
+    if (sameValue(readDraftValue(id), value)) continue;
+    patches.push({ id, value });
+  }
+  return patches;
 }
 
 /**

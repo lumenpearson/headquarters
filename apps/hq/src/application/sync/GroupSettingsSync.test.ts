@@ -10,6 +10,7 @@ import type {
   GroupSettingsPort,
 } from './groupSettingsPort';
 import { groupScopedSettingIds, GroupSettingsSync, toGroupOperations } from './GroupSettingsSync';
+import type { GroupMirror, GroupMirrorOutcome, GroupMirrorPort } from './localMirror';
 
 /**
  * A settings service stated as a port, not a mock counting calls.
@@ -287,6 +288,160 @@ describe('GroupSettingsSync publication', () => {
 
     expect(await test.service.adoptGroupSettings()).toEqual([]);
     expect(test.failures).toEqual([]);
+  });
+});
+
+/**
+ * The local copy as a port, not a spy.
+ *
+ * The claims below are about *which of two sources the draft is filled from*,
+ * so the fake has to be able to hold values and to answer a refusal, which a
+ * call counter cannot.
+ */
+class FakeMirror implements GroupMirrorPort {
+  copy: GroupMirror | null = null;
+  outcome: GroupMirrorOutcome = 'adopted';
+  readonly offered: GroupSettingsDocument[] = [];
+
+  read(): GroupMirror | null {
+    return this.copy;
+  }
+
+  async absorb(document: GroupSettingsDocument): Promise<GroupMirrorOutcome> {
+    this.offered.push(document);
+    return this.outcome;
+  }
+}
+
+function mirrorHolding(values: Readonly<Record<string, SettingValue>>): GroupMirror {
+  return {
+    version: 1,
+    groupId: 'GRP-1',
+    installationId: 'INST-1',
+    revision: 4,
+    sequence: 12,
+    values,
+    refreshedAt: '2026-08-26T09:00:00.000Z',
+  };
+}
+
+function syncWithMirror(
+  port: FakeGroupSettings,
+  mirror: FakeMirror,
+  draft: Record<string, SettingValue> = {},
+): {
+  readonly service: GroupSettingsSync;
+  readonly applied: (readonly SettingsPatch[])[];
+  readonly mirrorChanges: number;
+} {
+  const applied: (readonly SettingsPatch[])[] = [];
+  const counter = { value: 0 };
+  const service = new GroupSettingsSync({
+    port,
+    apply: (patches) => {
+      applied.push(patches);
+      for (const patch of patches) draft[patch.id] = patch.value as SettingValue;
+    },
+    readDraftValue: (id) => draft[id],
+    mirror,
+    onMirrorChanged: () => {
+      counter.value += 1;
+    },
+  });
+  return {
+    service,
+    applied,
+    get mirrorChanges() {
+      return counter.value;
+    },
+  };
+}
+
+describe('GroupSettingsSync and the local copy', () => {
+  it('offers the group answer to the copy and still lets the group win the join', async () => {
+    const port = new FakeGroupSettings();
+    port.document = { revision: 9, values: { 'telemetry.source': 'native' }, updatedAt: '' };
+    const mirror = new FakeMirror();
+    const test = syncWithMirror(port, mirror, { 'telemetry.source': 'simulation' });
+
+    const patches = await test.service.adoptGroupSettings();
+
+    expect(mirror.offered).toEqual([port.document]);
+    expect(patches).toEqual([{ id: 'telemetry.source', value: 'native' }]);
+    expect(test.mirrorChanges).toBe(1);
+  });
+
+  it('lets the group win the join even when the copy refuses to record it', async () => {
+    const port = new FakeGroupSettings();
+    port.document = { revision: 2, values: { 'telemetry.source': 'native' }, updatedAt: '' };
+    const mirror = new FakeMirror();
+    // The copy refuses because the answer is older than what it holds. That is
+    // a decision about the disk and not about the live group: the server is
+    // what the group currently says, and joining is accepting it.
+    mirror.outcome = 'kept';
+    const test = syncWithMirror(port, mirror, { 'telemetry.source': 'simulation' });
+
+    expect(await test.service.adoptGroupSettings()).toEqual([
+      { id: 'telemetry.source', value: 'native' },
+    ]);
+  });
+
+  it('joins on the local copy when the group cannot be read at all', async () => {
+    const port = new FakeGroupSettings();
+    // A download cut off mid-way: the connection dropped, the promise rejected.
+    port.readError = new ControlPlaneError('unavailable', 'socket hang up');
+    const mirror = new FakeMirror();
+    mirror.copy = mirrorHolding({ 'telemetry.source': 'native', 'simulation.preset': 'degraded' });
+    const draft: Record<string, SettingValue> = {
+      'telemetry.source': 'simulation',
+      'simulation.preset': 'normal',
+    };
+    const test = syncWithMirror(port, mirror, draft);
+
+    const patches = await test.service.adoptGroupSettings();
+
+    expect(patches).toEqual([
+      { id: 'telemetry.source', value: 'native' },
+      { id: 'simulation.preset', value: 'degraded' },
+    ]);
+    expect(mirror.offered).toEqual([]);
+    expect(test.mirrorChanges).toBe(1);
+  });
+
+  it('adopts nothing when the group cannot be read and there is no copy', async () => {
+    const port = new FakeGroupSettings();
+    port.readError = new ControlPlaneError('unavailable', 'socket hang up');
+    const mirror = new FakeMirror();
+    // Level three of the seniority: nothing is patched, so the draft is left
+    // holding what `createFactorySnapshot()` put there.
+    const draft: Record<string, SettingValue> = { 'telemetry.source': 'simulation' };
+    const test = syncWithMirror(port, mirror, draft);
+
+    expect(await test.service.adoptGroupSettings()).toEqual([]);
+    expect(test.applied).toEqual([]);
+    expect(draft).toEqual({ 'telemetry.source': 'simulation' });
+  });
+
+  it('puts the copy through the same check the wire goes through', async () => {
+    const port = new FakeGroupSettings();
+    port.readError = new ControlPlaneError('unavailable', 'no route to host');
+    const mirror = new FakeMirror();
+    // A copy that reached the disk from an older build, or was hand-edited in
+    // devtools. `groupValuePatches` is the one road into the draft, and it
+    // refuses each of these for the same reason it refuses them from the wire.
+    mirror.copy = mirrorHolding({
+      'telemetry.source': 'quantum',
+      'simulation.periodSeconds': 999_999,
+      'layout.density': 'comfortable',
+      'simulation.preset': 'degraded',
+    } as unknown as Record<string, SettingValue>);
+    const draft: Record<string, SettingValue> = { 'layout.density': 'dense' };
+    const test = syncWithMirror(port, mirror, draft);
+
+    expect(await test.service.adoptGroupSettings()).toEqual([
+      { id: 'simulation.preset', value: 'degraded' },
+    ]);
+    expect(draft['layout.density']).toBe('dense');
   });
 });
 

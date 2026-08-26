@@ -153,6 +153,30 @@ export interface ClockEstimate {
 }
 
 /**
+ * What the local copy of the group's state holds, for the status line (F14,
+ * stage 9).
+ *
+ * A summary and not the copy: the values live under
+ * `gremuchaya-hq:group-mirror:v1` and are read there by
+ * `GroupSnapshotDownloader`. What the operator needs on the status line is
+ * whether there is a copy at all and when it was last refreshed, which is the
+ * one fact that distinguishes "the group is unreachable and this screen is
+ * showing what it last agreed" from "the group is unreachable and this screen
+ * is showing the compiled-in defaults".
+ *
+ * Empty and zero mean no copy. The slice is not persisted -- see the note on
+ * this module -- so it is re-read from storage on every launch.
+ */
+export interface GroupMirrorSummary {
+  /** ISO 8601 of the last refresh that replaced the copy; empty when none. */
+  readonly refreshedAt: string;
+  /** The settings revision the copy holds; 0 when there is no copy. */
+  readonly revision: number;
+  /** The group-log position the copy is stamped at; 0 when none was recorded. */
+  readonly sequence: number;
+}
+
+/**
  * The optional fields are written `| undefined` rather than merely optional,
  * which is the one place this application asks for an explicit `undefined`.
  * The slice is a merge target -- `patchConnection` spreads a patch over it --
@@ -173,9 +197,20 @@ export interface ConnectionState {
   readonly clock: ClockEstimate;
   /** The realtime socket, which is a separate fact from the session's mode. */
   readonly realtime: RealtimeLinkState;
+  /**
+   * The local copy of the group's state, which is a fact about the disk rather
+   * than about the connection and survives every mode this slice can take.
+   */
+  readonly mirror: GroupMirrorSummary;
   /** The last failure worth showing, in the operator's language; empty when none. */
   readonly failure: string;
 }
+
+export const initialGroupMirrorSummary: GroupMirrorSummary = {
+  refreshedAt: '',
+  revision: 0,
+  sequence: 0,
+};
 
 export const initialConnectionState: ConnectionState = {
   mode: 'local-only',
@@ -183,6 +218,7 @@ export const initialConnectionState: ConnectionState = {
   devices: [],
   clock: { offsetMs: 0, latencyMs: 0, sampledAt: '' },
   realtime: initialRealtimeLinkState,
+  mirror: initialGroupMirrorSummary,
   failure: '',
 };
 
@@ -195,10 +231,16 @@ export const initialConnectionState: ConnectionState = {
  * which resets on a revoked session, and by `ControlPlaneRuntime`, which uses
  * it when there is no connection to reset -- `general.localOnly` is on, or no
  * control plane address is configured at all.
+ *
+ * `mirror` is the one field left out, and deliberately: the local copy is a
+ * fact about the disk rather than about the connection, and clearing it here
+ * would make the status line report "no local copy" for a session that has one
+ * -- at exactly the moment the operator most needs to know it does.
  */
-export function disconnectedConnection(mode: ConnectionMode): ConnectionState {
+export function disconnectedConnection(mode: ConnectionMode): Omit<ConnectionState, 'mirror'> {
+  const { mirror: _mirror, ...cleared } = initialConnectionState;
   return {
-    ...initialConnectionState,
+    ...cleared,
     mode,
     capabilities: undefined,
     session: undefined,

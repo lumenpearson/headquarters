@@ -6,8 +6,11 @@ import { useBooleanSetting, useStringSetting } from '@/application/personalizati
 import { toAuthorityMode } from '@/application/sync/authority';
 import { disconnectedConnection } from '@/application/sync/connection';
 import { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
+import { groupValuePatches } from '@/application/sync/GroupSettingsSync';
+import { mirrorSummary } from '@/application/sync/localMirror';
 import { loadProjectConfiguration } from '@/infrastructure/config/RuntimeConfigLoader';
 import { ControlPlaneClient } from '@/infrastructure/controlPlane/ControlPlaneClient';
+import { readGroupMirror } from '@/infrastructure/controlPlane/GroupSnapshotDownloader';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { GroupChannelRuntime } from './GroupChannelRuntime';
@@ -153,6 +156,36 @@ export function ControlPlaneRuntime() {
     }, clockIntervalMs);
     return () => window.clearInterval(intervalId);
   }, [mode, session]);
+
+  /*
+   * The local copy of the group's state, for the session that cannot reach the
+   * group at all (F14, stage 9).
+   *
+   * `GroupChannelRuntime` mounts only while a session is `online`, so it is the
+   * wrong place for this: the launch that matters here is the one where the
+   * control plane never answered. The copy is read on every mode change so the
+   * status line always reports what is actually on disk -- a mode reset clears
+   * every other field of the slice and this one is a fact about the disk.
+   *
+   * On `offline` the copy is also adopted, because offline is what joining
+   * looks like to a device that cannot reach its group: the same precedence
+   * `GroupSettingsSync` states for a live join, applied through the same
+   * `groupValuePatches`, so the offline path cannot accept a value the online
+   * path refuses. It follows that a group-scoped change made offline does not
+   * survive the next launch -- the group's last agreement wins a join, and this
+   * is one. That is the existing online behaviour, not a new rule.
+   */
+  useEffect(() => {
+    const mirror = readGroupMirror();
+    operationsStore.getState().patchConnection({ mirror: mirrorSummary(mirror) });
+    if (mode !== 'offline' || mirror === null) return;
+    const patches = groupValuePatches(
+      mirror.values,
+      (id) => operationsStore.getState().personalization.draft.values[id],
+    );
+    if (patches.length === 0) return;
+    operationsStore.getState().applySettingsPatch(patches);
+  }, [mode]);
 
   /*
    * `groups.authority` and the group's mode are reconciled here rather than

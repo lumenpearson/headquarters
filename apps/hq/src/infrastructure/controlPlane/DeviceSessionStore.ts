@@ -2,7 +2,7 @@ import type { DeviceRole } from '@/application/sync/connection';
 
 /**
  * The seventh persisted key. Listed in CLAUDE.md's state-ownership paragraph
- * and in `docs/release/environment.md` beside the other six.
+ * and in `docs/release/environment.md` beside the other seven.
  */
 export const deviceSessionStorageKey = 'gremuchaya-hq:device-session:v2';
 
@@ -291,8 +291,12 @@ function isLegacyStoredDeviceSession(value: unknown): value is LegacyStoredDevic
  * `localStorage` where it exists, and a process-lived map where it does not:
  * a server render, or a profile that blocks storage. The map keeps the
  * runtime working for the session and simply forgets it afterwards.
+ *
+ * Exported because `GroupSnapshotDownloader` persists under the same
+ * conditions and must make the same choice; a second copy of this try/catch
+ * would be a second place for "storage is blocked" to be handled differently.
  */
-function browserStorage(): KeyValueStorage {
+export function browserStorage(): KeyValueStorage {
   try {
     if (typeof localStorage !== 'undefined') return localStorage;
   } catch {
