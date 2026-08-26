@@ -67,6 +67,31 @@ export const projectConfigSchema = z.object({
     return url.hostname === '127.0.0.1' || url.hostname === 'localhost';
   }, 'Bridge URL must resolve to localhost'),
   bridgeTransport: z.literal('grpc-web').default('grpc-web'),
+  /**
+   * Where the control plane answers, when this client is meant to join a group.
+   *
+   * Absent means local-only: no client is built and no request leaves the
+   * machine. Unlike `bridgeUrl` this may name any host, because on a shoot day
+   * the control plane is one machine on the set's LAN and every other screen
+   * pairs with it over that network. The trust that follows is deliberate and
+   * has to be known: the pairing code and the tokens it earns travel to
+   * whatever this URL names, so the address comes from the project
+   * configuration an operator controls, never from a query string or a page.
+   * `https` is accepted and `http` is not refused, since a LAN with no
+   * certificate authority is the normal case there; the tokens are then
+   * protected only by the network they cross.
+   */
+  controlPlaneUrl: z
+    .url()
+    .refine((value) => {
+      const url = new URL(value);
+      return (
+        (url.protocol === 'http:' || url.protocol === 'https:') &&
+        url.username === '' &&
+        url.password === ''
+      );
+    }, 'Control plane URL must be an http(s) URL without credentials')
+    .optional(),
   screenWindows: z.array(screenWindowSchema),
   virtualMountRules: z.array(virtualMountRuleSchema),
   fileDisplayOverrides: z.array(fileDisplayOverrideSchema),

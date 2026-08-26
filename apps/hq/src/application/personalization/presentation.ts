@@ -488,6 +488,9 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'advanced.worldSync': 'Read at startup, which opens or refuses the cross-session channel.',
   'advanced.liveEdit':
     'Read by the live-edit bus, which decides whether a patch leaves the session.',
+  'general.localOnly': 'Read by ControlPlaneRuntime, which builds no client at all while it is on.',
+  'groups.authority':
+    'Read by ControlPlaneRuntime, which reconciles it with the group SetAuthorityMode reports.',
 };
 
 /**
@@ -501,13 +504,6 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
  * only honest thing to do is say so and name the address.
  */
 export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
-  // Moved here from `settingsReadElsewhere`, where it claimed to be "read by
-  // the pairing surface, which decides whether a group is offered". No pairing
-  // surface exists: outside the schema the identifier occurs twice, in this
-  // file and in a negative assertion in `issueDraft.test.ts`. An excuse that
-  // names an imaginary consumer is worse than no excuse, because the accounting
-  // then reports the category as healthy.
-  'general.localOnly': 'F10 with R27 — no pairing surface exists to offer or withhold a group.',
   // It was bound to `--ops-tile-min-width`, which no stylesheet and no module
   // read. Wiring it is not a matter of finding the missing rule: a screen's
   // `columns` is a coordinate system, not a pixel promise — `/cases` measures
@@ -519,7 +515,6 @@ export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
     'Needs a minimum-width input in @gremuchaya/layout-engine; the resolver has none.',
   'localization.locale': 'F11 — no locale runtime exists; every label is a Russian literal.',
   'simulation.preset': 'F12 — the simulation formula reads no setting at all.',
-  'groups.authority': 'F10 with R27 — the client has no SyncService client to send it through.',
   'titlebar.alignment': 'F13 — no custom titlebar exists in Rust or in TypeScript.',
 };
 

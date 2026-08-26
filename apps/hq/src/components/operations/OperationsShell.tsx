@@ -49,6 +49,11 @@ import {
   resolvePresentation,
   type ResolvedPresentation,
 } from '@/application/personalization/presentation';
+import {
+  authorityModeLabel,
+  connectionModeLabel,
+  connectionModeToken,
+} from '@/application/sync/connection';
 
 import { EditableContent } from '@/components/edit/EditableContent';
 
@@ -522,9 +527,15 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
  * words compress -- which bus is in use and why, and what the fallback would
  * be -- without spending a panel on it or sending the operator to another
  * screen.
+ *
+ * `SYNC:` is the third word, and it is the one that used to lie: the row read
+ * "Не подключена — R27, фича F10" whatever the session was doing, because
+ * there was no client to ask. It now names the mode the connection is
+ * actually in, and the group, authority and clock offset behind it.
  */
 function TransportProbe({ bus }: { readonly bus: string }) {
   const screenId = useOperationsStore((state) => state.production.screenId);
+  const connection = useOperationsStore((state) => state.connection);
   return (
     <TerminalPopover
       side="top"
@@ -532,7 +543,7 @@ function TransportProbe({ bus }: { readonly bus: string }) {
       description="Чем этот экран синхронизируется с остальными"
       trigger={
         <TerminalButton className="ops-statusline__probe" aria-label="Подробности транспорта">
-          BUS:{bus} RPC:GRPC-WEB
+          BUS:{bus} RPC:GRPC-WEB SYNC:{connectionModeToken(connection.mode)}
         </TerminalButton>
       }
     >
@@ -555,7 +566,26 @@ function TransportProbe({ bus }: { readonly bus: string }) {
         </div>
         <div>
           <dt>ГРУППОВАЯ СИНХРОНИЗАЦИЯ</dt>
-          <dd>Не подключена — R27, фича F10</dd>
+          <dd>
+            {connectionModeLabel(connection.mode)}
+            {connection.groupName === undefined ? '' : ` — ${connection.groupName}`}
+          </dd>
+        </div>
+        <div>
+          <dt>АВТОРИТЕТ</dt>
+          <dd>
+            {connection.authority === undefined
+              ? 'Группа не назначена'
+              : authorityModeLabel(connection.authority)}
+          </dd>
+        </div>
+        <div>
+          <dt>ЧАСЫ ГРУППЫ</dt>
+          <dd>
+            {connection.clock.sampledAt === ''
+              ? 'Не измерены'
+              : `Сдвиг ${connection.clock.offsetMs} мс, задержка ${connection.clock.latencyMs} мс`}
+          </dd>
         </div>
       </dl>
     </TerminalPopover>

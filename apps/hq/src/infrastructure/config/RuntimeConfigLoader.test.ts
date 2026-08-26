@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { loadRuntimeConfiguration } from './RuntimeConfigLoader';
+import { loadProjectConfiguration, loadRuntimeConfiguration } from './RuntimeConfigLoader';
 
 const requiredRuntimeFiles = new Map([
   ['/runtime/project.default.json', 'project.default.json'],
@@ -31,6 +31,34 @@ describe('RuntimeConfigLoader', () => {
     await expect(loadRuntimeConfiguration()).rejects.toThrow(
       'Invalid JSON in runtime config: /runtime/project.override.json',
     );
+  });
+
+  it('ships no control plane address by default, so a fresh install is local-only', async () => {
+    vi.stubGlobal('fetch', createRuntimeFetch(null));
+
+    const project = await loadProjectConfiguration();
+
+    expect(project.config.controlPlaneUrl).toBeUndefined();
+    expect(project.override).toBeNull();
+  });
+
+  it('takes the control plane address from the project override', async () => {
+    vi.stubGlobal(
+      'fetch',
+      createRuntimeFetch(
+        JSON.stringify({
+          version: 1,
+          values: { controlPlaneUrl: 'http://192.168.10.5:4100' },
+          assetOverrides: {},
+        }),
+      ),
+    );
+
+    const project = await loadProjectConfiguration();
+
+    // The override is the file an operator edits on the shoot machine; the
+    // default stays committed without an address on purpose.
+    expect(project.config.controlPlaneUrl).toBe('http://192.168.10.5:4100');
   });
 
   it('reports an application-shell fallback for a required config as unavailable', async () => {

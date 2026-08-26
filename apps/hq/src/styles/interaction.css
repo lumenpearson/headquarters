@@ -186,3 +186,78 @@ body.terminal-theme textarea:focus {
   color: var(--text-0);
   font-size: var(--font-sm);
 }
+
+/*
+ * The group dialog (R27). It reuses `.ops-definition-list` for the summary,
+ * so only the parts that list is not -- the pairing form, the two rosters and
+ * the failure line -- are described here. Every colour is a token: the dialog
+ * renders inside `.terminal-dialog`, which every theme and density already
+ * dresses.
+ */
+.group-pairing__form {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.group-pairing__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.group-pairing__note {
+  margin: var(--space-3) 0 0;
+  color: var(--text-2);
+  font-size: var(--font-xs);
+  letter-spacing: 0.08em;
+}
+
+.group-pairing__devices,
+.group-pairing__presence {
+  margin-top: var(--space-3);
+}
+
+.group-pairing__devices h3,
+.group-pairing__presence h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-2);
+  font-size: var(--font-xs);
+  letter-spacing: 0.12em;
+}
+
+.group-pairing__devices article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-1) 0;
+  border-bottom: 1px dotted var(--ops-line);
+}
+
+.group-pairing__devices article span {
+  display: grid;
+  min-width: 0;
+}
+
+.group-pairing__devices small,
+.group-pairing__presence small {
+  color: var(--text-2);
+  font-size: var(--font-xs);
+}
+
+.group-pairing__presence article {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-1) 0;
+  border-bottom: 1px dotted var(--ops-line);
+  overflow-wrap: anywhere;
+}
+
+.group-pairing__failure {
+  margin: var(--space-3) 0 0;
+  color: var(--ops-orange-bright);
+  font-size: var(--font-xs);
+}

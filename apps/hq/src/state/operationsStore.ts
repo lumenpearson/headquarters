@@ -48,6 +48,7 @@ import {
   type ContentPatch,
 } from '../application/edit/contentFields';
 import { booleanSetting, numberSetting } from '../application/personalization/settingValue';
+import { initialConnectionState, type ConnectionState } from '../application/sync/connection';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
@@ -244,6 +245,12 @@ export interface OperationsState {
   readonly personalization: PersonalizationState;
   readonly edit: EditModeState;
   readonly content: ContentEditState;
+  /**
+   * The synchronization group this session is in, if any (R27). Owned by
+   * `ControlPlaneSession`, which is the only writer; components read it.
+   * Never persisted and never broadcast: see `connection.ts`.
+   */
+  readonly connection: ConnectionState;
   readonly metrics: OperationsMetrics;
   readonly audit: readonly OpsAuditEntry[];
   readonly setRoute: (route: OperationsRoute) => void;
@@ -295,6 +302,12 @@ export interface OperationsState {
   readonly restoreSettingsHistoryEntry: (id: string) => void;
   readonly exportSettingsDraft: () => string;
   readonly importSettingsDraft: (serialized: string) => void;
+  /**
+   * Moves the connection to what the session service now knows. A partial
+   * patch rather than one action per field: every transition is decided in
+   * the service, and the store only records it.
+   */
+  readonly patchConnection: (patch: Partial<ConnectionState>) => void;
   readonly resetWorld: () => void;
   readonly simulationTick: () => void;
 }
@@ -396,6 +409,7 @@ function createBaseState() {
       dockEdge: 'right' as const,
     },
     content: { overrides: {} as ContentOverrides },
+    connection: initialConnectionState,
     metrics: {
       cpu: 43,
       ram: 68,
@@ -1022,9 +1036,17 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         ),
       };
     }),
+  patchConnection: (patch) => set((state) => ({ connection: { ...state.connection, ...patch } })),
   resetWorld: () => {
     const base = createBaseState();
-    set({ ...base, production: { ...base.production, snapshots: get().production.snapshots } });
+    // The connection outlives a world reset the way the snapshots do: the
+    // group this session is in is not part of the simulated world, and the
+    // session service that owns the slice is not told about the reset.
+    set({
+      ...base,
+      production: { ...base.production, snapshots: get().production.snapshots },
+      connection: get().connection,
+    });
   },
   simulationTick: () =>
     set((state) => {

@@ -61,6 +61,11 @@ export const contextMenuRegistry: readonly ContextMenuDefinition[] = [
       { id: 'shell.fullscreen', label: 'Полный экран', keybind: 'shell.fullscreen' },
       { id: 'shell.production', label: 'Панель режиссёра', keybind: 'shell.productionPanel' },
       {
+        id: 'shell.group',
+        label: 'Синхронизация группы',
+        action: 'shell.groupPairing',
+      },
+      {
         id: 'shell.diagnostics',
         label: 'Скопировать диагностику',
         action: 'shell.copyDiagnostics',

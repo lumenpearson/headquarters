@@ -1,0 +1,91 @@
+import type {
+  AuthorityMode,
+  ConnectionSession,
+  ControlPlaneCapabilities,
+  GroupDevice,
+  PresenceEntry,
+} from './connection';
+
+/**
+ * What the session service needs of the control plane, stated here so the
+ * application layer owns the contract and `ControlPlaneClient` in
+ * infrastructure implements it -- the direction `dependency-map.md` fixes.
+ * A test hands the service a fake of this interface and no transport at all.
+ */
+export interface ControlPlanePort {
+  readonly baseUrl: string;
+  /** The stored identity, or `null` when this client has not been paired. */
+  session(): ConnectionSession | null;
+  /** Epoch milliseconds, or `null` without a session. */
+  accessTokenExpiresAt(): number | null;
+  /** Drops the session for good. The next connection needs a pairing code. */
+  forgetSession(): void;
+  probeCapabilities(signal?: AbortSignal): Promise<ControlPlaneCapabilities>;
+  pair(pairingCode: string, deviceName: string, signal?: AbortSignal): Promise<PairingResult>;
+  refresh(signal?: AbortSignal): Promise<ConnectionSession>;
+  join(signal?: AbortSignal): Promise<GroupSummary>;
+  leave(signal?: AbortSignal): Promise<void>;
+  listDevices(signal?: AbortSignal): Promise<readonly GroupDevice[]>;
+  revoke(deviceId: string, signal?: AbortSignal): Promise<void>;
+  setAuthorityMode(mode: AuthorityMode, signal?: AbortSignal): Promise<GroupSummary>;
+  setLeader(deviceId: string, signal?: AbortSignal): Promise<GroupSummary>;
+  timeSync(signal?: AbortSignal): Promise<ClockSample>;
+  getPresence(signal?: AbortSignal): Promise<readonly PresenceEntry[]>;
+}
+
+export interface GroupSummary {
+  readonly groupId: string;
+  readonly name: string;
+  readonly authority: AuthorityMode;
+  readonly leaderDeviceId: string;
+}
+
+export interface PairingResult {
+  readonly session: ConnectionSession;
+  readonly group: GroupSummary;
+  readonly device: GroupDevice;
+}
+
+/** The four instants of one `TimeSync` round, all in epoch milliseconds. */
+export interface ClockSample {
+  readonly clientSendMs: number;
+  readonly serverReceiveMs: number;
+  readonly serverSendMs: number;
+  readonly clientReceiveMs: number;
+}
+
+export type ControlPlaneErrorKind =
+  | 'unauthenticated'
+  | 'permission-denied'
+  | 'unimplemented'
+  | 'unavailable'
+  | 'invalid-argument'
+  | 'not-found'
+  | 'failed-precondition'
+  | 'unknown';
+
+/**
+ * A control-plane failure as the session service reasons about it.
+ *
+ * The Connect code is folded into a kind because the service takes exactly
+ * three decisions on it -- refresh and retry, tell the operator to pair
+ * again, or note that this deployment lacks the collaborator -- and a
+ * `Code` import in the application layer would be the transport leaking up.
+ */
+export class ControlPlaneError extends Error {
+  constructor(
+    readonly kind: ControlPlaneErrorKind,
+    message: string,
+    options?: { readonly cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = 'ControlPlaneError';
+  }
+}
+
+export function isControlPlaneError(
+  error: unknown,
+  kind?: ControlPlaneErrorKind,
+): error is ControlPlaneError {
+  return error instanceof ControlPlaneError && (kind === undefined || error.kind === kind);
+}

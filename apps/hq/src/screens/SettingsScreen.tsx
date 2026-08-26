@@ -20,6 +20,8 @@ import {
 } from '@/application/personalization/catalog';
 import { KeybindList } from '@/components/keybinds/KeybindList';
 import { Panel } from '@/components/operations/OpsUi';
+import { openGroupPairing } from '@/components/sync/GroupPairingDialog';
+import { connectionModeLabel } from '@/application/sync/connection';
 import {
   categoryLabel,
   groupLabel,
@@ -233,6 +235,30 @@ export function SettingsScreen() {
             }
           >
             [F] FULLSCREEN / KIOSK
+          </TerminalButton>
+        </Panel>
+        {/*
+          The group's own surface, reached the way the production panel is:
+          a button in settings beside the switch that governs it. The category
+          `groups` renders in the personalization catalogue below, but a
+          setting cannot show which group this session is in, who leads it or
+          how far the clocks are apart -- and those are what an operator opens
+          settings to find out when a screen stops following.
+        */}
+        <Panel title="СИНХРОНИЗАЦИЯ ГРУППЫ" eyebrow="SYNC / R27" className="settings-group">
+          <Setting label="СОСТОЯНИЕ" detail="Связь с control plane">
+            <span className="settings-group__mode">
+              {connectionModeLabel(state.connection.mode)}
+            </span>
+          </Setting>
+          <Setting label="ГРУППА" detail="Имя группы и роль этого устройства">
+            <span className="settings-group__mode">
+              {state.connection.groupName ?? '—'}
+              {state.connection.session === undefined ? '' : ` / ${state.connection.session.role}`}
+            </span>
+          </Setting>
+          <TerminalButton className="ops-action" onClick={() => openGroupPairing()}>
+            [G] ОТКРЫТЬ ПОДКЛЮЧЕНИЕ К ГРУППЕ
           </TerminalButton>
         </Panel>
         <Panel title="ЛОКАЛЬНЫЕ ДАННЫЕ" eyebrow="PERSISTENCE / OFFLINE" className="settings-data">

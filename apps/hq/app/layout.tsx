@@ -10,6 +10,8 @@ import { EditPanel } from '@/components/edit/EditPanel';
 import { KeybindIntro } from '@/components/keybinds/KeybindIntro';
 import { KeybindRuntime } from '@/components/keybinds/KeybindRuntime';
 import { MaterialCatalogProvider } from '@/components/settings/MaterialCatalog';
+import { ControlPlaneRuntime } from '@/components/sync/ControlPlaneRuntime';
+import { GroupPairingDialog } from '@/components/sync/GroupPairingDialog';
 import { StartupSequence } from '@/components/startup/StartupSequence';
 import { OperationsRuntime } from '@/simulation/OperationsRuntime';
 
@@ -43,6 +45,8 @@ export default function RootLayout({ children }: RootLayoutProperties) {
             <KeybindRuntime />
             <ContextMenuRuntime />
             <EditModeRuntime />
+            <ControlPlaneRuntime />
+            <GroupPairingDialog />
             <KeybindIntro />
             <StartupSequence />
             <EditModeFrame />
