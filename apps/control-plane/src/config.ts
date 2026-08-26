@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+import { presign, signHeaders } from './storage/sigv4.js';
+
 export type AuthCredentialKind = 'access' | 'pair' | 'receipt' | 'refresh';
 
 /**
@@ -23,6 +25,48 @@ export interface ControlPlaneAuthConfig {
   verifyBootstrapSecret(candidate: string): boolean;
 }
 
+/** A request the storage configuration presigns for a client to send later. */
+export interface StoragePresignRequest {
+  readonly method: string;
+  readonly url: URL;
+  readonly signedAt: Date;
+}
+
+/** A request the control plane sends the object store itself. */
+export interface StorageSignRequest {
+  readonly method: string;
+  readonly url: URL;
+  readonly headers?: Readonly<Record<string, string>>;
+  /** Hex SHA-256 of the body, or `UNSIGNED-PAYLOAD`. */
+  readonly payloadHash: string;
+  readonly signedAt: Date;
+}
+
+/**
+ * Safe-to-pass object storage policy, built the way {@link ControlPlaneAuthConfig}
+ * is: the access key pair lives inside the two signing closures and is not a
+ * property, so nothing that receives this object can enumerate, serialize or
+ * log it. What is exposed is what an operator may need to read back — where
+ * the bucket is and how long a grant lives — and none of it is a credential.
+ *
+ * The access key *id* does appear inside every presigned URL as
+ * `X-Amz-Credential`; that is the protocol, and the id is not a secret.
+ */
+export interface ControlPlaneStorageConfig {
+  /** The service origin, e.g. `https://s3.eu-central-1.amazonaws.com`; no path. */
+  readonly endpoint: string;
+  readonly region: string;
+  readonly bucket: string;
+  /** `https://endpoint/bucket/key` rather than `https://bucket.endpoint/key`. */
+  readonly forcePathStyle: boolean;
+  /** How long an upload, download or preview grant is valid after it is issued. */
+  readonly grantTtlMs: number;
+  /** Presigns `url` for `grantTtlMs` from `signedAt`, signing the host alone. */
+  presign(request: StoragePresignRequest): URL;
+  /** Signs a request the control plane sends; returns the complete header set. */
+  sign(request: StorageSignRequest): Readonly<Record<string, string>>;
+}
+
 export interface ControlPlaneConfig {
   readonly port: number;
   readonly allowedOrigins: readonly string[];
@@ -32,6 +76,7 @@ export interface ControlPlaneConfig {
     readonly restToken: string;
   };
   readonly auth?: ControlPlaneAuthConfig;
+  readonly storage?: ControlPlaneStorageConfig;
 }
 
 const defaultPort = 4100;
@@ -43,6 +88,17 @@ const maximumAccessTokenLifetimeSeconds = 24 * 60 * 60;
 const minimumRefreshTokenLifetimeSeconds = 60 * 60;
 const maximumRefreshTokenLifetimeSeconds = 90 * 24 * 60 * 60;
 const maximumPairingCodeLifetimeSeconds = 60 * 60;
+/**
+ * A grant is a bearer capability on the bucket: whoever holds the URL can use
+ * it until it expires, whatever happened to their device session meanwhile.
+ * Fifteen minutes is the access-token lifetime, and a grant must not outlive
+ * the credential that obtained it, so that is the ceiling as well as the default.
+ */
+const defaultStorageGrantTtlSeconds = 15 * 60;
+const minimumStorageGrantTtlSeconds = 60;
+const maximumStorageGrantTtlSeconds = 15 * 60;
+const minimumStorageSecretLength = 8;
+const storageService = 's3';
 
 const authEnvironmentVariableNames = [
   'HQ_CONTROL_PLANE_AUTH_TOKEN_PEPPER',
@@ -51,6 +107,24 @@ const authEnvironmentVariableNames = [
   'HQ_CONTROL_PLANE_AUTH_ACCESS_TOKEN_TTL_SECONDS',
   'HQ_CONTROL_PLANE_AUTH_REFRESH_TOKEN_TTL_SECONDS',
   'HQ_CONTROL_PLANE_AUTH_PAIRING_CODE_TTL_SECONDS',
+] as const;
+
+const storageEnvironmentVariableNames = [
+  'HQ_CONTROL_PLANE_STORAGE_ENDPOINT',
+  'HQ_CONTROL_PLANE_STORAGE_REGION',
+  'HQ_CONTROL_PLANE_STORAGE_BUCKET',
+  'HQ_CONTROL_PLANE_STORAGE_ACCESS_KEY_ID',
+  'HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY',
+  'HQ_CONTROL_PLANE_STORAGE_FORCE_PATH_STYLE',
+  'HQ_CONTROL_PLANE_STORAGE_GRANT_TTL_SECONDS',
+] as const;
+
+const requiredStorageEnvironmentVariableNames = [
+  'HQ_CONTROL_PLANE_STORAGE_ENDPOINT',
+  'HQ_CONTROL_PLANE_STORAGE_REGION',
+  'HQ_CONTROL_PLANE_STORAGE_BUCKET',
+  'HQ_CONTROL_PLANE_STORAGE_ACCESS_KEY_ID',
+  'HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY',
 ] as const;
 
 export function loadControlPlaneConfig(
@@ -64,12 +138,14 @@ export function loadControlPlaneConfig(
     environment.HQ_CONTROL_PLANE_REDIS_REST_TOKEN,
   );
   const auth = parseAuth(environment, databaseUrl);
+  const storage = parseStorage(environment);
   return {
     port,
     allowedOrigins,
     ...(databaseUrl === undefined ? {} : { databaseUrl }),
     ...(redis === undefined ? {} : { redis }),
     ...(auth === undefined ? {} : { auth }),
+    ...(storage === undefined ? {} : { storage }),
   };
 }
 
@@ -262,6 +338,189 @@ function createAuthConfig(input: {
 
 function bootstrapDigest(secret: string): Buffer {
   return createHmac('sha256', 'gremuchaya-control-plane-bootstrap-v1').update(secret).digest();
+}
+
+/**
+ * Object storage is all-or-nothing like Redis: one variable of the group set
+ * means the whole group is meant, and a missing member is named rather than
+ * defaulted. Unlike auth it is not tied to the database URL — a health-only
+ * process simply never constructs the issuer — so the reduced mode stays
+ * reachable with any subset of the other groups.
+ */
+function parseStorage(
+  environment: Readonly<Record<string, string | undefined>>,
+): ControlPlaneStorageConfig | undefined {
+  if (!storageEnvironmentVariableNames.some((name) => isPresent(environment[name]))) {
+    return undefined;
+  }
+  const missing = requiredStorageEnvironmentVariableNames.filter(
+    (name) => !isPresent(environment[name]),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.join(', ')} must be set when object storage is configured: ` +
+        'HQ_CONTROL_PLANE_STORAGE_ENDPOINT, HQ_CONTROL_PLANE_STORAGE_REGION, ' +
+        'HQ_CONTROL_PLANE_STORAGE_BUCKET, HQ_CONTROL_PLANE_STORAGE_ACCESS_KEY_ID and ' +
+        'HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY are set together',
+    );
+  }
+
+  const endpoint = parseStorageEndpoint(environment.HQ_CONTROL_PLANE_STORAGE_ENDPOINT ?? '');
+  const region = parseStorageRegion(environment.HQ_CONTROL_PLANE_STORAGE_REGION ?? '');
+  const bucket = parseStorageBucket(environment.HQ_CONTROL_PLANE_STORAGE_BUCKET ?? '');
+  const accessKeyId = requireStorageKey(
+    environment.HQ_CONTROL_PLANE_STORAGE_ACCESS_KEY_ID,
+    'HQ_CONTROL_PLANE_STORAGE_ACCESS_KEY_ID',
+    1,
+  );
+  const secretAccessKey = requireStorageKey(
+    environment.HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY,
+    'HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY',
+    minimumStorageSecretLength,
+  );
+  const forcePathStyle = parseBoolean(
+    environment.HQ_CONTROL_PLANE_STORAGE_FORCE_PATH_STYLE,
+    'HQ_CONTROL_PLANE_STORAGE_FORCE_PATH_STYLE',
+  );
+  const grantTtlSeconds = parseLifetimeSeconds(
+    environment.HQ_CONTROL_PLANE_STORAGE_GRANT_TTL_SECONDS,
+    'HQ_CONTROL_PLANE_STORAGE_GRANT_TTL_SECONDS',
+    defaultStorageGrantTtlSeconds,
+    minimumStorageGrantTtlSeconds,
+    maximumStorageGrantTtlSeconds,
+  );
+
+  return createStorageConfig({
+    endpoint,
+    region,
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+    forcePathStyle,
+    grantTtlMs: secondsToMilliseconds(grantTtlSeconds),
+  });
+}
+
+/**
+ * HTTPS, or plain HTTP to the loopback interface only. A presigned URL carries
+ * a signature that any observer of a cleartext request could replay for the
+ * grant's lifetime, so the one exception is a MinIO on the developer's own
+ * machine, where there is no network to observe.
+ */
+function parseStorageEndpoint(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error('HQ_CONTROL_PLANE_STORAGE_ENDPOINT must be an absolute URL');
+  }
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_STORAGE_ENDPOINT must be an HTTPS URL; http is accepted only for 127.0.0.1, localhost or [::1]',
+    );
+  }
+  if (url.hostname.length === 0 || url.username.length > 0 || url.password.length > 0) {
+    throw new Error('HQ_CONTROL_PLANE_STORAGE_ENDPOINT must name a host and carry no credentials');
+  }
+  if (
+    (url.pathname !== '/' && url.pathname.length > 0) ||
+    url.search.length > 0 ||
+    url.hash.length > 0
+  ) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_STORAGE_ENDPOINT must be the service origin alone, without a path, query or fragment',
+    );
+  }
+  return url.origin;
+}
+
+function parseStorageRegion(value: string): string {
+  const region = value.trim();
+  if (!/^[a-z0-9-]{1,32}$/u.test(region)) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_STORAGE_REGION must be 1 to 32 lowercase letters, digits or hyphens',
+    );
+  }
+  return region;
+}
+
+/** The S3 bucket naming rules, which every compatible store enforces or relaxes. */
+function parseStorageBucket(value: string): string {
+  const bucket = value.trim();
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(bucket) || bucket.includes('..')) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_STORAGE_BUCKET must be 3 to 63 lowercase letters, digits, dots or hyphens, starting and ending with a letter or digit',
+    );
+  }
+  return bucket;
+}
+
+function requireStorageKey(value: string | undefined, name: string, minimumLength: number): string {
+  const key = value?.trim() ?? '';
+  if (key.length < minimumLength || /\s/u.test(key)) {
+    throw new Error(
+      `${name} must contain at least ${minimumLength.toString()} characters and no whitespace`,
+    );
+  }
+  return key;
+}
+
+function parseBoolean(value: string | undefined, name: string): boolean {
+  if (value === undefined || value.trim().length === 0) return false;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  throw new Error(`${name} must be true or false`);
+}
+
+function isPresent(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
+}
+
+function createStorageConfig(input: {
+  readonly endpoint: string;
+  readonly region: string;
+  readonly bucket: string;
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+  readonly forcePathStyle: boolean;
+  readonly grantTtlMs: number;
+}): ControlPlaneStorageConfig {
+  // Both keys are captured here and nowhere else. The AWS SigV4 algorithm,
+  // implemented in ./storage/sigv4.ts, receives them as arguments on each call
+  // and keeps nothing between calls.
+  const credentials = { accessKeyId: input.accessKeyId, secretAccessKey: input.secretAccessKey };
+  const scope = { region: input.region, service: storageService };
+  const expiresInSeconds = Math.trunc(input.grantTtlMs / 1000);
+  return Object.freeze({
+    endpoint: input.endpoint,
+    region: input.region,
+    bucket: input.bucket,
+    forcePathStyle: input.forcePathStyle,
+    grantTtlMs: input.grantTtlMs,
+    presign(request: StoragePresignRequest): URL {
+      return presign({
+        credentials,
+        scope,
+        method: request.method,
+        url: request.url,
+        signedAt: request.signedAt,
+        expiresInSeconds,
+      });
+    },
+    sign(request: StorageSignRequest): Readonly<Record<string, string>> {
+      return signHeaders({
+        credentials,
+        scope,
+        method: request.method,
+        url: request.url,
+        ...(request.headers === undefined ? {} : { headers: request.headers }),
+        payloadHash: request.payloadHash,
+        signedAt: request.signedAt,
+      });
+    },
+  });
 }
 
 function credentialDomain(kind: AuthCredentialKind): AuthCredentialKind {

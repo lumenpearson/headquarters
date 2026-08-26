@@ -60,6 +60,12 @@ interface ResolvedControlPlaneCollaborators {
    */
   readonly eventStore?: unknown;
   /**
+   * Whether the material service can mint upload, download and preview grants.
+   * Reported by `getCapabilities` as `materials.storage-grants` so a client can
+   * tell a library it may upload to from one it can only list.
+   */
+  readonly storageGrantsEnabled?: boolean;
+  /**
    * What the health endpoint reports. It is captured at startup and never
    * probed: a health check that opened a network connection to Upstash would
    * make this endpoint fail for a reason that has nothing to do with whether
@@ -152,6 +158,11 @@ function registerControlPlaneRoutes(
             version: 'v1',
             enabled: collaborators.materialService !== undefined,
           },
+          {
+            name: 'materials.storage-grants',
+            version: 'v1',
+            enabled: collaborators.storageGrantsEnabled === true,
+          },
           { name: 'settings', version: 'v1', enabled: collaborators.settingsService !== undefined },
           {
             name: 'sync.device-lifecycle',
@@ -231,6 +242,7 @@ async function resolveControlPlaneCollaborators(
     telemetryService: lifecycle.telemetryService,
     integrationService: lifecycle.integrationService,
     eventStore: lifecycle.eventStore,
+    storageGrantsEnabled: lifecycle.storageConfigured,
     dependencies: [
       {
         name: 'database',
@@ -243,6 +255,17 @@ async function resolveControlPlaneCollaborators(
         detail: lifecycle.coordination.configured
           ? 'Upstash coordination for presence liveness and mutation rate limiting'
           : 'not configured; presence reports the last recorded state and mutations are unlimited',
+      },
+      {
+        // Health is unauthenticated, so the detail names neither the endpoint
+        // nor the bucket: what an operator needs to know from here is whether
+        // grants can be minted and for how long they stay valid.
+        name: 'storage',
+        configured: lifecycle.storageConfigured,
+        detail:
+          lifecycle.storageConfigured && config.storage !== undefined
+            ? `S3-compatible object storage; presigned upload, download and preview grants expire after ${Math.trunc(config.storage.grantTtlMs / 1000).toString()} s`
+            : 'not configured; BeginUpload, CreateMaterialVersion, GetDownloadGrant and GetPreviewGrant answer FAILED_PRECONDITION',
       },
     ],
     realtime: {

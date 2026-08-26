@@ -114,6 +114,13 @@ export interface UploadSessionRecord {
   readonly chunkSize: number;
   readonly maxConcurrency: number;
   readonly expiresAt: Date;
+  /**
+   * The object store's own multipart upload id, once one has been opened. It is
+   * server-side plumbing bound to this session, never surfaced to a client: the
+   * protocol `UploadSession` has no field for it, and `toProtocolSession` omits
+   * it deliberately.
+   */
+  readonly storageUploadId?: string;
 }
 
 /** One contiguous byte range of an upload, as stored in `upload_parts`. */
@@ -435,7 +442,8 @@ function sessionJson(alias: string): string {
              'received_size', ${alias}.received_size::text,
              'chunk_size', ${alias}.chunk_size,
              'max_concurrency', ${alias}.max_concurrency,
-             'expires_at', ${alias}.expires_at
+             'expires_at', ${alias}.expires_at,
+             'storage_upload_id', ${alias}.storage_upload_id
            )`;
 }
 
@@ -642,6 +650,68 @@ export class DurableMaterialStore {
       session: toSession(readJsonObject(session, 'session')),
       completedParts: readNumberArray(row.completed_parts, 'completed_parts'),
     };
+  }
+
+  /**
+   * Records the object store's multipart upload id against an open session.
+   *
+   * `BeginUpload` and `CreateMaterialVersion` open the multipart upload only
+   * after the session row exists — the store decides deduplication first, and a
+   * deduplicated upload needs no multipart at all — so the id arrives in this
+   * one follow-up statement rather than as a column of the create. The write is
+   * gated on `storage_upload_id IS NULL`, which makes it a no-op the second time:
+   * a replayed `BeginUpload` reuses the id already recorded rather than opening
+   * a second multipart, and this statement refuses to overwrite the first.
+   *
+   * Authorization is the same join every mutation uses — an active `EDITOR` or
+   * `ADMIN` of the session's own group — re-derived here rather than trusted
+   * from the caller, because an access token outlives a revocation.
+   */
+  async attachStorageUploadId(
+    authenticated: AuthenticatedDevice,
+    uploadId: string,
+    storageUploadId: string,
+  ): Promise<void> {
+    const groupId = authenticated.group.id;
+    const normalizedUploadId = requireIdentifier(uploadId, 'upload_id');
+    const normalizedRemoteId = requireBoundedText(storageUploadId, 'storage_upload_id');
+    const rows = await this.query(
+      sql(
+        `WITH editor AS MATERIALIZED (
+           SELECT membership.group_id
+           FROM group_memberships AS membership
+           JOIN devices ON devices.id = membership.device_id
+           WHERE membership.group_id = $1
+             AND membership.device_id = $2
+             AND membership.revoked_at IS NULL
+             AND membership.role IN ('EDITOR', 'ADMIN')
+             AND devices.status <> 'REVOKED'
+           FOR UPDATE OF membership
+         ),
+         attached AS (
+           UPDATE upload_sessions AS session
+           SET storage_upload_id = $4, updated_at = $3
+           FROM editor
+           WHERE session.id = $5
+             AND session.group_id = editor.group_id
+             AND session.storage_upload_id IS NULL
+             AND session.state IN ('PENDING', 'UPLOADING', 'VERIFYING')
+           RETURNING session.id
+         )
+         SELECT
+           EXISTS (SELECT 1 FROM editor) AS editor_active,
+           EXISTS (SELECT 1 FROM attached) AS attached`,
+        [groupId, authenticated.device.id, this.#now(), normalizedRemoteId, normalizedUploadId],
+      ),
+    );
+    const row = requireOneRow(rows, 'Unable to record the storage upload id.');
+    this.assertEditor(row);
+    if (!readBoolean(row.attached, 'attached')) {
+      throw new PairedDeviceRuntimeError(
+        'FAILED_PRECONDITION',
+        'The upload session cannot record a storage upload id: it is closed or already carries one.',
+      );
+    }
   }
 
   /**
@@ -2515,6 +2585,7 @@ function toVersion(row: Record<string, unknown>): MaterialVersionRecord {
 }
 
 function toSession(row: Record<string, unknown>): UploadSessionRecord {
+  const storageUploadId = readOptionalText(row.storage_upload_id);
   return {
     id: readText(row.id, 'id'),
     groupId: readText(row.group_id, 'group_id'),
@@ -2526,6 +2597,7 @@ function toSession(row: Record<string, unknown>): UploadSessionRecord {
     chunkSize: Number(readBigInt(row.chunk_size, 'chunk_size')),
     maxConcurrency: Number(readBigInt(row.max_concurrency, 'max_concurrency')),
     expiresAt: readDate(row.expires_at, 'expires_at'),
+    ...(storageUploadId === undefined ? {} : { storageUploadId }),
   };
 }
 

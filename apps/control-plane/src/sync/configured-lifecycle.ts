@@ -22,6 +22,7 @@ import { createPairedDeviceRealtimeAdmission } from './realtime-admission.js';
 import { createPairedDeviceSyncService } from './service.js';
 import { DurableSettingsStore } from '../settings/store.js';
 import { createSettingsService } from '../settings/service.js';
+import { createS3GrantIssuer, type StorageGrantIssuerFactory } from '../storage/s3-grant-issuer.js';
 import { DurableSimulationProfileStore } from '../telemetry/store.js';
 import { createTelemetryService } from '../telemetry/service.js';
 
@@ -46,6 +47,13 @@ export interface ConfiguredPairedDeviceLifecycleOptions {
    * presence path without a cloud connection.
    */
   readonly coordinationFactory?: CoordinationClientFactory;
+  /**
+   * Optional object-storage seam, so a test can drive the multipart lifecycle
+   * against a scripted bucket instead of a real one. It is consulted only when
+   * `config.storage` is present; without a bucket no issuer exists and the
+   * grant-minting RPCs keep refusing.
+   */
+  readonly storageFactory?: StorageGrantIssuerFactory;
 }
 
 export interface ConfiguredPairedDeviceLifecycle {
@@ -53,6 +61,8 @@ export interface ConfiguredPairedDeviceLifecycle {
   readonly eventStore: DurableRealtimeEventStore;
   readonly presence: PresenceStore;
   readonly coordination: UpstashCoordination;
+  /** Whether a `StorageGrantIssuer` was built, which is what `Health` and `GetCapabilities` report. */
+  readonly storageConfigured: boolean;
   readonly hub: RealtimeHub;
   readonly syncService: ReturnType<typeof createPairedDeviceSyncService>;
   readonly settingsService: ReturnType<typeof createSettingsService>;
@@ -125,6 +135,13 @@ export async function createConfiguredPairedDeviceLifecycle(
   const materialStore = new DurableMaterialStore({ database, receipts });
   const simulationProfiles = new DurableSimulationProfileStore({ database, receipts });
   const integrationStore = new DurableIntegrationStore({ database, receipts });
+  // The issuer is a pure signer over the configured bucket: building it opens no
+  // connection, and the first network call is the CreateMultipartUpload of the
+  // first real upload. The credentials stay inside `config.storage`'s closures.
+  const storage =
+    config.storage === undefined
+      ? undefined
+      : (options.storageFactory ?? createS3GrantIssuer)(config.storage);
 
   return {
     runtime,
@@ -132,6 +149,7 @@ export async function createConfiguredPairedDeviceLifecycle(
     eventStore,
     presence,
     coordination,
+    storageConfigured: storage !== undefined,
     hub,
     syncService: createPairedDeviceSyncService({
       runtime,
@@ -142,12 +160,18 @@ export async function createConfiguredPairedDeviceLifecycle(
       hub,
       coordination,
     }),
-    // No storage grant issuer and no GitHub gateway are configured here: both
-    // need deployment secrets this composition root does not hold, so the RPCs
-    // that spend them answer `FAILED_PRECONDITION` naming what is missing while
-    // everything else works. That is the honest reduced mode, not a stub.
+    // The material service receives the storage issuer only when a bucket is
+    // configured; otherwise the four grant-minting RPCs answer
+    // `FAILED_PRECONDITION` naming what is missing while everything else works.
+    // No GitHub gateway is configured here for the same reason: it needs a
+    // deployment secret this composition root does not hold. That is the honest
+    // reduced mode, not a stub.
     settingsService: createSettingsService({ runtime, store: settingsStore }),
-    materialService: createMaterialService({ runtime, store: materialStore }),
+    materialService: createMaterialService({
+      runtime,
+      store: materialStore,
+      ...(storage === undefined ? {} : { storage }),
+    }),
     telemetryService: createTelemetryService({ runtime, profiles: simulationProfiles }),
     integrationService: createIntegrationService({ runtime, store: integrationStore }),
     realtime: {

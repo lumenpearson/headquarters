@@ -613,3 +613,59 @@ class ScriptedSqlClient implements SqlClient {
     return Promise.resolve();
   }
 }
+
+describe('durable material store: storage upload id', () => {
+  it('attaches the bucket upload id in one statement gated on the column being empty', async () => {
+    const database = new ScriptedSqlClient([[{ editor_active: true, attached: true }]]);
+    const store = createStore(database);
+
+    await store.attachStorageUploadId(authenticatedEditor(), uploadId, 'remote-upload-id');
+
+    expect(database.transactions).toHaveLength(0);
+    expect(database.queries).toHaveLength(1);
+    const statement = database.queries[0];
+    expect(statement?.text).toContain('UPDATE upload_sessions');
+    expect(statement?.text).toContain('AND session.storage_upload_id IS NULL');
+    expect(statement?.text).toContain("AND session.state IN ('PENDING', 'UPLOADING', 'VERIFYING')");
+    expect(statement?.text).toContain("membership.role IN ('EDITOR', 'ADMIN')");
+    // The bucket's identifier is a bound value, never interpolated.
+    expect(statement?.text).not.toContain('remote-upload-id');
+    expect(statement?.values).toContain('remote-upload-id');
+    expect(statement?.values).toContain(uploadId);
+  });
+
+  it('refuses to attach a second id, and refuses a non-editor', async () => {
+    const alreadyAttached = new ScriptedSqlClient([[{ editor_active: true, attached: false }]]);
+    await expect(
+      createStore(alreadyAttached).attachStorageUploadId(
+        authenticatedEditor(),
+        uploadId,
+        'another',
+      ),
+    ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'FAILED_PRECONDITION' });
+
+    const viewer = new ScriptedSqlClient([[{ editor_active: false, attached: false }]]);
+    await expect(
+      createStore(viewer).attachStorageUploadId(authenticatedEditor(), uploadId, 'another'),
+    ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'PERMISSION_DENIED' });
+  });
+
+  it('reads the attached id back with the session and keeps it off a session without one', async () => {
+    const database = new ScriptedSqlClient([
+      [
+        {
+          member_active: true,
+          session: sessionRow({ storage_upload_id: 'remote-upload-id' }),
+          completed_parts: [],
+        },
+      ],
+      [{ member_active: true, session: sessionRow(), completed_parts: [] }],
+    ]);
+    const store = createStore(database);
+
+    const attached = await store.getUploadStatus(authenticatedEditor(), uploadId);
+    expect(attached.session.storageUploadId).toBe('remote-upload-id');
+    const bare = await store.getUploadStatus(authenticatedEditor(), uploadId);
+    expect('storageUploadId' in bare.session).toBe(false);
+  });
+});

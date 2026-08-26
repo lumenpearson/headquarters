@@ -11,6 +11,7 @@ import {
 } from '../sync/receipts.js';
 import { PairedDeviceRuntimeError, type AuthenticatedDevice } from '../sync/runtime.js';
 
+import { storageKeyFor } from './store.js';
 import type {
   CompletedUploadPartInput,
   DurableMaterialStore,
@@ -30,21 +31,54 @@ import type {
  * ConnectRPC adapter for `MaterialService`.
  *
  * Everything about a material that this deployment can answer from PostgreSQL
- * is answered here. What it cannot answer is a URL: `UploadPartGrant.upload_url`,
- * `DownloadGrant.url` and `PreviewGrant.url` all presuppose an object store, and
- * `ControlPlaneConfig` declares none. Rather than return an empty string a
- * client cannot tell from a real address, the four RPCs that would have to mint
- * one refuse with `FAILED_PRECONDITION` naming the missing configuration, and
- * the other twelve work exactly as they will once a bucket exists.
+ * is answered here. A URL — `UploadPartGrant.upload_url`, `DownloadGrant.url`,
+ * `PreviewGrant.url` — presupposes an object store, which arrives as the
+ * injected {@link StorageGrantIssuer} once `HQ_CONTROL_PLANE_STORAGE_*` is
+ * configured. Without it, rather than return an empty string a client cannot
+ * tell from a real address, the four RPCs that would have to mint one refuse
+ * with `FAILED_PRECONDITION` naming the missing configuration, and the other
+ * twelve work either way.
  */
 
-/** One part of a multipart upload, as the object store needs it described. */
+/** What a multipart upload needs before any part can be addressed. */
+export interface StorageMultipartTarget {
+  readonly storageKey: string;
+  readonly mimeType: string;
+}
+
+/** The object store's own identifier for a multipart upload it just opened. */
+export interface StorageMultipartHandle {
+  readonly remoteUploadId: string;
+}
+
+/**
+ * One part of a multipart upload, as the object store needs it described.
+ *
+ * `remoteUploadId` is the store's identifier from {@link StorageMultipartHandle},
+ * not the control plane's `upload_sessions.id`: S3 addresses a part by the
+ * bucket's own upload id, which only exists once the multipart upload is open.
+ */
 export interface StorageUploadPartRequest {
-  readonly uploadId: string;
+  readonly remoteUploadId: string;
   readonly storageKey: string;
   readonly partNumber: number;
-  readonly offset: bigint;
-  readonly length: bigint;
+}
+
+/** One finished part, named by the etag the store returned for it. */
+export interface StorageCompletedPart {
+  readonly partNumber: number;
+  readonly etag: string;
+}
+
+export interface StorageMultipartCompletion {
+  readonly storageKey: string;
+  readonly remoteUploadId: string;
+  readonly parts: readonly StorageCompletedPart[];
+}
+
+export interface StorageMultipartAbort {
+  readonly storageKey: string;
+  readonly remoteUploadId: string;
 }
 
 export interface StorageObjectRequest {
@@ -75,14 +109,21 @@ export interface StoragePreviewGrant extends StorageGrant {
 /**
  * The seam between the material library and whatever stores its bytes.
  *
- * It is a port rather than a client because the control plane has no storage
- * configuration at all yet: the shape of a grant is known, the deployment that
- * issues one is not. Keeping it injected means the bucket's credentials stay in
- * a configuration closure and never reach this service, its responses, or its
- * error text.
+ * It is a port rather than a client so the bucket's credentials stay in a
+ * configuration closure and never reach this service, its responses, or its
+ * error text. Deployments that configure no storage leave it absent, and the
+ * four RPCs that would spend it keep refusing with `FAILED_PRECONDITION`.
+ *
+ * The three URL-minting operations are pure presigning; the three multipart
+ * lifecycle operations are calls the control plane makes itself, because a
+ * `CreateMultipartUpload`, `CompleteMultipartUpload` or `AbortMultipartUpload`
+ * carries a server credential and cannot be a URL handed to a browser.
  */
 export interface StorageGrantIssuer {
+  createMultipartUpload(target: StorageMultipartTarget): Awaitable<StorageMultipartHandle>;
   issueUploadPart(request: StorageUploadPartRequest): Awaitable<StorageGrant>;
+  completeMultipartUpload(completion: StorageMultipartCompletion): Awaitable<void>;
+  abortMultipartUpload(abort: StorageMultipartAbort): Awaitable<void>;
   issueDownload(request: StorageObjectRequest): Awaitable<StorageGrant>;
   issuePreview(request: StoragePreviewRequest): Awaitable<StoragePreviewGrant>;
 }
@@ -100,6 +141,12 @@ export interface MaterialServiceOptions {
 
 const defaultWatchPollIntervalMs = 1_000;
 const defaultWatchBatchSize = 64;
+/** The states in which an upload session still has a multipart upload to finish or abort. */
+const openUploadStates: ReadonlySet<UploadStateName> = new Set<UploadStateName>([
+  'PENDING',
+  'UPLOADING',
+  'VERIFYING',
+]);
 
 export function createMaterialService(
   options: MaterialServiceOptions,
@@ -184,7 +231,13 @@ export function createMaterialService(
         );
         return {
           session: toProtocolSession(begun.session),
-          parts: await issueUploadParts(storage, begun.session.id, begun.storageKey, begun.parts),
+          parts: await openMultipartAndIssueParts(storage, options.store, authenticated, {
+            session: begun.session,
+            storageKey: begun.storageKey,
+            mimeType: request.mimeType,
+            parts: begun.parts,
+            deduplicated: begun.deduplicated,
+          }),
           deduplicated: begun.deduplicated,
         };
       });
@@ -208,14 +261,21 @@ export function createMaterialService(
       return withRuntimeErrors(async () => {
         const authenticated = await authenticate(options.runtime, context);
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
+        const uploadId = requireResourceId(request.uploadId?.value, 'upload_id');
+        const completedParts = request.parts.map(toCompletedPart);
+        // The bucket's own multipart upload is finished first: the assembled
+        // object must exist before the material points at it, or a download
+        // grant would presign a GET to a key with no object behind it. Only
+        // then is the database completion recorded.
+        await completeStorageMultipart(options, authenticated, uploadId, completedParts);
         const completed = await callWithMutation(
           toMutationReceiptContext(request.context?.requestId),
           (mutation) =>
             options.store.completeUpload(
               authenticated,
-              requireResourceId(request.uploadId?.value, 'upload_id'),
+              uploadId,
               request.contentHash,
-              request.parts.map(toCompletedPart),
+              completedParts,
               ...mutation,
             ),
         );
@@ -230,15 +290,25 @@ export function createMaterialService(
       return withRuntimeErrors(async () => {
         const authenticated = await authenticate(options.runtime, context);
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
+        const uploadId = requireResourceId(request.uploadId?.value, 'upload_id');
+        // Read the multipart target while the session still exists, then cancel
+        // it in the database, then abort it in the bucket. The abort is
+        // best-effort: an S3-compatible store reclaims an abandoned multipart
+        // upload through its own lifecycle rules, so a failed abort must not
+        // undo a cancellation the database already recorded.
+        const abort = await resolveStorageAbort(options, authenticated, uploadId);
         const cancelled = await callWithMutation(
           toMutationReceiptContext(request.context?.requestId),
-          (mutation) =>
-            options.store.cancelUpload(
-              authenticated,
-              requireResourceId(request.uploadId?.value, 'upload_id'),
-              ...mutation,
-            ),
+          (mutation) => options.store.cancelUpload(authenticated, uploadId, ...mutation),
         );
+        if (abort !== undefined) {
+          await Promise.resolve(
+            abort.issuer.abortMultipartUpload({
+              storageKey: abort.storageKey,
+              remoteUploadId: abort.remoteUploadId,
+            }),
+          ).catch(() => undefined);
+        }
         return {
           result: {
             resourceId: { value: cancelled.uploadId },
@@ -271,12 +341,13 @@ export function createMaterialService(
         );
         return {
           session: toProtocolSession(created.session),
-          parts: await issueUploadParts(
-            storage,
-            created.session.id,
-            created.storageKey,
-            created.parts,
-          ),
+          parts: await openMultipartAndIssueParts(storage, options.store, authenticated, {
+            session: created.session,
+            storageKey: created.storageKey,
+            mimeType: request.mimeType,
+            parts: created.parts,
+            deduplicated: false,
+          }),
         };
       });
     },
@@ -480,20 +551,65 @@ export function createMaterialService(
   };
 }
 
+/**
+ * Opens the object store's multipart upload for a freshly created session and
+ * presigns a URL for every part.
+ *
+ * A deduplicated upload has nothing to send — the group already holds the bytes
+ * — so no multipart upload is opened and no grant is minted. A session that
+ * already carries a `storageUploadId` is a replay: the multipart upload was
+ * opened by the run that owns the receipt, so this reuses that id rather than
+ * opening a second one, which is why `attachStorageUploadId` refuses to
+ * overwrite the first.
+ */
+async function openMultipartAndIssueParts(
+  storage: StorageGrantIssuer,
+  store: DurableMaterialStore,
+  authenticated: AuthenticatedDevice,
+  input: {
+    readonly session: UploadSessionRecord;
+    readonly storageKey: string;
+    readonly mimeType: string;
+    readonly parts: readonly UploadPartRecord[];
+    readonly deduplicated: boolean;
+  },
+) {
+  if (input.deduplicated || input.parts.length === 0) return [];
+  const remoteUploadId = await resolveRemoteUploadId(storage, store, authenticated, input);
+  return issueUploadParts(storage, remoteUploadId, input.storageKey, input.parts);
+}
+
+async function resolveRemoteUploadId(
+  storage: StorageGrantIssuer,
+  store: DurableMaterialStore,
+  authenticated: AuthenticatedDevice,
+  input: {
+    readonly session: UploadSessionRecord;
+    readonly storageKey: string;
+    readonly mimeType: string;
+  },
+): Promise<string> {
+  if (input.session.storageUploadId !== undefined) return input.session.storageUploadId;
+  const handle = await storage.createMultipartUpload({
+    storageKey: input.storageKey,
+    mimeType: input.mimeType,
+  });
+  await store.attachStorageUploadId(authenticated, input.session.id, handle.remoteUploadId);
+  return handle.remoteUploadId;
+}
+
 async function issueUploadParts(
   storage: StorageGrantIssuer,
-  uploadId: string,
+  remoteUploadId: string,
   storageKey: string,
   parts: readonly UploadPartRecord[],
 ) {
   const grants = [];
   for (const part of parts) {
     const grant = await storage.issueUploadPart({
-      uploadId,
+      remoteUploadId,
       storageKey,
       partNumber: part.partNumber,
-      offset: part.offset,
-      length: part.length,
     });
     grants.push({
       partNumber: part.partNumber,
@@ -505,6 +621,78 @@ async function issueUploadParts(
     });
   }
   return grants;
+}
+
+/**
+ * Drives `CompleteMultipartUpload` for an upload that opened one. A session with
+ * no `storageUploadId` opened no multipart upload — the deduplicated path, where
+ * the bytes already existed — so there is nothing to complete and the call is a
+ * no-op. When there is one, storage is required: an upload that must be assembled
+ * in a bucket cannot be finished without the issuer that opened it.
+ */
+async function completeStorageMultipart(
+  options: MaterialServiceOptions,
+  authenticated: AuthenticatedDevice,
+  uploadId: string,
+  parts: readonly CompletedUploadPartInput[],
+): Promise<void> {
+  const status = await options.store.getUploadStatus(authenticated, uploadId);
+  const remoteUploadId = status.session.storageUploadId;
+  const materialId = status.session.materialId;
+  if (remoteUploadId === undefined || materialId === undefined) return;
+  // A session the database already closed was completed in the bucket before
+  // it was closed, so a retry has nothing to assemble; and one it cancelled is
+  // refused by the store below, without a bucket call it would only undo.
+  if (!openUploadStates.has(status.session.state)) return;
+  const storage = requireStorage(options.storage, 'upload');
+  const storageKey = await resolveMaterialStorageKey(options.store, authenticated, materialId);
+  await storage.completeMultipartUpload({
+    storageKey,
+    remoteUploadId,
+    parts: parts.map((part) => ({ partNumber: part.partNumber, etag: part.etag })),
+  });
+}
+
+/**
+ * The multipart target of a cancellable upload, or `undefined` when there is
+ * nothing in a bucket to abort — no issuer, no recorded upload id, or a session
+ * that has already left the states a cancel applies to.
+ */
+async function resolveStorageAbort(
+  options: MaterialServiceOptions,
+  authenticated: AuthenticatedDevice,
+  uploadId: string,
+): Promise<
+  | {
+      readonly issuer: StorageGrantIssuer;
+      readonly storageKey: string;
+      readonly remoteUploadId: string;
+    }
+  | undefined
+> {
+  const issuer = options.storage;
+  if (issuer === undefined) return undefined;
+  const status = await options.store
+    .getUploadStatus(authenticated, uploadId)
+    .catch(() => undefined);
+  const remoteUploadId = status?.session.storageUploadId;
+  const materialId = status?.session.materialId;
+  if (remoteUploadId === undefined || materialId === undefined) return undefined;
+  const storageKey = await resolveMaterialStorageKey(options.store, authenticated, materialId);
+  return { issuer, storageKey, remoteUploadId };
+}
+
+/**
+ * The reserved object key of a material's current content, which is the key its
+ * open multipart upload was created against: the same content hash names both.
+ */
+async function resolveMaterialStorageKey(
+  store: DurableMaterialStore,
+  authenticated: AuthenticatedDevice,
+  materialId: string,
+): Promise<string> {
+  const found = await store.getMaterial(authenticated, materialId);
+  return storageKeyFor(found.material.groupId, found.material.contentHash);
 }
 
 function resolveLocation(
@@ -545,7 +733,8 @@ function requireStorage(
     throw new PairedDeviceRuntimeError(
       'FAILED_PRECONDITION',
       `This control plane has no object storage configured, so it cannot issue a ${operation} address. ` +
-        'Supply a StorageGrantIssuer to the material service before using this RPC.',
+        'Set HQ_CONTROL_PLANE_STORAGE_ENDPOINT, HQ_CONTROL_PLANE_STORAGE_REGION, HQ_CONTROL_PLANE_STORAGE_BUCKET, ' +
+        'HQ_CONTROL_PLANE_STORAGE_ACCESS_KEY_ID and HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY before using this RPC.',
     );
   }
   return storage;

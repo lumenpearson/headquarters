@@ -33,10 +33,24 @@ This is the largest gap in the build and the one most likely to be planned aroun
   against live PostgreSQL. **`apps/hq` holds no client for any of it.** Whatever the server can
   do, no shipped screen can ask it to. Session synchronization in the application still runs over
   the browser screen bus (ADR 0001).
-- **Four `MaterialService` RPCs fail in every deployment this repository can produce.**
-  `BeginUpload`, `CreateMaterialVersion`, `GetDownloadGrant` and `GetPreviewGrant` need a
-  `StorageGrantIssuer`; the interface and its guard exist and no implementation does. They answer
-  `FAILED_PRECONDITION` naming the missing configuration rather than returning an empty URL.
+- **Object storage is implemented and unproven against a live bucket.** `BeginUpload`,
+  `CreateMaterialVersion`, `GetDownloadGrant` and `GetPreviewGrant` mint AWS Signature Version 4
+  presigned URLs once the `HQ_CONTROL_PLANE_STORAGE_*` group in `apps/control-plane/.env.example`
+  is set (`apps/control-plane/src/storage/`, no SDK); without it they answer `FAILED_PRECONDITION`
+  naming the missing variables. What is proved: the signature algorithm against the AWS SigV4
+  test-suite vectors and the S3 API Reference examples (`sigv4.test.ts`), the multipart calls
+  against a scripted bucket (`s3-grant-issuer.test.ts`), and the whole lifecycle —
+  `CreateMultipartUpload`, part grants, `CompleteMultipartUpload` before the database records the
+  version, `AbortMultipartUpload` after it records the cancellation — over binary gRPC-Web against
+  live PostgreSQL (`services.wire.integration.test.ts`, `material.integration.test.ts`). What is
+  not, because no bucket exists in any environment this repository has been run in: that a real
+  store accepts the signed requests; that a client `PUT` to a part grant succeeds and returns the
+  etag the completion then sends; that `CompleteMultipartUpload` assembles the object; that a
+  download grant serves it. Three gaps are by design and stay open with a bucket: the store never
+  checks `content_hash`, so the stored bytes match the declared hash only as far as the client was
+  honest; a zero-byte upload plans no parts, opens no multipart upload, and marks the material
+  `READY` with no object behind it; every preview variant is the original object served inline,
+  because no conversion pipeline renders another.
 - **Three `IntegrationService` RPCs answer `unimplemented`** for the same reason: `CreateIssue`,
   `CreateTranslationPullRequest` and `GetPullRequestStatus` need GitHub egress the composition
   root holds no secret for.

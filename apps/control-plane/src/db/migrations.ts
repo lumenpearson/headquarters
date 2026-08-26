@@ -808,6 +808,21 @@ const serviceDocumentsAndReceiptScopes: Migration = {
   ],
 };
 
+/**
+ * A multipart upload against an S3-compatible object store is addressed by the
+ * bucket's own upload id, minted by `CreateMultipartUpload` and required by
+ * every `UploadPart`, `CompleteMultipartUpload` and `AbortMultipartUpload`.
+ * That id has to survive between the `BeginUpload` that opens the upload and the
+ * separate `CompleteUpload` or `CancelUpload` RPC that finishes it, so it lives
+ * on the session row rather than in process memory a restart would lose. It is
+ * nullable because a deduplicated upload never opens a multipart upload, and
+ * because every session that predates this column has none.
+ */
+const uploadSessionStorageUploadId: Migration = {
+  id: '0009_upload_session_storage_upload_id',
+  statements: [sql('ALTER TABLE upload_sessions ADD COLUMN IF NOT EXISTS storage_upload_id text')],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -817,6 +832,7 @@ export const migrations: readonly Migration[] = [
   mutationReceiptsForRemainingMutations,
   groupEventSequencesAndRemainingScopes,
   serviceDocumentsAndReceiptScopes,
+  uploadSessionStorageUploadId,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

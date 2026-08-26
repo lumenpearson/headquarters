@@ -43,6 +43,7 @@ describe('control-plane migrations', () => {
         '0006_mutation_receipts_for_remaining_mutations',
         '0007_group_event_sequences_and_remaining_scopes',
         '0008_service_documents_and_receipt_scopes',
+        '0009_upload_session_storage_upload_id',
       ],
       skipped: [],
     });
@@ -139,6 +140,7 @@ describe('control-plane migrations', () => {
       '0006_mutation_receipts_for_remaining_mutations',
       '0007_group_event_sequences_and_remaining_scopes',
       '0008_service_documents_and_receipt_scopes',
+      '0009_upload_session_storage_upload_id',
     ]);
     const authenticationSql = migrations[1].statements
       .map((statement) => statement.text)
@@ -169,6 +171,7 @@ describe('control-plane migrations', () => {
           { id: migrations[5].id, applied: true },
           { id: migrations[6].id, applied: true },
           { id: migrations[7].id, applied: true },
+          { id: migrations[8].id, applied: true },
         ]);
       },
     };
@@ -182,6 +185,7 @@ describe('control-plane migrations', () => {
         '0006_mutation_receipts_for_remaining_mutations',
         '0007_group_event_sequences_and_remaining_scopes',
         '0008_service_documents_and_receipt_scopes',
+        '0009_upload_session_storage_upload_id',
       ],
       skipped: ['0001_control_plane_foundation'],
     });

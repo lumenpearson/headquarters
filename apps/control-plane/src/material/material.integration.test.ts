@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { create } from '@bufbuild/protobuf';
 import type { HandlerContext } from '@connectrpc/connect';
@@ -11,8 +11,14 @@ import { runMigrations } from '../db/migrations.js';
 import { DurablePairedDeviceRuntime } from '../sync/durable-runtime.js';
 import type { AuthenticatedDevice } from '../sync/runtime.js';
 
-import { createMaterialService, type StorageGrantIssuer } from './service.js';
-import { DurableMaterialStore, type BeginUploadOutcome } from './store.js';
+import {
+  createMaterialService,
+  type StorageGrantIssuer,
+  type StorageMultipartAbort,
+  type StorageMultipartCompletion,
+  type StorageMultipartTarget,
+} from './service.js';
+import { DurableMaterialStore, storageKeyFor, type BeginUploadOutcome } from './store.js';
 
 /**
  * Real PostgreSQL proof for the material library.
@@ -483,7 +489,11 @@ describeIntegration('durable material library against real PostgreSQL', () => {
       });
       expect(nothing[0]).toEqual({ materials: 0, objects: 0 });
 
-      const configured = createMaterialService({ runtime, store, storage: testStorageIssuer() });
+      const configured = createMaterialService({
+        runtime,
+        store,
+        storage: recordingStorageIssuer().issuer,
+      });
       const started = await configured.beginUpload?.(request, handlerContext(owner.accessToken));
       expect(started?.deduplicated).toBe(false);
       expect(started?.parts?.[0]?.uploadUrl).toContain('https://storage.invalid/');
@@ -495,6 +505,163 @@ describeIntegration('durable material library against real PostgreSQL', () => {
         values: [owner.groupId],
       });
       expect(written[0]).toEqual({ materials: 1, objects: 1 });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'opens one multipart upload per session, records its id, and finishes it in the bucket before the database',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const store = createStore(runtime);
+      const bucket = recordingStorageIssuer();
+      const service = createMaterialService({ runtime, store, storage: bucket.issuer });
+      const contentHash = uniqueContentHash();
+      const storageKey = storageKeyFor(owner.groupId, contentHash);
+      const context = handlerContext(owner.accessToken);
+      // A retry is recognised by its request id and its payload, and the
+      // material id is part of the payload: a client that wants a lost
+      // response replayed proposes the identity itself, as the store's
+      // `BeginUploadInput.materialId` says.
+      const beginRequest = create(materialV1.BeginUploadRequestSchema, {
+        context: { requestId: `begin-${uniqueSuffix()}` },
+        groupId: { value: owner.groupId },
+        materialId: { value: randomUUID() },
+        displayName: 'Съёмка',
+        originalFileName: 'take.mp4',
+        category: materialV1.MaterialCategory.VIDEO,
+        mimeType: 'video/mp4',
+        totalSize: 1024n,
+        contentHash,
+      });
+
+      const begun = await service.beginUpload?.(beginRequest, context);
+      const uploadId = begun?.session?.id?.value ?? '';
+      expect(uploadId).not.toBe('');
+      expect(bucket.opened).toEqual([{ storageKey, mimeType: 'video/mp4' }]);
+      const remoteUploadId = bucket.remoteUploadIds[0] ?? '';
+      // Every part grant is signed against the bucket's id, not the session's.
+      expect((begun?.parts ?? []).map((part) => part.uploadUrl)).toEqual([
+        `https://storage.invalid/${storageKey}?uploadId=${remoteUploadId}&partNumber=1`,
+      ]);
+      const recorded = await database.query<{ storage_upload_id: string | null }>({
+        text: 'SELECT storage_upload_id FROM upload_sessions WHERE id = $1',
+        values: [uploadId],
+      });
+      expect(recorded[0]?.storage_upload_id).toBe(remoteUploadId);
+
+      // A retry of the same request id is a replay: the multipart upload the
+      // first run opened is reused, and the grants name the same id.
+      const retried = await service.beginUpload?.(beginRequest, context);
+      expect(retried?.session?.id?.value).toBe(uploadId);
+      expect(bucket.opened).toHaveLength(1);
+      expect((retried?.parts ?? []).map((part) => part.uploadUrl)).toEqual(
+        (begun?.parts ?? []).map((part) => part.uploadUrl),
+      );
+      // And the row refuses a second id outright, so no path can re-point the
+      // session at a multipart upload its parts were not signed for.
+      await expect(
+        store.attachStorageUploadId(owner.authenticated, uploadId, 'another-remote-id'),
+      ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'FAILED_PRECONDITION' });
+
+      const completeRequest = create(materialV1.CompleteUploadRequestSchema, {
+        context: { requestId: `complete-${uniqueSuffix()}` },
+        uploadId: { value: uploadId },
+        contentHash,
+        parts: [{ partNumber: 1, etag: '"etag-1"', checksum: 'crc32c-1' }],
+      });
+      const completed = await service.completeUpload?.(completeRequest, context);
+      expect(completed?.material?.status).toBe(materialV1.MaterialStatus.READY);
+      expect(bucket.completed).toEqual([
+        { storageKey, remoteUploadId, parts: [{ partNumber: 1, etag: '"etag-1"' }] },
+      ]);
+      // The bucket saw the session still open: the object is assembled before
+      // the database records the version that points at it.
+      expect(bucket.sessionStatesAtCompletion).toEqual(['PENDING']);
+      const session = await database.query<{ state: string }>({
+        text: 'SELECT state FROM upload_sessions WHERE id = $1',
+        values: [uploadId],
+      });
+      expect(session[0]?.state).toBe('COMPLETED');
+
+      // A retried completion replays the version and asks the bucket for
+      // nothing: the session is already closed, so there is nothing to assemble.
+      const replayed = await service.completeUpload?.(completeRequest, context);
+      expect(replayed?.version?.id?.value).toBe(completed?.version?.id?.value);
+      expect(bucket.completed).toHaveLength(1);
+
+      // The bytes are now held, so a second material with the same content
+      // opens no multipart upload at all.
+      const duplicate = await service.beginUpload?.(
+        create(materialV1.BeginUploadRequestSchema, {
+          groupId: { value: owner.groupId },
+          displayName: 'Съёмка B',
+          originalFileName: 'take-b.mp4',
+          category: materialV1.MaterialCategory.VIDEO,
+          mimeType: 'video/mp4',
+          totalSize: 1024n,
+          contentHash,
+        }),
+        context,
+      );
+      expect(duplicate?.deduplicated).toBe(true);
+      expect(duplicate?.parts).toEqual([]);
+      expect(bucket.opened).toHaveLength(1);
+
+      // Grants for the stored object address the key the bytes were reserved under.
+      const download = await service.getDownloadGrant?.(
+        create(materialV1.GetDownloadGrantRequestSchema, {
+          materialId: { value: begun?.session?.materialId?.value ?? '' },
+        }),
+        context,
+      );
+      expect(download?.grant?.url).toBe(`https://storage.invalid/${storageKey}`);
+      expect(download?.grant?.contentHash).toBe(contentHash);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'aborts the bucket upload a cancelled session opened, after the database has cancelled it',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const store = createStore(runtime);
+      const bucket = recordingStorageIssuer();
+      const service = createMaterialService({ runtime, store, storage: bucket.issuer });
+      const contentHash = uniqueContentHash();
+      const context = handlerContext(owner.accessToken);
+
+      const begun = await service.beginUpload?.(
+        create(materialV1.BeginUploadRequestSchema, {
+          groupId: { value: owner.groupId },
+          displayName: 'Съёмка',
+          originalFileName: 'take.mp4',
+          category: materialV1.MaterialCategory.VIDEO,
+          mimeType: 'video/mp4',
+          totalSize: 1024n,
+          contentHash,
+        }),
+        context,
+      );
+      const uploadId = begun?.session?.id?.value ?? '';
+
+      await service.cancelUpload?.(
+        create(materialV1.CancelUploadRequestSchema, { uploadId: { value: uploadId } }),
+        context,
+      );
+
+      expect(bucket.aborted).toEqual([
+        {
+          storageKey: storageKeyFor(owner.groupId, contentHash),
+          remoteUploadId: bucket.remoteUploadIds[0],
+        },
+      ]);
+      // The database decision comes first: a bucket that refuses the abort must
+      // not un-cancel the session, and a caller the database refuses must never
+      // reach the bucket at all.
+      expect(bucket.sessionStatesAtAbort).toEqual(['CANCELLED']);
     },
     networkTimeoutMs,
   );
@@ -661,6 +828,66 @@ describeIntegration('durable material library against real PostgreSQL', () => {
     });
   }
 
+  /**
+   * A stand-in for the bucket this environment does not have. It records every
+   * multipart call, answers with URLs on the reserved `.invalid` domain, and
+   * reads the session's state from the database at the moment the bucket is
+   * asked to complete or abort — which is how the tests see the order of the
+   * bucket step and the database step, not only that both happened.
+   */
+  function recordingStorageIssuer(): RecordingStorageIssuer {
+    const expiresAt = new Date(Date.now() + 600_000);
+    const opened: StorageMultipartTarget[] = [];
+    const remoteUploadIds: string[] = [];
+    const completed: StorageMultipartCompletion[] = [];
+    const aborted: StorageMultipartAbort[] = [];
+    const sessionStatesAtCompletion: string[] = [];
+    const sessionStatesAtAbort: string[] = [];
+    async function sessionState(remoteUploadId: string): Promise<string> {
+      const rows = await database.query<{ state: string }>({
+        text: 'SELECT state FROM upload_sessions WHERE storage_upload_id = $1',
+        values: [remoteUploadId],
+      });
+      return rows[0]?.state ?? 'MISSING';
+    }
+    return {
+      opened,
+      remoteUploadIds,
+      completed,
+      aborted,
+      sessionStatesAtCompletion,
+      sessionStatesAtAbort,
+      issuer: {
+        createMultipartUpload: (target) => {
+          opened.push(target);
+          const remoteUploadId = `remote-${uniqueSuffix()}`;
+          remoteUploadIds.push(remoteUploadId);
+          return { remoteUploadId };
+        },
+        issueUploadPart: (request) => ({
+          url: `https://storage.invalid/${request.storageKey}?uploadId=${request.remoteUploadId}&partNumber=${request.partNumber.toString()}`,
+          expiresAt,
+        }),
+        completeMultipartUpload: async (completion) => {
+          sessionStatesAtCompletion.push(await sessionState(completion.remoteUploadId));
+          completed.push(completion);
+        },
+        abortMultipartUpload: async (abort) => {
+          sessionStatesAtAbort.push(await sessionState(abort.remoteUploadId));
+          aborted.push(abort);
+        },
+        issueDownload: (request) => ({
+          url: `https://storage.invalid/${request.storageKey}`,
+          expiresAt,
+        }),
+        issuePreview: (request) => ({
+          url: `https://storage.invalid/${request.storageKey}?variant=${request.variant}`,
+          expiresAt,
+        }),
+      },
+    };
+  }
+
   async function bootstrapGroup(runtime: DurablePairedDeviceRuntime): Promise<BootstrappedGroup> {
     const created = await runtime.createGroup({
       name: `Terminal ${uniqueSuffix()}`,
@@ -701,27 +928,14 @@ interface BootstrappedGroup {
   readonly authenticated: AuthenticatedDevice;
 }
 
-/**
- * A deterministic stand-in for the bucket this deployment does not have. It
- * exists to prove the seam is wired, never to imply a real address: every URL
- * it returns is on the reserved `.invalid` domain.
- */
-function testStorageIssuer(): StorageGrantIssuer {
-  const expiresAt = new Date(Date.now() + 600_000);
-  return {
-    issueUploadPart: (request) => ({
-      url: `https://storage.invalid/${request.storageKey}?part=${request.partNumber.toString()}`,
-      expiresAt,
-    }),
-    issueDownload: (request) => ({
-      url: `https://storage.invalid/${request.storageKey}`,
-      expiresAt,
-    }),
-    issuePreview: (request) => ({
-      url: `https://storage.invalid/${request.storageKey}?variant=${request.variant}`,
-      expiresAt,
-    }),
-  };
+interface RecordingStorageIssuer {
+  readonly issuer: StorageGrantIssuer;
+  readonly opened: readonly StorageMultipartTarget[];
+  readonly remoteUploadIds: readonly string[];
+  readonly completed: readonly StorageMultipartCompletion[];
+  readonly aborted: readonly StorageMultipartAbort[];
+  readonly sessionStatesAtCompletion: readonly string[];
+  readonly sessionStatesAtAbort: readonly string[];
 }
 
 /** The two fields the material handlers read; the rest of the context is unused. */

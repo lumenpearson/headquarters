@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ControlPlaneAuthConfig, ControlPlaneConfig } from '../config.js';
+import type {
+  ControlPlaneAuthConfig,
+  ControlPlaneConfig,
+  ControlPlaneStorageConfig,
+} from '../config.js';
 import type { SqlClient, SqlClientFactory, SqlStatement } from '../db/database.js';
 import type { MigrationRunResult } from '../db/migrations.js';
+import type { StorageGrantIssuerFactory } from '../storage/s3-grant-issuer.js';
 
 import {
   createConfiguredPairedDeviceLifecycle,
@@ -169,6 +174,47 @@ describe('configured paired-device lifecycle', () => {
     // The decorator is what turns a stale durable row into an OFFLINE reading,
     // so choosing it is the observable difference Redis makes here.
     expect(configured?.presence.constructor.name).toBe('CoordinatedPresenceStore');
+  });
+
+  it('builds the storage grant issuer from the storage configuration alone, and not otherwise', async () => {
+    const storage: ControlPlaneStorageConfig = {
+      endpoint: 'https://s3.example.test',
+      region: 'eu-central-1',
+      bucket: 'materials',
+      forcePathStyle: false,
+      grantTtlMs: 900_000,
+      presign: () => new URL('https://materials.s3.example.test/x'),
+      sign: () => ({}),
+    };
+    const storageFactory = vi.fn<StorageGrantIssuerFactory>(() => ({
+      createMultipartUpload: () => ({ remoteUploadId: 'remote' }),
+      issueUploadPart: () => ({ url: 'https://materials.s3.example.test/x', expiresAt: fixedNow }),
+      completeMultipartUpload: () => undefined,
+      abortMultipartUpload: () => undefined,
+      issueDownload: () => ({ url: 'https://materials.s3.example.test/x', expiresAt: fixedNow }),
+      issuePreview: () => ({ url: 'https://materials.s3.example.test/x', expiresAt: fixedNow }),
+    }));
+
+    const withoutStorage = await createConfiguredPairedDeviceLifecycle(authenticatedConfig(), {
+      database: new RecordingSqlClient(),
+      migrationRunner: async () => emptyMigrationResult(),
+      storageFactory,
+    });
+    expect(withoutStorage?.storageConfigured).toBe(false);
+    expect(storageFactory).not.toHaveBeenCalled();
+
+    const withStorage = await createConfiguredPairedDeviceLifecycle(
+      { ...authenticatedConfig(), storage },
+      {
+        database: new RecordingSqlClient(),
+        migrationRunner: async () => emptyMigrationResult(),
+        storageFactory,
+      },
+    );
+    expect(withStorage?.storageConfigured).toBe(true);
+    // The factory receives the frozen configuration itself, which is the only
+    // object that can sign: the composition root never sees a key.
+    expect(storageFactory).toHaveBeenCalledExactlyOnceWith(storage);
   });
 
   it('rejects manually constructed auth configuration without a database URL', async () => {
