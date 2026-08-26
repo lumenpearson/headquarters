@@ -19,13 +19,22 @@ import { PairedDeviceRuntimeError } from './runtime.js';
  */
 export function normalizePageSize(
   requested: number,
-  bounds: { readonly defaultPageSize: number; readonly maxPageSize: number },
+  bounds: {
+    readonly defaultPageSize: number;
+    readonly maxPageSize: number;
+    /**
+     * The wire field the refusal names. Every listing calls it `page_size`, but
+     * the group log is paged by `limit`, and an error that names a field the
+     * request does not carry sends the caller looking in the wrong place.
+     */
+    readonly field?: string;
+  },
 ): number {
   if (requested === 0) return bounds.defaultPageSize;
   if (!Number.isSafeInteger(requested) || requested < 1 || requested > bounds.maxPageSize) {
     throw new PairedDeviceRuntimeError(
       'INVALID_ARGUMENT',
-      `page_size must be between 1 and ${bounds.maxPageSize.toString()}.`,
+      `${bounds.field ?? 'page_size'} must be between 1 and ${bounds.maxPageSize.toString()}.`,
     );
   }
   return requested;

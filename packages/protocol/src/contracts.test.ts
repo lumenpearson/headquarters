@@ -78,6 +78,7 @@ describe('versioned Protobuf contracts', () => {
       'PairDevice',
       'PublishDocumentDelta',
       'PublishSessionCommand',
+      'ReadGroupEvents',
       'RefreshDeviceSession',
       'RevokeDevice',
       'SetAuthorityMode',
@@ -163,6 +164,10 @@ describe('versioned Protobuf contracts', () => {
     expect(MaterialService.method.watchMaterialEvents.methodKind).toBe('server_streaming');
     expect(SettingsService.method.watchSettings.methodKind).toBe('server_streaming');
     expect(SyncService.method.watchGroup.methodKind).toBe('server_streaming');
+    // The polling reader is deliberately not one of them: a stream needs the
+    // hub's listener set, and the whole point of `ReadGroupEvents` is that a
+    // deployment which cannot keep that set can still answer a resume.
+    expect(SyncService.method.readGroupEvents.methodKind).toBe('unary');
     expect(TelemetryService.method.streamTelemetry.methodKind).toBe('server_streaming');
   });
 

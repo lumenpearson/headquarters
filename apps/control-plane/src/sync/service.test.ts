@@ -40,6 +40,10 @@ describe('SyncService without its optional collaborators', () => {
           create(syncV1.PublishDocumentDeltaRequestSchema, {}),
           context,
         ),
+      // The polling reader needs the durable log and nothing else, so a startup
+      // without one has to say `unimplemented` rather than answer an empty page:
+      // an empty page is what a caller that is already current also receives.
+      () => service.readGroupEvents?.(create(syncV1.ReadGroupEventsRequestSchema, {}), context),
     ]) {
       await expect(Promise.resolve(call())).rejects.toMatchObject({
         code: Code.Unimplemented,

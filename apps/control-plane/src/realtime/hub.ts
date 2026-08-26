@@ -11,6 +11,7 @@ import {
   type GroupEventDraft,
   type RealtimeEventStore,
 } from './eventStore.js';
+import { decideReplay, resyncRequiredReason } from './replayDecision.js';
 
 const protocolVersion = 'gremuchaya.realtime.v1';
 
@@ -100,9 +101,17 @@ export class RealtimeHub {
         afterSequence: input.afterSequence,
         limit: this.#replayLimit,
       });
-      const earliest = replay.earliestSequence;
-      if (earliest !== undefined && input.afterSequence < earliest - 1n) {
-        input.send(resyncFrame(input.groupId, input.afterSequence, earliest));
+      // The retention edge is decided in `replayDecision.ts`, not here: the
+      // polling reader answers the same resume and has to reach the same
+      // verdict, and one deployment serving both must not disagree with itself.
+      const decision = decideReplay({
+        afterSequence: input.afterSequence,
+        earliestSequence: replay.earliestSequence,
+      });
+      if (decision.outcome === 'resync') {
+        input.send(
+          resyncFrame(input.groupId, input.afterSequence, decision.earliestAvailableSequence),
+        );
       } else {
         let cursor = input.afterSequence;
         for (const event of replay.events) {
@@ -152,7 +161,7 @@ function resyncFrame(
         groupId: { value: groupId },
         requestedAfterSequence,
         earliestAvailableSequence,
-        reason: 'retained event history no longer covers the requested sequence',
+        reason: resyncRequiredReason,
       },
     },
   });

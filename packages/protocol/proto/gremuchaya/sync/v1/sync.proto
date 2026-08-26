@@ -339,6 +339,43 @@ message WatchGroupResponse {
   GroupEvent event = 1;
 }
 
+// A page of the group log, read on demand.
+//
+// This is not a second `WatchGroup`. `WatchGroup` means "push what arrives" and
+// needs the process-local listener set of the realtime hub; a deployment that
+// answers one request on one instance and the next on another cannot keep that
+// set, and a socket admitted there would report itself live while following
+// nothing. This method means "give me the page after N" and needs no hub at
+// all, which is what makes the log readable from a serverless deployment.
+message ReadGroupEventsRequest {
+  gremuchaya.common.v1.ResourceId group_id = 1;
+  // The last sequence the caller already holds. Zero asks for the log from its
+  // beginning, which is the proto3 default and also the honest one: sequences
+  // start at one.
+  uint64 after_sequence = 2;
+  // How many events at most. Zero means the server default. A value above the
+  // retained-window ceiling is refused rather than clamped, because a clamp
+  // looks like a short page and a client would stop paging.
+  uint32 limit = 3;
+}
+
+message ReadGroupEventsResponse {
+  repeated GroupEvent events = 1;
+  // The oldest sequence the group still retains, or zero when the store
+  // reported no edge, which it does exactly when nothing sits above the
+  // requested cursor. Zero is never a real sequence, so it cannot be mistaken
+  // for one.
+  uint64 earliest_available_sequence = 2;
+  // Whether the log holds anything beyond the last event of this page.
+  bool has_more = 3;
+  // The retained window no longer covers the requested cursor, so the caller
+  // needs `GetDocumentSnapshot` rather than more pages. It is the same decision
+  // the realtime hub reports as `gremuchaya.realtime.v1.ResyncRequired`, taken
+  // by the same function, and it travels as a field rather than an error so a
+  // client that fell behind is not told its request was malformed.
+  bool resync_required = 4;
+}
+
 service SyncService {
   rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
   rpc UpdateGroup(UpdateGroupRequest) returns (UpdateGroupResponse);
@@ -357,5 +394,6 @@ service SyncService {
   rpc TimeSync(TimeSyncRequest) returns (TimeSyncResponse);
   rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
   rpc WatchGroup(WatchGroupRequest) returns (stream WatchGroupResponse);
+  rpc ReadGroupEvents(ReadGroupEventsRequest) returns (ReadGroupEventsResponse);
   rpc GetDocumentSnapshot(GetDocumentSnapshotRequest) returns (GetDocumentSnapshotResponse);
 }

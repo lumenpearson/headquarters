@@ -6,8 +6,12 @@ import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@conn
 import { syncV1 } from '@gremuchaya/protocol';
 import type { SyncService } from '@gremuchaya/protocol';
 
-import type { DurableRealtimeEventStore } from '../realtime/eventStore.js';
+import {
+  defaultRealtimeReplayLimit,
+  type DurableRealtimeEventStore,
+} from '../realtime/eventStore.js';
 import type { RealtimeHub } from '../realtime/hub.js';
+import { decideReplay } from '../realtime/replayDecision.js';
 
 import type { UpstashCoordination } from '../redis/coordination.js';
 
@@ -24,6 +28,7 @@ import {
   type PairedGroup,
 } from './runtime.js';
 import type { Awaitable, PairedDeviceLifecycle } from './lifecycle.js';
+import { normalizePageSize } from './paging.js';
 import {
   MutationRequestIdError,
   normalizeRequestId,
@@ -441,6 +446,73 @@ export function createPairedDeviceSyncService(
           stateVector: snapshot.stateVector,
           sequence: snapshot.sequence,
           documentType: snapshot.documentType,
+        };
+      });
+    },
+
+    /**
+     * Reads a page of the group log.
+     *
+     * This is `WatchGroup` answered by pull instead of push, and the difference
+     * is not stylistic. `WatchGroup` needs the hub, whose listener set is a
+     * property of one process: a deployment that answers one request on one
+     * instance and the next on another would admit a socket that reports itself
+     * live and then follows nothing. This method touches no hub at all — it
+     * reads the durable log and returns — so it is the surface a serverless
+     * deployment can actually serve, and it stays authorized exactly as
+     * `WatchGroup` is: an authenticated device, and only its own group.
+     */
+    async readGroupEvents(request, context) {
+      return withRuntimeErrors(async () => {
+        const events = requireEventStore(options.eventStore);
+        const authenticated = await authenticateRequest(options.runtime, context);
+        const groupId = requireResourceId(request.groupId?.value, 'group_id');
+        assertAuthenticatedGroup(authenticated, groupId);
+        // The ceiling is the one `replay` already enforces, not a second one:
+        // asking for more than the store will return is refused here rather
+        // than clamped there, because a silently shortened page looks to a
+        // caller exactly like the end of the log.
+        const limit = normalizePageSize(request.limit, {
+          defaultPageSize: defaultRealtimeReplayLimit,
+          maxPageSize: defaultRealtimeReplayLimit,
+          field: 'limit',
+        });
+        const page = await events.replay({
+          groupId,
+          afterSequence: request.afterSequence,
+          limit,
+        });
+        const decision = decideReplay({
+          afterSequence: request.afterSequence,
+          earliestSequence: page.earliestSequence,
+        });
+        if (decision.outcome === 'resync') {
+          // The same verdict the hub sends as `ResyncRequired`, from the same
+          // function. The page is withheld rather than truncated: a caller
+          // handed the oldest retained events would read them as a complete
+          // history and never ask for the snapshot it needs.
+          return {
+            events: [],
+            earliestAvailableSequence: decision.earliestAvailableSequence,
+            hasMore: false,
+            resyncRequired: true,
+          };
+        }
+        const last = page.events.at(-1);
+        // `has_more` is a fact about the log, not about how full this page came
+        // back: a page of exactly `limit` events can still be the last one. The
+        // probe runs only for a full page and asks the same `replay`, so there
+        // is no second retention rule to keep in step with the first.
+        const hasMore =
+          last !== undefined &&
+          page.events.length >= limit &&
+          (await events.replay({ groupId, afterSequence: last.sequence, limit: 1 })).events.length >
+            0;
+        return {
+          events: [...page.events],
+          earliestAvailableSequence: page.earliestSequence ?? 0n,
+          hasMore,
+          resyncRequired: false,
         };
       });
     },
