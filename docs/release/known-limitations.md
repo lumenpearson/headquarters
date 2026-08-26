@@ -59,8 +59,13 @@ This is the largest gap in the build and the one most likely to be planned aroun
   that migrations 0001–0008 do not declare. The simulation half of the contract is complete; the
   measurement half is not.
 - **Realtime fan-out is single-process.** Two control-plane processes both persist to
-  `sync_events`, but neither pushes the other's events to its own sockets: Upstash REST has no
-  pub/sub. A client's periodic reconnect picks up the gap through replay.
+  `sync_events`, but neither pushes the other's events to its own sockets, because nothing in this
+  repository carries an event between processes: `CoordinationRedisClient` offers
+  `set/sadd/expire/smembers/mget/incr` and subscribes to nothing. A client's periodic reconnect
+  picks up the gap through replay. An earlier version of this entry gave the reason as Upstash REST
+  having no pub/sub, which is wrong — it documents `POST /subscribe/{channel}` over Server-Sent
+  Events, and the pinned `@upstash/redis` exposes `subscribe()`. The limitation is one nobody has
+  lifted, not one that cannot be lifted.
 - **Without Upstash, presence cannot report a device gone** and publications are unbounded. The
   service still runs; `Health` says which of the two modes is in force.
 - `layout_documents`, `layout_versions` and `conversion_jobs` are created by migrations and

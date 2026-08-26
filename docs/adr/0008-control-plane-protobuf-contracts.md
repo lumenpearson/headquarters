@@ -44,7 +44,12 @@ assuming that an incomplete backend is ready.
    deliberately never probed — a health check that opens a socket fails for
    reasons unrelated to whether the service answers.
 10. CORS uses an explicit origin allow-list. Responses use `no-store`,
-    `nosniff`, a same-site resource policy and a restrictive CSP.
+    `nosniff`, a cross-origin resource policy and a restrictive CSP. Amended
+    2026-08-26: the policy was `same-site` and is now `cross-origin`, because
+    the packaged desktop shell calls from `tauri.localhost` and a control plane
+    on the set is a different site by definition — under `same-site` the browser
+    discarded those responses. The allow-list, not the resource policy, is what
+    decides who may call.
 
 ## Consequences
 

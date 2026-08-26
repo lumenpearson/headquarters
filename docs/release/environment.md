@@ -91,3 +91,28 @@ treats `sslmode=require` as `verify-full`, so a server with a self-signed certif
 
 `HQ_CONTROL_PLANE_TEST_DATABASE_DRIVER` is the same choice for the opt-in suites, and exists so the
 eight of them can be run twice — once through each driver — rather than duplicated per driver.
+
+### The deployment target, and the ceilings that shape it
+
+**Nothing is deployed.** No Vercel project exists, no Neon project has been provisioned through the
+Vercel Marketplace, and no blob store has been created. Every number below was read from the
+platform's own documentation on 2026-08-26 and none of it has been observed here; rule 2.2 in
+`docs/plans/actual_plan.md` calls that "written, not run", and it stays that way until stage 5 of
+F14 is executed against a real account.
+
+| Ceiling                               | Value                                              | What it decides here                                                                                                                                                                                               |
+| ------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Request **or** response body          | 4.5 MB, then HTTP 413 `FUNCTION_PAYLOAD_TOO_LARGE` | `GetDocumentSnapshot` and `PublishDocumentDelta` are the two RPCs that can exceed it. The platform answers before the handler runs, so no control-plane error names the cause.                                     |
+| Function memory, Hobby                | 2 GB / 1 vCPU, not configurable                    | Provisioned memory is billed as GB-hours, so on Hobby a warm instance costs 2 GB-hours per hour and the 360 GB-hour allowance is 180 instance-hours a month — six hours a day. This is the tightest Hobby ceiling. |
+| Active CPU, Hobby                     | 4 CPU-hours                                        | Only actual CPU counts; waiting on a database query does not.                                                                                                                                                      |
+| Function invocations, Hobby           | 1,000,000                                          | The polling cadence answers to this: at 5 s per client in the foreground a shoot day stays inside it, at 2 s it does not.                                                                                          |
+| Edge requests, Hobby                  | 1,000,000                                          | Counted alongside invocations, not instead of them.                                                                                                                                                                |
+| Maximum duration                      | 300 s on Hobby                                     | Irrelevant to unary RPCs, decisive for a socket — and a socket is ruled out for a different reason (ADR-0009).                                                                                                     |
+| Commercial use, Hobby                 | not permitted                                      | The fair-use guidelines restrict Hobby to non-commercial personal use. A shoot that pays anyone involved needs Pro, and this is a billing decision to take before the first deploy, not after.                     |
+| Neon Free: storage / compute / egress | 0.5 GB · 100 CU-hours · 5 GB                       | Sized for a control plane that stores events and settings, not media.                                                                                                                                              |
+| Neon Free: autosuspend                | 5 minutes, not disableable                         | Why `neon` (HTTP, holds no connection) is the right driver against Neon and `postgres` (TCP pool) is the right one against a database on the set.                                                                  |
+
+Provisioning is intended through the Vercel Marketplace's native Neon integration rather than a
+separate Neon account, so one invoice covers both. That integration writes `DATABASE_URL` (pooled)
+and `DATABASE_URL_UNPOOLED` (direct) into the project; `HQ_CONTROL_PLANE_DATABASE_URL` can take
+either, because the HTTP driver holds no connection for a pooler to manage.

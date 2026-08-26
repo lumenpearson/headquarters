@@ -116,8 +116,8 @@ reach the UI; a real node shadows an emulated one at the same virtual path.
 ### Further reading
 
 - `docs/architecture/dependency-map.md` — canonical layering summary
-- `docs/adr/0001`–`0008` — screen bus, virtual filesystem, file bridge, information state machines,
-  offline-first runtime, static route generation, toolchain pinning, control-plane contracts
+- `docs/adr/0001`–`0009` — screen bus, virtual filesystem, file bridge, information state machines,
+  offline-first runtime, static route generation, toolchain pinning, contracts, two RPC adapters
 - `docs/release/{environment,runbook,known-limitations}.md` — pinned versions, shoot-day procedure,
   and what is deliberately not built yet
 - `docs/plans/actual_plan.md` — the one plan (see Notes)
