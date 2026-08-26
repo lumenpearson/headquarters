@@ -224,6 +224,65 @@ describe('issue draft with content edits', () => {
     expect(body).toContain('`event.time@EV-1001` → `18:05:09`');
   });
 
+  it('keeps a content value inside its code span whatever the value holds', () => {
+    const draft = createSettingsDraft(createFactorySnapshot());
+    const url = new URL(
+      buildIssueDraftUrl({
+        repository: 'owner/repo',
+        draft,
+        content: {
+          'operation.summary@OP-GS-042':
+            '`## НЕ ЗАГОЛОВОК`\n- [ ] и не пункт списка\n\n```\nи не блок кода\n```',
+        },
+      }),
+    );
+    const body = url.searchParams.get('body') ?? '';
+    const rows = body.split('\n').filter((line) => line.startsWith('- '));
+
+    // One row, however many newlines the value held, and the headings below it
+    // are still the ones this builder wrote.
+    expect(rows).toHaveLength(1);
+    expect(body.split('\n').filter((line) => line.startsWith('##'))).toEqual([
+      '## Content changed in edit mode',
+    ]);
+    expect(rows[0]).toContain('⏎');
+    // The fence outgrows the longest run of backticks in the value.
+    expect(rows[0]).toContain('```` `## НЕ ЗАГОЛОВОК`');
+  });
+
+  it('clamps a body too long for a link, on a code-point boundary', () => {
+    const draft = createSettingsDraft(createFactorySnapshot());
+    // An afternoon of corrections across the case registry: one title per
+    // case, in a script where every character is a surrogate pair. The pad is
+    // ASCII and one character longer in the second draft, so the two bodies
+    // reach the cut at opposite parities and one of them would be cut between
+    // the halves of a pair by anything counting UTF-16 units.
+    const bodyWithPad = (pad: string): string => {
+      const url = new URL(
+        buildIssueDraftUrl({
+          repository: 'owner/repo',
+          draft,
+          content: Object.fromEntries(
+            Array.from({ length: 60 }, (_, index) => [
+              `case.title@CASE-${index.toString().padStart(2, '0')}`,
+              `${pad}${'𝄞'.repeat(120)}`,
+            ]),
+          ),
+        }),
+      );
+      return url.searchParams.get('body') ?? '';
+    };
+
+    for (const pad of ['', '.']) {
+      const body = bodyWithPad(pad);
+      expect([...body].length).toBeLessThanOrEqual(6000);
+      expect(body).toContain('Список обрезан');
+      // No lone surrogate, so nothing arrives as a replacement mark.
+      expect(body).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
+      expect(body).not.toContain('�');
+    }
+  });
+
   it('still refuses a draft with neither a setting nor a content change', () => {
     const draft = createSettingsDraft(createFactorySnapshot());
 
