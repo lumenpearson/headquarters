@@ -461,16 +461,10 @@ test('renders the full safe personalization catalogue and resets one selected ca
   // section at all.
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
-  await expect(
-    page.getByRole('option', { name: 'АНИМАЦИИ / ANIMATIONS', exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole('option', { name: 'МАТЕРИАЛЫ / MATERIALS', exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole('option', { name: 'РАСШИРЕННЫЕ / ADVANCED', exact: true }),
-  ).toBeVisible();
-  await page.getByRole('option', { name: 'АНИМАЦИИ / ANIMATIONS', exact: true }).click();
+  await expect(page.getByRole('option', { name: 'АНИМАЦИИ', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'МАТЕРИАЛЫ', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'РАСШИРЕННЫЕ', exact: true })).toBeVisible();
+  await page.getByRole('option', { name: 'АНИМАЦИИ', exact: true }).click();
 
   const enabled = page.getByRole('switch', { name: 'ANIMATIONS / ENABLED' });
   await expect(enabled).toBeChecked();
@@ -528,14 +522,14 @@ test('applies schema-backed visual preview tokens without introducing arbitrary 
 
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
-  await page.getByRole('option', { name: 'ЦВЕТА / COLORS', exact: true }).click();
+  await page.getByRole('option', { name: 'ЦВЕТА', exact: true }).click();
   const accent = page.getByRole('combobox', { name: 'COLORS / ACCENT' });
   await accent.click();
   await page.getByRole('option', { name: 'CYAN', exact: true }).click();
   await expect(page.locator('.ops-shell')).toHaveAttribute('data-accent', 'cyan');
 
   await category.click();
-  await page.getByRole('option', { name: 'ФОНЫ / BACKGROUNDS', exact: true }).click();
+  await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
   const background = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
   await background.click();
   await page.getByRole('option', { name: 'GRADIENT', exact: true }).click();

@@ -82,12 +82,12 @@ test('R6: every section is reachable from the floating panel and shows its categ
   const section = panel.getByRole('combobox', { name: 'Раздел' });
   const sections = [
     'ВНЕШНИЙ ВИД',
-    'МАКЕТ',
-    'ДВИЖЕНИЕ И ДОСТУПНОСТЬ / MOTION',
-    'ИНФОРМАЦИЯ / INFORMATION',
-    'МЕДИА И КАРТА / MEDIA',
-    'СЕССИЯ И УПРАВЛЕНИЕ / SESSION',
-    'СИСТЕМА / SYSTEM',
+    'МАКЕТ И РАЗМЕРЫ',
+    'ДВИЖЕНИЕ И ДОСТУПНОСТЬ',
+    'ИНФОРМАЦИЯ',
+    'МЕДИА И КАРТА',
+    'СЕССИЯ И УПРАВЛЕНИЕ',
+    'СИСТЕМА',
   ];
 
   for (const name of sections) {
@@ -192,7 +192,7 @@ for (const [option, attribute] of [
 
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
     await category.click();
-    await page.getByRole('option', { name: 'ПАТТЕРНЫ / PATTERNS', exact: true }).click();
+    await page.getByRole('option', { name: 'ПАТТЕРНЫ', exact: true }).click();
     const pattern = page.getByRole('combobox', { name: 'PATTERNS / FOCUS' });
     await pattern.click();
     await page.getByRole('option', { name: option, exact: true }).click();

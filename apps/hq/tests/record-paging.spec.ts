@@ -13,7 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function setPageSize(page: Page, size: number): Promise<void> {
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'ТАБЛИЦЫ / TABLES', exact: true }).click();
+  await page.getByRole('option', { name: 'ТАБЛИЦЫ', exact: true }).click();
   /*
    * Typed, not filled. `locator.fill` assigns the value and dispatches one
    * input event, which Base UI's number field reads differently from

@@ -237,7 +237,7 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   // tiles category is a heading inside `layout` rather than an entry in a flat
   // list of all thirty-two categories.
   await panel.getByRole('combobox', { name: 'Раздел' }).click();
-  await page.getByRole('option', { name: 'МАКЕТ', exact: true }).click();
+  await page.getByRole('option', { name: 'МАКЕТ И РАЗМЕРЫ', exact: true }).click();
 
   const list = panel.locator('.edit-tiles');
   await expect(list).toBeVisible();

@@ -85,7 +85,7 @@ test('R16: turning the sequence off in settings silences the next launch', async
 
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
-  await page.getByRole('option', { name: 'ЗАПУСК / STARTUP', exact: true }).click();
+  await page.getByRole('option', { name: 'ЗАПУСК', exact: true }).click();
   await page.getByRole('switch', { name: 'STARTUP / ENABLED' }).click();
 
   // The draft does not survive a reload, so the switch is read back in place

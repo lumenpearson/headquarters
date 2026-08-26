@@ -59,7 +59,7 @@ test('R12: the selection colour follows the theme the operator chose', async ({ 
   expect(dark.ink).toBe('#000');
 
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'ТЕМЫ / THEMES', exact: true }).click();
+  await page.getByRole('option', { name: 'ТЕМЫ', exact: true }).click();
   await page.getByRole('combobox', { name: 'THEMES / ID' }).click();
   await page.getByRole('option', { name: 'LIGHT-OPERATIONS', exact: true }).click();
 
@@ -207,7 +207,7 @@ test('R12: a long press reaches the same menu on touch, and the setting turns it
   // nothing at all; this is the consumer that makes it mean something.
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
-  await page.getByRole('option', { name: 'POP-UP / POPUPS', exact: true }).click();
+  await page.getByRole('option', { name: 'POP-UP', exact: true }).click();
   await page.getByRole('switch', { name: 'POPUPS / LONG PRESS' }).click();
 
   await page.goto('/objects');

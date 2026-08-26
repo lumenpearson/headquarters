@@ -89,7 +89,7 @@ test('paints a chosen material as the application background, and lets go of it'
 
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
     await category.click();
-    await page.getByRole('option', { name: 'ФОНЫ / BACKGROUNDS', exact: true }).click();
+    await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
 
     const kind = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
     await kind.click();
@@ -134,7 +134,7 @@ test('offers only material the setting accepts', async ({ page }) => {
   await page.goto('/settings');
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
-  await page.getByRole('option', { name: 'ФОНЫ / BACKGROUNDS', exact: true }).click();
+  await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
 
   const source = page.getByRole('combobox', { name: 'BACKGROUNDS / VIDEO SOURCE' });
   await expect(source).toBeVisible();
@@ -209,7 +209,7 @@ test('plays a chosen clip as the background and stops it when motion is off', as
     await page.goto('/settings');
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
     await category.click();
-    await page.getByRole('option', { name: 'ФОНЫ / BACKGROUNDS', exact: true }).click();
+    await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
 
     const kind = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
     await kind.click();
@@ -229,7 +229,7 @@ test('plays a chosen clip as the background and stops it when motion is off', as
     // R13 asks for a background whose motion can be switched off. Turning
     // animations off must actually stop the decoder, not merely hide movement.
     await category.click();
-    await page.getByRole('option', { name: 'АНИМАЦИИ / ANIMATIONS', exact: true }).click();
+    await page.getByRole('option', { name: 'АНИМАЦИИ', exact: true }).click();
     await page.getByRole('switch', { name: 'ANIMATIONS / ENABLED' }).click();
 
     await expect
