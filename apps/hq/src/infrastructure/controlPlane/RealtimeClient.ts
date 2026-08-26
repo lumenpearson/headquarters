@@ -3,7 +3,11 @@ import { realtimeV1 } from '@gremuchaya/protocol';
 import type { syncV1 } from '@gremuchaya/protocol';
 
 import type { RealtimeLinkState } from '@/application/sync/connection';
-import type { GroupEventEnvelope, RealtimeIdentity } from '@/application/sync/groupChannel';
+import type {
+  GroupEventCursor,
+  GroupEventEnvelope,
+  RealtimeIdentity,
+} from '@/application/sync/groupChannel';
 
 import { toGroupEventEnvelope } from './groupEventCodec';
 
@@ -71,6 +75,15 @@ export interface RealtimeClientOptions {
   readonly onEvent: (event: GroupEventEnvelope) => void;
   readonly onStatus: (state: RealtimeLinkState) => void;
   /**
+   * The group's applied position, owned by whatever merges the transports.
+   *
+   * The socket resumes from it and rewinds it on a resync, but does not own
+   * it: a group fed by both a socket and a poller has one order and therefore
+   * one position. Absent, the client keeps a private cursor, which is what a
+   * socket that is the only transport wants.
+   */
+  readonly cursor?: GroupEventCursor;
+  /**
    * Called when the retained log no longer covers the resume point. The caller
    * takes `GetDocumentSnapshot` and answers with the sequence the snapshot was
    * taken at; the next hello resumes from there.
@@ -125,14 +138,29 @@ export class RealtimeClient {
   #resyncController: AbortController | null = null;
   #attempt = 0;
   #started = false;
-  /** The last sequence handed to `onEvent`, and therefore the resume point. */
-  #lastSequence = 0n;
+  /**
+   * The group's applied position. Injected when something else merges the
+   * transports; private when this socket is the only one.
+   */
+  readonly #cursor: GroupEventCursor;
+  /**
+   * Whether this socket is the group's merge point.
+   *
+   * True when no cursor was injected, which means nothing else is feeding the
+   * group and the socket both decides what is new and remembers it. False when
+   * a channel merges several transports: then the channel decides, and a
+   * socket that also decided would advance the position past an event the
+   * channel had not yet fanned out.
+   */
+  readonly #ownsCursor: boolean;
   #connectionId = '';
   #resyncCount = 0;
   #status: RealtimeLinkState['status'] = 'off';
 
   constructor(options: RealtimeClientOptions) {
     this.#options = options;
+    this.#cursor = options.cursor ?? createPrivateCursor();
+    this.#ownsCursor = options.cursor === undefined;
     this.#url = realtimeUrl(options.baseUrl);
     this.#createSocket =
       options.createSocket ?? ((url) => new WebSocket(url) as unknown as RealtimeSocketLike);
@@ -152,7 +180,7 @@ export class RealtimeClient {
   }
 
   get lastSequence(): bigint {
-    return this.#lastSequence;
+    return this.#cursor.appliedSequence();
   }
 
   start(): void {
@@ -240,7 +268,7 @@ export class RealtimeClient {
         value: {
           groupId: { value: identity.groupId },
           deviceId: { value: identity.deviceId },
-          afterSequence: this.#lastSequence,
+          afterSequence: this.#cursor.appliedSequence(),
           documentStateVector: identity.documentStateVector ?? new Uint8Array(0),
           accessToken: identity.accessToken,
         },
@@ -296,8 +324,7 @@ export class RealtimeClient {
    */
   #applyEvent(socket: RealtimeSocketLike, event: syncV1.GroupEvent | undefined): void {
     if (event === undefined) return;
-    if (event.sequence <= this.#lastSequence) return;
-    this.#lastSequence = event.sequence;
+    if (this.#ownsCursor && !this.#cursor.accept(event.sequence)) return;
     this.#emit(this.#status === 'live' ? 'live' : this.#status);
     this.#options.onEvent(toGroupEventEnvelope(event));
     this.#acknowledge(socket, event.sequence);
@@ -333,7 +360,7 @@ export class RealtimeClient {
     if (onResync === undefined) {
       // Without a snapshot collaborator the honest resume point is the oldest
       // the server still retains: everything before it is gone either way.
-      this.#lastSequence = maxSequence(0n, resync.earliestAvailableSequence - 1n);
+      this.#cursor.rewindTo(maxSequence(0n, resync.earliestAvailableSequence - 1n));
       this.#emit('reconnecting');
       if (this.#started) this.#scheduleReconnect();
       return;
@@ -350,16 +377,17 @@ export class RealtimeClient {
     )
       .then((outcome) => {
         if (controller.signal.aborted) return;
-        this.#lastSequence =
+        this.#cursor.rewindTo(
           outcome === null
             ? maxSequence(0n, resync.earliestAvailableSequence - 1n)
-            : outcome.afterSequence;
+            : outcome.afterSequence,
+        );
       })
       .catch(() => {
         // A snapshot that could not be read leaves the client where the log
         // still starts, which is the most it can honestly claim to have seen.
         if (!controller.signal.aborted) {
-          this.#lastSequence = maxSequence(0n, resync.earliestAvailableSequence - 1n);
+          this.#cursor.rewindTo(maxSequence(0n, resync.earliestAvailableSequence - 1n));
         }
       })
       .finally(() => {
@@ -454,7 +482,7 @@ export class RealtimeClient {
     this.#options.onStatus({
       status,
       connectionId: this.#connectionId,
-      lastSequence: Number(this.#lastSequence),
+      lastSequence: Number(this.#cursor.appliedSequence()),
       resyncCount: this.#resyncCount,
     });
   }
@@ -488,6 +516,27 @@ function toBytes(data: unknown): Uint8Array | null {
   // A text frame. The server never sends one, so this is another script's
   // message or a proxy's, and it is not decoded as Protobuf.
   return null;
+}
+
+/**
+ * The cursor a socket keeps when it is the group's only transport.
+ *
+ * Held here rather than as a field so the client has exactly one way to read
+ * its position, whether the position is its own or somebody else's.
+ */
+function createPrivateCursor(): GroupEventCursor {
+  let applied = 0n;
+  return {
+    accept: (sequence) => {
+      if (sequence <= applied) return false;
+      applied = sequence;
+      return true;
+    },
+    appliedSequence: () => applied,
+    rewindTo: (sequence) => {
+      applied = sequence < 0n ? 0n : sequence;
+    },
+  };
 }
 
 function maxSequence(left: bigint, right: bigint): bigint {

@@ -108,6 +108,9 @@ export function GroupChannelRuntime({ client, session }: GroupChannelRuntimeProp
         baseUrl: client.baseUrl,
         identity: () => client.realtimeIdentity(),
         onEvent: channel.deliver,
+        // The channel owns the group's position, because the group has one
+        // order and may come to have more than one transport carrying it.
+        cursor: channel,
         onStatus: (state) => operationsStore.getState().patchConnection({ realtime: state }),
         onResync: async (_resync, signal) => {
           /*

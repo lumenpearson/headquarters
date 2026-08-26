@@ -114,6 +114,38 @@ export interface DocumentSnapshot {
 }
 
 /**
+ * The applied position in a group's one event order.
+ *
+ * A group has a single order: the database allocates every sequence under a
+ * row lock, so the numbers are the commit order and no reader can see a gap
+ * that later fills in. One order deserves one cursor, and a transport reads it
+ * rather than keeping its own -- otherwise a group fed by both a socket and a
+ * poller would hold two positions and each would replay what the other had
+ * already applied.
+ */
+export interface GroupEventCursor {
+  /**
+   * Takes `sequence` if it is newer than the applied position, and says so.
+   *
+   * Check and advance are one operation because they are one decision: two
+   * callers asking "is this new?" before either advances would both be told
+   * yes. Exactly one merge point calls this per event.
+   */
+  accept(sequence: bigint): boolean;
+  /** The last sequence applied to the group; a resume starts after it. */
+  appliedSequence(): bigint;
+  /**
+   * Moves the cursor back so a replay from `sequence` is applied again.
+   *
+   * The server answers a resume point it no longer retains with the oldest it
+   * still holds. Everything between is gone, so the cursor follows the
+   * server's edge rather than stranding the group behind a position that now
+   * points into a pruned window.
+   */
+  rewindTo(sequence: bigint): void;
+}
+
+/**
  * What a live-edit transport or a playback coordinator needs of the group.
  *
  * Deliberately narrow: publish two kinds of thing, and hear everything. The
