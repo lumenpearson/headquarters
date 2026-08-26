@@ -44,6 +44,7 @@ describe('control-plane migrations', () => {
         '0007_group_event_sequences_and_remaining_scopes',
         '0008_service_documents_and_receipt_scopes',
         '0009_upload_session_storage_upload_id',
+        '0010_control_plane_installation',
       ],
       skipped: [],
     });
@@ -141,6 +142,7 @@ describe('control-plane migrations', () => {
       '0007_group_event_sequences_and_remaining_scopes',
       '0008_service_documents_and_receipt_scopes',
       '0009_upload_session_storage_upload_id',
+      '0010_control_plane_installation',
     ]);
     const authenticationSql = migrations[1].statements
       .map((statement) => statement.text)
@@ -172,6 +174,7 @@ describe('control-plane migrations', () => {
           { id: migrations[6].id, applied: true },
           { id: migrations[7].id, applied: true },
           { id: migrations[8].id, applied: true },
+          { id: migrations[9].id, applied: true },
         ]);
       },
     };
@@ -186,10 +189,43 @@ describe('control-plane migrations', () => {
         '0007_group_event_sequences_and_remaining_scopes',
         '0008_service_documents_and_receipt_scopes',
         '0009_upload_session_storage_upload_id',
+        '0010_control_plane_installation',
       ],
       skipped: ['0001_control_plane_foundation'],
     });
     expect(transactions).toHaveLength(1);
+  });
+
+  /*
+   * The structural half of the installation identity. Whether a second run
+   * really leaves the value alone is proved against a live engine in
+   * `postgres.integration.test.ts`; this is the change detector that keeps the
+   * two statements from acquiring a way to overwrite it.
+   */
+  it('mints the installation identity idempotently and never rewrites it', () => {
+    const installation = migrations.find(
+      (migration) => migration.id === '0010_control_plane_installation',
+    );
+    const statements = (installation?.statements ?? []).map((statement) => statement.text);
+    const installationSql = statements.join('\n');
+
+    expect(installationSql).toContain('CREATE TABLE IF NOT EXISTS control_plane_installation');
+    expect(installationSql).toContain('installation_id uuid NOT NULL DEFAULT gen_random_uuid()');
+    // A single row, enforced by the database rather than by the caller.
+    expect(installationSql).toContain(
+      'singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton)',
+    );
+    expect(installationSql).toContain('ON CONFLICT (singleton) DO NOTHING');
+
+    // No statement anywhere in the sequence can change an identity once minted:
+    // an UPDATE, a DELETE or a DROP here would make a client's comparison mean
+    // nothing, because the same database could report two different values.
+    const everySql = migrations
+      .flatMap((migration) => migration.statements.map((statement) => statement.text))
+      .join('\n');
+    expect(everySql).not.toMatch(/UPDATE\s+control_plane_installation/iu);
+    expect(everySql).not.toMatch(/DELETE\s+FROM\s+control_plane_installation/iu);
+    expect(everySql).not.toMatch(/DROP\s+TABLE[^;]*control_plane_installation/iu);
   });
 
   it('makes a queued second runner acquire the lock before it rechecks the ledger', async () => {

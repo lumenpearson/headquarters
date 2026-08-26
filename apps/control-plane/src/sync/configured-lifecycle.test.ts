@@ -23,7 +23,7 @@ describe('configured paired-device lifecycle', () => {
 
     await expect(
       createConfiguredPairedDeviceLifecycle(
-        { port: 0, allowedOrigins: ['http://127.0.0.1:3000'] },
+        { port: 0, host: '127.0.0.1', allowedOrigins: ['http://127.0.0.1:3000'] },
         { databaseFactory },
       ),
     ).resolves.toBeUndefined();
@@ -32,7 +32,13 @@ describe('configured paired-device lifecycle', () => {
   });
 
   it('runs migrations before returning a durable lifecycle, SyncService, and authenticated realtime admission', async () => {
-    const database = new RecordingSqlClient([[createdLifecycleRow()], [pairingCodeRow()]]);
+    // The first scripted answer is the installation identity startup reads
+    // straight after the migration gate; the two after it are the lifecycle's.
+    const database = new RecordingSqlClient([
+      [{ installation_id: '3f1c2b7a-0d4e-4f6a-9c2b-8e1d5a7c9f30' }],
+      [createdLifecycleRow()],
+      [pairingCodeRow()],
+    ]);
     const events: string[] = [];
     const hashCredential = vi.fn(
       (kind: 'access' | 'pair' | 'refresh', raw: string) => `configured-${kind}-${raw.length}`,
@@ -63,6 +69,9 @@ describe('configured paired-device lifecycle', () => {
       applied: ['0001_control_plane_foundation'],
       skipped: [],
     });
+    // Read after the gate and carried onto the lifecycle, so `GetCapabilities`
+    // reports which database the migrations above just ran against.
+    expect(configured.installationId).toBe('3f1c2b7a-0d4e-4f6a-9c2b-8e1d5a7c9f30');
     expect(configured.syncService.createGroup).toBeTypeOf('function');
     expect(configured.realtime.admission).toBeDefined();
     expect(events).toEqual(['migrations']);
@@ -89,9 +98,10 @@ describe('configured paired-device lifecycle', () => {
     );
 
     expect(events).toEqual(['migrations']);
-    expect(database.queries).toHaveLength(2);
-    const createGroupStatement = database.queries[0];
-    const createPairingCodeStatement = database.queries[1];
+    // The installation read at index 0, then the two mutations above it.
+    expect(database.queries).toHaveLength(3);
+    const createGroupStatement = database.queries[1];
+    const createPairingCodeStatement = database.queries[2];
     expect(createGroupStatement?.values).toContainEqual(new Date('2026-08-18T09:02:00.000Z'));
     expect(createGroupStatement?.values).toContainEqual(new Date('2026-08-18T11:00:00.000Z'));
     expect(createPairingCodeStatement?.values).toContainEqual(new Date('2026-08-18T09:30:00.000Z'));
@@ -122,7 +132,12 @@ describe('configured paired-device lifecycle', () => {
     });
 
     expect(databaseFactory).toHaveBeenCalledExactlyOnceWith(databaseUrl);
-    expect(driver.queries).toEqual([{ text: 'SELECT 1', values: [] }]);
+    // The migration runner's own statement, then the one read of the
+    // installation identity. Nothing else reaches the driver at startup.
+    expect(driver.queries.map((statement) => statement.text.split('\n')[0]?.trim())).toEqual([
+      'SELECT 1',
+      'SELECT installation_id::text AS installation_id',
+    ]);
   });
 
   it('does not return enabled collaborators when the immutable migration gate fails', async () => {
@@ -221,6 +236,7 @@ describe('configured paired-device lifecycle', () => {
     await expect(
       createConfiguredPairedDeviceLifecycle({
         port: 0,
+        host: '127.0.0.1',
         allowedOrigins: ['http://127.0.0.1:3000'],
         auth: authConfig(),
       }),
@@ -231,6 +247,7 @@ describe('configured paired-device lifecycle', () => {
 function authenticatedConfig(overrides: Partial<ControlPlaneAuthConfig> = {}): ControlPlaneConfig {
   return {
     port: 0,
+    host: '127.0.0.1',
     allowedOrigins: ['http://127.0.0.1:3000'],
     databaseUrl,
     auth: authConfig(overrides),

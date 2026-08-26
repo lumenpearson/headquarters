@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gremuchaya/control/v1/control.proto.
  */
 export const file_gremuchaya_control_v1_control: GenFile = /*@__PURE__*/
-  fileDesc("CiNncmVtdWNoYXlhL2NvbnRyb2wvdjEvY29udHJvbC5wcm90bxIVZ3JlbXVjaGF5YS5jb250cm9sLnYxIg8KDUhlYWx0aFJlcXVlc3QiegoQRGVwZW5kZW5jeUhlYWx0aBIMCgRuYW1lGAEgASgJEjQKBnN0YXR1cxgCIAEoDjIkLmdyZW11Y2hheWEuY29udHJvbC52MS5TZXJ2aW5nU3RhdHVzEhIKCmxhdGVuY3lfbXMYAyABKA0SDgoGZGV0YWlsGAQgASgJIqECCg5IZWFsdGhSZXNwb25zZRIPCgdzZXJ2aWNlGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgDIAEoCRI0CgZzdGF0dXMYBCABKA4yJC5ncmVtdWNoYXlhLmNvbnRyb2wudjEuU2VydmluZ1N0YXR1cxIuCgpzdGFydGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjaGVja2VkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI9CgxkZXBlbmRlbmNpZXMYByADKAsyJy5ncmVtdWNoYXlhLmNvbnRyb2wudjEuRGVwZW5kZW5jeUhlYWx0aCIYChZHZXRDYXBhYmlsaXRpZXNSZXF1ZXN0IjwKCkNhcGFiaWxpdHkSDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEg8KB2VuYWJsZWQYAyABKAgiUgoXR2V0Q2FwYWJpbGl0aWVzUmVzcG9uc2USNwoMY2FwYWJpbGl0aWVzGAEgAygLMiEuZ3JlbXVjaGF5YS5jb250cm9sLnYxLkNhcGFiaWxpdHkqiAEKDVNlcnZpbmdTdGF0dXMSHgoaU0VSVklOR19TVEFUVVNfVU5TUEVDSUZJRUQQABIaChZTRVJWSU5HX1NUQVRVU19TRVJWSU5HEAESGwoXU0VSVklOR19TVEFUVVNfREVHUkFERUQQAhIeChpTRVJWSU5HX1NUQVRVU19OT1RfU0VSVklORxADMt4BChNDb250cm9sUGxhbmVTZXJ2aWNlElUKBkhlYWx0aBIkLmdyZW11Y2hheWEuY29udHJvbC52MS5IZWFsdGhSZXF1ZXN0GiUuZ3JlbXVjaGF5YS5jb250cm9sLnYxLkhlYWx0aFJlc3BvbnNlEnAKD0dldENhcGFiaWxpdGllcxItLmdyZW11Y2hheWEuY29udHJvbC52MS5HZXRDYXBhYmlsaXRpZXNSZXF1ZXN0Gi4uZ3JlbXVjaGF5YS5jb250cm9sLnYxLkdldENhcGFiaWxpdGllc1Jlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("CiNncmVtdWNoYXlhL2NvbnRyb2wvdjEvY29udHJvbC5wcm90bxIVZ3JlbXVjaGF5YS5jb250cm9sLnYxIg8KDUhlYWx0aFJlcXVlc3QiegoQRGVwZW5kZW5jeUhlYWx0aBIMCgRuYW1lGAEgASgJEjQKBnN0YXR1cxgCIAEoDjIkLmdyZW11Y2hheWEuY29udHJvbC52MS5TZXJ2aW5nU3RhdHVzEhIKCmxhdGVuY3lfbXMYAyABKA0SDgoGZGV0YWlsGAQgASgJIqECCg5IZWFsdGhSZXNwb25zZRIPCgdzZXJ2aWNlGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgDIAEoCRI0CgZzdGF0dXMYBCABKA4yJC5ncmVtdWNoYXlhLmNvbnRyb2wudjEuU2VydmluZ1N0YXR1cxIuCgpzdGFydGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjaGVja2VkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI9CgxkZXBlbmRlbmNpZXMYByADKAsyJy5ncmVtdWNoYXlhLmNvbnRyb2wudjEuRGVwZW5kZW5jeUhlYWx0aCIYChZHZXRDYXBhYmlsaXRpZXNSZXF1ZXN0IjwKCkNhcGFiaWxpdHkSDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEg8KB2VuYWJsZWQYAyABKAgiawoXR2V0Q2FwYWJpbGl0aWVzUmVzcG9uc2USNwoMY2FwYWJpbGl0aWVzGAEgAygLMiEuZ3JlbXVjaGF5YS5jb250cm9sLnYxLkNhcGFiaWxpdHkSFwoPaW5zdGFsbGF0aW9uX2lkGAIgASgJKogBCg1TZXJ2aW5nU3RhdHVzEh4KGlNFUlZJTkdfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGgoWU0VSVklOR19TVEFUVVNfU0VSVklORxABEhsKF1NFUlZJTkdfU1RBVFVTX0RFR1JBREVEEAISHgoaU0VSVklOR19TVEFUVVNfTk9UX1NFUlZJTkcQAzLeAQoTQ29udHJvbFBsYW5lU2VydmljZRJVCgZIZWFsdGgSJC5ncmVtdWNoYXlhLmNvbnRyb2wudjEuSGVhbHRoUmVxdWVzdBolLmdyZW11Y2hheWEuY29udHJvbC52MS5IZWFsdGhSZXNwb25zZRJwCg9HZXRDYXBhYmlsaXRpZXMSLS5ncmVtdWNoYXlhLmNvbnRyb2wudjEuR2V0Q2FwYWJpbGl0aWVzUmVxdWVzdBouLmdyZW11Y2hheWEuY29udHJvbC52MS5HZXRDYXBhYmlsaXRpZXNSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message gremuchaya.control.v1.HealthRequest
@@ -154,6 +154,30 @@ export type GetCapabilitiesResponse = Message<"gremuchaya.control.v1.GetCapabili
    * @generated from field: repeated gremuchaya.control.v1.Capability capabilities = 1;
    */
   capabilities: Capability[];
+
+  /**
+   * The identity of the database this control plane serves. Migration
+   * 0010_control_plane_installation mints it once and never again for the life
+   * of that database, so a database deleted and recreated at the same URL --
+   * which is what a free Neon project does when it is re-provisioned -- reports
+   * a different value than the one a device paired against.
+   *
+   * Empty when this process reached no database at all, or when the schema it
+   * reached predates that migration. Absent is deliberately not the same fact
+   * as different: a client that cannot compare must say so rather than claim a
+   * match or a mismatch.
+   *
+   * It rides on GetCapabilities rather than on Health because GetCapabilities
+   * is the call a client already makes before it trusts anything -- the client
+   * probes capabilities as the first act of connecting, ahead of restoring a
+   * session or joining a group -- so the comparison costs no extra round trip
+   * and happens while refusing is still free. Health is a liveness endpoint
+   * that infrastructure polls on a timer; identity is not liveness, and a
+   * client must not have to be healthy-polling to learn it.
+   *
+   * @generated from field: string installation_id = 2;
+   */
+  installationId: string;
 };
 
 /**

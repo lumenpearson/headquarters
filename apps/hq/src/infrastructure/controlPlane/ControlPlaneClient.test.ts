@@ -155,19 +155,26 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
   return { ...base, ...overrides };
 }
 
-const controlClient: ControlRpcClient = {
-  async getCapabilities() {
-    return {
-      capabilities: [
-        { name: 'sync', enabled: true },
-        { name: 'sync.device-lifecycle', enabled: true },
-        { name: 'sync.realtime-admission', enabled: false },
-        { name: 'settings', enabled: true },
-        { name: 'materials', enabled: false },
-      ],
-    };
-  },
-};
+const installationId = '3f1c2b7a-0d4e-4f6a-9c2b-8e1d5a7c9f30';
+
+function controlRpcClient(reported = installationId): ControlRpcClient {
+  return {
+    async getCapabilities() {
+      return {
+        installationId: reported,
+        capabilities: [
+          { name: 'sync', enabled: true },
+          { name: 'sync.device-lifecycle', enabled: true },
+          { name: 'sync.realtime-admission', enabled: false },
+          { name: 'settings', enabled: true },
+          { name: 'materials', enabled: false },
+        ],
+      };
+    },
+  };
+}
+
+const controlClient: ControlRpcClient = controlRpcClient();
 
 function client(options: { readonly sync?: SyncRpcClient; readonly now?: () => number } = {}) {
   const recorded: Recorded = { refreshRequestIds: [], mutationContexts: [] };
@@ -191,6 +198,7 @@ describe('ControlPlaneClient', () => {
     const { client: created } = client();
 
     expect(await created.probeCapabilities()).toEqual({
+      installationId,
       sync: true,
       deviceLifecycle: true,
       realtimeAdmission: false,
@@ -307,11 +315,67 @@ describe('ControlPlaneClient', () => {
     expect(join?.requestId).not.toBe(recorded.mutationContexts[0]?.requestId);
   });
 
+  /*
+   * The identity is written onto the session at the one moment it is certainly
+   * true: the group and the tokens being stored exist in the database the probe
+   * just named and in no other. Pairing itself asks the control plane nothing
+   * about its database, so the value comes from the probe that preceded it.
+   */
+  it('records which database a pairing was earned from', async () => {
+    const { client: created, store } = client();
+
+    await created.probeCapabilities();
+    await created.pair('CODE-1', 'MON-01');
+
+    expect(store.read()?.controlPlaneInstallationId).toBe(installationId);
+    expect(created.storedInstallationId()).toBe(installationId);
+  });
+
+  /*
+   * A control plane older than the migration that mints an identity reports
+   * none. Storing `''` says "unknown", which the connection treats as a fact it
+   * cannot check -- rather than inventing a value that would later disagree
+   * with the real one and refuse a perfectly good deployment.
+   */
+  it('stores an unknown installation when the control plane reports none', async () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    const created = new ControlPlaneClient({
+      baseUrl: 'http://127.0.0.1:4100',
+      sessionStore: store,
+      clients: {
+        control: controlRpcClient(''),
+        sync: syncClient({ refreshRequestIds: [], mutationContexts: [] }),
+      },
+    });
+
+    await created.probeCapabilities();
+    await created.pair('CODE-1', 'MON-01');
+
+    expect(store.read()?.controlPlaneInstallationId).toBe('');
+    expect(created.storedInstallationId()).toBe('');
+  });
+
+  it('answers no stored installation at all without a session', () => {
+    const created = new ControlPlaneClient({
+      baseUrl: 'http://127.0.0.1:4100',
+      sessionStore: new DeviceSessionStore(memoryStorage()),
+      clients: {
+        control: controlClient,
+        sync: syncClient({ refreshRequestIds: [], mutationContexts: [] }),
+      },
+    });
+
+    // `null` and `''` are different answers: nothing paired, versus paired
+    // against a control plane that could not say which database it was.
+    expect(created.storedInstallationId()).toBeNull();
+  });
+
   it('refuses a session earned from a different control plane', async () => {
     const store = new DeviceSessionStore(memoryStorage());
     store.write({
-      version: 1,
+      version: 2,
       controlPlaneUrl: 'http://192.168.10.5:4100',
+      controlPlaneInstallationId: installationId,
       accessToken: 'access-elsewhere',
       refreshToken: 'refresh-elsewhere',
       accessTokenExpiresAt: 60_000,

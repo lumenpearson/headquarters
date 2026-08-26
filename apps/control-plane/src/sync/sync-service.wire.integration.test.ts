@@ -256,6 +256,7 @@ describeIntegration('SyncService over binary gRPC-Web against real PostgreSQL', 
     const running = await startControlPlane(
       {
         port: 0,
+        host: '127.0.0.1',
         allowedOrigins: ['http://127.0.0.1:3000'],
         databaseUrl: testDatabaseUrl ?? '',
         auth: authConfig(),

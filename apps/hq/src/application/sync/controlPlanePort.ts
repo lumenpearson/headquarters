@@ -27,6 +27,26 @@ export interface ControlPlanePort {
   accessTokenExpiresAt(): number | null;
   /** Drops the session for good. The next connection needs a pairing code. */
   forgetSession(): void;
+  /**
+   * The control-plane installation the stored session was minted against, or
+   * `null` when there is no session at all.
+   *
+   * `''` is a third answer and not the same as `null`: a session stored before
+   * this client recorded the identity, or one paired against a control plane
+   * that reported none. Unknown is deliberately not a match -- a client that
+   * cannot compare must say so rather than assume the database is the one it
+   * knew.
+   */
+  storedInstallationId(): string | null;
+  /**
+   * Records which installation the stored session belongs to.
+   *
+   * Called after pairing, and once for a session that predates the field, so
+   * the *next* replacement of the database is caught. It never overwrites a
+   * recorded identity with a different one: that disagreement is the fact the
+   * whole check exists to report, and silently adopting it would erase it.
+   */
+  adoptInstallationId(installationId: string): void;
   probeCapabilities(signal?: AbortSignal): Promise<ControlPlaneCapabilities>;
   pair(pairingCode: string, deviceName: string, signal?: AbortSignal): Promise<PairingResult>;
   refresh(signal?: AbortSignal): Promise<ConnectionSession>;

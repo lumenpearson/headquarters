@@ -1,8 +1,30 @@
 import { describe, expect, it } from 'vitest';
 
-import { DeviceSessionStore, memoryStorage, type StoredDeviceSession } from './DeviceSessionStore';
+import {
+  DeviceSessionStore,
+  deviceSessionStorageKey,
+  legacyDeviceSessionStorageKey,
+  memoryStorage,
+  type StoredDeviceSession,
+} from './DeviceSessionStore';
+
+const installationId = '3f1c2b7a-0d4e-4f6a-9c2b-8e1d5a7c9f30';
 
 const session: StoredDeviceSession = {
+  version: 2,
+  controlPlaneUrl: 'http://127.0.0.1:4100',
+  controlPlaneInstallationId: installationId,
+  accessToken: 'access-1',
+  refreshToken: 'refresh-1',
+  accessTokenExpiresAt: 1_000,
+  refreshTokenExpiresAt: 9_000,
+  deviceId: 'device-a',
+  groupId: 'group-a',
+  role: 'EDITOR',
+};
+
+/** A session as the `v1` key held it, with no installation identity at all. */
+const legacySession = {
   version: 1,
   controlPlaneUrl: 'http://127.0.0.1:4100',
   accessToken: 'access-1',
@@ -24,13 +46,87 @@ describe('DeviceSessionStore', () => {
 
   it('answers with nothing, and forgets the key, for a blob that is not a session', () => {
     const storage = memoryStorage();
-    storage.setItem('gremuchaya-hq:device-session:v1', '{"version":1,"accessToken":42}');
+    storage.setItem(deviceSessionStorageKey, '{"version":2,"accessToken":42}');
     const store = new DeviceSessionStore(storage);
 
     expect(store.read()).toBeNull();
     // Removed rather than left to throw again on the next launch, the way the
     // operations key recovers itself.
-    expect(storage.getItem('gremuchaya-hq:device-session:v1')).toBeNull();
+    expect(storage.getItem(deviceSessionStorageKey)).toBeNull();
+  });
+
+  /*
+   * A `v2` record that has the key's version but not its installation field was
+   * hand-edited or truncated. Defaulting it to `''` would turn a damaged record
+   * into a session that merely "cannot prove where it came from" and would then
+   * be handed the next control plane's identity as if it had always been there.
+   */
+  it('refuses a current-version blob that carries no installation field', () => {
+    const storage = memoryStorage();
+    const { controlPlaneInstallationId: _dropped, ...withoutField } = session;
+    storage.setItem(deviceSessionStorageKey, JSON.stringify(withoutField));
+
+    expect(new DeviceSessionStore(storage).read()).toBeNull();
+  });
+
+  /*
+   * The upgrade path. A device paired before this client recorded which
+   * database it was talking to keeps its pairing -- nine screens asking for
+   * fresh codes on a shoot day is a worse outcome than the one being prevented
+   * -- but it does not acquire a claim it never had: the identity is empty,
+   * which the connection reads as unknown rather than as a match.
+   */
+  it('carries a v1 session forward with an unknown installation', () => {
+    const storage = memoryStorage();
+    storage.setItem(legacyDeviceSessionStorageKey, JSON.stringify(legacySession));
+    const store = new DeviceSessionStore(storage);
+
+    const read = store.read();
+
+    expect(read).toEqual({ ...session, controlPlaneInstallationId: '' });
+    expect(storage.getItem(legacyDeviceSessionStorageKey)).toBeNull();
+    expect(storage.getItem(deviceSessionStorageKey)).not.toBeNull();
+  });
+
+  it('prefers the current key and never resurrects a legacy blob after clear', () => {
+    const storage = memoryStorage();
+    storage.setItem(legacyDeviceSessionStorageKey, JSON.stringify(legacySession));
+    storage.setItem(deviceSessionStorageKey, JSON.stringify(session));
+    const store = new DeviceSessionStore(storage);
+
+    expect(store.read()).toEqual(session);
+
+    store.clear();
+
+    // Forgetting a pairing has to forget both keys, or the next read would
+    // hand the operator back the session they just gave up.
+    expect(store.read()).toBeNull();
+    expect(storage.getItem(legacyDeviceSessionStorageKey)).toBeNull();
+  });
+
+  it('records an unknown installation once and never replaces a recorded one', () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    store.write({ ...session, controlPlaneInstallationId: '' });
+
+    store.adoptInstallationId(installationId);
+    expect(store.read()?.controlPlaneInstallationId).toBe(installationId);
+
+    /*
+     * Two different non-empty identities are exactly the disagreement the
+     * connection refuses on. A store that adopted the newer one would erase the
+     * evidence before the operator could see it.
+     */
+    store.adoptInstallationId('9a2c4b60-6f1e-4f6f-9c93-5d0f2b7a41d8');
+    expect(store.read()?.controlPlaneInstallationId).toBe(installationId);
+  });
+
+  it('records nothing when the control plane reported no installation', () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    store.write({ ...session, controlPlaneInstallationId: '' });
+
+    store.adoptInstallationId('');
+
+    expect(store.read()?.controlPlaneInstallationId).toBe('');
   });
 
   it('keeps a pending refresh id until the refresh succeeds', () => {

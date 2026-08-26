@@ -24,6 +24,7 @@ describe('gRPC-Web control-plane foundation', () => {
     const running = await startControlPlane(
       {
         port: 0,
+        host: '127.0.0.1',
         allowedOrigins: ['http://127.0.0.1:3000'],
       },
       {
@@ -158,6 +159,111 @@ describe('gRPC-Web control-plane foundation', () => {
     expect(capabilityEnabled(capabilities, 'sync.realtime-admission')).toBe(true);
   });
 
+  /*
+   * The identity has to reach a client that has not authenticated yet, because
+   * the point of it is to be checked before anything is trusted. This asserts
+   * it over the real gRPC-Web transport on the unauthenticated method, not off
+   * the handler object.
+   */
+  it('reports the database identity to an unauthenticated capability probe', async () => {
+    const database = new RecordingSqlClient([
+      { installation_id: '9a2c4b60-6f1e-4f6f-9c93-5d0f2b7a41d8' },
+    ]);
+    const migrationRunner = vi.fn(async (): Promise<MigrationRunResult> => emptyMigrationResult());
+    const running = await startControlPlane(authenticatedConfig(), {
+      pairedDeviceLifecycle: { database, migrationRunner },
+    });
+    closeControlPlane = running.close;
+    const address = running.server.address() as AddressInfo;
+    const client = createClient(
+      ControlPlaneService,
+      createGrpcWebTransport({
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        useBinaryFormat: true,
+      }),
+    );
+
+    const capabilities = await client.getCapabilities({});
+
+    expect(capabilities.installationId).toBe('9a2c4b60-6f1e-4f6f-9c93-5d0f2b7a41d8');
+    // Read once at startup, not per request: an unauthenticated endpoint must
+    // not be a way to make the database work.
+    const before = database.queries.length;
+    await client.getCapabilities({});
+    expect(database.queries.length).toBe(before);
+  });
+
+  /*
+   * A process that reached no database has no identity to report, and saying
+   * so with an empty string is what lets a client tell "cannot compare" from
+   * "a different database". Anything else -- a throw, an invented value -- would
+   * either take health-only startup down or make the comparison a lie.
+   */
+  it('reports an empty identity when startup reached no database at all', async () => {
+    const running = await startControlPlane({
+      port: 0,
+      host: '127.0.0.1',
+      allowedOrigins: ['http://127.0.0.1:3000'],
+    });
+    closeControlPlane = running.close;
+    const address = running.server.address() as AddressInfo;
+    const client = createClient(
+      ControlPlaneService,
+      createGrpcWebTransport({
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        useBinaryFormat: true,
+      }),
+    );
+
+    await expect(client.getCapabilities({})).resolves.toMatchObject({ installationId: '' });
+  });
+
+  /*
+   * The bind address decides whether any other machine on the set's LAN can
+   * reach the control plane at all, and a loopback-only bind fails silently:
+   * the server serves perfectly to the one client sharing its interface.
+   * `127.0.0.2` is a second loopback address, so this proves the configured
+   * value is what `listen` receives without asking the test host for a network.
+   */
+  it('binds the interface the configuration names, not a hard-coded one', async () => {
+    const running = await startControlPlane({
+      port: 0,
+      host: '127.0.0.2',
+      allowedOrigins: ['http://127.0.0.1:3000'],
+    });
+    closeControlPlane = running.close;
+
+    const address = running.server.address() as AddressInfo;
+
+    expect(address.address).toBe('127.0.0.2');
+  });
+
+  /*
+   * `Cross-Origin-Resource-Policy: same-site` discarded the response before the
+   * packaged shell could read it: the client runs on `tauri.localhost` and the
+   * control plane on whatever host the deployment gave it, which are different
+   * registrable domains. What protects this surface is the bearer token and the
+   * origin allowlist, so the header is `cross-origin`.
+   */
+  it('lets a cross-site client read the reply its origin was already allowed', async () => {
+    const running = await startControlPlane({
+      port: 0,
+      host: '127.0.0.1',
+      allowedOrigins: ['http://tauri.localhost'],
+    });
+    closeControlPlane = running.close;
+    const address = running.server.address() as AddressInfo;
+
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/gremuchaya.control.v1.ControlPlaneService/Health`,
+      { method: 'OPTIONS', headers: { origin: 'http://tauri.localhost' } },
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://tauri.localhost');
+    expect(response.headers.get('cross-origin-resource-policy')).toBe('cross-origin');
+  });
+
   it('fails closed when auth startup receives explicit volatile lifecycle overrides', async () => {
     const config = authenticatedConfig();
 
@@ -194,6 +300,7 @@ describe('gRPC-Web control-plane foundation', () => {
 function authenticatedConfig(overrides: Partial<ControlPlaneAuthConfig> = {}): ControlPlaneConfig {
   return {
     port: 0,
+    host: '127.0.0.1',
     allowedOrigins: ['http://127.0.0.1:3000'],
     databaseUrl: 'postgresql://role:password@ep-hq.neon.tech/headquarters?sslmode=require',
     auth: {
@@ -245,11 +352,13 @@ class RecordingSqlClient implements SqlClient {
   readonly queries: SqlStatement[] = [];
   readonly transactions: SqlStatement[][] = [];
 
+  constructor(private readonly rows: readonly Record<string, unknown>[] = []) {}
+
   async query<Row extends Record<string, unknown>>(
     statement: SqlStatement,
   ): Promise<readonly Row[]> {
     this.queries.push({ text: statement.text, values: [...(statement.values ?? [])] });
-    return [];
+    return this.rows as readonly Row[];
   }
 
   async transaction(statements: readonly SqlStatement[]): Promise<void> {

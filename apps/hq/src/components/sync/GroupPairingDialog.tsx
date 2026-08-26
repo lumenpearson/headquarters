@@ -75,6 +75,13 @@ export function GroupPairingDialog() {
 
   const paired = connection.session !== undefined;
   const admin = connection.session?.role === 'ADMIN';
+  /*
+   * The address answers, but its database is not the one this device paired
+   * against. The stored session is deliberately still on disk: the client
+   * refuses to act on it, and giving it up is the operator's decision, taken
+   * here, rather than something a probe did to them.
+   */
+  const foreignInstallation = connection.mode === 'installation-changed';
 
   return (
     <TerminalDialog
@@ -86,6 +93,19 @@ export function GroupPairingDialog() {
       className="group-pairing"
       footer={
         <div className="group-pairing__actions">
+          {foreignInstallation ? (
+            <TerminalButton
+              className="ops-action ops-action--danger"
+              tone="critical"
+              disabled={busy || session === null}
+              onClick={() => {
+                session?.unpair();
+                setPairingCode('');
+              }}
+            >
+              [U] ЗАБЫТЬ СЕССИЮ И СПАРИТЬСЯ ЗАНОВО
+            </TerminalButton>
+          ) : null}
           {paired ? (
             <>
               <TerminalButton
@@ -115,6 +135,15 @@ export function GroupPairingDialog() {
     >
       <ConnectionSummary connection={connection} />
 
+      {foreignInstallation ? (
+        <p className="group-pairing__failure" role="status">
+          АДРЕС ОТВЕЧАЕТ, НО ЗА НИМ ДРУГАЯ БАЗА CONTROL PLANE — НЕ ТА, С КОТОРОЙ СПАРЕНО ЭТО
+          УСТРОЙСТВО. СОХРАНЁННАЯ СЕССИЯ ОСТАВЛЕНА НЕТРОНУТОЙ, ГРУППА НЕ ЧИТАЕТСЯ, ЛОКАЛЬНЫЕ
+          НАСТРОЙКИ НЕ ПЕРЕЗАПИСАНЫ. ЕСЛИ БАЗУ ДЕЙСТВИТЕЛЬНО ПЕРЕСОЗДАЛИ — ЗАБУДЬТЕ СЕССИЮ И
+          ЗАПРОСИТЕ НОВЫЙ КОД ПАРЫ.
+        </p>
+      ) : null}
+
       {session === null ? (
         <p className="group-pairing__note">
           {connection.mode === 'local-only'
@@ -123,7 +152,7 @@ export function GroupPairingDialog() {
         </p>
       ) : null}
 
-      {session !== null && !paired ? (
+      {session !== null && !paired && !foreignInstallation ? (
         <div className="group-pairing__form">
           <TerminalField label="КОД ПАРЫ" description="Код выдаёт администратор группы">
             <TerminalInput
@@ -267,6 +296,17 @@ function ConnectionSummary({ connection }: { readonly connection: ConnectionStat
           {connection.clock.sampledAt === ''
             ? 'НЕ ИЗМЕРЕНЫ'
             : `СДВИГ ${connection.clock.offsetMs} MS / ЗАДЕРЖКА ${connection.clock.latencyMs} MS`}
+        </dd>
+      </div>
+      <div>
+        <dt>БАЗА</dt>
+        {/* The installation identity, so an operator who is told the database
+            is not the expected one can read which one answered and compare it
+            with the deployment. It names a database and opens nothing. */}
+        <dd>
+          {capabilities === undefined || capabilities.installationId === ''
+            ? '—'
+            : capabilities.installationId}
         </dd>
       </div>
       <div>

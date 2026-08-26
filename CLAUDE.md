@@ -107,9 +107,10 @@ State ownership:
 - Scene definitions (52 Zod-validated scenes) are immutable configuration, not runtime state.
 - `localStorage` owns everything the browser persists, under seven keys:
   `gremuchaya-hq:operations:v3` (runtime state), `gremuchaya-hq:production-snapshots:v3`,
-  `gremuchaya-hq:snapshots:v1` (`LocalSnapshotPersistence`), `gremuchaya-hq:device-session:v1`
+  `gremuchaya-hq:snapshots:v1` (`LocalSnapshotPersistence`), `gremuchaya-hq:device-session:v2`
   (`DeviceSessionStore` — the paired control-plane session, refresh token included, which is a
-  stated trade-off of a local-first desktop application),
+  stated trade-off of a local-first desktop application; `v2` adds the control-plane installation
+  id the session was minted against, and a `v1` blob is carried forward once with that id empty),
   `hq.camera-material-assignments.v1`, `hq.keybinds-intro-seen.v1`,
   and the Yandex Maps key. There is no IndexedDB and no Tauri store plugin anywhere in this
   repository. Media and timer handles are never persisted.

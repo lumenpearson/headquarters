@@ -123,6 +123,8 @@ export interface ControlRpcClient {
     options?: CallOptions,
   ): Promise<{
     readonly capabilities: readonly { readonly name: string; readonly enabled: boolean }[];
+    /** Empty when this control plane reached no database, or an older one. */
+    readonly installationId: string;
   }>;
 }
 
@@ -268,6 +270,14 @@ export class ControlPlaneClient implements ControlPlanePort {
   readonly #mintRequestId: () => string;
   readonly #now: () => number;
   readonly #transport: Transport | undefined;
+  /**
+   * What the last `GetCapabilities` said this control plane's database is.
+   *
+   * `''` until a probe answers, and `''` afterwards if the control plane
+   * reported none. A session paired without a probe is stored with an unknown
+   * installation rather than an invented one.
+   */
+  #probedInstallationId = '';
 
   constructor(options: ControlPlaneClientOptions) {
     this.baseUrl = options.baseUrl;
@@ -343,11 +353,34 @@ export class ControlPlaneClient implements ControlPlanePort {
     this.#store.clear();
   }
 
+  /**
+   * The installation the stored session was minted against, or `null` with no
+   * session. `''` is a session that predates the field, which is unknown and
+   * deliberately not a match.
+   */
+  storedInstallationId(): string | null {
+    return this.#stored()?.controlPlaneInstallationId ?? null;
+  }
+
+  /** Records the installation on a session that holds none; never replaces one. */
+  adoptInstallationId(installationId: string): void {
+    this.#store.adoptInstallationId(installationId);
+  }
+
   async probeCapabilities(signal?: AbortSignal): Promise<ControlPlaneCapabilities> {
     const response = await call(() => this.#control.getCapabilities({}, options(signal)));
     const enabled = (name: string) =>
       response.capabilities.some((capability) => capability.name === name && capability.enabled);
+    /*
+     * The identity is remembered here as well as returned, so that a `pair`
+     * that follows this probe can write it onto the session it is about to
+     * store. Pairing itself asks the control plane nothing about its database,
+     * and adding a second round trip to learn what the probe already reported
+     * would be a call made to answer a question that was already answered.
+     */
+    this.#probedInstallationId = response.installationId;
     return {
+      installationId: response.installationId,
       sync: enabled('sync'),
       deviceLifecycle: enabled('sync.device-lifecycle'),
       realtimeAdmission: enabled('sync.realtime-admission'),
@@ -385,8 +418,12 @@ export class ControlPlaneClient implements ControlPlanePort {
     const group = required(response.group, 'Control plane returned no group.');
     const device = required(response.device, 'Control plane returned no device.');
     const stored: StoredDeviceSession = {
-      version: 1,
+      version: 2,
       controlPlaneUrl: this.baseUrl,
+      // Which database this pairing belongs to, from the probe that preceded
+      // it. Recorded at the one moment it is certainly true: the group and the
+      // tokens being written here exist in that database and nowhere else.
+      controlPlaneInstallationId: this.#probedInstallationId,
       accessToken: session.accessToken,
       refreshToken: session.refreshToken,
       accessTokenExpiresAt: toEpochMs(session.accessTokenExpiresAt),

@@ -823,6 +823,43 @@ const uploadSessionStorageUploadId: Migration = {
   statements: [sql('ALTER TABLE upload_sessions ADD COLUMN IF NOT EXISTS storage_upload_id text')],
 };
 
+/**
+ * The identity of this database, minted once and never again.
+ *
+ * A control plane deployed on a free Neon project can lose its database and be
+ * handed another one at the same URL: the project is deleted and recreated,
+ * migrations are run against a fresh branch, or the project is re-provisioned.
+ * Nothing on the wire distinguished that from the database a device paired
+ * against, so after a reset the operator re-paired into an empty group and the
+ * client reconciled its local state against nothing. This row is what lets a
+ * client refuse instead.
+ *
+ * `gen_random_uuid()` has been in core PostgreSQL since 13 and needs no
+ * extension, so nothing here depends on `pgcrypto` being installable. The
+ * identity is minted by the column DEFAULT of the single insert rather than by
+ * this process, which keeps it a property of the database rather than of
+ * whichever runner happened to reach it first.
+ *
+ * Both statements are idempotent, and the surrounding runner executes a
+ * migration's body only when the ledger has no row for it. Re-running the
+ * sequence therefore cannot mint a second identity -- not by re-executing the
+ * body, and not by two runners racing for the advisory lock. That stability is
+ * the property the whole reset detection rests on.
+ */
+const controlPlaneInstallation: Migration = {
+  id: '0010_control_plane_installation',
+  statements: [
+    sql(`CREATE TABLE IF NOT EXISTS control_plane_installation (
+      singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+      installation_id uuid NOT NULL DEFAULT gen_random_uuid(),
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`),
+    sql(`INSERT INTO control_plane_installation (singleton)
+      VALUES (true)
+      ON CONFLICT (singleton) DO NOTHING`),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -833,6 +870,7 @@ export const migrations: readonly Migration[] = [
   groupEventSequencesAndRemainingScopes,
   serviceDocumentsAndReceiptScopes,
   uploadSessionStorageUploadId,
+  controlPlaneInstallation,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

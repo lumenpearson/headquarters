@@ -72,6 +72,13 @@ interface ResolvedControlPlaneCollaborators {
    * the control plane is serving.
    */
   readonly dependencies?: readonly DependencyReport[];
+  /**
+   * The identity of the database this process reached, reported verbatim by
+   * `GetCapabilities`. Absent in health-only startup and empty when the schema
+   * predates migration 0010; both answer `''` on the wire, because a client
+   * has to be able to tell "cannot compare" from "a different database".
+   */
+  readonly installationId?: string;
 }
 
 interface DependencyReport {
@@ -100,7 +107,7 @@ export async function startControlPlane(
 
   await new Promise<void>((resolveListening, rejectListening) => {
     server.once('error', rejectListening);
-    server.listen(config.port, '127.0.0.1', resolveListening);
+    server.listen(config.port, config.host, resolveListening);
   });
 
   return {
@@ -149,6 +156,11 @@ function registerControlPlaneRoutes(
     },
     getCapabilities() {
       return {
+        // Read once at startup beside the dependency report, never per request:
+        // this endpoint is unauthenticated, and a database query behind it would
+        // hand anyone who can reach the port a way to make the control plane do
+        // work. `''` is the honest answer of a process that reached no database.
+        installationId: collaborators.installationId ?? '',
         capabilities: [
           { name: 'control.health', version: 'v1', enabled: true },
           { name: 'transport.connect', version: 'v1', enabled: true },
@@ -236,6 +248,7 @@ async function resolveControlPlaneCollaborators(
   }
 
   return {
+    installationId: lifecycle.installationId,
     syncService: lifecycle.syncService,
     settingsService: lifecycle.settingsService,
     materialService: lifecycle.materialService,
@@ -315,7 +328,17 @@ function prepareRpcResponse(
 function setSecurityHeaders(response: ServerResponse): void {
   response.setHeader('Cache-Control', 'no-store');
   response.setHeader('X-Content-Type-Options', 'nosniff');
-  response.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  // `cross-origin` rather than `same-site`: the packaged desktop shell runs on
+  // `tauri.localhost` while the control plane answers on whatever host the
+  // deployment gave it, and those are different registrable domains, so
+  // `same-site` made the browser discard a response the server had already
+  // authorized. What protects this surface is the bearer token every method
+  // but `Health` and `GetCapabilities` requires, together with the origin
+  // allowlist above -- not a header that only decides who may read a reply
+  // already sent. The two unauthenticated methods report the service's own
+  // name, version, capability list and installation identity, which is exactly
+  // what a client must read before it can authenticate at all.
+  response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   response.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
 }
 
@@ -324,7 +347,7 @@ if (isEntrypoint(import.meta.url, process.argv[1])) {
   const running = await startControlPlane(config);
   const address = running.server.address();
   const port = typeof address === 'object' && address !== null ? address.port : config.port;
-  process.stdout.write(`gremuchaya-control-plane listening on http://127.0.0.1:${port}\n`);
+  process.stdout.write(`gremuchaya-control-plane listening on http://${config.host}:${port}\n`);
 }
 
 function isEntrypoint(moduleUrl: string, executablePath: string | undefined): boolean {

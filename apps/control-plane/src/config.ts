@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 
 import { presign, signHeaders } from './storage/sigv4.js';
 
@@ -69,6 +70,17 @@ export interface ControlPlaneStorageConfig {
 
 export interface ControlPlaneConfig {
   readonly port: number;
+  /**
+   * The interface the RPC and realtime server binds to.
+   *
+   * `127.0.0.1` by default, so an existing deployment keeps answering exactly
+   * where it did. It is configurable because the shoot-day topology this
+   * project's own project schema describes is one machine serving the others
+   * over the set's LAN, and a loopback bind makes that topology unreachable
+   * from any other machine -- with no error anywhere, because the server is
+   * serving perfectly to the one client that shares its network namespace.
+   */
+  readonly host: string;
   readonly allowedOrigins: readonly string[];
   readonly databaseUrl?: string;
   readonly redis?: {
@@ -80,6 +92,25 @@ export interface ControlPlaneConfig {
 }
 
 const defaultPort = 4100;
+/**
+ * Loopback, so that widening the bind is a deliberate act an operator writes
+ * down rather than something a version bump does to a machine on its own.
+ */
+const defaultHost = '127.0.0.1';
+/**
+ * The origins a browser client may present.
+ *
+ * The two development addresses, and the two a packaged Tauri build sends: a
+ * WebView2 shell serving a static export requests with `Origin:
+ * http://tauri.localhost`, and the HTTPS form on the platforms that use it.
+ * Without them `prepareRpcResponse` answers the packaged desktop's own control
+ * plane with a flat 403 -- on the same machine, over loopback -- and the
+ * failure looks like a control plane that is down. The same four addresses the
+ * native media gateway allows (`apps/hq/src-tauri/src/media_gateway.rs`,
+ * `allowed_origin`), so the two allowlists say one thing.
+ */
+const defaultAllowedOrigins =
+  'http://127.0.0.1:3000,http://localhost:3000,http://tauri.localhost,https://tauri.localhost';
 const defaultAccessTokenLifetimeSeconds = 15 * 60;
 const defaultRefreshTokenLifetimeSeconds = 30 * 24 * 60 * 60;
 const defaultPairingCodeLifetimeSeconds = 10 * 60;
@@ -131,6 +162,7 @@ export function loadControlPlaneConfig(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): ControlPlaneConfig {
   const port = parsePort(environment.HQ_CONTROL_PLANE_PORT);
+  const host = parseHost(environment.HQ_CONTROL_PLANE_HOST);
   const allowedOrigins = parseOrigins(environment.HQ_CONTROL_PLANE_ALLOWED_ORIGINS);
   const databaseUrl = parseDatabaseUrl(environment.HQ_CONTROL_PLANE_DATABASE_URL);
   const redis = parseRedis(
@@ -141,6 +173,7 @@ export function loadControlPlaneConfig(
   const storage = parseStorage(environment);
   return {
     port,
+    host,
     allowedOrigins,
     ...(databaseUrl === undefined ? {} : { databaseUrl }),
     ...(redis === undefined ? {} : { redis }),
@@ -158,8 +191,32 @@ function parsePort(value: string | undefined): number {
   return port;
 }
 
+/**
+ * The bind address, as `net.Server.listen` takes it.
+ *
+ * IP literals are checked by `node:net`'s own `isIP` rather than by a regex
+ * written here, so `0.0.0.0`, `::` and `::1` are accepted for exactly the
+ * reason the runtime accepts them. A bracketed IPv6 literal is unwrapped
+ * because that is the form an operator copies out of a URL, and `listen`
+ * refuses it. Anything else must look like a DNS name; a value carrying a
+ * scheme, a port or a path is a URL written where an address belongs and is
+ * named as such rather than passed on to fail at `listen` with no context.
+ */
+function parseHost(value: string | undefined): string {
+  if (value === undefined || value.trim().length === 0) return defaultHost;
+  const trimmed = value.trim();
+  const host = trimmed.startsWith('[') && trimmed.endsWith(']') ? trimmed.slice(1, -1) : trimmed;
+  if (isIP(host) !== 0) return host;
+  if (/^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$/u.test(host)) {
+    return host;
+  }
+  throw new Error(
+    'HQ_CONTROL_PLANE_HOST must be an IPv4 address, an IPv6 address or a hostname, without a scheme or port',
+  );
+}
+
 function parseOrigins(value: string | undefined): readonly string[] {
-  const origins = (value ?? 'http://127.0.0.1:3000,http://localhost:3000')
+  const origins = (value ?? defaultAllowedOrigins)
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0)

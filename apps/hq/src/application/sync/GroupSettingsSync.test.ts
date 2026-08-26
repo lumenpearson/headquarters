@@ -84,8 +84,8 @@ describe('groupScopedSettingIds', () => {
   it('names every definition whose scope says group and no other', () => {
     const ids = groupScopedSettingIds();
     // Derived from the definitions rather than listed, so this asserts the
-    // property and not a snapshot: a sixth group-scoped setting declared
-    // tomorrow must reach the group without anyone remembering to edit a list.
+    // property and not a snapshot: a group-scoped setting declared tomorrow
+    // must reach the group without anyone remembering to edit a list.
     expect(ids.every((id) => getSettingDefinition(id)?.scope === 'group')).toBe(true);
     expect(
       settingsDefinitions
@@ -94,7 +94,7 @@ describe('groupScopedSettingIds', () => {
     ).toBe(true);
   });
 
-  it('carries the five R6 named as the group half, and no device setting', () => {
+  it('carries the settings R6 named as the group half, and no device setting', () => {
     const ids = groupScopedSettingIds();
     for (const id of [
       'telemetry.source',
@@ -126,6 +126,58 @@ describe('GroupSettingsSync precedence', () => {
       { id: 'advanced.liveEdit', value: true },
     ]);
     expect(test.applied).toHaveLength(1);
+  });
+
+  /*
+   * The guard against the failure this task exists to prevent, from the
+   * settings side. A control plane whose database was replaced -- a Neon
+   * project re-provisioned, migrations run against a fresh branch -- answers
+   * for a group that holds nothing at all. Adopting "nothing" as the group's
+   * decision would blank every group-scoped setting on every joined device, and
+   * the operator would learn about the reset by losing their configuration.
+   *
+   * Nothing is adopted, nothing is applied, and the local values are still the
+   * local values afterwards.
+   */
+  it('adopts nothing at all from a group that holds no values', async () => {
+    const port = new FakeGroupSettings();
+    port.document = { revision: 0, values: {}, updatedAt: '' };
+    const draft: Record<string, SettingValue> = {
+      'telemetry.source': 'native',
+      'advanced.liveEdit': true,
+      'simulation.preset': 'degraded',
+    };
+    const test = sync(port, draft);
+
+    expect(await test.service.adoptGroupSettings()).toEqual([]);
+
+    expect(test.applied).toEqual([]);
+    expect(draft).toEqual({
+      'telemetry.source': 'native',
+      'advanced.liveEdit': true,
+      'simulation.preset': 'degraded',
+    });
+  });
+
+  /*
+   * The same rule one setting at a time: a group that holds some group-scoped
+   * values and not others may decide the ones it holds and nothing more. An
+   * implementation that read a missing value as the definition's default would
+   * pass the whole-document case above and still reset a setting here.
+   */
+  it('leaves a group-scoped setting the group does not hold alone', async () => {
+    const port = new FakeGroupSettings();
+    port.document = { revision: 4, values: { 'telemetry.source': 'native' }, updatedAt: '' };
+    const draft: Record<string, SettingValue> = {
+      'telemetry.source': 'simulation',
+      'advanced.liveEdit': true,
+    };
+    const test = sync(port, draft);
+
+    const patches = await test.service.adoptGroupSettings();
+
+    expect(patches).toEqual([{ id: 'telemetry.source', value: 'native' }]);
+    expect(draft['advanced.liveEdit']).toBe(true);
   });
 
   it('patches nothing when the group already agrees with the draft', async () => {

@@ -65,6 +65,7 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
       const running = await startControlPlane(
         {
           port: 0,
+          host: '127.0.0.1',
           allowedOrigins: ['http://127.0.0.1:3000'],
           databaseUrl: testDatabaseUrl ?? '',
           auth: authConfig(),
@@ -231,6 +232,7 @@ describeIntegration('material grants over binary gRPC-Web with a configured buck
       const running = await startControlPlane(
         {
           port: 0,
+          host: '127.0.0.1',
           allowedOrigins: ['http://127.0.0.1:3000'],
           databaseUrl: testDatabaseUrl ?? '',
           auth: authConfig(),

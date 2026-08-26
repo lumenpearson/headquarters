@@ -1,10 +1,16 @@
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
+import type { AddressInfo } from 'node:net';
 
+import { createClient } from '@connectrpc/connect';
+import { createGrpcWebTransport } from '@connectrpc/connect-web';
+import { ControlPlaneService } from '@gremuchaya/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { SqlClient } from './db/database.js';
+import { readInstallationId } from './db/installation.js';
 import { DisposableDatabasePool, liveTestDatabaseUrl } from './db/liveDatabase.js';
 import { migrations, runMigrations } from './db/migrations.js';
+import { startControlPlane } from './server.js';
 import { DurablePairedDeviceRuntime } from './sync/durable-runtime.js';
 import type { AuthenticatedDevice } from './sync/runtime.js';
 
@@ -80,6 +86,126 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
       });
       expect(ledger.map((row) => row.id)).toEqual(migrations.map((migration) => migration.id));
       expect(ledger.every((row) => row.n === 1)).toBe(true);
+    },
+    networkTimeoutMs,
+  );
+
+  /*
+   * The property the reset detection rests on, proved rather than argued: the
+   * identity is minted once and a second run of the whole sequence leaves it
+   * exactly as it was. If a re-run could mint a new value, every paired client
+   * would refuse its own control plane after a routine redeploy.
+   */
+  it(
+    'keeps one installation identity across repeated migration runs',
+    async () => {
+      const first = await readInstallationId(database);
+      expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
+
+      await runMigrations(database);
+      await runMigrations(database);
+
+      expect(await readInstallationId(database)).toBe(first);
+      const rows = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM control_plane_installation',
+      });
+      expect(rows[0]?.n).toBe(1);
+    },
+    networkTimeoutMs,
+  );
+
+  /*
+   * The other half of the same property, and the one the feature exists for: a
+   * database that was deleted and recreated at the same address reports a
+   * different identity. Two disposable databases stand in for the same Neon
+   * project before and after a re-provision.
+   */
+  it(
+    'gives a freshly created database a different installation identity',
+    async () => {
+      const replacement = await pool.create();
+      await runMigrations(replacement);
+
+      const original = await readInstallationId(database);
+      const replaced = await readInstallationId(replacement);
+
+      expect(replaced).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
+      expect(replaced).not.toBe(original);
+    },
+    networkTimeoutMs,
+  );
+
+  /*
+   * Simultaneous runners against one empty database. The advisory lock already
+   * serializes the sequence, and `ON CONFLICT (singleton) DO NOTHING` is the
+   * second lock: whichever ordering wins, exactly one identity exists.
+   */
+  it(
+    'mints exactly one installation identity under simultaneous first runs',
+    async () => {
+      const contended = await pool.create();
+
+      await Promise.all([runMigrations(contended), runMigrations(contended)]);
+
+      const rows = await contended.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM control_plane_installation',
+      });
+      expect(rows[0]?.n).toBe(1);
+      expect(await readInstallationId(contended)).not.toBe('');
+    },
+    networkTimeoutMs,
+  );
+
+  /*
+   * The whole chain, over the wire: a client that has not authenticated asks an
+   * unauthenticated `GetCapabilities` and is told which database it is talking
+   * to. Everything above proves the value; this proves it arrives.
+   */
+  it(
+    'carries the identity of the live database to an unauthenticated client',
+    async () => {
+      const wireDatabase = await pool.create();
+      await runMigrations(wireDatabase);
+      const expected = await readInstallationId(wireDatabase);
+
+      const running = await startControlPlane(
+        {
+          port: 0,
+          host: '127.0.0.1',
+          allowedOrigins: ['http://127.0.0.1:3000'],
+          databaseUrl: testDatabaseUrl ?? '',
+          auth: {
+            tokenHashVersion: 'v1',
+            accessTokenLifetimeMs: 900_000,
+            refreshTokenLifetimeMs: 2_592_000_000,
+            pairingCodeLifetimeMs: 600_000,
+            // The probe under test is unauthenticated, so no credential is
+            // ever hashed here; the closure exists because the presence of
+            // `auth` is what makes startup build the durable lifecycle.
+            hashCredential: (kind, credential) =>
+              createHmac('sha256', tokenPepper).update(`${kind}:${credential}`).digest('base64url'),
+            verifyBootstrapSecret: () => false,
+          },
+        },
+        { pairedDeviceLifecycle: { database: wireDatabase } },
+      );
+      try {
+        const address = running.server.address() as AddressInfo;
+        const client = createClient(
+          ControlPlaneService,
+          createGrpcWebTransport({
+            baseUrl: `http://127.0.0.1:${address.port}`,
+            useBinaryFormat: true,
+          }),
+        );
+
+        const capabilities = await client.getCapabilities({});
+
+        expect(capabilities.installationId).toBe(expected);
+        expect(capabilities.installationId).not.toBe('');
+      } finally {
+        await running.close();
+      }
     },
     networkTimeoutMs,
   );

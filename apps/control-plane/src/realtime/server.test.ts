@@ -21,7 +21,11 @@ describe('binary realtime WebSocket transport', () => {
   });
 
   it('does not expose realtime without explicit authenticated admission or development mode', async () => {
-    const running = await startControlPlane({ port: 0, allowedOrigins: [allowedOrigin] });
+    const running = await startControlPlane({
+      port: 0,
+      host: '127.0.0.1',
+      allowedOrigins: [allowedOrigin],
+    });
     closeControlPlane = running.close;
     const address = running.server.address() as AddressInfo;
 
@@ -63,7 +67,7 @@ describe('binary realtime WebSocket transport', () => {
       },
     });
     const running = await startControlPlane(
-      { port: 0, allowedOrigins: [allowedOrigin] },
+      { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
       { realtime: { admission: createPairedDeviceRealtimeAdmission(runtime) } },
     );
     closeControlPlane = running.close;
@@ -108,7 +112,7 @@ describe('binary realtime WebSocket transport', () => {
   it('serializes revoked-editor delivery so no later group event leaks and reauthentication is required', async () => {
     const { runtime, owner, ownerAuthenticated, editor } = createPairedEditorRuntime();
     const running = await startControlPlane(
-      { port: 0, allowedOrigins: [allowedOrigin] },
+      { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
       {
         realtime: {
           admission: createPairedDeviceRealtimeAdmission(runtime),
@@ -159,7 +163,7 @@ describe('binary realtime WebSocket transport', () => {
     const { runtime, owner, editor } = createPairedEditorRuntime();
     const refreshed = runtime.refreshDeviceSession(editor.session.refreshToken);
     const running = await startControlPlane(
-      { port: 0, allowedOrigins: [allowedOrigin] },
+      { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
       {
         realtime: {
           admission: createPairedDeviceRealtimeAdmission(runtime),
@@ -202,7 +206,7 @@ describe('binary realtime WebSocket transport', () => {
       accessTokenLifetimeMs: 50,
     });
     const running = await startControlPlane(
-      { port: 0, allowedOrigins: [allowedOrigin] },
+      { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
       {
         realtime: {
           admission: createPairedDeviceRealtimeAdmission(runtime),
@@ -232,7 +236,7 @@ describe('binary realtime WebSocket transport', () => {
   it('periodically invalidates an idle revoked paired-device socket without waiting for another event', async () => {
     const { runtime, owner, ownerAuthenticated, editor } = createPairedEditorRuntime();
     const running = await startControlPlane(
-      { port: 0, allowedOrigins: [allowedOrigin] },
+      { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
       {
         realtime: {
           admission: createPairedDeviceRealtimeAdmission(runtime),
@@ -261,7 +265,7 @@ describe('binary realtime WebSocket transport', () => {
   it('revalidates every protected outbound frame and inbound acknowledgement or ping', async () => {
     const validations: Array<{ accessToken: string; groupId: string; deviceId: string }> = [];
     const running = await startControlPlane(
-      { port: 0, allowedOrigins: [allowedOrigin] },
+      { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
       {
         realtime: {
           admission: {
@@ -306,7 +310,7 @@ describe('binary realtime WebSocket transport', () => {
   it('fails closed with a legacy admission implementation that only supplies admit', async () => {
     let allowed = true;
     const running = await startControlPlane(
-      { port: 0, allowedOrigins: [allowedOrigin] },
+      { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
       {
         realtime: {
           admission: { admit: () => allowed },
@@ -388,7 +392,7 @@ describe('binary realtime WebSocket transport', () => {
 
 async function startDevelopmentRealtime() {
   const running = await startControlPlane(
-    { port: 0, allowedOrigins: [allowedOrigin] },
+    { port: 0, host: '127.0.0.1', allowedOrigins: [allowedOrigin] },
     { realtime: { allowUnauthenticatedDevelopment: true } },
   );
   return running;

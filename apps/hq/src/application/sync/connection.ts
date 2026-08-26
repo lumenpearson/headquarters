@@ -19,7 +19,25 @@ export type ConnectionMode =
   /** Paired, joined, and answering. */
   | 'online'
   /** The session was refused and could not be refreshed; a new pairing code is needed. */
-  | 'reauth-required';
+  | 'reauth-required'
+  /**
+   * The address answers, but its database is not the one this device paired
+   * against.
+   *
+   * A separate member because `reauth-required` states that this device's
+   * credentials went stale, which the operator answers with a fresh pairing
+   * code. This states something else entirely: the credentials may be perfectly
+   * good and there is simply no longer a database that knows them, because the
+   * one behind this address was deleted and recreated. Folding the two together
+   * would send the operator to pair into an empty group and reconcile the
+   * local state against nothing -- the loss this mode exists to prevent.
+   *
+   * Nothing is cleared when a session lands here. The stored session stays on
+   * disk and the connection stays out of `online`, so no group settings are
+   * adopted, no socket opens and no local state is overwritten, until the
+   * operator decides.
+   */
+  | 'installation-changed';
 
 export type DeviceRole = 'VIEWER' | 'EDITOR' | 'ADMIN';
 
@@ -30,6 +48,17 @@ export type PresenceStatus = 'OFFLINE' | 'ONLINE' | 'REVOKED';
 
 /** What `GetCapabilities` answered, reduced to the flags this client acts on. */
 export interface ControlPlaneCapabilities {
+  /**
+   * The identity of the database behind this address, as `GetCapabilities`
+   * reported it, or `''` when it reported none -- a control plane that reached
+   * no database, or whose schema predates the migration that mints one.
+   *
+   * Not a credential and not a secret: it names a database, opens nothing, and
+   * is answered to any caller that can reach the port. It lives on the
+   * capabilities rather than beside the session because it is a fact about the
+   * deployment, which is what this record holds.
+   */
+  readonly installationId: string;
   /** The group-event, presence and session-command surface. */
   readonly sync: boolean;
   /** Pairing and refresh -- without it no session can be started. */
@@ -231,6 +260,8 @@ export function connectionModeToken(mode: ConnectionMode): string {
       return 'ONLINE';
     case 'reauth-required':
       return 'REAUTH';
+    case 'installation-changed':
+      return 'FOREIGN';
   }
 }
 
@@ -247,6 +278,8 @@ export function connectionModeLabel(mode: ConnectionMode): string {
       return 'В ГРУППЕ';
     case 'reauth-required':
       return 'НУЖЕН НОВЫЙ КОД ПАРЫ';
+    case 'installation-changed':
+      return 'ПО ЭТОМУ АДРЕСУ ДРУГАЯ БАЗА CONTROL PLANE';
   }
 }
 

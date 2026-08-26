@@ -111,8 +111,48 @@ export class ControlPlaneSession {
       this.#reset('reauth-required', capabilities);
       return;
     }
+    if (!this.#installationMatches(capabilities.installationId)) return;
     if (!(await this.#ensureFreshSession(signal))) return;
     await this.#enterGroup(signal);
+  }
+
+  /**
+   * Whether the database behind this address is still the one the session was
+   * minted against, and the refusal when it is not.
+   *
+   * Three answers, not two. A stored identity and a reported one that disagree
+   * is the reset this exists to catch, and the session stops there: the mode
+   * moves somewhere the operator can see, the stored session is left exactly
+   * where it is, and nothing is joined, adopted or overwritten. Either side
+   * being empty is *unknown*, and unknown proceeds: an empty report comes from
+   * a control plane older than the migration that mints an identity, an empty
+   * store from a session paired before this client recorded one, and refusing
+   * on either would strand a working deployment on an upgrade ordering. A
+   * replaced database does not present as absent -- a fresh database that has
+   * run its migrations always reports an identity -- so nothing this feature
+   * exists to catch escapes through that gap.
+   *
+   * The unknown store is filled in from the report, so the *next* replacement
+   * is caught. `adoptInstallationId` never overwrites a recorded identity, so
+   * this can only ever close the gap, never paper over a mismatch.
+   */
+  #installationMatches(reported: string): boolean {
+    const stored = this.#client.storedInstallationId();
+    if (stored === null) return true;
+    if (stored === '' || reported === '') {
+      this.#client.adoptInstallationId(reported);
+      return true;
+    }
+    if (stored === reported) return true;
+    this.#set({
+      ...disconnectedConnection('installation-changed'),
+      capabilities: this.#state.capabilities,
+      failure:
+        'БАЗА CONTROL PLANE ПО ЭТОМУ АДРЕСУ — НЕ ТА, С КОТОРОЙ СПАРЕНО УСТРОЙСТВО. ' +
+        'ГРУППА И НАСТРОЙКИ ГРУППЫ НЕ ЧИТАЮТСЯ, ЛОКАЛЬНОЕ СОСТОЯНИЕ НЕ ПЕРЕЗАПИСЫВАЕТСЯ. ' +
+        'ЗАБУДЬТЕ СОХРАНЁННУЮ СЕССИЮ И СПАРИТЕСЬ ЗАНОВО.',
+    });
+    return false;
   }
 
   /** Pairs with a code an administrator issued, then enters the group. */

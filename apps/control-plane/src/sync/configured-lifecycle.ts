@@ -1,5 +1,6 @@
 import type { ControlPlaneConfig } from '../config.js';
 import { createNeonDatabase, type SqlClient, type SqlClientFactory } from '../db/database.js';
+import { readInstallationId } from '../db/installation.js';
 import { runMigrations, type MigrationRunResult } from '../db/migrations.js';
 import { DurableIntegrationStore } from '../integration/store.js';
 import { createIntegrationService } from '../integration/service.js';
@@ -58,6 +59,13 @@ export interface ConfiguredPairedDeviceLifecycleOptions {
 
 export interface ConfiguredPairedDeviceLifecycle {
   readonly runtime: DurablePairedDeviceRuntime;
+  /**
+   * The identity of the database the migrations above just ran against, which
+   * `GetCapabilities` reports so a paired client can tell this database from a
+   * replacement answering at the same address. `''` when the schema predates
+   * migration 0010.
+   */
+  readonly installationId: string;
   readonly eventStore: DurableRealtimeEventStore;
   readonly presence: PresenceStore;
   readonly coordination: UpstashCoordination;
@@ -97,6 +105,11 @@ export async function createConfiguredPairedDeviceLifecycle(
   const database =
     options.database ?? createNeonDatabase(config.databaseUrl, options.databaseFactory);
   const migrations = await (options.migrationRunner ?? runMigrations)(database);
+  // Read after the migration gate and never again: the identity is minted by
+  // 0010 and is immutable for the life of the database, so a second read could
+  // only ever return the same value at the cost of a query on an
+  // unauthenticated endpoint.
+  const installationId = await readInstallationId(database);
   const runtime = new DurablePairedDeviceRuntime({
     database,
     hashCredential: (kind, credential) => auth.hashCredential(kind, credential),
@@ -145,6 +158,7 @@ export async function createConfiguredPairedDeviceLifecycle(
 
   return {
     runtime,
+    installationId,
     migrations,
     eventStore,
     presence,

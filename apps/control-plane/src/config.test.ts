@@ -32,6 +32,7 @@ describe('control-plane configuration', () => {
       }),
     ).toEqual({
       port: 0,
+      host: '127.0.0.1',
       allowedOrigins: ['http://127.0.0.1:3000', 'https://hq.example.test'],
       databaseUrl,
       redis: { restUrl: 'https://hq-redis.upstash.io', restToken: 'upstash-token' },
@@ -41,11 +42,62 @@ describe('control-plane configuration', () => {
   it('keeps health-only startup valid when no auth environment is supplied', () => {
     expect(loadControlPlaneConfig({})).toEqual({
       port: 4100,
-      allowedOrigins: ['http://127.0.0.1:3000', 'http://localhost:3000'],
+      host: '127.0.0.1',
+      allowedOrigins: [
+        'http://127.0.0.1:3000',
+        'http://localhost:3000',
+        'http://tauri.localhost',
+        'https://tauri.localhost',
+      ],
     });
     expect(
       loadControlPlaneConfig({ HQ_CONTROL_PLANE_DATABASE_URL: databaseUrl }).auth,
     ).toBeUndefined();
+  });
+
+  /*
+   * A packaged WebView2 shell serving the static export requests with
+   * `Origin: http://tauri.localhost`. Without it in the default list
+   * `prepareRpcResponse` answers the packaged desktop's own control plane with
+   * a flat 403 on the same machine, and the operator sees a control plane that
+   * looks down. The default is asserted rather than the parser, because the
+   * default is the thing that was wrong.
+   */
+  it('admits the packaged desktop shell by default, in both schemes', () => {
+    const origins = loadControlPlaneConfig({}).allowedOrigins;
+
+    expect(origins).toContain('http://tauri.localhost');
+    expect(origins).toContain('https://tauri.localhost');
+  });
+
+  /*
+   * The bind address decides whether any other machine on the set's LAN can
+   * reach the control plane at all. Loopback stays the default so no
+   * deployment starts answering more widely because it was upgraded; widening
+   * it is a value an operator writes down.
+   */
+  it('binds loopback unless an operator names another interface', () => {
+    expect(loadControlPlaneConfig({}).host).toBe('127.0.0.1');
+    expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_HOST: '' }).host).toBe('127.0.0.1');
+    expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_HOST: '  0.0.0.0 ' }).host).toBe('0.0.0.0');
+    expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_HOST: '192.168.10.4' }).host).toBe(
+      '192.168.10.4',
+    );
+    expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_HOST: '::' }).host).toBe('::');
+    // The bracketed form is what an operator copies out of a URL, and
+    // `listen` refuses it; unwrapping it here beats a startup crash on set.
+    expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_HOST: '[::1]' }).host).toBe('::1');
+    expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_HOST: 'hq-shoot-01.local' }).host).toBe(
+      'hq-shoot-01.local',
+    );
+  });
+
+  it('names a bind address written as a URL rather than letting listen fail on it', () => {
+    for (const value of ['http://127.0.0.1', '127.0.0.1:4100', 'hq.local/path', '-hq.local']) {
+      expect(() => loadControlPlaneConfig({ HQ_CONTROL_PLANE_HOST: value })).toThrow(
+        'HQ_CONTROL_PLANE_HOST must be an IPv4 address, an IPv6 address or a hostname',
+      );
+    }
   });
 
   it('creates a secret-safe auth policy with Phase 3 defaults', () => {

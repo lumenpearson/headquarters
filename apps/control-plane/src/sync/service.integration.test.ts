@@ -27,6 +27,7 @@ describe('authenticated paired-device SyncService', () => {
     const running = await startControlPlane(
       {
         port: 0,
+        host: '127.0.0.1',
         allowedOrigins: ['http://127.0.0.1:3000'],
       },
       {

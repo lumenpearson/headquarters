@@ -7,11 +7,12 @@ import type { GroupSettingsOperation, GroupSettingsPort } from './groupSettingsP
 /**
  * The settings whose scope says they belong to the group, not the machine.
  *
- * Five today -- `telemetry.source`, `simulation.preset`, `groups.authority`,
- * `github.draftOnly`, `advanced.liveEdit` -- against 135 device ones. The list
- * is derived from the definitions rather than written out, so a sixth
- * group-scoped setting reaches the group the moment it is declared, and a
- * definition demoted to `device` stops reaching it.
+ * The membership is derived from `settingsDefinitions`, never written out here:
+ * a definition declared `scope: 'group'` reaches the group the moment it is
+ * declared, and one demoted to `device` stops reaching it, with nothing to keep
+ * in step. An earlier version of this comment named the five settings and the
+ * count of the rest, and both were wrong within a release -- which is the
+ * argument for naming the mechanism rather than the number.
  */
 export function groupScopedSettingIds(): readonly string[] {
   return settingsDefinitions
@@ -103,6 +104,17 @@ export class GroupSettingsSync {
     const patches: SettingsPatch[] = [];
     for (const id of groupScopedSettingIds()) {
       const value = document.values[id];
+      /*
+       * A value the group does not hold is skipped, so a document with no
+       * values at all produces no patches and this method is a no-op.
+       *
+       * That is load-bearing rather than incidental. A control plane whose
+       * database was replaced -- a Neon project re-provisioned, migrations run
+       * against a fresh branch -- answers `GetEffectiveSettings` for a group
+       * that holds nothing, and adopting "nothing" as the group's decision
+       * would blank every group-scoped setting on every joined device. Absent
+       * is not a decision. `GroupSettingsSync.test.ts` holds the case.
+       */
       if (value === undefined) continue;
       const definition = getSettingDefinition(id);
       if (definition === undefined || !definition.validate(value)) continue;

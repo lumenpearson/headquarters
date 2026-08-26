@@ -15,7 +15,12 @@ import {
   type PairingResult,
 } from './controlPlanePort';
 
+const installationId = '3f1c2b7a-0d4e-4f6a-9c2b-8e1d5a7c9f30';
+/** The same address after its database was deleted and recreated. */
+const replacementInstallationId = '9a2c4b60-6f1e-4f6f-9c93-5d0f2b7a41d8';
+
 const capabilities: ControlPlaneCapabilities = {
+  installationId,
   sync: true,
   deviceLifecycle: true,
   realtimeAdmission: true,
@@ -43,6 +48,8 @@ class FakeControlPlane implements ControlPlanePort {
   readonly baseUrl = 'http://127.0.0.1:4100';
   readonly calls: string[] = [];
   stored: ConnectionSession | null = null;
+  /** What the stored session says it was minted against; `''` is unknown. */
+  storedInstallation: string | null = installationId;
   expiresAt: number | null = 600_000;
   probeFails = false;
   joinError: ControlPlaneError | null = null;
@@ -64,6 +71,18 @@ class FakeControlPlane implements ControlPlanePort {
   forgetSession(): void {
     this.calls.push('forgetSession');
     this.stored = null;
+    this.storedInstallation = null;
+  }
+
+  storedInstallationId(): string | null {
+    return this.stored === null ? null : this.storedInstallation;
+  }
+
+  adoptInstallationId(value: string): void {
+    this.calls.push(`adoptInstallationId:${value}`);
+    if (value === '' || this.stored === null) return;
+    if (this.storedInstallation !== '' && this.storedInstallation !== null) return;
+    this.storedInstallation = value;
   }
 
   async probeCapabilities(): Promise<ControlPlaneCapabilities> {
@@ -75,6 +94,7 @@ class FakeControlPlane implements ControlPlanePort {
   async pair(): Promise<PairingResult> {
     this.calls.push('pair');
     this.stored = identity;
+    this.storedInstallation = this.capabilities.installationId;
     return {
       session: identity,
       group: this.serverGroup,
@@ -217,6 +237,100 @@ describe('ControlPlaneSession', () => {
     // "just to know" would break that promise on the first launch.
     expect(client.calls).toEqual([]);
     expect(read().mode).toBe('local-only');
+  });
+
+  /*
+   * The reset this whole feature exists for: the address still answers, the
+   * stored credentials may be perfectly good, and the database behind it is a
+   * different one. Nothing may be joined, adopted or forgotten -- the operator
+   * has to be told, because the alternative is discovering it by loss.
+   */
+  it('refuses a control plane whose database is not the one it paired with', async () => {
+    const client = new FakeControlPlane();
+    client.stored = identity;
+    client.storedInstallation = installationId;
+    client.capabilities = { ...capabilities, installationId: replacementInstallationId };
+    const { created, read } = session(client);
+
+    await created.connect(false);
+
+    expect(read().mode).toBe('installation-changed');
+    // Not `reauth-required`: the credentials did not go stale, the database
+    // behind them was replaced, and the two ask the operator for different
+    // things.
+    expect(read().failure).toContain('НЕ ТА, С КОТОРОЙ СПАРЕНО УСТРОЙСТВО');
+    expect(read().session).toBeUndefined();
+    // The probe, and nothing after it. No refresh, no join, no device or
+    // presence read -- and above all no `forgetSession`: giving up the pairing
+    // is the operator's decision, taken in the pairing dialog.
+    expect(client.calls).toEqual(['probeCapabilities']);
+    expect(client.stored).toBe(identity);
+    expect(client.storedInstallation).toBe(installationId);
+  });
+
+  it('proceeds normally when the database is still the one it paired with', async () => {
+    const client = new FakeControlPlane();
+    client.stored = identity;
+    client.storedInstallation = installationId;
+    const { created, read } = session(client);
+
+    await created.connect(false);
+
+    expect(read().mode).toBe('online');
+    expect(client.calls).toContain('join');
+  });
+
+  /*
+   * Unknown is not a mismatch, in either direction. A session paired before the
+   * client recorded an identity, and a control plane older than the migration
+   * that mints one, both answer `''`; refusing on either would strand a working
+   * deployment on nothing more than an upgrade ordering. A replaced database
+   * never presents as absent -- a fresh database that has run its migrations
+   * always reports an identity -- so the guard loses nothing by proceeding.
+   */
+  it('proceeds, and records the identity, for a session that carries none', async () => {
+    const client = new FakeControlPlane();
+    client.stored = identity;
+    client.storedInstallation = '';
+    const { created, read } = session(client);
+
+    await created.connect(false);
+
+    expect(read().mode).toBe('online');
+    // Recorded now, so the *next* replacement of the database is caught.
+    expect(client.storedInstallation).toBe(installationId);
+  });
+
+  it('proceeds when the control plane reports no identity of its own', async () => {
+    const client = new FakeControlPlane();
+    client.stored = identity;
+    client.storedInstallation = installationId;
+    client.capabilities = { ...capabilities, installationId: '' };
+    const { created, read } = session(client);
+
+    await created.connect(false);
+
+    expect(read().mode).toBe('online');
+    // Nothing recorded from an empty report, and the identity it already holds
+    // is left exactly as it was.
+    expect(client.storedInstallation).toBe(installationId);
+  });
+
+  it('offers the operator the way out of a refused installation', async () => {
+    const client = new FakeControlPlane();
+    client.stored = identity;
+    client.storedInstallation = installationId;
+    client.capabilities = { ...capabilities, installationId: replacementInstallationId };
+    const { created, read } = session(client);
+    await created.connect(false);
+
+    // What the pairing dialog's button does: give up the stored session
+    // deliberately, and only then ask for a new code.
+    created.unpair();
+
+    expect(client.calls).toContain('forgetSession');
+    expect(client.stored).toBeNull();
+    expect(read().mode).toBe('reauth-required');
   });
 
   it('goes offline when the control plane does not answer the probe', async () => {

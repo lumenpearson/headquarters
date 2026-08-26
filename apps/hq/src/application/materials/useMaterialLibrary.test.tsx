@@ -89,6 +89,7 @@ function joinGroup(capabilities: { readonly materials?: boolean } = {}): void {
   operationsStore.getState().patchConnection({
     mode: 'online',
     capabilities: {
+      installationId: 'test-installation',
       sync: true,
       deviceLifecycle: true,
       realtimeAdmission: false,
