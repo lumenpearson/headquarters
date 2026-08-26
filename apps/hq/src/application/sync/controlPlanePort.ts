@@ -5,6 +5,13 @@ import type {
   GroupDevice,
   PresenceEntry,
 } from './connection';
+import type {
+  DocumentDeltaPublication,
+  DocumentDeltaReceipt,
+  DocumentSnapshot,
+  GroupSessionCommand,
+  SessionCommandPublication,
+} from './groupChannel';
 
 /**
  * What the session service needs of the control plane, stated here so the
@@ -31,6 +38,29 @@ export interface ControlPlanePort {
   setLeader(deviceId: string, signal?: AbortSignal): Promise<GroupSummary>;
   timeSync(signal?: AbortSignal): Promise<ClockSample>;
   getPresence(signal?: AbortSignal): Promise<readonly PresenceEntry[]>;
+  /**
+   * Appends one document delta to the group log. The server allocates the
+   * sequence; an editor role is required and a viewer is refused.
+   */
+  publishDocumentDelta(
+    publication: DocumentDeltaPublication,
+    signal?: AbortSignal,
+  ): Promise<DocumentDeltaReceipt>;
+  /**
+   * Appends one session command. Under `LEADER` authority only the leader may,
+   * and the refusal is `failed-precondition` rather than a silent no-op.
+   * `epoch` and `sequence` come back from the server; neither is sent.
+   */
+  publishSessionCommand(
+    publication: SessionCommandPublication,
+    signal?: AbortSignal,
+  ): Promise<GroupSessionCommand>;
+  /**
+   * The document state a resume falls back to. `null` rather than a throw when
+   * the server has recorded no snapshot, because "no snapshot yet" is the
+   * ordinary state of a group whose log has never been pruned.
+   */
+  getDocumentSnapshot(documentId: string, signal?: AbortSignal): Promise<DocumentSnapshot | null>;
 }
 
 export interface GroupSummary {

@@ -6008,6 +6008,43 @@ button.is-active {
   text-align: center;
 }
 
+/*
+ * The group's own ledger, beneath the local one and visibly a different list.
+ * The rule the separator states is that the two page differently: the local
+ * ledger knows its total, the server's is forward-only.
+ */
+.settings-history-group {
+  display: grid;
+  gap: 5px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--ops-line);
+}
+
+.settings-history-group__head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px;
+  align-items: baseline;
+}
+
+.settings-history-group__head h3 {
+  margin: 0;
+  color: var(--ops-orange);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+}
+
+.settings-history-group__head span {
+  color: var(--ops-muted);
+  font-size: 7px;
+  text-align: right;
+}
+
+.settings-history-row span.settings-history-actor {
+  color: var(--ops-muted);
+}
+
 @container operations-workspace (max-width: 1240px) {
   .settings-history {
     grid-column: span 1;

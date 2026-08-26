@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 import { useBooleanSetting } from '@/application/personalization/useSetting';
 import { useKeybind } from '@/components/keybinds/KeybindRuntime';
+import {
+  currentGroupRuntime,
+  noGroupRuntime,
+  subscribeGroupRuntime,
+} from '@/components/sync/groupRuntimeHolder';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import {
@@ -11,6 +16,7 @@ import {
   createBrowserLiveEditTransport,
 } from '@/infrastructure/browser/LiveEditBus';
 import type { LiveEditTransport } from '@/infrastructure/browser/LiveEditBus';
+import { createGroupLiveEditTransport } from '@/infrastructure/controlPlane/GroupLiveEditTransport';
 
 interface EditModeRuntimeProps {
   /**
@@ -41,6 +47,14 @@ interface EditModeRuntimeProps {
 export function EditModeRuntime({ transport }: EditModeRuntimeProps) {
   const active = useOperationsStore((state) => state.edit.active);
   const liveEdit = useBooleanSetting('advanced.liveEdit');
+  /*
+   * External state, read with the hook for external state, as
+   * `ControlPlaneRuntime` reads its session. A group appears and disappears
+   * with `JoinGroup`, which is not a render of this component, so mirroring it
+   * into component state would leave two copies to disagree about whether a
+   * channel exists.
+   */
+  const group = useSyncExternalStore(subscribeGroupRuntime, currentGroupRuntime, noGroupRuntime);
 
   useEffect(() => {
     document.documentElement.dataset.editMode = active ? 'on' : 'off';
@@ -66,7 +80,27 @@ export function EditModeRuntime({ transport }: EditModeRuntimeProps) {
    */
   useEffect(() => {
     if (!liveEdit) return;
-    const bus = transport ?? createBrowserLiveEditTransport();
+    /*
+     * Which transport, in one line: the group's when this session is in one,
+     * the browser's when it is not. F10 replaces the wire underneath live edit
+     * and nothing else -- the gate above still decides whether any wire exists,
+     * and the re-validation below still decides what may land.
+     *
+     * A patch published to the group reaches every admitted device rather than
+     * only the tabs of one browser profile, which is what R27 asks for; a
+     * local-only session keeps exactly the behaviour it had.
+     */
+    const bus =
+      transport ??
+      (group === null
+        ? createBrowserLiveEditTransport()
+        : createGroupLiveEditTransport({
+            channel: group.channel,
+            onPublishFailed: () =>
+              operationsStore
+                .getState()
+                .patchConnection({ failure: 'ЖИВОЕ РЕДАКТИРОВАНИЕ НЕ ПРИНЯТО ГРУППОЙ' }),
+          }));
     const disconnect = connectLiveEdit(bus, (patches) => {
       operationsStore.getState().applySettingsPatch(patches);
     });
@@ -76,7 +110,7 @@ export function EditModeRuntime({ transport }: EditModeRuntimeProps) {
       // opened here is closed here.
       if (transport === undefined) bus.close();
     };
-  }, [liveEdit, transport]);
+  }, [group, liveEdit, transport]);
 
   useKeybind('edit.toggle', () => {
     const state = operationsStore.getState();

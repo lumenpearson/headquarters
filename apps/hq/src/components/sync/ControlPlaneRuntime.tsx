@@ -10,6 +10,8 @@ import { loadProjectConfiguration } from '@/infrastructure/config/RuntimeConfigL
 import { ControlPlaneClient } from '@/infrastructure/controlPlane/ControlPlaneClient';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
+import { GroupChannelRuntime } from './GroupChannelRuntime';
+
 /** How often the group's presence list is re-read. */
 const presenceIntervalMs = 15_000;
 /** How often the clock is re-estimated. Drift is slow; the probe is not free. */
@@ -23,17 +25,32 @@ const clockIntervalMs = 60_000;
  * disconnected state, so a surface that asks while nothing is connected is
  * told exactly that rather than handed a client that cannot answer.
  */
-let active: ControlPlaneSession | null = null;
+interface ActiveConnection {
+  readonly session: ControlPlaneSession;
+  /**
+   * The client the session was built on, kept because the group channel needs
+   * what only the client has: the shared authenticated transport, and the
+   * identity a realtime hello carries. The session deliberately holds neither
+   * -- it reasons about a port, not about credentials.
+   */
+  readonly client: ControlPlaneClient;
+}
+
+let active: ActiveConnection | null = null;
 const listeners = new Set<() => void>();
 
 export function currentControlPlaneSession(): ControlPlaneSession | null {
-  return active;
+  return active === null ? null : active.session;
 }
 
 /** Notifies the surfaces that hold a session so they re-read it. */
-function setActiveSession(session: ControlPlaneSession | null): void {
-  active = session;
+function setActiveSession(connection: ActiveConnection | null): void {
+  active = connection;
   for (const listener of [...listeners]) listener();
+}
+
+function currentActiveConnection(): ActiveConnection | null {
+  return active;
 }
 
 export function subscribeControlPlaneSession(listener: () => void): () => void {
@@ -66,11 +83,12 @@ export function ControlPlaneRuntime() {
    * effect body -- a cascading render, and one more place for the two copies
    * to disagree about whether a client exists.
    */
-  const session = useSyncExternalStore(
+  const connection = useSyncExternalStore(
     subscribeControlPlaneSession,
-    currentControlPlaneSession,
+    currentActiveConnection,
     () => null,
   );
+  const session = connection === null ? null : connection.session;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -98,17 +116,18 @@ export function ControlPlaneRuntime() {
         operationsStore.getState().patchConnection(disconnectedConnection('local-only'));
         return;
       }
+      const client = new ControlPlaneClient({
+        baseUrl,
+        device: {
+          platform: typeof navigator === 'undefined' ? 'web' : navigator.platform,
+          applicationVersion: process.env.NEXT_PUBLIC_HQ_BUILD_ID ?? 'dev',
+        },
+      });
       const created = new ControlPlaneSession({
-        client: new ControlPlaneClient({
-          baseUrl,
-          device: {
-            platform: typeof navigator === 'undefined' ? 'web' : navigator.platform,
-            applicationVersion: process.env.NEXT_PUBLIC_HQ_BUILD_ID ?? 'dev',
-          },
-        }),
+        client,
         apply: (patch) => operationsStore.getState().patchConnection(patch),
       });
-      setActiveSession(created);
+      setActiveSession({ session: created, client });
       void created.connect(false, controller.signal);
     });
 
@@ -154,7 +173,15 @@ export function ControlPlaneRuntime() {
     });
   }, [authoritySetting, mode, serverAuthority, session]);
 
-  return null;
+  /*
+   * The socket, the event channel and the group's settings are mounted rather
+   * than opened here, because they live and die with a joined group while this
+   * runtime lives as long as the application. Rendering them keeps that
+   * lifetime in React's hands instead of in a second set of effect guards.
+   */
+  return connection === null ? null : (
+    <GroupChannelRuntime client={connection.client} session={connection.session} />
+  );
 }
 
 /**

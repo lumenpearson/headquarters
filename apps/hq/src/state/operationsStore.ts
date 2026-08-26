@@ -49,6 +49,7 @@ import {
 } from '../application/edit/contentFields';
 import { booleanSetting, numberSetting } from '../application/personalization/settingValue';
 import { initialConnectionState, type ConnectionState } from '../application/sync/connection';
+import { publishGroupSettings } from '../application/sync/groupSettingsBus';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
@@ -789,6 +790,11 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     // `EditModeRuntime`, which connects a transport only while the group has
     // enabled it; with nothing connected this call does nothing at all.
     publishLiveEdit(patches);
+    // R6, the group half: a group-scoped change is also what the group agreed,
+    // and `SettingsService` is where that is recorded. `publishGroupSettings`
+    // filters to the five group-scoped definitions and does nothing at all
+    // without a session, so a local-only client makes no call.
+    publishGroupSettings(patches);
   },
   resetSettingsCategory: (category) =>
     set((state) => {

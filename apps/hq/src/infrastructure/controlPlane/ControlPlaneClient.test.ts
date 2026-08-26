@@ -121,6 +121,22 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
     async timeSync() {
       return { serverReceiveTime: timestamp(5_000), serverSendTime: timestamp(5_000) };
     },
+    async publishDocumentDelta() {
+      return { sequence: 7n, stateVector: new Uint8Array([1]) };
+    },
+    async publishSessionCommand(request) {
+      // The server overwrites both numbers; the fake does the same, so a test
+      // asserting the client adopted them cannot pass by accident.
+      return { command: { ...request.command, epoch: 4n, sequence: 11n } };
+    },
+    async getDocumentSnapshot() {
+      return {
+        snapshot: new Uint8Array([9]),
+        stateVector: new Uint8Array([8]),
+        sequence: 42n,
+        documentType: syncV1.SynchronizedDocumentType.SETTINGS,
+      };
+    },
     async getPresence() {
       return {
         devices: [

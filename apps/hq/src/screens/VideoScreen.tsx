@@ -2,7 +2,16 @@
 
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import {
   isVideoProvider,
   MediaPlayer,
@@ -55,6 +64,12 @@ import {
   type PlaybackSyncTarget,
 } from '@/infrastructure/media/PlaybackSyncCoordinator';
 import { RecordPagination } from '@/components/operations/RecordPagination';
+import {
+  currentGroupRuntime,
+  noGroupRuntime,
+  subscribeGroupRuntime,
+} from '@/components/sync/groupRuntimeHolder';
+import { createGroupPlaybackSyncTransport } from '@/infrastructure/controlPlane/GroupPlaybackSyncTransport';
 import { useOperationsStore } from '@/state/operationsStore';
 
 const playbackRateOptions = [0.5, 1, 1.5, 2, 4].map((rate) => ({
@@ -269,6 +284,14 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
   const [cameraMaterialSourceFailure, setCameraMaterialSourceFailure] =
     useState<CameraMaterialSourceFailure | null>(null);
   const [playbackSyncState, setPlaybackSyncState] = useState<PlaybackSyncState>('CONNECTING');
+  /*
+   * The group, read as external state exactly as `EditModeRuntime` reads it:
+   * it appears with `JoinGroup` and disappears with the session, neither of
+   * which is a render of this screen.
+   */
+  const group = useSyncExternalStore(subscribeGroupRuntime, currentGroupRuntime, noGroupRuntime);
+  const authority = useOperationsStore((value) => value.connection.authority);
+  const leaderDeviceId = useOperationsStore((value) => value.connection.leaderDeviceId);
   const webcamSessionRef = useRef<WebcamSession | null>(null);
   const webcamRequestRef = useRef(0);
   const selectedCameraIdRef = useRef<string | undefined>(undefined);
@@ -718,12 +741,37 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
 
   useEffect(() => {
     try {
-      // The coordinator already declared and validated this option; nothing
-      // passed it. A lead gives a slower screen time to arrive at the same
-      // instant as a fast one, which is the point of synchronised playback.
+      /*
+       * The coordinator already declared and validated the lead; nothing passed
+       * it. A lead gives a slower screen time to arrive at the same instant as
+       * a fast one, which is the point of synchronised playback.
+       *
+       * The transport is the group's while this session is in one, and the
+       * browser's otherwise. That is what moves `epoch` and `sequence` off this
+       * machine: the group transport answers each publication with the pair the
+       * server allocated, and the coordinator adopts it. Authority is passed in
+       * too, so a session under `LEADER` refuses to publish locally rather than
+       * learning it from a `FAILED_PRECONDITION` on every control press.
+       */
+      const groupTransport =
+        group === null
+          ? undefined
+          : createGroupPlaybackSyncTransport({
+              channel: group.channel,
+              onPublishFailed: () => setPlaybackSyncState('LOCAL ONLY'),
+            });
       const coordinator = new PlaybackSyncCoordinator({
         onCommand: (command) => playbackCommandHandlerRef.current(command),
         executionDelayMs: playbackLeadMs,
+        ...(groupTransport === undefined ? {} : { transport: groupTransport }),
+        ...(group === null ? {} : { deviceId: group.deviceId }),
+        ...(authority === undefined
+          ? {}
+          : {
+              authority:
+                authority === 'leader' ? ('LEADER' as const) : ('MULTI_AUTHORITY' as const),
+            }),
+        ...(leaderDeviceId === undefined ? {} : { leaderDeviceId }),
       });
       playbackSyncRef.current = coordinator;
       void Promise.resolve().then(() => setPlaybackSyncState('ACTIVE'));
@@ -735,7 +783,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       void Promise.resolve().then(() => setPlaybackSyncState('LOCAL ONLY'));
       return undefined;
     }
-  }, [playbackLeadMs]);
+  }, [authority, group, leaderDeviceId, playbackLeadMs]);
 
   const requestPlaybackAction = useCallback(
     (

@@ -53,6 +53,8 @@ import {
   authorityModeLabel,
   connectionModeLabel,
   connectionModeToken,
+  realtimeStatusLabel,
+  realtimeStatusToken,
 } from '@/application/sync/connection';
 
 import { EditableContent } from '@/components/edit/EditableContent';
@@ -532,10 +534,20 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
  * "Не подключена — R27, фича F10" whatever the session was doing, because
  * there was no client to ask. It now names the mode the connection is
  * actually in, and the group, authority and clock offset behind it.
+ *
+ * The mode alone still left one thing unsaid. `SYNC:ONLINE` was printed both
+ * by a session with a live realtime socket and by one whose whole contact with
+ * the group was a fifteen-second presence poll -- a control plane started
+ * without realtime admission serves no socket at all. The link is therefore
+ * printed after the mode: `ONLINE/LIVE` follows the group as it moves,
+ * `ONLINE/POLL` catches up on a timer, and `ONLINE/RETRY` is between attempts.
  */
 function TransportProbe({ bus }: { readonly bus: string }) {
   const screenId = useOperationsStore((state) => state.production.screenId);
   const connection = useOperationsStore((state) => state.connection);
+  // One token rather than two adjacent expressions, so the slash between the
+  // mode and the link cannot be lost to JSX whitespace collapsing.
+  const syncToken = `${connectionModeToken(connection.mode)}/${realtimeStatusToken(connection.realtime.status)}`;
   return (
     <TerminalPopover
       side="top"
@@ -543,7 +555,7 @@ function TransportProbe({ bus }: { readonly bus: string }) {
       description="Чем этот экран синхронизируется с остальными"
       trigger={
         <TerminalButton className="ops-statusline__probe" aria-label="Подробности транспорта">
-          BUS:{bus} RPC:GRPC-WEB SYNC:{connectionModeToken(connection.mode)}
+          BUS:{bus} RPC:GRPC-WEB SYNC:{syncToken}
         </TerminalButton>
       }
     >
@@ -577,6 +589,18 @@ function TransportProbe({ bus }: { readonly bus: string }) {
             {connection.authority === undefined
               ? 'Группа не назначена'
               : authorityModeLabel(connection.authority)}
+          </dd>
+        </div>
+        <div>
+          <dt>КАНАЛ СОБЫТИЙ</dt>
+          <dd>
+            {realtimeStatusLabel(connection.realtime.status)}
+            {connection.realtime.lastSequence === 0
+              ? ''
+              : ` — событие ${connection.realtime.lastSequence}`}
+            {connection.realtime.resyncCount === 0
+              ? ''
+              : `, пересинхронизаций ${connection.realtime.resyncCount}`}
           </dd>
         </div>
         <div>

@@ -29,6 +29,10 @@ import {
   Setting,
 } from '@/components/settings/SchemaSetting';
 import {
+  groupHistoryOperationLabel,
+  useGroupSettingsHistory,
+} from '@/components/settings/useGroupSettingsHistory';
+import {
   querySettingsHistory,
   settingsHistoryOperations,
   settingsHistoryScopes,
@@ -53,6 +57,17 @@ export function SettingsScreen() {
   const [historyDate, setHistoryDate] = useState('');
   const [historyOrder, setHistoryOrder] = useState<'newest' | 'oldest'>('newest');
   const [historyPageNumber, setHistoryPageNumber] = useState(1);
+  /*
+   * The scope switch is the source switch too (F8, R29). `device` and `all`
+   * describe this machine's ledger and nothing else exists for them to
+   * describe. `group` is the one that reaches further: the local rows under it
+   * are the changes this machine made that will propagate, and the group's own
+   * ledger -- what the server recorded, from every device -- is read beneath
+   * them. Two lists rather than one merged one, because the two page
+   * differently and cannot honestly be interleaved: see
+   * `useGroupSettingsHistory`.
+   */
+  const groupHistory = useGroupSettingsHistory(historyScope === 'group');
   const catalog = useMemo(
     () =>
       queryCatalog({
@@ -614,6 +629,69 @@ export function SettingsScreen() {
             ВОССТАНОВЛЕНИЕ ЗАГРУЖАЕТ СОСТОЯНИЕ В ЛОКАЛЬНЫЙ DRAFT; ПУБЛИКАЦИЯ СОЗДАЁТ НОВУЮ РЕВИЗИЮ И
             НЕ ПЕРЕЗАПИСЫВАЕТ ИСТОРИЮ.
           </p>
+          {historyScope !== 'group' ? null : (
+            <section className="settings-history-group" aria-label="Журнал группы">
+              <header className="settings-history-group__head">
+                <h3>ЖУРНАЛ ГРУППЫ</h3>
+                <span>
+                  {groupHistory.status === 'unavailable'
+                    ? 'СЕССИЯ НЕ В ГРУППЕ — ЧИТАТЬ НЕЧЕГО'
+                    : groupHistory.status === 'loading'
+                      ? 'ЧТЕНИЕ'
+                      : groupHistory.status === 'failed'
+                        ? groupHistory.failure
+                        : `ЗАГРУЖЕНО ${groupHistory.entries.length}${
+                            groupHistory.hasMore ? ', ЕСТЬ ЕЩЁ' : ', БОЛЬШЕ НЕТ'
+                          }`}
+                </span>
+              </header>
+              {groupHistory.entries.length === 0 ? null : (
+                <div className="settings-history-list" aria-live="polite">
+                  {groupHistory.entries.map((entry) => (
+                    <article className="settings-history-row" key={entry.id}>
+                      <div>
+                        <strong>{groupHistoryOperationLabel(entry.operation)}</strong>
+                        <small>{formatHistoryDate(entry.at)}</small>
+                      </div>
+                      <p>
+                        {entry.changedIds.join(', ') ||
+                          entry.elementId ||
+                          'ИЗМЕНЕНИЕ БЕЗ ПАРАМЕТРОВ'}
+                      </p>
+                      <span>{entry.category.toUpperCase() || 'GROUP'}</span>
+                      <span className="settings-history-actor">
+                        РЕВ. {entry.revision} · {entry.actorDeviceId || 'НЕИЗВЕСТНОЕ УСТРОЙСТВО'}
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              )}
+              {/*
+                Forward only, and no page number. The server pages by keyset and
+                reports neither a previous cursor nor a total, so a "СТР. 2 / 7"
+                here would be a count nobody made.
+              */}
+              <div className="settings-history-pagination">
+                <TerminalButton
+                  className="ops-action"
+                  size="small"
+                  disabled={groupHistory.status === 'unavailable'}
+                  onClick={groupHistory.reload}
+                >
+                  [↺] СНАЧАЛА
+                </TerminalButton>
+                <span>ПАГИНАЦИЯ ПО КУРСОРУ · БЕЗ ОБЩЕГО СЧЁТА</span>
+                <TerminalButton
+                  className="ops-action"
+                  size="small"
+                  disabled={!groupHistory.hasMore}
+                  onClick={groupHistory.loadMore}
+                >
+                  ЕЩЁ [→]
+                </TerminalButton>
+              </div>
+            </section>
+          )}
         </Panel>
         <Panel title="ГОРЯЧИЕ КЛАВИШИ" eyebrow="KEYMAP / TERMINAL" className="settings-keymap">
           {[

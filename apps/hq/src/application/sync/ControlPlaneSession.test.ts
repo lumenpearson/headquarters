@@ -160,6 +160,36 @@ class FakeControlPlane implements ControlPlanePort {
       },
     ];
   }
+
+  /*
+   * The publication half of the port. `ControlPlaneSession` calls none of these
+   * -- it owns pairing, joining and the two polls -- so they record the call
+   * and answer the shape, which keeps the transcript honest about what the
+   * session actually reaches for.
+   */
+  async publishDocumentDelta() {
+    this.calls.push('publishDocumentDelta');
+    return { sequence: 1n, stateVector: new Uint8Array(0) };
+  }
+
+  async publishSessionCommand() {
+    this.calls.push('publishSessionCommand');
+    return {
+      epoch: 1n,
+      sequence: 1n,
+      action: 'play' as const,
+      target: '',
+      positionSeconds: 0,
+      playbackRate: 1,
+      executeAtMs: 0,
+      issuedByDeviceId: 'device-a',
+    };
+  }
+
+  async getDocumentSnapshot() {
+    this.calls.push('getDocumentSnapshot');
+    return null;
+  }
 }
 
 function session(client: FakeControlPlane, now = () => 0) {

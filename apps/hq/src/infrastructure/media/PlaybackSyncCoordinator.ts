@@ -34,8 +34,29 @@ export interface PlaybackSyncCommandInput {
   readonly playbackRate?: number;
 }
 
+/**
+ * The ordering the server allocated for a published command.
+ *
+ * `epoch` is the group revision the command was issued against and `sequence`
+ * the number the append gave it. Both are server facts: `publishSessionCommand`
+ * overwrites whatever a client sent, because a client-chosen pair would let two
+ * sessions disagree about which command is newer.
+ */
+export interface PlaybackSyncAllocation {
+  readonly epoch: number;
+  readonly sequence: number;
+}
+
 export interface PlaybackSyncTransport {
-  publish(command: PlaybackSyncCommand): void;
+  /**
+   * Sends one command.
+   *
+   * A transport that owns the ordering answers with the numbers the server
+   * allocated, and the coordinator adopts them; the browser transport answers
+   * nothing, because in one browser profile there is no authority to allocate
+   * anything and the local counter is the whole truth.
+   */
+  publish(command: PlaybackSyncCommand): void | Promise<PlaybackSyncAllocation | null>;
   subscribe(listener: (command: PlaybackSyncCommand) => void): () => void;
   close(): void;
 }
@@ -50,13 +71,29 @@ export interface PlaybackSyncCoordinatorOptions {
   readonly now?: () => number;
   readonly schedule?: (callback: () => void, delayMs: number) => () => void;
   readonly transport?: PlaybackSyncTransport;
+  /**
+   * Where a refused publication is reported. The command still executes on
+   * this screen -- an operator's own control obeys the operator -- but the
+   * group did not accept it, and a screen that showed `ACTIVE` regardless
+   * would be claiming a synchronization that is not happening.
+   */
+  readonly onPublishFailed?: (error: unknown) => void;
 }
 
 /**
  * Orders media actions before their scheduled execution time. The default
- * transport synchronizes same-profile browser windows. The command shape is
- * intentionally compatible with the future generated SyncService command: it
- * contains no local path, Blob URL, loopback grant or MediaStream reference.
+ * transport synchronizes same-profile browser windows; the group transport of
+ * F10 carries the same commands to every admitted device. The command shape
+ * contains no local path, Blob URL, loopback grant or MediaStream reference,
+ * which is what lets one shape serve both.
+ *
+ * `epoch` and `sequence` are allocated locally only while nothing better
+ * exists. This coordinator was built as a pre-image of `PublishSessionCommand`
+ * and numbered its own commands because there was no server to ask; the server
+ * owns both numbers and always did. A transport that reaches one therefore
+ * answers with what was allocated, and {@link PlaybackSyncCoordinator.publish}
+ * replaces the local pair with it -- without moving `executeAtMs`, so the
+ * instant the command runs at is unchanged by the round trip.
  */
 export class PlaybackSyncCoordinator {
   readonly #deviceId: string;
@@ -111,12 +148,19 @@ export class PlaybackSyncCoordinator {
     };
     this.#sequence = command.sequence;
     this.#lastSequenceByDevice.set(this.#deviceId, command.sequence);
-    if (this.#accept(command)) {
-      this.#transport.publish(command);
-      this.#scheduleCommand(command);
-      return command;
+    if (!this.#accept(command)) return null;
+    const allocation = this.#transport.publish(command);
+    this.#scheduleCommand(command);
+    if (allocation !== undefined) {
+      void allocation
+        .then((allocated) => {
+          if (allocated !== null) this.#adopt(command, allocated);
+        })
+        .catch((error: unknown) => {
+          this.options.onPublishFailed?.(error);
+        });
     }
-    return null;
+    return command;
   }
 
   close(): void {
@@ -126,6 +170,38 @@ export class PlaybackSyncCoordinator {
     for (const cancel of this.#cancelByTarget.values()) cancel();
     this.#cancelByTarget.clear();
     this.#transport.close();
+  }
+
+  /**
+   * Replaces a locally numbered command with the server's numbering.
+   *
+   * Only while it is still the latest for its target: a command already
+   * superseded has nothing left to order against, and re-arming it would
+   * execute an action the operator has moved on from. The scheduled callback
+   * compares by identity, so the timer is cancelled and re-armed against the
+   * replacement; `executeAtMs` is carried over unchanged, so the instant does
+   * not move by however long the round trip took.
+   */
+  #adopt(previous: PlaybackSyncCommand, allocation: PlaybackSyncAllocation): void {
+    if (this.#closed) return;
+    const key = targetKey(previous.target);
+    if (this.#latestByTarget.get(key) !== previous) return;
+    if (!Number.isSafeInteger(allocation.epoch) || allocation.epoch <= 0) return;
+    if (!Number.isSafeInteger(allocation.sequence) || allocation.sequence <= 0) return;
+    const next: PlaybackSyncCommand = {
+      ...previous,
+      epoch: allocation.epoch,
+      sequence: allocation.sequence,
+    };
+    this.#latestByTarget.set(key, next);
+    this.#sequence = Math.max(this.#sequence, next.sequence);
+    this.#lastSequenceByDevice.set(
+      this.#deviceId,
+      Math.max(this.#lastSequenceByDevice.get(this.#deviceId) ?? 0, next.sequence),
+    );
+    this.#cancelByTarget.get(key)?.();
+    this.#cancelByTarget.delete(key);
+    this.#scheduleCommand(next);
   }
 
   #receive(command: PlaybackSyncCommand): void {

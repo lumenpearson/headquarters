@@ -1,4 +1,4 @@
-import { Code, ConnectError, createClient } from '@connectrpc/connect';
+import { Code, ConnectError, createClient, type Transport } from '@connectrpc/connect';
 import { ControlPlaneService, SyncService, syncV1 } from '@gremuchaya/protocol';
 
 import type {
@@ -12,15 +12,32 @@ import type {
 } from '@/application/sync/connection';
 import {
   ControlPlaneError,
+  isControlPlaneError,
   type ClockSample,
   type ControlPlaneErrorKind,
   type ControlPlanePort,
   type GroupSummary,
   type PairingResult,
 } from '@/application/sync/controlPlanePort';
+import type {
+  RealtimeIdentity,
+  DocumentDeltaPublication,
+  DocumentDeltaReceipt,
+  DocumentSnapshot,
+  GroupSessionCommand,
+  SessionCommandPublication,
+} from '@/application/sync/groupChannel';
 
 import { createBearerInterceptor } from './authInterceptor';
 import { DeviceSessionStore, type StoredDeviceSession } from './DeviceSessionStore';
+import {
+  fromGroupSessionAction,
+  fromSynchronizedDocumentType,
+  toEpochMs,
+  toGroupSessionCommand,
+  toSynchronizedDocumentType,
+  toWireTimestamp,
+} from './groupEventCodec';
 import { createControlPlaneTransport } from './transport';
 
 /*
@@ -71,6 +88,24 @@ interface WirePresence {
   readonly clockOffsetMs: bigint;
   readonly latencyMs: number;
   readonly observedAt?: WireTimestamp | undefined;
+}
+
+/**
+ * The session command as it crosses the wire in both directions.
+ *
+ * `epoch` and `sequence` are sent as zero and read back from the response: the
+ * server overwrites both (`sync/service.ts`, `publishSessionCommand`), and a
+ * client that filled them in would be stating an order it does not own.
+ */
+interface WireSessionCommand {
+  readonly epoch: bigint;
+  readonly sequence: bigint;
+  readonly action: syncV1.SessionCommandAction;
+  readonly target: string;
+  readonly positionSeconds: number;
+  readonly playbackRate: number;
+  readonly executeAt?: WireTimestamp | undefined;
+  readonly issuedByDeviceId?: WireResourceId | undefined;
 }
 
 interface WireMutationContext {
@@ -168,6 +203,35 @@ export interface SyncRpcClient {
     request: { readonly groupId: WireResourceId },
     options?: CallOptions,
   ): Promise<{ readonly devices: readonly WirePresence[] }>;
+  publishDocumentDelta(
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly documentId: WireResourceId;
+      readonly documentType: syncV1.SynchronizedDocumentType;
+      readonly stateVector: Uint8Array;
+      readonly delta: Uint8Array;
+      readonly hybridLogicalClock: bigint;
+    },
+    options?: CallOptions,
+  ): Promise<{ readonly sequence: bigint; readonly stateVector: Uint8Array }>;
+  publishSessionCommand(
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly command: WireSessionCommand;
+    },
+    options?: CallOptions,
+  ): Promise<{ readonly command?: WireSessionCommand | undefined }>;
+  getDocumentSnapshot(
+    request: { readonly groupId: WireResourceId; readonly documentId: WireResourceId },
+    options?: CallOptions,
+  ): Promise<{
+    readonly snapshot: Uint8Array;
+    readonly stateVector: Uint8Array;
+    readonly sequence: bigint;
+    readonly documentType: syncV1.SynchronizedDocumentType;
+  }>;
 }
 
 export interface ControlPlaneClientOptions {
@@ -203,6 +267,7 @@ export class ControlPlaneClient implements ControlPlanePort {
   readonly #device: { readonly platform: string; readonly applicationVersion: string };
   readonly #mintRequestId: () => string;
   readonly #now: () => number;
+  readonly #transport: Transport | undefined;
 
   constructor(options: ControlPlaneClientOptions) {
     this.baseUrl = options.baseUrl;
@@ -213,13 +278,46 @@ export class ControlPlaneClient implements ControlPlanePort {
     if (options.clients !== undefined) {
       this.#control = options.clients.control;
       this.#sync = options.clients.sync;
+      this.#transport = undefined;
     } else {
       const transport = createControlPlaneTransport(options.baseUrl, [
         createBearerInterceptor(() => this.accessToken()),
       ]);
+      this.#transport = transport;
       this.#control = createClient(ControlPlaneService, transport);
       this.#sync = createClient(SyncService, transport);
     }
+  }
+
+  /**
+   * The authenticated transport, so a second service client can share it.
+   *
+   * `SettingsService` needs the same bearer interceptor and the same base
+   * address, and building a second transport would mean a second place for the
+   * token-reading rule to drift. `undefined` when a test injected clients, in
+   * which case there is no transport to share and the test supplies its own.
+   */
+  get transport(): Transport | undefined {
+    return this.#transport;
+  }
+
+  /**
+   * What a realtime `ClientHello` carries, or `null` without a session.
+   *
+   * Assembled here rather than in the socket client because this is where the
+   * credential lives: the token is read out of the session store at the moment
+   * a socket opens, exactly as the bearer interceptor reads it at the moment of
+   * a call, so a reconnect after a refresh greets the server with the rotated
+   * token rather than the one this client was built with.
+   */
+  realtimeIdentity(): RealtimeIdentity | null {
+    const stored = this.#stored();
+    if (stored === null) return null;
+    return {
+      groupId: stored.groupId,
+      deviceId: stored.deviceId,
+      accessToken: stored.accessToken,
+    };
   }
 
   /** The stored identity, or `null` when this client has not been paired. */
@@ -444,7 +542,7 @@ export class ControlPlaneClient implements ControlPlanePort {
         {
           groupId: { value: stored.groupId },
           clientSendMonotonicMs: BigInt(Math.max(0, Math.floor(clientSendMs))),
-          clientWallTime: toTimestamp(clientSendMs),
+          clientWallTime: toWireTimestamp(clientSendMs),
         },
         options(signal),
       ),
@@ -464,6 +562,101 @@ export class ControlPlaneClient implements ControlPlanePort {
       this.#sync.getPresence({ groupId: { value: stored.groupId } }, options(signal)),
     );
     return response.devices.map(toPresence);
+  }
+
+  /**
+   * Appends one document delta to the group log.
+   *
+   * The sequence comes back from the append; nothing about ordering is decided
+   * here. `state_vector` is sent empty by the only caller in this application
+   * -- live edit carries settings patches, not a CRDT document -- and the field
+   * is kept on the publication so a later CRDT caller has somewhere to put it.
+   */
+  async publishDocumentDelta(
+    publication: DocumentDeltaPublication,
+    signal?: AbortSignal,
+  ): Promise<DocumentDeltaReceipt> {
+    const stored = this.#requireSession();
+    const response = await call(() =>
+      this.#sync.publishDocumentDelta(
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          documentId: { value: publication.documentId },
+          documentType: fromSynchronizedDocumentType(publication.documentType),
+          stateVector: publication.stateVector ?? new Uint8Array(0),
+          delta: publication.delta,
+          hybridLogicalClock: publication.hybridLogicalClock ?? 0n,
+        },
+        options(signal),
+      ),
+    );
+    return { sequence: response.sequence, stateVector: response.stateVector };
+  }
+
+  /**
+   * Appends one session command and answers with the one the server recorded.
+   *
+   * `epoch`, `sequence` and `issued_by_device_id` are sent empty on purpose:
+   * the server sets all three, and the returned command -- not the requested
+   * one -- is what the caller must order by.
+   */
+  async publishSessionCommand(
+    publication: SessionCommandPublication,
+    signal?: AbortSignal,
+  ): Promise<GroupSessionCommand> {
+    const stored = this.#requireSession();
+    const executeAtMs = publication.executeAtMs;
+    const response = await call(() =>
+      this.#sync.publishSessionCommand(
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          command: {
+            epoch: 0n,
+            sequence: 0n,
+            action: fromGroupSessionAction(publication.action),
+            target: publication.target,
+            positionSeconds: publication.positionSeconds ?? 0,
+            playbackRate: publication.playbackRate ?? 0,
+            ...(executeAtMs === undefined ? {} : { executeAt: toWireTimestamp(executeAtMs) }),
+          },
+        },
+        options(signal),
+      ),
+    );
+    const command = required(response.command, 'Control plane returned no session command.');
+    return toWireSessionCommand(command);
+  }
+
+  /**
+   * The snapshot a resume falls back to, or `null` when none was recorded.
+   *
+   * `NOT_FOUND` becomes `null` because a group whose log still covers every
+   * resume point has no snapshot at all, and that is not a failure to show.
+   */
+  async getDocumentSnapshot(
+    documentId: string,
+    signal?: AbortSignal,
+  ): Promise<DocumentSnapshot | null> {
+    const stored = this.#requireSession();
+    try {
+      const response = await call(() =>
+        this.#sync.getDocumentSnapshot(
+          { groupId: { value: stored.groupId }, documentId: { value: documentId } },
+          options(signal),
+        ),
+      );
+      return {
+        snapshot: response.snapshot,
+        stateVector: response.stateVector,
+        sequence: response.sequence,
+        documentType: toSynchronizedDocumentType(response.documentType),
+      };
+    } catch (error: unknown) {
+      if (isControlPlaneError(error, 'not-found')) return null;
+      throw error;
+    }
   }
 
   #stored(): StoredDeviceSession | null {
@@ -543,14 +736,15 @@ function required<Value>(value: Value | undefined, message: string): Value {
   return value;
 }
 
-function toEpochMs(timestamp: WireTimestamp | undefined): number {
-  if (timestamp === undefined) return 0;
-  return Number(timestamp.seconds) * 1000 + Math.floor(timestamp.nanos / 1_000_000);
-}
-
-function toTimestamp(epochMs: number): WireTimestamp {
-  const seconds = Math.floor(epochMs / 1000);
-  return { seconds: BigInt(seconds), nanos: Math.round((epochMs - seconds * 1000) * 1_000_000) };
+/**
+ * The structural wire command, read through the shared codec.
+ *
+ * `toGroupSessionCommand` takes the generated message; this facade declares
+ * its wire shapes structurally so a fake satisfies them, and the two agree
+ * field for field. The cast is where those two descriptions meet.
+ */
+function toWireSessionCommand(command: WireSessionCommand): GroupSessionCommand {
+  return toGroupSessionCommand(command as unknown as Parameters<typeof toGroupSessionCommand>[0]);
 }
 
 function toRole(role: number): DeviceRole {

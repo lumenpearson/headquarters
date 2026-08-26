@@ -40,6 +40,54 @@ export interface ControlPlaneCapabilities {
   readonly materials: boolean;
 }
 
+/**
+ * Where the group's realtime socket stands (R27, F10 task 2).
+ *
+ * The status line used to say `SYNC:ONLINE` for a session whose only contact
+ * with the group was a fifteen-second presence poll, which on set reads as
+ * "this screen is following" when it is not. The link is therefore reported
+ * beside the mode rather than folded into it: a session can be admitted and
+ * still have no socket, because the deployment registered no realtime
+ * admission or because the socket is between attempts.
+ */
+export type RealtimeLinkStatus =
+  /** No socket is wanted: local-only, offline, or not yet joined. */
+  | 'off'
+  /** The socket is open or opening and has not been answered with `ServerReady`. */
+  | 'connecting'
+  /** `ServerReady` arrived; group events are being delivered. */
+  | 'live'
+  /** The socket dropped and the next attempt is waiting out its backoff. */
+  | 'reconnecting'
+  /** Admitted, but this control plane answers no realtime admission at all. */
+  | 'polling';
+
+export interface RealtimeLinkState {
+  readonly status: RealtimeLinkStatus;
+  /** What `ServerReady` named this connection; empty until it answers. */
+  readonly connectionId: string;
+  /**
+   * The last group-event sequence this client applied, as a number because the
+   * slice is read by React and a `bigint` in a store is a serialization trap.
+   * A sequence never exceeds `Number.MAX_SAFE_INTEGER` in this deployment: it
+   * counts appended events, not milliseconds.
+   */
+  readonly lastSequence: number;
+  /**
+   * How many times the retained log no longer covered the resume point and a
+   * snapshot had to be taken instead. Nonzero says the socket dropped for
+   * longer than the server keeps history, which is worth seeing.
+   */
+  readonly resyncCount: number;
+}
+
+export const initialRealtimeLinkState: RealtimeLinkState = {
+  status: 'off',
+  connectionId: '',
+  lastSequence: 0,
+  resyncCount: 0,
+};
+
 export interface ConnectionSession {
   readonly deviceId: string;
   readonly groupId: string;
@@ -94,6 +142,8 @@ export interface ConnectionState {
   readonly presence: readonly PresenceEntry[];
   readonly devices: readonly GroupDevice[];
   readonly clock: ClockEstimate;
+  /** The realtime socket, which is a separate fact from the session's mode. */
+  readonly realtime: RealtimeLinkState;
   /** The last failure worth showing, in the operator's language; empty when none. */
   readonly failure: string;
 }
@@ -103,6 +153,7 @@ export const initialConnectionState: ConnectionState = {
   presence: [],
   devices: [],
   clock: { offsetMs: 0, latencyMs: 0, sampledAt: '' },
+  realtime: initialRealtimeLinkState,
   failure: '',
 };
 
@@ -126,6 +177,45 @@ export function disconnectedConnection(mode: ConnectionMode): ConnectionState {
     authority: undefined,
     leaderDeviceId: undefined,
   };
+}
+
+/**
+ * The link token the shell prints after the mode, in the same Latin register.
+ *
+ * `POLL` is the one that earns its place: it says the session is in the group
+ * and is reading it on a timer, which is the truth on a control plane started
+ * without realtime admission. Without it that session read exactly like one
+ * with a live socket.
+ */
+export function realtimeStatusToken(status: RealtimeLinkStatus): string {
+  switch (status) {
+    case 'off':
+      return 'OFF';
+    case 'connecting':
+      return 'DIAL';
+    case 'live':
+      return 'LIVE';
+    case 'reconnecting':
+      return 'RETRY';
+    case 'polling':
+      return 'POLL';
+  }
+}
+
+/** The same link states, as the operator reads them in the transport popover. */
+export function realtimeStatusLabel(status: RealtimeLinkStatus): string {
+  switch (status) {
+    case 'off':
+      return 'СОКЕТ НЕ ОТКРЫТ';
+    case 'connecting':
+      return 'ПОДКЛЮЧЕНИЕ СОКЕТА';
+    case 'live':
+      return 'СОБЫТИЯ ГРУППЫ В РЕАЛЬНОМ ВРЕМЕНИ';
+    case 'reconnecting':
+      return 'ПЕРЕПОДКЛЮЧЕНИЕ СОКЕТА';
+    case 'polling':
+      return 'ОПРОС ПО ТАЙМЕРУ — CONTROL PLANE БЕЗ REALTIME';
+  }
 }
 
 /** The status token the shell prints beside the bus, in the status line's Latin register. */
