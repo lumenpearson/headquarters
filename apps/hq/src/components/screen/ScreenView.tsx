@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { applyCueAction } from '@/application/sceneState';
 import { ModuleRenderer } from '@/components/modules/ModuleRenderer';
 import { RuntimeProvider, useRuntime } from '@/components/runtime/RuntimeProvider';
+import { ManagedWindowFrame } from '@/components/shell/TitleBar';
 import { appStore, useAppStore } from '@/state/appStore';
 
 export function ScreenView({ screenId }: { readonly screenId: ScreenId }) {
@@ -62,28 +63,36 @@ function SynchronizedScreen({ screenId }: { readonly screenId: ScreenId }) {
     return unsubscribe;
   }, [controller, sceneId, screenId]);
 
-  if (status !== 'ready')
-    return (
-      <main className="screen-route screen-route--loading">
-        {status === 'failed' ? error : 'SCREEN LINK / CONNECTING'}
-      </main>
-    );
+  /*
+   * The bar wraps both states, and the loading one is the reason it has to.
+   * A window whose runtime never becomes ready is the window an operator most
+   * needs to be rid of, and a bar drawn only once the bus connects would be
+   * missing exactly then.
+   */
   return (
-    <main className={`screen-route ${screen.blackout ? 'is-blackout' : ''}`}>
-      <header>
-        <span>{screenId}</span>
-        <strong>{screen.module}</strong>
-        <i>{sceneId ?? 'LOCAL'}</i>
-      </header>
-      <div className="screen-route__content">
-        <ModuleRenderer module={screen.module} payload={screen.payload} />
-        {screen.frozen ? <div className="freeze-layer">FREEZE</div> : null}
-        {screen.glitch > 0 ? (
-          <div className="glitch-layer" style={{ opacity: screen.glitch }} />
-        ) : null}
-      </div>
-      {screen.blackout ? <div className="screen-blackout" /> : null}
-    </main>
+    <ManagedWindowFrame label={`HQ / ${screenId}`}>
+      {status === 'ready' ? (
+        <main className={`screen-route ${screen.blackout ? 'is-blackout' : ''}`}>
+          <header>
+            <span>{screenId}</span>
+            <strong>{screen.module}</strong>
+            <i>{sceneId ?? 'LOCAL'}</i>
+          </header>
+          <div className="screen-route__content">
+            <ModuleRenderer module={screen.module} payload={screen.payload} />
+            {screen.frozen ? <div className="freeze-layer">FREEZE</div> : null}
+            {screen.glitch > 0 ? (
+              <div className="glitch-layer" style={{ opacity: screen.glitch }} />
+            ) : null}
+          </div>
+          {screen.blackout ? <div className="screen-blackout" /> : null}
+        </main>
+      ) : (
+        <main className="screen-route screen-route--loading">
+          {status === 'failed' ? error : 'SCREEN LINK / CONNECTING'}
+        </main>
+      )}
+    </ManagedWindowFrame>
   );
 }
 

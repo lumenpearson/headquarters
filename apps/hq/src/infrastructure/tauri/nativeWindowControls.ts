@@ -12,8 +12,14 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
  * mutator at all, which is why `capabilities/default.json` names
  * `allow-minimize`, `allow-toggle-maximize` and `allow-close` explicitly. It
  * also names `allow-start-dragging`, which is what the injected handler behind
- * `data-tauri-drag-region` calls, and `allow-set-decorations`, which nothing
- * calls yet: the frame is switched off at creation in `tauri.conf.json`.
+ * `data-tauri-drag-region` calls. It named `allow-set-decorations` as well until
+ * the display windows got a bar of their own: the frame is decided at creation,
+ * in `tauri.conf.json` for `control` and in `managed_windows.rs` for the nine,
+ * and a grant no caller spends is privilege the shell does not need.
+ *
+ * The capability covers `control` and the `screen-*` labels alike, so these are
+ * the same four commands whether the bar drawn over them is the shell's or a
+ * display window's.
  *
  * Every function is guarded by `isTauri()` and is a no-op on the web build, so
  * the same bar renders in a browser with controls that answer a click by doing

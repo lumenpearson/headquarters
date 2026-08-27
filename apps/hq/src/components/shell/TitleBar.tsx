@@ -45,6 +45,12 @@ const productTitle = 'ГРЕМУЧАЯ СМЕСЬ — ОПЕРАТИВНЫЙ Ш�
  * The web build renders the bar identically and its controls do nothing: a
  * browser owns its own chrome, `isTauri()` is false, and every native call
  * returns without reaching an IPC bridge that is not there.
+ *
+ * R25 lets the operator empty `titlebar.elements` down to nothing, and this
+ * window is allowed to lose its close control that way: Alt+F4, the taskbar
+ * entry and the settings route are all still within reach of the person sitting
+ * at it. `ManagedWindowFrame` below draws a fixed roster for exactly that
+ * reason -- a display window on the second monitor has none of them.
  */
 export function TitleBar({ route }: { readonly route: OperationsRoute }) {
   const profile = useHostWindowProfile();
@@ -124,6 +130,64 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
         }
       })}
     </header>
+  );
+}
+
+/**
+ * The chrome of a managed display window: the bar, and the route under it.
+ *
+ * `open_screen_window` creates the nine display windows with the frame off,
+ * exactly as `control` is created, and until now nothing drew a bar inside
+ * them -- so a window on the second monitor could not be closed or minimized
+ * from inside it at all. The frame stays off (Windows chrome on a wall screen
+ * is in shot) and this row replaces what it used to provide.
+ *
+ * The roster is fixed and short, and neither half of that is an oversight:
+ *
+ * - `titlebar.elements` is not read. R25 lets the operator empty that list, and
+ *   the shell window survives it -- Alt+F4, the taskbar and the settings route
+ *   are all still there. A display window is on another monitor, often
+ *   fullscreen, and the operator is not sitting at it; a roster that could be
+ *   emptied would strand it. The close control is therefore a property of the
+ *   window kind rather than a setting, which is why this bar cannot lose it.
+ * - No maximize: the window is already placed on a whole monitor by
+ *   `open_screen_window`, and toggling maximize would snap it to the work area,
+ *   which is smaller than what it was given.
+ * - No information slot: its four readings are the shell's, and the route below
+ *   already prints the screen, its module and the scene it is following.
+ *
+ * The corner treatment is not asked for here either. `control` reads the host
+ * on mount because R24 makes the corners follow the Windows generation; a
+ * display window is square by role, and `open_screen_window` settles that
+ * before the first frame rather than after the page loads.
+ *
+ * A browser session draws the same bar with controls that do nothing, the way
+ * the shell bar does: the two builds differ in what a control reaches, not in
+ * what the operator sees.
+ */
+export function ManagedWindowFrame({
+  label,
+  children,
+}: {
+  readonly label: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="managed-window">
+      <header className="ops-titlebar ops-titlebar--managed" data-tauri-drag-region>
+        <span className="ops-titlebar__title" data-titlebar-element="title" data-tauri-drag-region>
+          {label}
+        </span>
+        <WindowControl
+          element="minimize"
+          label="Свернуть окно"
+          glyph="—"
+          onActivate={minimizeWindow}
+        />
+        <WindowControl element="close" label="Закрыть окно" glyph="✕" onActivate={closeWindow} />
+      </header>
+      {children}
+    </div>
   );
 }
 

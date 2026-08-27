@@ -1389,6 +1389,32 @@ test('R25: the titlebar alignment decides where the bar puts its elements', asyn
   expect(right.titleGap).toBeGreaterThan(centred.titleGap);
 });
 
+test('R25: an emptied roster stops at the shell window and never at a display one', async ({
+  page,
+}) => {
+  // Not a value any default coincides with: the schema ships the whole roster
+  // (C51). An empty list is the arrangement that leaves a window with no way
+  // out of itself, and it is accepted on exactly one of the two windows.
+  await seedSettings(page, { 'titlebar.elements': [] });
+
+  await page.goto('/overview');
+  // The exported markup draws all five, so reaching zero is proof the stored
+  // roster arrived rather than proof of a page that had not hydrated yet.
+  await expect(page.locator('.ops-titlebar [data-titlebar-element]')).toHaveCount(0);
+
+  await page.goto('/screen/wall-center/');
+  /*
+   * Same blob, same origin, other window. The wait is on the runtime becoming
+   * ready, which the exported HTML never is: it proves client React ran, and
+   * the mount effect that hydrates the stored settings ran in the same commit.
+   * Without it this assertion would be satisfied by the static markup and would
+   * pass with the roster wired straight into the display bar.
+   */
+  await expect(page.locator('.screen-route__content')).toBeVisible();
+  await expect(page.locator('.ops-titlebar--managed [data-titlebar-element]')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Закрыть окно' })).toBeVisible();
+});
+
 test('R24: the title bar takes a row of the window rather than covering one', async ({ page }) => {
   await page.setViewportSize(wide);
   await page.goto('/overview');

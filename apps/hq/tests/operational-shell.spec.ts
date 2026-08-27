@@ -313,6 +313,80 @@ test('renders static screen and scene routes without a white flash', async ({ pa
   await expect(page.locator('[data-scene-route="s08-31"]')).toBeVisible();
 });
 
+/**
+ * R24 on the nine windows `open_screen_window` creates.
+ *
+ * They are built with the frame off, and until this change the route inside
+ * them drew no bar: on the second monitor that is a window the operator cannot
+ * close without going back to the machine. A browser cannot open one -- the
+ * command belongs to the native shell -- so what these cases hold is the half
+ * that lives in the page: the control is there on every display route, it is
+ * reachable by keyboard, and the bar is a row rather than something laid over
+ * the route (R26). That the operating system then destroys the window is
+ * asserted where the IPC boundary can be watched, in `TitleBar.test.tsx`.
+ */
+for (const [route, content] of [
+  ['/screen/wall-center/', '.screen-route'],
+  ['/wall/hq-standard/', '.wall-route'],
+] as const) {
+  test(`R24: the display window at ${route} carries a way out of itself`, async ({ page }) => {
+    await page.goto(route);
+    await expect(page.locator(content)).toBeVisible();
+
+    const close = page.getByRole('button', { name: 'Закрыть окно' });
+    await expect(close).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Свернуть окно' })).toBeVisible();
+    // A wall screen is watched more often than it is clicked on, and the
+    // machine driving it may have no pointer within reach of that monitor.
+    await close.focus();
+    await expect(close).toBeFocused();
+
+    const layout = await page.evaluate((selector) => {
+      const bar = document.querySelector('.ops-titlebar--managed');
+      const main = document.querySelector(selector);
+      if (bar === null || main === null) throw new Error('the display window is missing a row');
+      return {
+        bar: bar.getBoundingClientRect(),
+        main: main.getBoundingClientRect(),
+        documentY: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+        documentX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    }, content);
+
+    // Two rows tiling the window: the bar from the top edge, the route from
+    // where the bar ends to the bottom. An overlay would satisfy neither, and
+    // a bar that pushed the route down would show as a scrolling document.
+    expect(layout.bar.top).toBe(0);
+    expect(layout.bar.height).toBeGreaterThan(0);
+    expect(layout.main.top).toBeCloseTo(layout.bar.bottom, 0);
+    expect(layout.main.bottom).toBeCloseTo(900, 0);
+    expect(layout.documentY).toBe(0);
+    expect(layout.documentX).toBe(0);
+    // Edge to edge as well as top to bottom. The shell's bar is placed by a
+    // `grid-area` naming two columns, and a display route has one: carrying
+    // that placement over insets the row and takes the close control out of
+    // the corner the operator reaches for.
+    expect(layout.bar.left).toBe(0);
+    expect(layout.bar.width).toBeCloseTo(1440, 0);
+  });
+}
+
+test('R24: a display window whose runtime never boots can still be closed', async ({ page }) => {
+  /*
+   * The state the bar is most needed in, and the one it would have been
+   * missing from had it been drawn inside the ready branch: the route has
+   * nothing to show, and the window is standing on a monitor whose operator is
+   * somewhere else. Refusing the project configuration is how the boot is made
+   * to fail without waiting for anything to time out.
+   */
+  await page.route('**/runtime/project.default.json', (route) => route.abort());
+  await page.goto('/screen/wall-center/');
+
+  await expect(page.locator('.screen-route--loading')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Закрыть окно' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Свернуть окно' })).toBeVisible();
+});
+
 test('opens production controls and restores a local continuity snapshot', async ({ page }) => {
   await page.goto('/');
   await page.keyboard.press('Control+Shift+KeyP');

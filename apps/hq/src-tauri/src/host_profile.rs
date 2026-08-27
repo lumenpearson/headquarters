@@ -101,7 +101,7 @@ fn corner_preference(
 }
 
 #[cfg(windows)]
-fn apply_corners(window: &WebviewWindow, rounded: bool) -> Result<(), String> {
+pub(crate) fn apply_corners(window: &WebviewWindow, rounded: bool) -> Result<(), String> {
     use windows_sys::Win32::Graphics::Dwm::{
         DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE,
     };
@@ -135,7 +135,7 @@ fn apply_corners(window: &WebviewWindow, rounded: bool) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn apply_corners(_window: &WebviewWindow, _rounded: bool) -> Result<(), String> {
+pub(crate) fn apply_corners(_window: &WebviewWindow, _rounded: bool) -> Result<(), String> {
     // Corner preferences are a DWM concept; other hosts keep their native chrome.
     Ok(())
 }

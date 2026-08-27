@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolvePresentation } from '@/application/personalization/presentation';
 import { operationsStore } from '@/state/operationsStore';
 
-import { TitleBar } from './TitleBar';
+import { ManagedWindowFrame, TitleBar } from './TitleBar';
 
 interface RecordedCall {
   readonly command: string;
@@ -168,7 +168,7 @@ describe('R25: the bar an operator arranged', () => {
     expect(screen.queryByRole('button', { name: 'Развернуть окно' })).toBeNull();
   });
 
-  it('draws no control at all when the roster is emptied', async () => {
+  it('draws no control at all when the roster is emptied, which only this window allows', async () => {
     patch('titlebar.elements', []);
     mockNativeShell(profiles.win11);
 
@@ -178,6 +178,14 @@ describe('R25: the bar an operator arranged', () => {
     // The bar itself stays: it is the window's frame, and R26 sizes the
     // workspace against a row that is always there.
     expect(document.querySelector('.ops-titlebar')).not.toBeNull();
+    /*
+     * Losing the close control is accepted here and nowhere else. R25 asks for
+     * a roster the operator arranges, and the person who empties it is sitting
+     * at this window: Alt+F4, its taskbar entry and the settings route are all
+     * within reach. A display window on the second monitor has none of the
+     * three, which is why `ManagedWindowFrame` does not read this setting --
+     * see the case below.
+     */
   });
 
   it('shows the reading titlebar.information names, and nothing when it names none', async () => {
@@ -303,5 +311,138 @@ describe('R25: the bar an operator arranged', () => {
         'data-titlebar-alignment'
       ],
     ).toBe('split');
+  });
+});
+
+/**
+ * The nine display windows `open_screen_window` creates.
+ *
+ * They are built with the frame off, exactly as `control` is, and until this
+ * change nothing drew a bar inside them: a window on the second monitor could
+ * not be closed or minimized from inside it at all. What these cases assert is
+ * that the control reaches the window-close command with the display window's
+ * own label -- not that the operating system destroyed the window, which needs
+ * a live shell and is recorded as unproven.
+ */
+describe('R24: a display window can be closed from inside itself', () => {
+  const displayLabel = 'screen-hwan-main';
+
+  /** Renders the frame as the webview of a managed window, not of `control`. */
+  async function mountManagedFrame(
+    extra: (command: string) => unknown = () => null,
+  ): Promise<readonly RecordedCall[]> {
+    const calls: RecordedCall[] = [];
+    Object.assign(globalThis, { isTauri: true });
+    mockWindows(displayLabel);
+    mockIPC((command, args) => {
+      calls.push({ command, args });
+      return extra(command);
+    });
+    render(
+      <ManagedWindowFrame label={`HQ / ${displayLabel}`}>
+        <main className="screen-route" />
+      </ManagedWindowFrame>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    return calls;
+  }
+
+  async function click(name: string): Promise<void> {
+    fireEvent.click(screen.getByRole('button', { name }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it('sends the close command naming the display window, not the one that opened it', async () => {
+    const calls = await mountManagedFrame();
+
+    await click('Закрыть окно');
+
+    expect(calls).toContainEqual({
+      command: 'plugin:window|close',
+      args: { label: displayLabel },
+    });
+  });
+
+  it('sends the minimize command naming the display window', async () => {
+    const calls = await mountManagedFrame();
+
+    await click('Свернуть окно');
+
+    expect(calls).toContainEqual({
+      command: 'plugin:window|minimize',
+      args: { label: displayLabel },
+    });
+  });
+
+  it('still closes after the operator has emptied titlebar.elements', async () => {
+    // The setting the shell window honours down to an empty bar. A display
+    // window that honoured it would be a window on another monitor with no way
+    // out, so the roster here is a property of the window kind.
+    patch('titlebar.elements', []);
+    const calls = await mountManagedFrame();
+
+    expect(elementOrder()).toEqual(['title', 'minimize', 'close']);
+    await click('Закрыть окно');
+
+    expect(calls).toContainEqual({
+      command: 'plugin:window|close',
+      args: { label: displayLabel },
+    });
+  });
+
+  it('still closes after the operator has rearranged the shell bar around it', async () => {
+    // The same, one step less blunt: a roster that keeps controls but drops
+    // `close` is the arrangement an operator would actually save.
+    patch('titlebar.elements', ['title', 'minimize']);
+    patch('titlebar.information', 'clock');
+    patch('titlebar.dragRegion', 'none');
+    const calls = await mountManagedFrame();
+
+    expect(elementOrder()).toEqual(['title', 'minimize', 'close']);
+    // `dragRegion: none` is the shell's answer to a touch monitor; a display
+    // window keeps its bar draggable, since the bar is all the chrome it has.
+    expect(document.querySelector('.ops-titlebar')?.hasAttribute('data-tauri-drag-region')).toBe(
+      true,
+    );
+    await click('Закрыть окно');
+
+    expect(calls).toContainEqual({
+      command: 'plugin:window|close',
+      args: { label: displayLabel },
+    });
+  });
+
+  it('carries no maximize and no information slot', async () => {
+    await mountManagedFrame();
+
+    // Maximize would snap a window already given a whole monitor to the work
+    // area, and the information slot's four readings are the shell's: the route
+    // under this bar prints the screen, its module and the scene it follows.
+    expect(screen.queryByRole('button', { name: 'Развернуть окно' })).toBeNull();
+    expect(document.querySelector('.ops-titlebar__information')).toBeNull();
+  });
+
+  it('asks the host for nothing on mount: the corners are settled where the window is made', async () => {
+    const calls = await mountManagedFrame();
+
+    // `control` reads the host and applies a corner preference because R24 ties
+    // its corners to the Windows generation. A display window fills a monitor
+    // and is square whatever the host, which `open_screen_window` settles
+    // before the first frame.
+    expect(calls.map((call) => call.command)).toEqual([]);
+  });
+
+  it('draws the same bar in a browser session, with controls that reach nothing', async () => {
+    const calls = await mountManagedFrame();
+    Reflect.deleteProperty(globalThis, 'isTauri');
+
+    await click('Закрыть окно');
+
+    expect(calls).toEqual([]);
+    expect(elementOrder()).toEqual(['title', 'minimize', 'close']);
   });
 });

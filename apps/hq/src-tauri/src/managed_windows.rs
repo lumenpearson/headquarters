@@ -4,6 +4,8 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
+use crate::host_profile;
+
 const SCREEN_IDS: &[&str] = &[
     "hwan-main",
     "hwan-map",
@@ -15,6 +17,33 @@ const SCREEN_IDS: &[&str] = &[
     "interrogation-video",
     "interrogation-audio",
 ];
+
+/// The chrome a managed display window is created with.
+///
+/// Neither answer follows the host, and both are decisions rather than
+/// defaults.
+///
+/// `decorations` stays off for the same reason it is off on `control`: the page
+/// draws the application's own bar (R24). A system frame here would put Windows
+/// chrome on a wall screen that is in shot, and the four `titlebar.*` settings
+/// would stop at its edge. What the frame used to be the only source of -- a way
+/// to close the window from inside it -- the route's own bar now carries.
+///
+/// `rounded_corners` stays off because the window is sized to a whole monitor.
+/// Windows 11 rounds an undecorated top-level window by default, and a rounded
+/// corner on a display filling a monitor is a notch of desktop showing through.
+/// The control window keeps the host's own treatment; a display surface is
+/// square by role.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ManagedWindowChrome {
+    decorations: bool,
+    rounded_corners: bool,
+}
+
+const MANAGED_WINDOW_CHROME: ManagedWindowChrome = ManagedWindowChrome {
+    decorations: false,
+    rounded_corners: false,
+};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,9 +138,13 @@ pub fn open_screen_window(
     let route = format!("screen/{screen_id}/index.html");
     let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(route.into()))
         .title(format!("HQ / {screen_id}"))
-        .decorations(false)
+        .decorations(MANAGED_WINDOW_CHROME.decorations)
         .build()
         .map_err(|error| error.to_string())?;
+    // Asked for here rather than left to DWM's default, and asked for before the
+    // window is placed so the corners are settled by the first frame the
+    // operator sees.
+    host_profile::apply_corners(&window, MANAGED_WINDOW_CHROME.rounded_corners)?;
     window
         .set_position(PhysicalPosition::new(
             monitor.position().x,
@@ -171,6 +204,25 @@ mod tests {
         assert!(!is_primary_monitor(geometry(1920, 0, 1920, 1080), primary));
         assert!(!is_primary_monitor(geometry(-1920, 0, 1920, 1080), primary));
         assert!(!is_primary_monitor(geometry(0, 0, 2560, 1440), primary));
+    }
+
+    /// A change detector, and named as one (rule 2.3).
+    ///
+    /// It cannot prove that the window the runtime builds carries no frame:
+    /// `WebviewWindowBuilder` exposes nothing to read back, and the only real
+    /// evidence is a window on a screen. What it does is hold the decision
+    /// still: flipping either answer -- to let the system draw the frame again,
+    /// or to let DWM round a display filling a monitor -- fails here instead of
+    /// reaching a shoot unnoticed.
+    #[test]
+    fn a_display_window_is_created_without_a_system_frame_or_rounded_corners() {
+        assert_eq!(
+            MANAGED_WINDOW_CHROME,
+            ManagedWindowChrome {
+                decorations: false,
+                rounded_corners: false,
+            }
+        );
     }
 
     #[test]
