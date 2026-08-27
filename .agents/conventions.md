@@ -99,17 +99,23 @@ Desktop-сборка — статический экспорт Next.js плюс 
   доменам он не разделён; план, предполагающий срезы scene/screens/workspace/explorer/
   connection, описывает цель, а не код.
 - Определения сцен — неизменяемая конфигурация, а не состояние исполнения.
-- Персонализацией владеет `@gremuchaya/settings-schema`: 71 определение в 32 категориях и
-  пяти областях (`factory | group | device | local-draft | session-preview`), сгруппированные
-  для навигации в `apps/hq/src/application/personalization/catalog.ts`. Шестьдесят шесть из
-  них `device`, пять `group` — новое определение по умолчанию `device`, а `group` берут
-  только для того, что группа обязана видеть одинаково.
-  Значение попадает в документ через одну таблицу
-  `apps/hq/src/application/personalization/presentation.ts`, и тест падает на определении,
-  которое там не привязано и не отнесено к названному потребителю.
-- `localStorage` владеет всем, что сохраняет браузер, — шесть ключей:
+- Персонализацией владеет `@gremuchaya/settings-schema`: реестр определений в 32 категориях
+  и трёх областях (`factory | group | device`), сгруппированные для навигации в
+  `apps/hq/src/application/personalization/catalog.ts`. Новое определение по умолчанию
+  `device`, а `group` берут только для того, что группа обязана видеть одинаково; сколько
+  их сейчас в каждой области, отвечает сам реестр — счёт здесь устаревал дважды и потому
+  не повторяется (`local-draft` и `session-preview` были объявлены и не достались никому,
+  сняты 2026-08-27). Значение попадает в документ через одну таблицу
+  `apps/hq/src/application/personalization/presentation.ts` плюс названный там же список
+  `derivedPresentationOutputs` — то, что вычисляется из двух настроек сразу и потому
+  привязкой быть не может. Тест падает на определении, которое не привязано и не отнесено
+  к названному потребителю, и на выходе, который ничем не читается.
+- `localStorage` владеет всем, что сохраняет браузер, — восемь ключей:
   `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
-  `gremuchaya-hq:snapshots:v1`, `hq.camera-material-assignments.v1`,
+  `gremuchaya-hq:snapshots:v1`, `gremuchaya-hq:device-session:v3` (сопряжённая сессия,
+  областью ей служит база, а не адрес), `gremuchaya-hq:group-mirror:v1` (локальная копия
+  облачного состояния, выкладывается через черновой ключ `…:draft`),
+  `hq.camera-material-assignments.v1`,
   `hq.keybinds-intro-seen.v1` и ключ Яндекс Карт
   `gremuchaya-hq:yandex-maps-v3-api-key` (устаревший `gremuchaya-hq:yandex-maps-api-key`
   только вычищается). Ключи `__gremuchaya_screen_bus_v1__`, `__gremuchaya_live_edit_v1__`
