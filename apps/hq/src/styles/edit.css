@@ -4,78 +4,159 @@
  */
 
 /*
- * R22: the accent-gradient window border.
+ * R22: the edit-mode window frame -- an inward gradient from every edge with
+ * an accent glow.
  *
- * Drawn as a fixed overlay with a transparent border and two backgrounds --
- * padding-box for the fill, border-box for the gradient -- so the gradient
- * paints in the border area without a wrapper element and without shifting
- * anything beneath it. `pointer-events: none` keeps the whole shell clickable.
+ * Drawn as a fixed overlay with `pointer-events: none`, so it shifts nothing
+ * beneath it and the whole shell stays clickable. Four edge gradients fade to
+ * transparent within a fixed distance, and the glow itself is an inset shadow,
+ * so no layer here can ever cover the workspace with a fill: the previous
+ * construction clipped an opaque fill with `mask-composite: exclude`, and a
+ * runtime that ignores that composite painted the fill over the entire window.
  */
 .edit-mode-frame {
+  --edit-frame-reach: clamp(36px, 5vw, 96px);
+
   position: fixed;
   inset: 0;
   z-index: var(--z-devtools);
-  pointer-events: none;
-  border: 2px solid transparent;
+  animation: edit-frame-in var(--motion-standard, 240ms) ease-out both;
   background:
-    linear-gradient(var(--bg-0), var(--bg-0)) padding-box,
-    linear-gradient(135deg, var(--accent), var(--accent-strong), var(--accent)) border-box;
-  /* The fill is only there to clip the gradient to the border ring. */
-  mask:
-    linear-gradient(#000 0 0) padding-box exclude,
-    linear-gradient(#000 0 0) border-box;
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent var(--edit-frame-reach)
+    ),
+    linear-gradient(
+      to left,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent var(--edit-frame-reach)
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent var(--edit-frame-reach)
+    ),
+    linear-gradient(
+      to top,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent var(--edit-frame-reach)
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent),
+    inset 0 0 28px color-mix(in srgb, var(--accent) 26%, transparent),
+    inset 0 0 96px color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
 }
 
-/* R7: the floating panel, magnetically aligned to one edge. */
-.edit-panel {
-  position: fixed;
-  z-index: var(--z-dialog);
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  width: clamp(280px, 22vw, 380px);
-  padding: var(--space-3);
-  border: 1px solid var(--line-2);
-  background: var(--panel-raised);
-  cursor: grab;
+@keyframes edit-frame-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
-.edit-panel[data-dragging='true'] {
-  cursor: grabbing;
+@media (prefers-reduced-motion: reduce) {
+  .edit-mode-frame {
+    animation: none;
+  }
 }
 
 /*
- * Insets rather than transforms: the panel is a fixed overlay, and a transform
- * would create a containing block for anything inside it that is itself fixed.
+ * R7: the floating panel -- a devtools strip, magnetically aligned to an edge.
+ *
+ * One transform is the whole placement: the component computes the docked
+ * position and writes `translate3d`, the drag writes the same property, and
+ * the transition below is what turns a release into a glide to the chosen
+ * edge. `data-dragging` switches the transition off so the panel tracks the
+ * pointer without lag. Anchored at the top-left and moved by transform rather
+ * than by insets, because two of the four inset keywords cannot animate from
+ * `auto` and the snap would teleport on every second edge.
  */
-.edit-panel[data-edge='left'] {
-  inset: var(--space-5) auto var(--space-5) 0;
+.edit-panel {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  grid-template-rows: auto auto;
+  width: clamp(300px, 26vw, 400px);
+  border: 1px solid var(--line-2);
+  background: var(--panel-raised);
+  box-shadow:
+    0 14px 44px rgb(0 0 0 / 42%),
+    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow var(--motion-standard) ease;
+  will-change: transform;
 }
 
-.edit-panel[data-edge='right'] {
-  inset: var(--space-5) 0 var(--space-5) auto;
-}
-
-.edit-panel[data-edge='top'] {
-  inset: 0 var(--space-5) auto var(--space-5);
-  width: auto;
-  max-height: 40dvh;
-}
-
-.edit-panel[data-edge='bottom'] {
-  inset: auto var(--space-5) 0 var(--space-5);
-  width: auto;
-  max-height: 40dvh;
+.edit-panel[data-dragging='true'] {
+  box-shadow:
+    0 22px 64px rgb(0 0 0 / 55%),
+    0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  transition: none;
 }
 
 .edit-panel__header {
   display: flex;
   gap: var(--space-2);
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
   color: var(--accent);
   font-size: var(--font-xs);
   letter-spacing: 0.12em;
+  cursor: grab;
+}
+
+.edit-panel[data-dragging='true'] .edit-panel__header {
+  cursor: grabbing;
+}
+
+.edit-panel__grip {
+  color: var(--text-2);
+  letter-spacing: 0;
+}
+
+.edit-panel__count {
+  margin-left: auto;
+  color: var(--text-2);
+}
+
+/*
+ * The disclosure: the strip's body grows along Y with what it holds and
+ * collapses to nothing, animated through the row track rather than a measured
+ * height so the contents never need to know their own size. The inner wrapper
+ * owns the overflow during the animation; the settings list below caps and
+ * scrolls itself past `min(56vh, 540px)`.
+ */
+.edit-panel__body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.edit-panel[data-expanded='false'] .edit-panel__body {
+  grid-template-rows: 0fr;
+}
+
+.edit-panel__body-inner {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-panel,
+  .edit-panel__body {
+    transition: none;
+  }
 }
 
 /*
@@ -104,6 +185,7 @@
 /* R26: the panel scrolls internally; it never lengthens the document. */
 .edit-panel__settings {
   min-height: 0;
+  max-height: min(56vh, 540px);
 }
 
 .edit-panel__category {
