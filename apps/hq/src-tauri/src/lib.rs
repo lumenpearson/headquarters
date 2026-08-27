@@ -8,8 +8,14 @@ pub mod protocol;
 pub fn run() {
     use tauri::Manager;
 
-    let media_gateway = media_gateway::MediaGatewayState::from_environment()
-        .expect("failed to initialize the loopback media gateway");
+    // `expect` would print the Debug form, which is the bare variant name; the Display
+    // form is the one that says which configuration field was wrong. Both are kept:
+    // every Display message here is a fixed sentence carrying no camera URL, and the
+    // Debug form still holds the I/O detail behind `MediaGatewayError::Io`.
+    let media_gateway =
+        media_gateway::MediaGatewayState::from_environment().unwrap_or_else(|error| {
+            panic!("failed to initialize the loopback media gateway: {error} ({error:?})")
+        });
     let media_gateway_server = media_gateway.clone();
     let media_gateway_supervisor = media_gateway.clone();
 

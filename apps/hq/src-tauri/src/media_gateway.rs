@@ -47,6 +47,15 @@ const HLS_DELETE_THRESHOLD: &str = "2";
 pub enum MediaGatewayError {
     #[error("media gateway configuration is invalid")]
     InvalidConfiguration,
+    // The message names the field and the accepted values, and deliberately repeats
+    // neither the value the operator typed nor anything else from the camera entry:
+    // the neighbouring `rtspUrl` carries credentials, and this error is serialized to
+    // the UI and printed at startup.
+    #[error(
+        "media gateway configuration field videoEncoder is not a supported encoder; \
+         accepted values are libx264, h264_nvenc, h264_qsv and h264_amf"
+    )]
+    UnsupportedVideoEncoder,
     #[error("media gateway configuration file must be a regular non-symbolic file")]
     UnsafeConfigurationFile,
     #[error("camera or consumer identifier is invalid")]
@@ -100,6 +109,138 @@ impl RtspTransport {
     }
 }
 
+/// Video encoder the gateway may hand to FFmpeg for a transcoded camera.
+///
+/// The set is closed on purpose, and stays closed. Whatever this field selects is
+/// spliced verbatim into the argument vector of an external process, so a free-form
+/// string would turn a field that reads like a codec name into a way of adding
+/// arguments to that process: `libx264 -f null -` arrives as two extra arguments,
+/// and there is no shell to blame for it. A closed enum makes the argument vector a
+/// function of literals compiled into this file — the configuration only chooses
+/// between them, and adding an encoder is a code change that can be reviewed.
+///
+/// The members are the software encoder plus the three hardware families that exist
+/// on the Windows shoot machines: NVIDIA NVENC, Intel Quick Sync and AMD AMF.
+#[derive(Clone, Copy, Default)]
+enum VideoEncoder {
+    /// Software H.264. The default, and the only encoder present on every machine.
+    #[default]
+    Libx264,
+    /// NVIDIA NVENC. Needs an FFmpeg built with `--enable-nvenc` and driver support.
+    H264Nvenc,
+    /// Intel Quick Sync Video.
+    H264Qsv,
+    /// AMD Advanced Media Framework.
+    H264Amf,
+}
+
+impl VideoEncoder {
+    fn from_configuration_value(value: &str) -> Result<Self, MediaGatewayError> {
+        match value {
+            "libx264" => Ok(Self::Libx264),
+            "h264_nvenc" => Ok(Self::H264Nvenc),
+            "h264_qsv" => Ok(Self::H264Qsv),
+            "h264_amf" => Ok(Self::H264Amf),
+            // A name that is not in the set is refused rather than replaced by the
+            // default. An operator who writes `h264_nvnec` on a machine bought for
+            // hardware encoding would otherwise get software encoding, a hot CPU and
+            // no indication that the configuration was ever read as anything else.
+            _ => Err(MediaGatewayError::UnsupportedVideoEncoder),
+        }
+    }
+
+    /// The whole video branch of the FFmpeg invocation for this encoder.
+    ///
+    /// Each encoder carries its own list instead of sharing one list with the codec
+    /// name substituted, because the quality and latency knobs are not shared
+    /// vocabulary: `-preset veryfast -tune zerolatency` is libx264's, NVENC spells
+    /// the same intent `-preset p4 -tune ll`, Quick Sync has no `-tune` at all and
+    /// lowers latency by shortening its async queue, and AMF has neither and uses
+    /// `-usage`/`-quality`. Where an option has no counterpart it is left out rather
+    /// than approximated:
+    ///
+    /// * `-sc_threshold 0` is libx264's scene-cut suppression. NVENC's nearest
+    ///   equivalent, `-no-scenecut`, only applies when lookahead is on, which
+    ///   `-tune ll` turns off; Quick Sync and AMF have none. Only libx264 gets it.
+    /// * `-pix_fmt yuv420p` is repeated per encoder rather than shared because
+    ///   `h264_qsv` does not accept it — Quick Sync encodes `nv12`.
+    ///
+    /// `-g 50 -keyint_min 50` is repeated for the same reason it exists at all: HLS
+    /// needs segment boundaries to land on keyframes, and every encoder here honours
+    /// those two generic options.
+    fn video_arguments(self) -> &'static [&'static str] {
+        match self {
+            // Byte for byte the profile this gateway has always emitted. A camera
+            // entry without `videoEncoder` must keep producing exactly this.
+            Self::Libx264 => &[
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-tune",
+                "zerolatency",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "50",
+                "-keyint_min",
+                "50",
+                "-sc_threshold",
+                "0",
+            ],
+            // NVENC: `p1`..`p7` replaced the old named presets, and `ll` is its own
+            // low-latency tuning (no lookahead, no B-frames).
+            Self::H264Nvenc => &[
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                "p4",
+                "-tune",
+                "ll",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "50",
+                "-keyint_min",
+                "50",
+            ],
+            // Quick Sync: the preset names read like libx264's but belong to the QSV
+            // encoder. Latency is set by `-async_depth`, which is how deep the
+            // encoder is allowed to queue; 1 means it does not run ahead.
+            Self::H264Qsv => &[
+                "-c:v",
+                "h264_qsv",
+                "-preset",
+                "veryfast",
+                "-async_depth",
+                "1",
+                "-pix_fmt",
+                "nv12",
+                "-g",
+                "50",
+                "-keyint_min",
+                "50",
+            ],
+            // AMF: `-usage` states the scenario and `-quality` the speed/quality
+            // trade-off. There is no preset and no tune.
+            Self::H264Amf => &[
+                "-c:v",
+                "h264_amf",
+                "-usage",
+                "lowlatency",
+                "-quality",
+                "speed",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "50",
+                "-keyint_min",
+                "50",
+            ],
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawGatewayConfiguration {
@@ -118,12 +259,20 @@ struct RawCameraSource {
     transport: RtspTransport,
     #[serde(default)]
     transcode_video: bool,
+    // Read as a string and resolved by `VideoEncoder::from_configuration_value` rather
+    // than deserialized straight into the enum: serde reports an unknown variant as a
+    // parse failure, which `read_configuration` can only report as
+    // `InvalidConfiguration` — an error that does not say which field was wrong.
+    // Absent means `VideoEncoder::default()`, so configurations written before this
+    // field existed keep the command line they have always produced.
+    video_encoder: Option<String>,
 }
 
 struct NativeCameraSource {
     rtsp_url: Url,
     transport: RtspTransport,
     transcode_video: bool,
+    video_encoder: VideoEncoder,
 }
 
 struct GatewayConfiguration {
@@ -739,10 +888,27 @@ fn load_configuration() -> Result<GatewayConfiguration, MediaGatewayError> {
         return Err(MediaGatewayError::InvalidConfiguration);
     }
 
+    Ok(GatewayConfiguration {
+        sources: native_camera_sources(raw.cameras)?,
+        max_workers,
+        ffmpeg_path,
+    })
+}
+
+fn native_camera_sources(
+    cameras: Vec<RawCameraSource>,
+) -> Result<HashMap<String, NativeCameraSource>, MediaGatewayError> {
     let mut sources = HashMap::new();
-    for source in raw.cameras {
+    for source in cameras {
         validate_identifier(&source.camera_id)?;
         let url = parse_rtsp_url(&source.rtsp_url)?;
+        // Resolved for every camera, including one with `transcodeVideo` false. A
+        // misspelt encoder is a misspelt encoder whether or not this entry happens to
+        // reach the branch that uses it; validity must not depend on a second field.
+        let video_encoder = match source.video_encoder.as_deref() {
+            Some(value) => VideoEncoder::from_configuration_value(value)?,
+            None => VideoEncoder::default(),
+        };
         if sources
             .insert(
                 source.camera_id,
@@ -750,6 +916,7 @@ fn load_configuration() -> Result<GatewayConfiguration, MediaGatewayError> {
                     rtsp_url: url,
                     transport: source.transport,
                     transcode_video: source.transcode_video,
+                    video_encoder,
                 },
             )
             .is_some()
@@ -757,11 +924,7 @@ fn load_configuration() -> Result<GatewayConfiguration, MediaGatewayError> {
             return Err(MediaGatewayError::InvalidConfiguration);
         }
     }
-    Ok(GatewayConfiguration {
-        sources,
-        max_workers,
-        ffmpeg_path,
-    })
+    Ok(sources)
 }
 
 fn parse_rtsp_url(value: &str) -> Result<Url, MediaGatewayError> {
@@ -808,21 +971,7 @@ fn build_ffmpeg_command(
         .arg("-map")
         .arg("0:a:0?");
     if source.transcode_video {
-        command
-            .arg("-c:v")
-            .arg("libx264")
-            .arg("-preset")
-            .arg("veryfast")
-            .arg("-tune")
-            .arg("zerolatency")
-            .arg("-pix_fmt")
-            .arg("yuv420p")
-            .arg("-g")
-            .arg("50")
-            .arg("-keyint_min")
-            .arg("50")
-            .arg("-sc_threshold")
-            .arg("0");
+        command.args(source.video_encoder.video_arguments());
     } else {
         command.arg("-c:v").arg("copy");
     }
@@ -981,21 +1130,55 @@ fn allowed_origin(origin: &HeaderValue) -> bool {
 mod tests {
     use super::*;
 
+    const TEST_OUTPUT_DIR: &str = "C:/hq/hls";
+    const TEST_RTSP_URL: &str = "rtsp://operator:s3cr3t@camera.invalid/live";
+
     fn source(url: &str, transcode_video: bool) -> NativeCameraSource {
         NativeCameraSource {
             rtsp_url: Url::parse(url).expect("test source URL must parse"),
             transport: RtspTransport::Tcp,
             transcode_video,
+            video_encoder: VideoEncoder::default(),
         }
     }
 
     fn command_arguments(source: &NativeCameraSource) -> Vec<String> {
-        let command = build_ffmpeg_command(Path::new("ffmpeg"), source, Path::new("C:/hq/hls"));
+        let command = build_ffmpeg_command(Path::new("ffmpeg"), source, Path::new(TEST_OUTPUT_DIR));
         command
             .as_std()
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect()
+    }
+
+    /// Builds the arguments the gateway would run for a camera entry written as JSON,
+    /// so the assertions below are made against the external process invocation rather
+    /// than against the parsed structure.
+    fn command_arguments_for_configuration(json: &str) -> Result<Vec<String>, MediaGatewayError> {
+        let raw: RawGatewayConfiguration =
+            serde_json::from_str(json).expect("test configuration must be valid JSON");
+        let sources = native_camera_sources(raw.cameras)?;
+        let source = sources.get("K-17").expect("test camera must be configured");
+        Ok(command_arguments(source))
+    }
+
+    /// The video half of the invocation: everything from `-c:v` up to the audio codec.
+    fn video_arguments_of(arguments: &[String]) -> Vec<String> {
+        let start = arguments
+            .iter()
+            .position(|argument| argument == "-c:v")
+            .expect("a video codec must be selected");
+        let end = arguments
+            .iter()
+            .position(|argument| argument == "-c:a")
+            .expect("an audio codec must follow the video arguments");
+        arguments[start..end].to_vec()
+    }
+
+    fn camera_configuration(encoder_field: &str) -> String {
+        format!(
+            r#"{{"cameras":[{{"cameraId":"K-17","rtspUrl":"{TEST_RTSP_URL}","transcodeVideo":true{encoder_field}}}]}}"#
+        )
     }
 
     #[test]
@@ -1042,6 +1225,221 @@ mod tests {
         assert!(arguments.windows(2).any(|pair| pair == ["-c:a", "aac"]));
         assert!(!arguments.iter().any(|argument| argument == "cmd.exe"));
         assert!(!arguments.iter().any(|argument| argument == "sh"));
+    }
+
+    #[test]
+    fn an_unset_encoder_reproduces_the_previous_command_line_argument_for_argument() {
+        let arguments = command_arguments_for_configuration(&camera_configuration(""))
+            .expect("a camera entry without videoEncoder must be accepted");
+        let mut expected: Vec<String> = [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-rtsp_transport",
+            "tcp",
+            "-rw_timeout",
+            "5000000",
+            "-i",
+        ]
+        .iter()
+        .map(|argument| (*argument).to_owned())
+        .collect();
+        expected.push(
+            Url::parse(TEST_RTSP_URL)
+                .expect("test source URL must parse")
+                .to_string(),
+        );
+        expected.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0?",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-tune",
+                "zerolatency",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "50",
+                "-keyint_min",
+                "50",
+                "-sc_threshold",
+                "0",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "96k",
+                "-ac",
+                "2",
+                "-ar",
+                "48000",
+                "-f",
+                "hls",
+                "-hls_time",
+                "2",
+                "-hls_list_size",
+                "6",
+                "-hls_delete_threshold",
+                "2",
+                "-hls_flags",
+                "delete_segments+append_list+omit_endlist+independent_segments",
+                "-hls_allow_cache",
+                "0",
+                "-hls_segment_filename",
+            ]
+            .iter()
+            .map(|argument| (*argument).to_owned()),
+        );
+        expected.push(
+            Path::new(TEST_OUTPUT_DIR)
+                .join("segment-%09d.ts")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        expected.push(
+            Path::new(TEST_OUTPUT_DIR)
+                .join("index.m3u8")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        assert_eq!(arguments, expected);
+    }
+
+    #[test]
+    fn each_encoder_carries_its_own_quality_and_latency_options() {
+        for (encoder, expected) in [
+            (
+                "libx264",
+                vec![
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-tune",
+                    "zerolatency",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-g",
+                    "50",
+                    "-keyint_min",
+                    "50",
+                    "-sc_threshold",
+                    "0",
+                ],
+            ),
+            (
+                "h264_nvenc",
+                vec![
+                    "-c:v",
+                    "h264_nvenc",
+                    "-preset",
+                    "p4",
+                    "-tune",
+                    "ll",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-g",
+                    "50",
+                    "-keyint_min",
+                    "50",
+                ],
+            ),
+            (
+                "h264_qsv",
+                vec![
+                    "-c:v",
+                    "h264_qsv",
+                    "-preset",
+                    "veryfast",
+                    "-async_depth",
+                    "1",
+                    "-pix_fmt",
+                    "nv12",
+                    "-g",
+                    "50",
+                    "-keyint_min",
+                    "50",
+                ],
+            ),
+            (
+                "h264_amf",
+                vec![
+                    "-c:v",
+                    "h264_amf",
+                    "-usage",
+                    "lowlatency",
+                    "-quality",
+                    "speed",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-g",
+                    "50",
+                    "-keyint_min",
+                    "50",
+                ],
+            ),
+        ] {
+            let configuration = camera_configuration(&format!(r#","videoEncoder":"{encoder}""#));
+            let arguments = command_arguments_for_configuration(&configuration)
+                .expect("a supported encoder must be accepted");
+            assert_eq!(
+                video_arguments_of(&arguments),
+                expected,
+                "encoder {encoder}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_encoder_is_refused_by_field_name_instead_of_falling_back() {
+        let configuration = camera_configuration(r#","videoEncoder":"h264_nvnec""#);
+        let error = command_arguments_for_configuration(&configuration)
+            .expect_err("a misspelt encoder must not be accepted");
+        assert!(matches!(error, MediaGatewayError::UnsupportedVideoEncoder));
+        let message = error.to_string();
+        assert!(message.contains("videoEncoder"), "{message}");
+        // The refusal must not quote the camera entry back: `rtspUrl` carries
+        // credentials, and this message reaches the UI and the startup output.
+        assert!(!message.contains("s3cr3t"), "{message}");
+        assert!(!message.contains("camera.invalid"), "{message}");
+        assert!(!message.contains("h264_nvnec"), "{message}");
+    }
+
+    #[test]
+    fn an_unknown_encoder_is_refused_even_when_the_camera_is_not_transcoded() {
+        let configuration = format!(
+            r#"{{"cameras":[{{"cameraId":"K-17","rtspUrl":"{TEST_RTSP_URL}","videoEncoder":"h264_nvnec"}}]}}"#
+        );
+        assert!(matches!(
+            command_arguments_for_configuration(&configuration),
+            Err(MediaGatewayError::UnsupportedVideoEncoder)
+        ));
+    }
+
+    #[test]
+    fn the_encoder_field_cannot_smuggle_further_ffmpeg_arguments() {
+        for value in [
+            "libx264 -f null -",
+            "libx264\" \"-vf",
+            "libx264;calc.exe",
+            "LIBX264",
+            "",
+        ] {
+            let encoded = serde_json::to_string(value).expect("test value must serialize");
+            let configuration = camera_configuration(&format!(r#","videoEncoder":{encoded}"#));
+            assert!(
+                matches!(
+                    command_arguments_for_configuration(&configuration),
+                    Err(MediaGatewayError::UnsupportedVideoEncoder)
+                ),
+                "value {value:?} must be refused"
+            );
+        }
     }
 
     #[test]
