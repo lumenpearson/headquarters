@@ -6,7 +6,7 @@ import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ControlPlaneLinkState } from '@/application/sync/connection';
-import type { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
+import { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
 import {
   ControlPlaneClient,
   type ControlRpcClient,
@@ -306,9 +306,13 @@ describe('the group own state, as the operator sees it', () => {
    * the codec, the poll feed, the channel's cursor, the subscriber and the
    * store -- and a hand-rolled envelope would skip the first two of those.
    */
-  function planeServing(events: readonly syncV1.GroupEvent[]): {
+  function planeServing(
+    events: readonly syncV1.GroupEvent[],
+    overrides: Partial<SyncRpcClient> = {},
+  ): {
     readonly links: readonly ControlPlaneLink[];
     readonly reads: bigint[];
+    readonly client: ControlPlaneClient;
   } {
     const sessionStore = new DeviceSessionStore(memoryStorage());
     sessionStore.write({
@@ -334,23 +338,19 @@ describe('the group own state, as the operator sees it', () => {
           resyncRequired: false,
         });
       },
+      ...overrides,
     } as unknown as SyncRpcClient;
     const control = {} as unknown as ControlRpcClient;
+    const client = new ControlPlaneClient({
+      baseUrl: nearPlane,
+      sessionStore,
+      credentials: 'owner',
+      clients: { control, sync },
+    });
     return {
       reads,
-      links: [
-        {
-          linkId: 'link-0',
-          baseUrl: nearPlane,
-          role: 'primary',
-          client: new ControlPlaneClient({
-            baseUrl: nearPlane,
-            sessionStore,
-            credentials: 'owner',
-            clients: { control, sync },
-          }),
-        },
-      ],
+      client,
+      links: [{ linkId: 'link-0', baseUrl: nearPlane, role: 'primary', client }],
     };
   }
 
@@ -452,5 +452,131 @@ describe('the group own state, as the operator sees it', () => {
     // the retained window and not news, whatever order it arrived in.
     expect(leaderOnScreen()).toBe('ЭКРАН 1');
     expect(operationsStore.getState().connection.leaderDeviceId).toBe('device-a');
+  });
+  /** The group renamed elsewhere, at a revision this session has not seen. */
+  function groupRenamed(sequence: bigint, name: string, revision: bigint) {
+    return create(syncV1.GroupEventSchema, {
+      sequence,
+      kind: syncV1.GroupEventKind.GROUP_UPDATED,
+      actorDeviceId: { value: 'device-b' },
+      occurredAt: timestampFromDate(new Date()),
+      group: {
+        id: { value: 'group-a' },
+        name,
+        authorityMode: syncV1.AuthorityMode.LEADER,
+        leaderDeviceId: { value: 'device-a' },
+        revision: { number: revision, etag: `group-a-${revision.toString()}` },
+      },
+    });
+  }
+
+  /** This device's role, changed by an administrator on another machine. */
+  function devicePromoted(sequence: bigint, revision: bigint) {
+    return create(syncV1.GroupEventSchema, {
+      sequence,
+      kind: syncV1.GroupEventKind.DEVICE_UPDATED,
+      actorDeviceId: { value: 'device-b' },
+      occurredAt: timestampFromDate(new Date()),
+      group: {
+        id: { value: 'group-a' },
+        name: 'ШТАБ',
+        authorityMode: syncV1.AuthorityMode.MULTI_AUTHORITY,
+        leaderDeviceId: { value: 'device-b' },
+        revision: { number: revision, etag: `group-a-${revision.toString()}` },
+      },
+      device: {
+        id: { value: 'device-a' },
+        name: 'ЭКРАН 1',
+        role: syncV1.DeviceRole.ADMIN,
+        status: syncV1.DeviceStatus.ONLINE,
+      },
+    });
+  }
+
+  /** What the pairing surface prints beside a term of its summary list. */
+  function summaryValue(term: string): string | undefined {
+    const row = [...document.querySelectorAll('.ops-definition-list > div')].find(
+      (entry) => entry.querySelector('dt')?.textContent === term,
+    );
+    return row?.querySelector('dd')?.textContent ?? undefined;
+  }
+
+  it('keeps a rename the retained window would otherwise undo', async () => {
+    /*
+     * The page the feed replays from a cursor of zero is a real snapshot of
+     * this group -- an earlier mutation this session never saw -- and it is
+     * older than the rename that has just been made. What tells them apart is
+     * the revision the rename came back with, and nothing else can: arrival
+     * order puts the older one last.
+     */
+    const { links, client } = planeServing([groupRenamed(1n, 'ШТАБ', 7n)], {
+      updateGroup: (request: { readonly name: string }) =>
+        Promise.resolve({
+          group: {
+            id: { value: 'group-a' },
+            name: request.name,
+            authorityMode: syncV1.AuthorityMode.LEADER,
+            leaderDeviceId: { value: 'device-a' },
+            revision: { number: 8n },
+          },
+        }),
+    });
+    joined([linkState({})]);
+    act(() => {
+      operationsStore.getState().patchConnection({ groupRevision: 6 });
+    });
+    const created = new ControlPlaneSession({
+      client,
+      apply: (patch) => operationsStore.getState().patchConnection(patch),
+    });
+
+    await act(async () => {
+      await created.renameGroup('ШТАБ-2');
+    });
+    render(
+      <>
+        <GroupChannelRuntime links={links} session={sessionStub([])} />
+        <GroupPairingDialog />
+      </>,
+    );
+    act(() => {
+      openGroupPairing();
+    });
+    await settle();
+
+    // The name the operator typed is still the name on screen after the whole
+    // retained window has been replayed over it.
+    expect(summaryValue('ГРУППА')).toBe('ШТАБ-2');
+    expect(operationsStore.getState().connection.groupRevision).toBe(8);
+  });
+
+  it('raises this session own role when an administrator elsewhere promotes it', async () => {
+    const { links, reads } = planeServing([devicePromoted(1n, 8n)]);
+    joined([linkState({})]);
+    act(() => {
+      operationsStore.getState().patchConnection({
+        session: { deviceId: 'device-a', groupId: 'group-a', role: 'EDITOR' },
+        devices: [
+          { deviceId: 'device-a', name: 'ЭКРАН 1', role: 'EDITOR', status: 'ONLINE' },
+          { deviceId: 'device-b', name: 'ЭКРАН 2', role: 'ADMIN', status: 'ONLINE' },
+        ],
+      });
+    });
+
+    render(<GroupChannelRuntime links={links} session={sessionStub([])} />);
+    await settle();
+
+    /*
+     * The role every administrative control is gated on, moved by a page of the
+     * log and by nothing else: no rejoin, no `ListDevices`, no reconnection.
+     * A session that went on believing the role it paired with would keep the
+     * commands the server has just started allowing it out of reach.
+     */
+    expect(reads).toEqual([0n]);
+    expect(operationsStore.getState().connection.session?.role).toBe('ADMIN');
+    expect(operationsStore.getState().connection.devices).toEqual([
+      { deviceId: 'device-a', name: 'ЭКРАН 1', role: 'ADMIN', status: 'ONLINE' },
+      { deviceId: 'device-b', name: 'ЭКРАН 2', role: 'ADMIN', status: 'ONLINE' },
+    ]);
   });
 });

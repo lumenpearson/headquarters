@@ -43,6 +43,18 @@ export type ConnectionMode =
 
 export type DeviceRole = 'VIEWER' | 'EDITOR' | 'ADMIN';
 
+/**
+ * The roles a pairing code may grant.
+ *
+ * `ADMIN` is missing because the control plane refuses it: `createPairingCode`
+ * answers `INVALID_ARGUMENT` for anything but `VIEWER` or `EDITOR`
+ * (`durable-runtime.ts`), so an administrator is made by promoting a device
+ * that already joined and never by handing out a code. Stating it as a type
+ * rather than as a check is what keeps the surface from offering a third
+ * option: there is nowhere to put one.
+ */
+export type PairingRole = Exclude<DeviceRole, 'ADMIN'>;
+
 /** The two values of `groups.authority`, which `SetAuthorityMode` also takes. */
 export type AuthorityMode = 'leader' | 'multi-authority';
 
@@ -455,6 +467,44 @@ export function sortPresence(presence: readonly PresenceEntry[]): readonly Prese
     if (left.status !== right.status) return left.status === 'ONLINE' ? -1 : 1;
     return left.deviceId.localeCompare(right.deviceId, 'en-US');
   });
+}
+
+/**
+ * One device's record, folded into the roster, and this session's own role with
+ * it.
+ *
+ * Beside {@link sortPresence} and for the same reason: two paths learn that a
+ * role changed, and one rule has to serve both. `SetDeviceRole` answers with
+ * the device it changed, and `DEVICE_UPDATED` carries the same message on the
+ * group log, so the call path and the log path write one list by one rule. It
+ * is idempotent by construction -- replacing a record with an equal record
+ * changes nothing -- which is what makes the two paths safe to run one after
+ * the other, as they do whenever this device is the one that issued the change.
+ *
+ * The session's role travels with the roster rather than beside it: it is the
+ * field every administrative control is gated on, and a session that went on
+ * believing the role it paired with would offer commands the server now
+ * refuses.
+ */
+export function groupDevicePatch(
+  view: {
+    readonly devices: readonly GroupDevice[];
+    readonly session?: ConnectionSession | undefined;
+  },
+  device: GroupDevice,
+): Partial<ConnectionState> {
+  const index = view.devices.findIndex((candidate) => candidate.deviceId === device.deviceId);
+  const devices =
+    index < 0
+      ? [...view.devices, device]
+      : view.devices.map((candidate, position) => (position === index ? device : candidate));
+  const session = view.session;
+  return {
+    devices,
+    ...(session === undefined || session.deviceId !== device.deviceId
+      ? {}
+      : { session: { ...session, role: device.role } }),
+  };
 }
 
 export function deviceRoleLabel(role: DeviceRole): string {

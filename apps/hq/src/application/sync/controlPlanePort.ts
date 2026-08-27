@@ -2,8 +2,10 @@ import type {
   AuthorityMode,
   ConnectionSession,
   ControlPlaneCapabilities,
+  DeviceRole,
   GroupDevice,
   GroupSummary,
+  PairingRole,
   PresenceEntry,
 } from './connection';
 import type {
@@ -50,7 +52,39 @@ export interface ControlPlanePort {
    */
   adoptInstallationId(installationId: string): void;
   probeCapabilities(signal?: AbortSignal): Promise<ControlPlaneCapabilities>;
+  /**
+   * Creates the group and pairs this device into it as its first `ADMIN`.
+   *
+   * The one call on this port that presents no bearer token, because there is
+   * no session yet and no group for one to belong to. What authorizes it is the
+   * deployment's own bootstrap secret, carried on the request and nowhere else:
+   * see {@link CreateGroupRequest}.
+   *
+   * It answers exactly what pairing answers, and for the same reason -- a group,
+   * a device and a session -- so a caller that has one has no second shape to
+   * learn.
+   */
+  createGroup(request: CreateGroupRequest, signal?: AbortSignal): Promise<PairingResult>;
   pair(pairingCode: string, deviceName: string, signal?: AbortSignal): Promise<PairingResult>;
+  /**
+   * Issues one pairing code for this session's group.
+   *
+   * The code is a credential: it is what a neighbouring device presents to
+   * `PairDevice` to earn a session. It is therefore *returned* rather than
+   * recorded, and no caller may put it in the `connection` slice, which is
+   * persisted, broadcast and copied into diagnostics.
+   */
+  createPairingCode(role: PairingRole, signal?: AbortSignal): Promise<PairingCodeGrant>;
+  /** Renames this session's group. An administrator may; anyone else is refused. */
+  updateGroup(name: string, signal?: AbortSignal): Promise<GroupSummary>;
+  /**
+   * Changes what a member of this session's group may do.
+   *
+   * Answers the device alone -- `SetDeviceRoleResponse` carries no group, so no
+   * revision comes back with it, and the group's own fields are left to the
+   * `DEVICE_UPDATED` event the same mutation publishes.
+   */
+  setDeviceRole(deviceId: string, role: DeviceRole, signal?: AbortSignal): Promise<GroupDevice>;
   refresh(signal?: AbortSignal): Promise<ConnectionSession>;
   join(signal?: AbortSignal): Promise<GroupSummary>;
   leave(signal?: AbortSignal): Promise<void>;
@@ -103,6 +137,40 @@ export interface PairingResult {
   readonly session: ConnectionSession;
   readonly group: GroupSummary;
   readonly device: GroupDevice;
+}
+
+/**
+ * What it takes to bring a group into existence.
+ *
+ * `bootstrapSecret` is the deployment's `HQ_CONTROL_PLANE_BOOTSTRAP_SECRET`,
+ * which `CreateGroup` -- and only `CreateGroup` -- requires
+ * (`sync/service.ts`, `requireBootstrapAuthorization`). It is the one credential
+ * this application takes from the operator and does not keep: it is passed
+ * straight through to the transport as a request header, is never written to
+ * the session store, never enters the `connection` slice, and never appears in
+ * a failure message. The alternative -- a deployment secret in
+ * `project.override.json` on every screen machine -- would put it permanently
+ * on every disk on set and read it into the runtime configuration besides.
+ */
+export interface CreateGroupRequest {
+  readonly name: string;
+  readonly deviceName: string;
+  readonly bootstrapSecret: string;
+}
+
+/**
+ * One issued pairing code, as the operator has to read it out to a neighbour.
+ *
+ * `expiresAtMs` is not decoration. The code lives ten minutes by default
+ * (`HQ_CONTROL_PLANE_AUTH_PAIRING_CODE_TTL_SECONDS`), and a code shown without
+ * its deadline is one an operator will still be reading out after the server
+ * has forgotten it -- which presents as "the code is wrong" rather than as
+ * "the code is old". Zero means the control plane sent no instant.
+ */
+export interface PairingCodeGrant {
+  readonly code: string;
+  readonly role: DeviceRole;
+  readonly expiresAtMs: number;
 }
 
 /** The four instants of one `TimeSync` round, all in epoch milliseconds. */

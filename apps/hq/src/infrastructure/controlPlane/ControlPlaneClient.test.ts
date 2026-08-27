@@ -16,6 +16,17 @@ function timestamp(epochMs: number) {
 interface Recorded {
   readonly refreshRequestIds: string[];
   readonly mutationContexts: { readonly requestId: string; readonly actorDeviceId?: string }[];
+  /**
+   * `<method>:<secret or ->` for every call that could carry the bootstrap
+   * header, so a claim about which one presents it is read off a transcript
+   * rather than off a single spy.
+   */
+  readonly bootstrapHeaders: string[];
+}
+
+/** What the transport would actually have put on the wire for this call. */
+function bootstrapHeader(options: { readonly headers?: HeadersInit } | undefined): string {
+  return new Headers(options?.headers ?? {}).get('x-hq-bootstrap-secret') ?? '-';
 }
 
 /**
@@ -26,8 +37,87 @@ interface Recorded {
 function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}): SyncRpcClient {
   let refreshes = 0;
   const base: SyncRpcClient = {
-    async pairDevice(request) {
+    async createGroup(request, options) {
       recorded.mutationContexts.push({ requestId: request.context.requestId });
+      recorded.bootstrapHeaders.push(`createGroup:${bootstrapHeader(options)}`);
+      return {
+        group: {
+          id: { value: 'group-a' },
+          name: request.name,
+          authorityMode: syncV1.AuthorityMode.MULTI_AUTHORITY,
+          leaderDeviceId: { value: 'device-a' },
+          revision: { number: 1n },
+        },
+        device: {
+          id: { value: 'device-a' },
+          name: request.initialDevice.name,
+          role: syncV1.DeviceRole.ADMIN,
+          status: syncV1.DeviceStatus.ONLINE,
+        },
+        session: {
+          accessToken: 'access-1',
+          refreshToken: 'refresh-1',
+          accessTokenExpiresAt: timestamp(60_000),
+          refreshTokenExpiresAt: timestamp(600_000),
+          deviceId: { value: 'device-a' },
+          groupId: { value: 'group-a' },
+          role: syncV1.DeviceRole.ADMIN,
+        },
+      };
+    },
+    async createPairingCode(request, options) {
+      recorded.mutationContexts.push({
+        requestId: request.context.requestId,
+        ...(request.context.actorDeviceId === undefined
+          ? {}
+          : { actorDeviceId: request.context.actorDeviceId.value }),
+      });
+      recorded.bootstrapHeaders.push(`createPairingCode:${bootstrapHeader(options)}`);
+      return {
+        pairingCode: {
+          code: 'PAIR-0001',
+          groupId: request.groupId,
+          role: request.role,
+          expiresAt: timestamp(600_000),
+        },
+      };
+    },
+    async updateGroup(request) {
+      recorded.mutationContexts.push({
+        requestId: request.context.requestId,
+        ...(request.context.actorDeviceId === undefined
+          ? {}
+          : { actorDeviceId: request.context.actorDeviceId.value }),
+      });
+      return {
+        group: {
+          id: { value: 'group-a' },
+          name: request.name,
+          authorityMode: syncV1.AuthorityMode.LEADER,
+          leaderDeviceId: { value: 'device-a' },
+          revision: { number: 9n },
+        },
+      };
+    },
+    async setDeviceRole(request) {
+      recorded.mutationContexts.push({
+        requestId: request.context.requestId,
+        ...(request.context.actorDeviceId === undefined
+          ? {}
+          : { actorDeviceId: request.context.actorDeviceId.value }),
+      });
+      return {
+        device: {
+          id: request.deviceId,
+          name: 'MON-02',
+          role: request.role,
+          status: syncV1.DeviceStatus.ONLINE,
+        },
+      };
+    },
+    async pairDevice(request, options) {
+      recorded.mutationContexts.push({ requestId: request.context.requestId });
+      recorded.bootstrapHeaders.push(`pairDevice:${bootstrapHeader(options)}`);
       return {
         group: {
           id: { value: 'group-a' },
@@ -185,7 +275,11 @@ function controlRpcClient(reported = installationId): ControlRpcClient {
 const controlClient: ControlRpcClient = controlRpcClient();
 
 function client(options: { readonly sync?: SyncRpcClient; readonly now?: () => number } = {}) {
-  const recorded: Recorded = { refreshRequestIds: [], mutationContexts: [] };
+  const recorded: Recorded = {
+    refreshRequestIds: [],
+    mutationContexts: [],
+    bootstrapHeaders: [],
+  };
   const store = new DeviceSessionStore(memoryStorage());
   let minted = 0;
   const created = new ControlPlaneClient({
@@ -234,7 +328,11 @@ describe('ControlPlaneClient', () => {
 
   it('replays one request id while a refresh is unanswered and mints a new one after', async () => {
     const failing = { failures: 1 };
-    const recorded: Recorded = { refreshRequestIds: [], mutationContexts: [] };
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+    };
     const sync = syncClient(recorded, {
       async refreshDeviceSession(request) {
         recorded.refreshRequestIds.push(request.context.requestId);
@@ -287,7 +385,11 @@ describe('ControlPlaneClient', () => {
   });
 
   it('forgets the session when a refresh is refused outright', async () => {
-    const recorded: Recorded = { refreshRequestIds: [], mutationContexts: [] };
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+    };
     const sync = syncClient(recorded, {
       async refreshDeviceSession() {
         throw new ConnectError('revoked', Code.Unauthenticated);
@@ -352,7 +454,7 @@ describe('ControlPlaneClient', () => {
       sessionStore: store,
       clients: {
         control: controlRpcClient(''),
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [] }),
+        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
       },
     });
 
@@ -369,7 +471,7 @@ describe('ControlPlaneClient', () => {
       sessionStore: new DeviceSessionStore(memoryStorage()),
       clients: {
         control: controlClient,
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [] }),
+        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
       },
     });
 
@@ -397,7 +499,7 @@ describe('ControlPlaneClient', () => {
       sessionStore: store,
       clients: {
         control: controlClient,
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [] }),
+        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
       },
     });
 
@@ -420,7 +522,7 @@ describe('ControlPlaneClient', () => {
 
   it('turns a transport failure that never reached the host into an unavailable kind', async () => {
     const sync = syncClient(
-      { refreshRequestIds: [], mutationContexts: [] },
+      { refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] },
       {
         async getPresence() {
           throw new TypeError('Failed to fetch');
@@ -471,7 +573,11 @@ describe('ControlPlaneClient', () => {
  */
 describe('two links over one session store', () => {
   function pair(now: () => number) {
-    const recorded: Recorded = { refreshRequestIds: [], mutationContexts: [] };
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+    };
     const store = new DeviceSessionStore(memoryStorage());
     const sync = syncClient(recorded);
     let minted = 0;
@@ -559,5 +665,139 @@ describe('two links over one session store', () => {
     expect(recorded.mutationContexts).toHaveLength(1);
     expect(store.read()?.controlPlaneInstallationId).toBe('');
     expect(reader.session()).not.toBeNull();
+  });
+});
+
+/**
+ * The four calls that make a group administrable from the application (R27).
+ *
+ * They were declared on the contract and reachable from nothing, so a group and
+ * its first pairing code had to be made with a second tool and a device that
+ * joined as `VIEWER` could never be promoted.
+ */
+describe('ControlPlaneClient over the group administration calls', () => {
+  it('presents the bootstrap secret on CreateGroup, on no other call, and stores none of it', async () => {
+    const { client: created, store, recorded } = client();
+
+    await created.probeCapabilities();
+    const group = await created.createGroup({
+      name: '  ШТАБ  ',
+      deviceName: 'MON-01',
+      bootstrapSecret: 'secret-value',
+    });
+    await created.createPairingCode('EDITOR');
+
+    /*
+     * The header is on the one call that has no session to authenticate with,
+     * and the transcript shows it is nowhere else. `PairDevice` is in this
+     * transcript for exactly that contrast: it is the other unauthenticated
+     * call, and it carries a pairing code instead.
+     */
+    expect(recorded.bootstrapHeaders).toEqual(['createGroup:secret-value', 'createPairingCode:-']);
+    // Nothing about a deployment secret belongs on this disk. The stored blob
+    // is read whole rather than field by field, so a secret added to it later
+    // by any path fails this.
+    expect(JSON.stringify(store.read())).not.toContain('secret-value');
+    expect(group.session).toEqual({ deviceId: 'device-a', groupId: 'group-a', role: 'ADMIN' });
+    // The padding is dropped here and not on the server: `createGroup` stores
+    // the name as given (`durable-runtime.ts`, `requireText(input.name)`),
+    // unlike `updateGroup`, which trims.
+    expect(group.group.name).toBe('ШТАБ');
+    expect(group.device.role).toBe('ADMIN');
+    expect(store.read()?.accessToken).toBe('access-1');
+    expect(store.read()?.controlPlaneInstallationId).toBe(installationId);
+  });
+
+  it('refuses to create a group from a link that only reads credentials', async () => {
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+    };
+    const reader = new ControlPlaneClient({
+      baseUrl: 'https://plane.example',
+      credentials: 'reader',
+      sessionStore: new DeviceSessionStore(memoryStorage()),
+      clients: { control: controlClient, sync: syncClient(recorded) },
+    });
+
+    await expect(
+      reader.createGroup({ name: 'ШТАБ', deviceName: 'MON-02', bootstrapSecret: 'secret-value' }),
+    ).rejects.toMatchObject({ kind: 'failed-precondition' });
+
+    // Refused before the wire, like `pair` and `refresh`: a second plane
+    // minting a session against the shared store would be a second writer of
+    // credentials the owner link rotates.
+    expect(recorded.bootstrapHeaders).toEqual([]);
+  });
+
+  it('answers an issued pairing code with the role and the deadline it carries', async () => {
+    const { client: created } = client();
+    await created.pair('CODE-1', 'MON-01');
+
+    // Both roles are issued, because a client that sent one fixed role would
+    // hand an operator asking for an editor a viewer instead, and the code
+    // itself looks the same either way.
+    expect(await created.createPairingCode('VIEWER')).toEqual({
+      code: 'PAIR-0001',
+      role: 'VIEWER',
+      expiresAtMs: 600_000,
+    });
+    // The deadline is part of the answer, not decoration: a code read out after
+    // it has passed presents as "the code is wrong".
+    expect(await created.createPairingCode('EDITOR')).toEqual({
+      code: 'PAIR-0001',
+      role: 'EDITOR',
+      expiresAtMs: 600_000,
+    });
+  });
+
+  it('carries the revision a rename produced back to the caller', async () => {
+    const { client: created, recorded } = client();
+    await created.pair('CODE-1', 'MON-01');
+
+    const group = await created.updateGroup('  ШТАБ-2  ');
+
+    // The revision is what tells this rename from the pre-rename snapshot the
+    // retained window still holds, so it has to survive the conversion.
+    expect(group).toEqual({
+      groupId: 'group-a',
+      name: 'ШТАБ-2',
+      authority: 'leader',
+      leaderDeviceId: 'device-a',
+      revision: 9,
+    });
+    expect(recorded.mutationContexts.at(-1)?.actorDeviceId).toBe('device-a');
+  });
+
+  it('answers a role change with the device alone, at the role that was asked for', async () => {
+    const { client: created, recorded } = client();
+    await created.pair('CODE-1', 'MON-01');
+
+    const device = await created.setDeviceRole('device-b', 'ADMIN');
+
+    expect(device).toEqual({
+      deviceId: 'device-b',
+      name: 'MON-02',
+      role: 'ADMIN',
+      status: 'ONLINE',
+    });
+    expect(recorded.mutationContexts.at(-1)?.actorDeviceId).toBe('device-a');
+  });
+
+  it('refuses every administrative call without a session rather than sending one', async () => {
+    const { client: created, recorded } = client();
+
+    await expect(created.createPairingCode('EDITOR')).rejects.toMatchObject({
+      kind: 'unauthenticated',
+    });
+    await expect(created.updateGroup('ШТАБ-2')).rejects.toMatchObject({
+      kind: 'unauthenticated',
+    });
+    await expect(created.setDeviceRole('device-b', 'EDITOR')).rejects.toMatchObject({
+      kind: 'unauthenticated',
+    });
+
+    expect(recorded.mutationContexts).toEqual([]);
   });
 });

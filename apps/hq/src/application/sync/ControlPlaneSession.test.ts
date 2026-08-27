@@ -6,12 +6,17 @@ import {
   type ConnectionSession,
   type ConnectionState,
   type ControlPlaneCapabilities,
+  type DeviceRole,
+  type GroupDevice,
   type GroupSummary,
+  type PairingRole,
 } from './connection';
 import {
   ControlPlaneError,
   type ClockSample,
   type ControlPlanePort,
+  type CreateGroupRequest,
+  type PairingCodeGrant,
   type PairingResult,
 } from './controlPlanePort';
 
@@ -56,6 +61,12 @@ class FakeControlPlane implements ControlPlanePort {
   joinError: ControlPlaneError | null = null;
   refreshError: ControlPlaneError | null = null;
   authorityError: ControlPlaneError | null = null;
+  createGroupError: ControlPlaneError | null = null;
+  pairingCodeError: ControlPlaneError | null = null;
+  updateGroupError: ControlPlaneError | null = null;
+  deviceRoleError: ControlPlaneError | null = null;
+  /** Every bootstrap secret this port was handed, in order. */
+  readonly bootstrapSecrets: string[] = [];
   capabilities: ControlPlaneCapabilities = capabilities;
   serverGroup: GroupSummary = group;
   samples: ClockSample[] = [];
@@ -106,6 +117,47 @@ class FakeControlPlane implements ControlPlanePort {
         status: 'ONLINE',
       },
     };
+  }
+
+  async createGroup(request: CreateGroupRequest): Promise<PairingResult> {
+    this.calls.push(`createGroup:${request.name}`);
+    if (this.createGroupError !== null) throw this.createGroupError;
+    // The bootstrap secret is recorded separately from the transcript, so an
+    // assertion that it never reached the store cannot pass because the
+    // transcript happens not to print it.
+    this.bootstrapSecrets.push(request.bootstrapSecret);
+    this.stored = identity;
+    this.storedInstallation = this.capabilities.installationId;
+    this.serverGroup = { ...this.serverGroup, name: request.name };
+    return {
+      session: identity,
+      group: this.serverGroup,
+      device: { deviceId: 'device-a', name: request.deviceName, role: 'ADMIN', status: 'ONLINE' },
+    };
+  }
+
+  async createPairingCode(role: PairingRole): Promise<PairingCodeGrant> {
+    this.calls.push(`createPairingCode:${role}`);
+    if (this.pairingCodeError !== null) throw this.pairingCodeError;
+    return { code: 'PAIR-0001', role, expiresAtMs: 600_000 };
+  }
+
+  async updateGroup(name: string): Promise<GroupSummary> {
+    this.calls.push(`updateGroup:${name}`);
+    if (this.updateGroupError !== null) throw this.updateGroupError;
+    // Every group mutation bumps the revision inside the same statement on the
+    // server (`group-mutations.ts`, `groupMutationEpilogue`).
+    this.serverGroup = { ...this.serverGroup, name, revision: this.serverGroup.revision + 1 };
+    return this.serverGroup;
+  }
+
+  async setDeviceRole(deviceId: string, role: DeviceRole): Promise<GroupDevice> {
+    this.calls.push(`setDeviceRole:${deviceId}:${role}`);
+    if (this.deviceRoleError !== null) throw this.deviceRoleError;
+    // The bump happens on the server here too; the answer simply does not carry
+    // it, because `SetDeviceRoleResponse` holds no group.
+    this.serverGroup = { ...this.serverGroup, revision: this.serverGroup.revision + 1 };
+    return { deviceId, name: 'MON-01', role, status: 'ONLINE' };
   }
 
   async refresh(): Promise<ConnectionSession> {
@@ -602,5 +654,168 @@ describe('ControlPlaneSession', () => {
     expect(client.calls).toContain('forgetSession');
     expect(read().mode).toBe('reauth-required');
     expect(read().groupName).toBeUndefined();
+  });
+});
+
+/**
+ * The group, made and staffed from the application rather than from a second
+ * tool (R27).
+ *
+ * Until these four calls had a caller, a group and its first pairing code came
+ * from a script and a device that joined as `VIEWER` stayed one for good.
+ */
+describe('ControlPlaneSession over the group administration calls', () => {
+  it('creates the group, enters it, and shows it', async () => {
+    const client = new FakeControlPlane();
+    client.stored = null;
+    const { created, read } = session(client);
+
+    const made = await created.createGroup({
+      name: 'ШТАБ',
+      deviceName: 'MON-01',
+      bootstrapSecret: 'secret-value',
+    });
+
+    // The claim is the observable consequence, not the call: a session that had
+    // no group is in one, and the surface has a name to print.
+    expect(made).toBe(true);
+    expect(read().mode).toBe('online');
+    expect(read().groupName).toBe('ШТАБ');
+    expect(read().session).toEqual(identity);
+    expect(client.bootstrapSecrets).toEqual(['secret-value']);
+    // The secret is handed to the port and kept nowhere. The whole slice is
+    // read rather than named fields, so a secret that reached it by any path
+    // fails this.
+    expect(JSON.stringify(read())).not.toContain('secret-value');
+  });
+
+  it('shows the refusal when the bootstrap secret is wrong, and joins nothing', async () => {
+    const client = new FakeControlPlane();
+    client.stored = null;
+    client.createGroupError = new ControlPlaneError(
+      'unauthenticated',
+      'Bootstrap authorization is required.',
+    );
+    const { created, read } = session(client);
+
+    expect(
+      await created.createGroup({
+        name: 'ШТАБ',
+        deviceName: 'MON-01',
+        bootstrapSecret: 'wrong-value',
+      }),
+    ).toBe(false);
+
+    // Swallowing this would leave an operator staring at a dialog that did
+    // nothing and said nothing.
+    expect(read().mode).toBe('reauth-required');
+    expect(read().failure).toContain('ГРУППА НЕ СОЗДАНА');
+    expect(read().groupName).toBeUndefined();
+    expect(client.calls).not.toContain('join');
+  });
+
+  it('records the revision a rename produced, so the retained window cannot undo it', async () => {
+    const client = new FakeControlPlane();
+    const { created, read } = session(client);
+    await created.pair('CODE-1', 'MON-01');
+    const joinedAt = read().groupRevision;
+
+    expect(await created.renameGroup('ШТАБ-2')).toBe(true);
+
+    expect(read().groupName).toBe('ШТАБ-2');
+    /*
+     * The revision travels with the name. `UpdateGroup` publishes
+     * `GROUP_UPDATED`, so the same change comes back over the log and is
+     * dropped as already held; a name written without its revision would leave
+     * this session behind the group it had just renamed.
+     */
+    expect(read().groupRevision).toBe(joinedAt + 1);
+  });
+
+  it('leaves the name alone and shows the refusal when the server denies a rename', async () => {
+    const client = new FakeControlPlane();
+    client.updateGroupError = new ControlPlaneError(
+      'permission-denied',
+      'Only an active group administrator can rename the group.',
+    );
+    const { created, read } = session(client);
+    await created.pair('CODE-1', 'MON-01');
+
+    expect(await created.renameGroup('ШТАБ-2')).toBe(false);
+
+    expect(read().groupName).toBe('ШТАБ');
+    expect(read().failure).toContain('ЗАПРОС К CONTROL PLANE ОТКЛОНЁН');
+    // A refused call is a fact about one call, not about the connection.
+    expect(read().mode).toBe('online');
+  });
+
+  it('hands the issued code back and puts none of it in the slice', async () => {
+    const client = new FakeControlPlane();
+    const { created, read } = session(client);
+    await created.pair('CODE-1', 'MON-01');
+
+    const grant = await created.createPairingCode('VIEWER');
+
+    expect(grant).toEqual({ code: 'PAIR-0001', role: 'VIEWER', expiresAtMs: 600_000 });
+    /*
+     * A pairing code earns a session, which makes it a credential in exactly
+     * the sense the tokens are. The slice is persisted to `localStorage`,
+     * broadcast over the screen bus and copied into diagnostic reports.
+     */
+    expect(JSON.stringify(read())).not.toContain('PAIR-0001');
+  });
+
+  it('answers nothing and shows the refusal when a viewer asks for a pairing code', async () => {
+    const client = new FakeControlPlane();
+    client.pairingCodeError = new ControlPlaneError(
+      'permission-denied',
+      'Only an active group administrator can issue a pairing code.',
+    );
+    const { created, read } = session(client);
+    await created.pair('CODE-1', 'MON-01');
+
+    expect(await created.createPairingCode('EDITOR')).toBeNull();
+
+    expect(read().failure).toContain('ЗАПРОС К CONTROL PLANE ОТКЛОНЁН');
+  });
+
+  it('writes the new role into the roster from the answer, without re-reading the list', async () => {
+    const client = new FakeControlPlane();
+    const { created, read } = session(client);
+    await created.pair('CODE-1', 'MON-01');
+    const readsBefore = client.calls.filter((entry) => entry === 'listDevices').length;
+
+    expect(await created.setDeviceRole('device-a', 'EDITOR')).toBe(true);
+
+    /*
+     * The answer is applied because the echo may never come: a control plane
+     * started without a realtime hub publishes nothing, and a poll feed is up
+     * to its interval behind. `device-a` is this very session, so its own role
+     * moves with the roster -- it is what every administrative control is
+     * gated on.
+     */
+    expect(read().devices).toEqual([
+      { deviceId: 'device-a', name: 'MON-01', role: 'EDITOR', status: 'ONLINE' },
+    ]);
+    expect(read().session?.role).toBe('EDITOR');
+    expect(client.calls.filter((entry) => entry === 'listDevices')).toHaveLength(readsBefore);
+  });
+
+  it('leaves the roster alone and shows the refusal when a role change is denied', async () => {
+    const client = new FakeControlPlane();
+    client.deviceRoleError = new ControlPlaneError(
+      'failed-precondition',
+      'A group must retain at least one active administrator.',
+    );
+    const { created, read } = session(client);
+    await created.pair('CODE-1', 'MON-01');
+
+    expect(await created.setDeviceRole('device-a', 'VIEWER')).toBe(false);
+
+    expect(read().devices).toEqual([
+      { deviceId: 'device-a', name: 'MON-01', role: 'ADMIN', status: 'ONLINE' },
+    ]);
+    expect(read().session?.role).toBe('ADMIN');
+    expect(read().failure).toContain('ЗАПРОС К CONTROL PLANE ОТКЛОНЁН');
   });
 });

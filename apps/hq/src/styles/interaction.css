@@ -213,12 +213,14 @@ body.terminal-theme textarea:focus {
   letter-spacing: 0.08em;
 }
 
+.group-pairing__admin,
 .group-pairing__devices,
 .group-pairing__links,
 .group-pairing__presence {
   margin-top: var(--space-3);
 }
 
+.group-pairing__admin h3,
 .group-pairing__devices h3,
 .group-pairing__links h3,
 .group-pairing__presence h3 {
@@ -228,9 +230,24 @@ body.terminal-theme textarea:focus {
   letter-spacing: 0.12em;
 }
 
+/* The administrative half: a rename and a pairing code, each a field and the
+   command that applies it. One column, so the field, its description and its
+   button read top to bottom whatever the dialog is narrowed to. */
+.group-pairing__admin {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: stretch;
+}
+
+/*
+ * The identity of the row is one column; every control it carries is another,
+ * wrapping rather than clipping. A fixed track per control put the role select
+ * and two buttons on one line and pushed the device name out of the dialog at
+ * the narrowest window of the matrix.
+ */
 .group-pairing__devices article {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-2);
   align-items: center;
   padding: var(--space-1) 0;
@@ -242,9 +259,57 @@ body.terminal-theme textarea:focus {
   min-width: 0;
 }
 
+.group-pairing__device-controls {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.group-pairing__role {
+  min-width: 10ch;
+}
+
 .group-pairing__devices small,
 .group-pairing__links small,
 .group-pairing__presence small {
+  color: var(--text-2);
+  font-size: var(--font-xs);
+}
+
+/* Why a command is closed, beside the command. Quieter than a failure, which
+   reports something the control plane refused; this reports something that was
+   never sent. */
+.group-pairing__hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-xs);
+  letter-spacing: 0.06em;
+}
+
+/*
+ * An issued pairing code, which an operator reads out loud to a neighbouring
+ * screen. It is set larger and wider-tracked than anything else in the dialog
+ * because it is transcribed by hand, and it wraps rather than truncates.
+ */
+.group-pairing__code {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--ops-line);
+  background: var(--panel-raised);
+  overflow-wrap: anywhere;
+}
+
+.group-pairing__code strong {
+  color: var(--ops-green-bright);
+  font-size: var(--font-lg);
+  letter-spacing: 0.2em;
+}
+
+.group-pairing__code small {
   color: var(--text-2);
   font-size: var(--font-xs);
 }

@@ -2,17 +2,23 @@ import { resolveAuthority } from './authority';
 import { summarizeClockSamples } from './clock';
 import {
   disconnectedConnection,
+  groupDevicePatch,
   initialConnectionState,
   sortPresence,
   type AuthorityMode,
   type ConnectionState,
+  type DeviceRole,
+  type GroupDevice,
   type GroupSummary,
+  type PairingRole,
 } from './connection';
 import {
   isControlPlaneError,
   type ClockSample,
   type ControlPlaneErrorKind,
   type ControlPlanePort,
+  type CreateGroupRequest,
+  type PairingCodeGrant,
 } from './controlPlanePort';
 
 export interface ControlPlaneSessionOptions {
@@ -159,6 +165,106 @@ export class ControlPlaneSession {
         'ЗАБУДЬТЕ СОХРАНЁННУЮ СЕССИЮ И СПАРИТЕСЬ ЗАНОВО.',
     });
     return false;
+  }
+
+  /**
+   * Creates the group this device will lead, then enters it (R27).
+   *
+   * The other half of `pair`: one of the two is how a session comes to belong
+   * to a group at all, and before this existed neither of them could be the
+   * first. The failure lands on `reauth-required` for the same reason pairing's
+   * does -- nothing was joined and the operator's next act is to present a
+   * credential -- and the refusal is put where the operator reads it rather
+   * than swallowed.
+   *
+   * The secret is a parameter and never a field: it is passed through to the
+   * client, which sets it as one request header, and this service records
+   * nothing of it. Answering whether the group exists is what the surface needs;
+   * anything more would be the secret's lifetime growing.
+   */
+  async createGroup(request: CreateGroupRequest, signal?: AbortSignal): Promise<boolean> {
+    this.#set({ mode: 'connecting', failure: '' });
+    try {
+      const created = await this.#client.createGroup(request, signal);
+      this.#set({ session: created.session });
+      this.#applyGroup(created.group);
+    } catch (error: unknown) {
+      this.#set({ mode: 'reauth-required', failure: describe(error, 'ГРУППА НЕ СОЗДАНА') });
+      return false;
+    }
+    await this.#enterGroup(signal);
+    return true;
+  }
+
+  /**
+   * Issues a pairing code, and hands it back rather than recording it.
+   *
+   * `null` is a refusal, and the refusal is on `connection.failure` by then:
+   * the caller needs the answer only to stop showing a code that is no longer
+   * the newest thing that happened. The code itself never enters the slice --
+   * it is a credential, and the slice is persisted, broadcast and copied into
+   * diagnostic reports.
+   */
+  async createPairingCode(
+    role: PairingRole,
+    signal?: AbortSignal,
+  ): Promise<PairingCodeGrant | null> {
+    if (!(await this.#ensureFreshSession(signal))) return null;
+    try {
+      const grant = await this.#client.createPairingCode(role, signal);
+      this.#set({ failure: '' });
+      return grant;
+    } catch (error: unknown) {
+      this.#record(error);
+      return null;
+    }
+  }
+
+  /**
+   * Renames the group, and records the revision the rename produced.
+   *
+   * The revision is why this goes through `#applyGroup` rather than writing the
+   * name alone. `UpdateGroup` publishes `GROUP_UPDATED`, so the same change
+   * comes back over the log; the version check in `groupStatePatch` drops it as
+   * already held. A name written without its revision would leave this session
+   * behind the group it just renamed, and the pre-rename snapshot still in the
+   * retained window would put the old name back on the next resume.
+   */
+  async renameGroup(name: string, signal?: AbortSignal): Promise<boolean> {
+    if (!(await this.#ensureFreshSession(signal))) return false;
+    try {
+      this.#applyGroup(await this.#client.updateGroup(name, signal));
+      this.#set({ failure: '' });
+      return true;
+    } catch (error: unknown) {
+      this.#record(error);
+      return false;
+    }
+  }
+
+  /**
+   * Changes what a member of the group may do.
+   *
+   * The answer carries no group and therefore no revision, so the roster is
+   * written by the rule both paths share and the group's own fields are left
+   * to the `DEVICE_UPDATED` event the same mutation publishes. Applying the
+   * answer is not optional: a control plane started without a realtime hub
+   * publishes nothing, and a poll feed is up to its interval behind, so a
+   * session that waited for the echo would show a role it had already changed.
+   * Applying both is safe because replacing a record with an equal record
+   * changes nothing.
+   */
+  async setDeviceRole(deviceId: string, role: DeviceRole, signal?: AbortSignal): Promise<boolean> {
+    if (!(await this.#ensureFreshSession(signal))) return false;
+    let changed: GroupDevice;
+    try {
+      changed = await this.#client.setDeviceRole(deviceId, role, signal);
+    } catch (error: unknown) {
+      this.#record(error);
+      return false;
+    }
+    this.#set({ ...groupDevicePatch(this.#state, changed), failure: '' });
+    return true;
   }
 
   /** Pairs with a code an administrator issued, then enters the group. */

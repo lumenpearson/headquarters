@@ -5,8 +5,10 @@ import type {
   AuthorityMode,
   ConnectionSession,
   ControlPlaneCapabilities,
+  DeviceRole,
   GroupDevice,
   GroupSummary,
+  PairingRole,
   PresenceEntry,
 } from '@/application/sync/connection';
 import {
@@ -15,6 +17,8 @@ import {
   type ClockSample,
   type ControlPlaneErrorKind,
   type ControlPlanePort,
+  type CreateGroupRequest,
+  type PairingCodeGrant,
   type PairingResult,
 } from '@/application/sync/controlPlanePort';
 import type {
@@ -30,6 +34,7 @@ import type { GroupEventPage } from '@/application/sync/groupEventFeed';
 import { createBearerInterceptor } from './authInterceptor';
 import { DeviceSessionStore, type StoredDeviceSession } from './DeviceSessionStore';
 import {
+  fromDeviceRole,
   fromGroupSessionAction,
   fromSynchronizedDocumentType,
   toDeviceRole,
@@ -89,8 +94,29 @@ interface WireMutationContext {
   readonly actorDeviceId?: WireResourceId;
 }
 
+/**
+ * The issued pairing code, which only `CreatePairingCode` answers.
+ *
+ * Declared here beside the session rather than in the codec because the group
+ * log never carries one: a code is a credential, and the contract keeps
+ * credentials out of the event stream entirely.
+ */
+interface WirePairingCode {
+  readonly code: string;
+  readonly groupId?: WireResourceId | undefined;
+  readonly role: number;
+  readonly expiresAt?: WireTimestamp | undefined;
+}
+
 interface CallOptions {
   readonly signal?: AbortSignal;
+  /**
+   * Per-call headers, which exactly one call uses: `CreateGroup` presents the
+   * bootstrap secret. It is set here rather than in an interceptor because an
+   * interceptor would have to hold the secret for the life of the transport,
+   * and this way it exists for the duration of one request.
+   */
+  readonly headers?: HeadersInit;
 }
 
 export interface ControlRpcClient {
@@ -105,6 +131,48 @@ export interface ControlRpcClient {
 }
 
 export interface SyncRpcClient {
+  createGroup(
+    request: {
+      readonly context: WireMutationContext;
+      readonly name: string;
+      readonly initialDevice: {
+        readonly name: string;
+        readonly publicKey: string;
+        readonly platform: string;
+        readonly applicationVersion: string;
+      };
+    },
+    options?: CallOptions,
+  ): Promise<{
+    readonly group?: WireGroup | undefined;
+    readonly device?: WireDevice | undefined;
+    readonly session?: WireSession | undefined;
+  }>;
+  createPairingCode(
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly role: syncV1.DeviceRole;
+    },
+    options?: CallOptions,
+  ): Promise<{ readonly pairingCode?: WirePairingCode | undefined }>;
+  updateGroup(
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly name: string;
+    },
+    options?: CallOptions,
+  ): Promise<{ readonly group?: WireGroup | undefined }>;
+  setDeviceRole(
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly deviceId: WireResourceId;
+      readonly role: syncV1.DeviceRole;
+    },
+    options?: CallOptions,
+  ): Promise<{ readonly device?: WireDevice | undefined }>;
   pairDevice(
     request: {
       readonly pairingCode: string;
@@ -418,6 +486,44 @@ export class ControlPlaneClient implements ControlPlanePort {
   }
 
   /**
+   * Brings a group into existence and pairs this device in as its first
+   * administrator.
+   *
+   * The bootstrap secret rides on this one request and on nothing else: it is
+   * set as a per-call header, so it is never held by the transport, never
+   * written to the session store and never read back out of anything. What
+   * comes back is what pairing brings back, and it is stored the same way,
+   * because a device that just created a group is a paired device.
+   *
+   * `initial_device.role` is not sent. The server does not read it -- it writes
+   * `'ADMIN'` into the first membership itself (`durable-runtime.ts`,
+   * `createGroup`) -- and a client that sent a role would be stating a decision
+   * it does not own.
+   */
+  async createGroup(request: CreateGroupRequest, signal?: AbortSignal): Promise<PairingResult> {
+    this.#requireCredentialOwner('create a group');
+    const response = await call(() =>
+      this.#sync.createGroup(
+        {
+          context: { requestId: this.#mintRequestId() },
+          name: request.name.trim(),
+          initialDevice: {
+            name: request.deviceName.trim(),
+            publicKey: '',
+            platform: this.#device.platform,
+            applicationVersion: this.#device.applicationVersion,
+          },
+        },
+        {
+          ...options(signal),
+          headers: { 'x-hq-bootstrap-secret': request.bootstrapSecret },
+        },
+      ),
+    );
+    return this.#adoptSession(response);
+  }
+
+  /**
    * Pairs this device into a group with a code an administrator issued.
    *
    * The code is the credential, so the call carries no bearer token; what it
@@ -443,6 +549,95 @@ export class ControlPlaneClient implements ControlPlanePort {
         options(signal),
       ),
     );
+    return this.#adoptSession(response);
+  }
+
+  /**
+   * Issues a pairing code for the group this session belongs to.
+   *
+   * The code is returned and nowhere else. It is a credential in exactly the
+   * sense the tokens are -- presenting it earns a session -- so it never
+   * reaches the session store, which holds this device's own credentials, and
+   * never reaches the `connection` slice, which is persisted and broadcast.
+   * The surface that shows it holds it for as long as it is on screen.
+   */
+  async createPairingCode(role: PairingRole, signal?: AbortSignal): Promise<PairingCodeGrant> {
+    const stored = this.#requireSession();
+    const response = await call(() =>
+      this.#sync.createPairingCode(
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          role: fromDeviceRole(role),
+        },
+        options(signal),
+      ),
+    );
+    const grant = required(response.pairingCode, 'Control plane returned no pairing code.');
+    return {
+      code: grant.code,
+      role: toDeviceRole(grant.role),
+      expiresAtMs: toEpochMs(grant.expiresAt),
+    };
+  }
+
+  /** Renames the group. The server requires an active administrator. */
+  async updateGroup(name: string, signal?: AbortSignal): Promise<GroupSummary> {
+    const stored = this.#requireSession();
+    const response = await call(() =>
+      this.#sync.updateGroup(
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          name: name.trim(),
+        },
+        options(signal),
+      ),
+    );
+    return toGroupSummary(required(response.group, 'Control plane returned no group.'));
+  }
+
+  /**
+   * Changes what a member of the group may do.
+   *
+   * The answer is the device alone: `SetDeviceRoleResponse` carries no group,
+   * so the revision the mutation bumped does not come back here. It arrives on
+   * the `DEVICE_UPDATED` event the same mutation publishes, and that is what
+   * the group's own fields are ordered by.
+   */
+  async setDeviceRole(
+    deviceId: string,
+    role: DeviceRole,
+    signal?: AbortSignal,
+  ): Promise<GroupDevice> {
+    const stored = this.#requireSession();
+    const response = await call(() =>
+      this.#sync.setDeviceRole(
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          deviceId: { value: deviceId },
+          role: fromDeviceRole(role),
+        },
+        options(signal),
+      ),
+    );
+    return toGroupDevice(required(response.device, 'Control plane returned no device.'));
+  }
+
+  /**
+   * Writes what a group entry earned, whichever call earned it.
+   *
+   * `CreateGroup` and `PairDevice` are the only two calls that mint a session,
+   * they answer the same three messages, and what has to happen to that answer
+   * is identical. Two copies of it would be two places for the installation
+   * identity or the deprecated scalar fields to be handled differently.
+   */
+  #adoptSession(response: {
+    readonly group?: WireGroup | undefined;
+    readonly device?: WireDevice | undefined;
+    readonly session?: WireSession | undefined;
+  }): PairingResult {
     const session = required(response.session, 'Control plane returned no session.');
     const group = required(response.group, 'Control plane returned no group.');
     const device = required(response.device, 'Control plane returned no device.');

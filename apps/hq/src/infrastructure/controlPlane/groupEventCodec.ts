@@ -111,6 +111,25 @@ export function toDeviceRole(role: number): DeviceRole {
   return 'VIEWER';
 }
 
+/**
+ * The role as the wire spells it.
+ *
+ * The inverse of {@link toDeviceRole}, and here rather than in the client
+ * because both directions of one mapping belong together: `CreatePairingCode`
+ * and `SetDeviceRole` are the two calls that state a role, and a second table
+ * beside this one would be a second place for `EDITOR` to mean something else.
+ */
+export function fromDeviceRole(role: DeviceRole): syncV1.DeviceRole {
+  switch (role) {
+    case 'ADMIN':
+      return syncV1.DeviceRole.ADMIN;
+    case 'EDITOR':
+      return syncV1.DeviceRole.EDITOR;
+    case 'VIEWER':
+      return syncV1.DeviceRole.VIEWER;
+  }
+}
+
 export function toPresenceStatus(status: number): PresenceStatus {
   if (status === syncV1.DeviceStatus.ONLINE) return 'ONLINE';
   if (status === syncV1.DeviceStatus.REVOKED) return 'REVOKED';

@@ -1,4 +1,5 @@
 import {
+  groupDevicePatch,
   sortPresence,
   type ConnectionState,
   type GroupDevice,
@@ -87,17 +88,9 @@ export function groupStatePatch(
       const group = groupPatch(view, event);
       const device = event.device;
       if (group === null || device === undefined || device.deviceId === '') return group;
-      return {
-        ...group,
-        devices: withDevice(view.devices, device),
-        ...(view.session === undefined || view.session.deviceId !== device.deviceId
-          ? {}
-          : // The role of this very device changed. It is the one the surfaces
-            // gate their administrative controls on, and a session that went on
-            // believing the role it was paired with would offer commands the
-            // server now refuses.
-            { session: { ...view.session, role: device.role } }),
-      };
+      // The same rule the answer to `SetDeviceRole` is applied by, in one
+      // place: the two paths carry the same message and must write one roster.
+      return { ...group, ...groupDevicePatch(view, device) };
     }
     case 'presence-updated':
       return presencePatch(view, event);
@@ -137,13 +130,6 @@ function groupPatch(
     authority: group.authority,
     leaderDeviceId: group.leaderDeviceId,
   };
-}
-
-/** Replaces one device in place, or appends it, keeping the list's order. */
-function withDevice(devices: readonly GroupDevice[], device: GroupDevice): readonly GroupDevice[] {
-  const index = devices.findIndex((candidate) => candidate.deviceId === device.deviceId);
-  if (index < 0) return [...devices, device];
-  return devices.map((candidate, position) => (position === index ? device : candidate));
 }
 
 /**
