@@ -20,7 +20,26 @@ export interface CreatedPairedGroup {
   readonly session: PairedDeviceSession;
 }
 
-export interface RevokedPairedDevice {
+/**
+ * Whether this answer came from a receipt instead of from a mutation that ran.
+ *
+ * A retry carrying an already-completed `request_id` is answered from
+ * `mutation_receipts`: the group was revised once, by the original call. Both
+ * runtimes already know which of the two happened — the durable one reads
+ * `receipt_claimed` back from its own statement, the deterministic one holds
+ * the completed receipt record — but neither said so, and the service layer
+ * cannot re-derive it. Comparing revisions would not answer the question: a
+ * concurrent mutation moves the group between the two calls, and a receipt
+ * deliberately answers with the revision the original produced.
+ *
+ * So the fact is reported rather than reconstructed, which is what keeps the
+ * receipt the single place that decides what a retry is.
+ */
+export interface MutationOutcome {
+  readonly replayed: boolean;
+}
+
+export interface RevokedPairedDevice extends MutationOutcome {
   readonly group: PairedGroup;
   readonly device: PairedDevice;
 }

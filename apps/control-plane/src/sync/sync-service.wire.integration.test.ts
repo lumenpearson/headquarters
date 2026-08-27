@@ -366,22 +366,203 @@ describeIntegration('SyncService over binary gRPC-Web against real PostgreSQL', 
       });
       expect(revisions[0]?.revision).toBe(String(first.result?.revision?.number));
 
-      // The publication is an epilogue and runs once per call, so a retry does
-      // append a second copy of the same snapshot. It carries the same
-      // revision, which is the field a subscriber drops a repeat by, so the
-      // duplicate changes no state anywhere. Measured rather than claimed as
-      // desirable: `UpdateGroup`, `SetLeader`, `SetAuthorityMode` and
-      // `SetDeviceRole` all publish this way, and making an epilogue skip a
-      // replay is one change for the five of them, not one for this handler.
-      expect(await countEvents(groupId)).toBe(beforeRevoke + 2);
+      // The epilogue asks the mutation whether it ran. A retry answered from a
+      // receipt performed nothing, so it announces nothing: counted in the
+      // table, the log holds one new row and not two. The second copy carried
+      // the same revision and every subscriber dropped it, but it still spent a
+      // sequence number and still had to be read back by every polling client,
+      // page after page, for the life of the group.
+      expect(await countEvents(groupId)).toBe(beforeRevoke + 1);
       const page = await sync.readGroupEvents(
         { groupId: { value: groupId }, afterSequence: BigInt(beforeRevoke) },
         { headers: adminHeaders },
       );
       expect(page.events.map((event) => [event.kind, event.group?.revision?.number])).toEqual([
         [syncV1.GroupEventKind.DEVICE_UPDATED, first.result?.revision?.number],
-        [syncV1.GroupEventKind.DEVICE_UPDATED, first.result?.revision?.number],
       ]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'appends one row for a retried group mutation and one for every distinct one',
+    async () => {
+      const { sync, close } = await startWireClient();
+      closeControlPlane = close;
+
+      const created = await sync.createGroup(
+        {
+          name: 'Штаб-6',
+          initialDevice: device('Primary workstation', 'ed25519:wire-primary-6'),
+        },
+        { headers: { 'x-hq-bootstrap-secret': bootstrapSecret } },
+      );
+      const groupId = required(created.group?.id?.value, 'group id');
+      const adminHeaders = {
+        authorization: `Bearer ${required(created.session?.accessToken, 'admin token')}`,
+      };
+      const grant = await sync.createPairingCode(
+        { groupId: { value: groupId }, role: syncV1.DeviceRole.EDITOR },
+        { headers: adminHeaders },
+      );
+      const paired = await sync.pairDevice({
+        pairingCode: required(grant.pairingCode?.code, 'pairing code'),
+        deviceName: 'Analyst laptop',
+        publicKey: 'ed25519:wire-analyst-6',
+        platform: 'windows',
+        applicationVersion: '0.1.0',
+      });
+      const editorId = required(paired.device?.id?.value, 'editor device id');
+      const before = await countEvents(groupId);
+      const renameId = `rename-${crypto.randomUUID()}`;
+      const roleId = `role-${crypto.randomUUID()}`;
+      const leaderId = `leader-${crypto.randomUUID()}`;
+
+      // All four administration mutations reach the log through the same two
+      // publishers as the revoke, so both shapes are exercised: a rename, a
+      // leader change and a mode change announce the group, a role change
+      // announces the device.
+      const renamed = await sync.updateGroup(
+        {
+          context: { requestId: renameId },
+          groupId: { value: groupId },
+          name: 'Штаб-6-переименован',
+        },
+        { headers: adminHeaders },
+      );
+      await sync.updateGroup(
+        {
+          context: { requestId: renameId },
+          groupId: { value: groupId },
+          name: 'Штаб-6-переименован',
+        },
+        { headers: adminHeaders },
+      );
+      expect(await countEvents(groupId)).toBe(before + 1);
+
+      const promoted = await sync.setDeviceRole(
+        {
+          context: { requestId: roleId },
+          groupId: { value: groupId },
+          deviceId: { value: editorId },
+          role: syncV1.DeviceRole.ADMIN,
+        },
+        { headers: adminHeaders },
+      );
+      await sync.setDeviceRole(
+        {
+          context: { requestId: roleId },
+          groupId: { value: groupId },
+          deviceId: { value: editorId },
+          role: syncV1.DeviceRole.ADMIN,
+        },
+        { headers: adminHeaders },
+      );
+      expect(await countEvents(groupId)).toBe(before + 2);
+
+      const led = await sync.setLeader(
+        {
+          context: { requestId: leaderId },
+          groupId: { value: groupId },
+          deviceId: { value: editorId },
+        },
+        { headers: adminHeaders },
+      );
+      await sync.setLeader(
+        {
+          context: { requestId: leaderId },
+          groupId: { value: groupId },
+          deviceId: { value: editorId },
+        },
+        { headers: adminHeaders },
+      );
+      expect(await countEvents(groupId)).toBe(before + 3);
+
+      // The other direction, so the count cannot be satisfied by publishing
+      // nothing: a distinct request identifier is a distinct mutation, and the
+      // log takes its row.
+      const modeChanged = await sync.setAuthorityMode(
+        {
+          context: { requestId: `mode-${crypto.randomUUID()}` },
+          groupId: { value: groupId },
+          mode: syncV1.AuthorityMode.MULTI_AUTHORITY,
+        },
+        { headers: adminHeaders },
+      );
+      expect(await countEvents(groupId)).toBe(before + 4);
+
+      // Seven calls, four mutations, four rows — each carrying the revision its
+      // own mutation produced, in the order the group performed them.
+      const page = await sync.readGroupEvents(
+        { groupId: { value: groupId }, afterSequence: BigInt(before) },
+        { headers: adminHeaders },
+      );
+      expect(page.events.map((event) => [event.kind, event.device?.id?.value ?? ''])).toEqual([
+        [syncV1.GroupEventKind.GROUP_UPDATED, ''],
+        [syncV1.GroupEventKind.DEVICE_UPDATED, editorId],
+        [syncV1.GroupEventKind.GROUP_UPDATED, ''],
+        [syncV1.GroupEventKind.GROUP_UPDATED, ''],
+      ]);
+      expect(page.events[1]?.device?.role).toBe(promoted.device?.role);
+      expect(page.events[2]?.group?.leaderDeviceId?.value).toBe(editorId);
+      const revisions = page.events.map((event) => event.group?.revision?.number ?? 0n);
+      expect(revisions[0]).toBe(renamed.group?.revision?.number);
+      expect(revisions[2]).toBe(led.group?.revision?.number);
+      expect(revisions[3]).toBe(modeChanged.group?.revision?.number);
+      // Strictly ascending: a suppressed retry must not be mistaken for a
+      // suppressed mutation, and a repeated revision is what that would look
+      // like.
+      for (let index = 1; index < revisions.length; index += 1) {
+        expect(revisions[index] ?? 0n).toBeGreaterThan(revisions[index - 1] ?? 0n);
+      }
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'answers two simultaneous copies of one request with one mutation and one row',
+    async () => {
+      const { sync, close } = await startWireClient();
+      closeControlPlane = close;
+
+      const created = await sync.createGroup(
+        {
+          name: 'Штаб-7',
+          initialDevice: device('Primary workstation', 'ed25519:wire-primary-7'),
+        },
+        { headers: { 'x-hq-bootstrap-secret': bootstrapSecret } },
+      );
+      const groupId = required(created.group?.id?.value, 'group id');
+      const adminHeaders = {
+        authorization: `Bearer ${required(created.session?.accessToken, 'admin token')}`,
+      };
+      const before = await countEvents(groupId);
+      const requestId = `rename-race-${crypto.randomUUID()}`;
+      const rename = () =>
+        sync.updateGroup(
+          {
+            context: { requestId },
+            groupId: { value: groupId },
+            name: 'Штаб-7-одновременно',
+          },
+          { headers: adminHeaders },
+        );
+
+      // A retry that overlaps its original is what a client with a timeout
+      // actually produces. What serializes the two is not asserted here — the
+      // transport may queue them and the receipt's unique index would serialize
+      // them anyway; what is asserted is the outcome a client and a neighbour
+      // can observe, which is one mutation and one row.
+      const [first, second] = await Promise.all([rename(), rename()]);
+
+      expect(second.group?.revision?.number).toBe(first.group?.revision?.number);
+      expect(await countEvents(groupId)).toBe(before + 1);
+      const stored = await database.query<{ name: string; revision: string }>({
+        text: 'SELECT name, revision::text AS revision FROM groups WHERE id = $1',
+        values: [groupId],
+      });
+      expect(stored[0]?.name).toBe('Штаб-7-одновременно');
+      expect(stored[0]?.revision).toBe(String(first.group?.revision?.number));
     },
     networkTimeoutMs,
   );

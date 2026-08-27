@@ -10,12 +10,16 @@ import {
   defaultRealtimeReplayLimit,
   type DurableRealtimeEventStore,
 } from '../realtime/eventStore.js';
-import type { RealtimeHub } from '../realtime/hub.js';
+import type { GroupEventPublication, RealtimeHub } from '../realtime/hub.js';
 import { decideReplay } from '../realtime/replayDecision.js';
 
 import type { UpstashCoordination } from '../redis/coordination.js';
 
-import type { GroupAdministration } from './group-administration.js';
+import type {
+  GroupAdministration,
+  MutatedGroup,
+  MutatedGroupDevice,
+} from './group-administration.js';
 import type { PresenceSnapshot, PresenceStore } from './presence-store.js';
 
 import {
@@ -27,7 +31,7 @@ import {
   type PairedDeviceSession,
   type PairedGroup,
 } from './runtime.js';
-import type { Awaitable, PairedDeviceLifecycle } from './lifecycle.js';
+import type { Awaitable, MutationOutcome, PairedDeviceLifecycle } from './lifecycle.js';
 import { normalizePageSize } from './paging.js';
 import {
   MutationRequestIdError,
@@ -218,7 +222,7 @@ export function createPairedDeviceSyncService(
         // device it never knew. `ListDevices` stays the path that drops the
         // row, so the two agree on the device and differ only on whether a
         // departed member is still worth showing.
-        await publishDeviceUpdate(options, revoked.group, revoked.device);
+        await publishDeviceUpdate(options, revoked);
         return {
           result: {
             resourceId: { value: revoked.device.id },
@@ -242,7 +246,7 @@ export function createPairedDeviceSyncService(
             ...receiptContext,
           ),
         );
-        await publishGroupUpdate(options, updated.group);
+        await publishGroupUpdate(options, updated);
         return { group: toGroup(updated.group) };
       });
     },
@@ -261,7 +265,7 @@ export function createPairedDeviceSyncService(
             ...receiptContext,
           ),
         );
-        await publishGroupUpdate(options, updated.group);
+        await publishGroupUpdate(options, updated);
         return { group: toGroup(updated.group) };
       });
     },
@@ -280,7 +284,7 @@ export function createPairedDeviceSyncService(
             ...receiptContext,
           ),
         );
-        await publishGroupUpdate(options, updated.group);
+        await publishGroupUpdate(options, updated);
         return { group: toGroup(updated.group) };
       });
     },
@@ -300,7 +304,7 @@ export function createPairedDeviceSyncService(
             ...receiptContext,
           ),
         );
-        await publishDeviceUpdate(options, changed.group, changed.device);
+        await publishDeviceUpdate(options, changed);
         return { device: toDevice(changed.device) };
       });
     },
@@ -920,15 +924,39 @@ async function assertPublicationAllowed(
   );
 }
 
+/**
+ * Announces a group mutation, unless the mutation did not run.
+ *
+ * A retry carrying an already-completed `request_id` is answered from its
+ * receipt: the statement never executed, the group was revised once, and the
+ * snapshot handed back is the one the original call produced. Publishing it
+ * again appended a second copy of that snapshot to `sync_events`, spent a
+ * sequence number, and lengthened the log every polling client reads back in
+ * pages — for an event carrying a revision each subscriber has already seen and
+ * therefore drops. All five publishing mutations funnel through here, so the
+ * decision is made once rather than five times.
+ *
+ * The publication is built lazily so a replay pays for no protobuf it will not
+ * send.
+ */
+async function announceGroupMutation(
+  options: PairedDeviceServiceOptions,
+  mutated: MutationOutcome,
+  publication: () => GroupEventPublication,
+): Promise<void> {
+  if (mutated.replayed) return;
+  await options.hub?.publish(publication());
+}
+
 async function publishGroupUpdate(
   options: PairedDeviceServiceOptions,
-  group: PairedGroup,
+  mutated: MutatedGroup,
 ): Promise<void> {
-  await options.hub?.publish({
-    groupId: group.id,
+  await announceGroupMutation(options, mutated, () => ({
+    groupId: mutated.group.id,
     kind: syncV1.GroupEventKind.GROUP_UPDATED,
-    group: create(syncV1.GroupSchema, toGroup(group)),
-  });
+    group: create(syncV1.GroupSchema, toGroup(mutated.group)),
+  }));
 }
 
 /**
@@ -942,15 +970,14 @@ async function publishGroupUpdate(
  */
 async function publishDeviceUpdate(
   options: PairedDeviceServiceOptions,
-  group: PairedGroup,
-  device: PairedDevice,
+  mutated: MutatedGroupDevice,
 ): Promise<void> {
-  await options.hub?.publish({
-    groupId: group.id,
+  await announceGroupMutation(options, mutated, () => ({
+    groupId: mutated.group.id,
     kind: syncV1.GroupEventKind.DEVICE_UPDATED,
-    group: create(syncV1.GroupSchema, toGroup(group)),
-    device: create(syncV1.DeviceSchema, toDevice(device)),
-  });
+    group: create(syncV1.GroupSchema, toGroup(mutated.group)),
+    device: create(syncV1.DeviceSchema, toDevice(mutated.device)),
+  }));
 }
 
 async function publishPresence(

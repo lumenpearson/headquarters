@@ -2,6 +2,8 @@ import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
 import type { SqlClient } from '../db/database.js';
 import { normalizePageSize as boundPageSize } from './paging.js';
+import type { MutatedGroup, MutatedGroupDevice } from './group-administration.js';
+import type { RevokedPairedDevice } from './lifecycle.js';
 import {
   groupMutationEpilogue,
   groupMutationProjection,
@@ -1357,7 +1359,7 @@ export class DurablePairedDeviceRuntime {
     groupId: string,
     deviceId: string,
     mutation?: MutationReceiptContext,
-  ): Promise<{ readonly group: PairedGroup; readonly device: PairedDevice }> {
+  ): Promise<RevokedPairedDevice> {
     const normalizedGroupId = requireText(groupId, 'group_id');
     const normalizedDeviceId = requireText(deviceId, 'device_id');
     if (authenticated.group.id !== normalizedGroupId) {
@@ -1596,7 +1598,7 @@ export class DurablePairedDeviceRuntime {
         'The paired device could not be revoked because its state changed concurrently.',
       );
     }
-    return { group: toGroup(group), device: toDevice(device) };
+    return { group: toGroup(group), device: toDevice(device), replayed: false };
   }
 
   /**
@@ -1608,9 +1610,7 @@ export class DurablePairedDeviceRuntime {
    * current one, so the caller sees the revision its own mutation produced
    * instead of whatever the group has drifted to since.
    */
-  private async replayRevokedDevice(
-    receipt: MutationReceiptClaim,
-  ): Promise<{ readonly group: PairedGroup; readonly device: PairedDevice }> {
+  private async replayRevokedDevice(receipt: MutationReceiptClaim): Promise<RevokedPairedDevice> {
     const outcome = await this.resolveRefusedClaim(receipt, replayNoLongerAuthorized());
     const recordedGroupId = requireOutcomeField(outcome.groupId, 'group_id');
     const recordedDeviceId = requireOutcomeField(outcome.deviceId, 'device_id');
@@ -1646,7 +1646,7 @@ export class DurablePairedDeviceRuntime {
     );
     const row = rows[0];
     if (row === undefined) throw replayNoLongerAuthorized();
-    return { group: toGroup(row), device: toDevice(row) };
+    return { group: toGroup(row), device: toDevice(row), replayed: true };
   }
 
   assertContextActor(authenticated: AuthenticatedDevice, actorDeviceId: string | undefined): void {
@@ -1678,7 +1678,7 @@ export class DurablePairedDeviceRuntime {
     groupId: string,
     name: string,
     mutation?: MutationReceiptContext,
-  ): Promise<{ readonly group: PairedGroup }> {
+  ): Promise<MutatedGroup> {
     const normalizedGroupId = requireText(groupId, 'group_id');
     const normalizedName = requireText(name.trim(), 'name');
     this.requireSameGroup(authenticated, normalizedGroupId);
@@ -1723,7 +1723,7 @@ export class DurablePairedDeviceRuntime {
       row,
       'Only an active group administrator can rename the group.',
     );
-    return { group: this.requireMutatedGroup(row) };
+    return { group: this.requireMutatedGroup(row), replayed: false };
   }
 
   /**
@@ -1738,7 +1738,7 @@ export class DurablePairedDeviceRuntime {
     groupId: string,
     mode: AuthorityMode,
     mutation?: MutationReceiptContext,
-  ): Promise<{ readonly group: PairedGroup }> {
+  ): Promise<MutatedGroup> {
     const normalizedGroupId = requireText(groupId, 'group_id');
     this.requireSameGroup(authenticated, normalizedGroupId);
     const now = this.currentTime();
@@ -1800,7 +1800,7 @@ export class DurablePairedDeviceRuntime {
         'Set an active group leader before switching the group to leader authority.',
       );
     }
-    return { group: this.requireMutatedGroup(row) };
+    return { group: this.requireMutatedGroup(row), replayed: false };
   }
 
   /**
@@ -1816,7 +1816,7 @@ export class DurablePairedDeviceRuntime {
     groupId: string,
     deviceId: string,
     mutation?: MutationReceiptContext,
-  ): Promise<{ readonly group: PairedGroup }> {
+  ): Promise<MutatedGroup> {
     const normalizedGroupId = requireText(groupId, 'group_id');
     const normalizedDeviceId = requireText(deviceId, 'device_id');
     this.requireSameGroup(authenticated, normalizedGroupId);
@@ -1879,7 +1879,7 @@ export class DurablePairedDeviceRuntime {
         'Group leadership can only be given to an active member of the group.',
       );
     }
-    return { group: this.requireMutatedGroup(row) };
+    return { group: this.requireMutatedGroup(row), replayed: false };
   }
 
   /**
@@ -1896,7 +1896,7 @@ export class DurablePairedDeviceRuntime {
     deviceId: string,
     role: DeviceRole,
     mutation?: MutationReceiptContext,
-  ): Promise<{ readonly group: PairedGroup; readonly device: PairedDevice }> {
+  ): Promise<MutatedGroupDevice> {
     const normalizedGroupId = requireText(groupId, 'group_id');
     const normalizedDeviceId = requireText(deviceId, 'device_id');
     this.requireSameGroup(authenticated, normalizedGroupId);
@@ -2032,7 +2032,7 @@ export class DurablePairedDeviceRuntime {
         'The paired device role could not be changed because its state changed concurrently.',
       );
     }
-    return { group: this.requireMutatedGroup(row), device: toDevice(device) };
+    return { group: this.requireMutatedGroup(row), device: toDevice(device), replayed: false };
   }
 
   private requireSameGroup(authenticated: AuthenticatedDevice, groupId: string): void {
@@ -2071,9 +2071,7 @@ export class DurablePairedDeviceRuntime {
    * so re-running one would move the group a second time. The recorded revision
    * is returned instead of the group's current one.
    */
-  private async replayGroupMutation(
-    receipt: MutationReceiptClaim,
-  ): Promise<{ readonly group: PairedGroup }> {
+  private async replayGroupMutation(receipt: MutationReceiptClaim): Promise<MutatedGroup> {
     const outcome = await this.resolveRefusedClaim(receipt, replayNoLongerAuthorized());
     const recordedGroupId = requireOutcomeField(outcome.groupId, 'group_id');
     if (outcome.revision === undefined) throw replayNoLongerAuthorized();
@@ -2092,12 +2090,13 @@ export class DurablePairedDeviceRuntime {
         [recordedGroupId, outcome.revision.toString()],
       ),
     );
-    return { group: toGroup(requireOneRow(rows, 'The recorded group no longer exists.')) };
+    return {
+      group: toGroup(requireOneRow(rows, 'The recorded group no longer exists.')),
+      replayed: true,
+    };
   }
 
-  private async replayRoleChange(
-    receipt: MutationReceiptClaim,
-  ): Promise<{ readonly group: PairedGroup; readonly device: PairedDevice }> {
+  private async replayRoleChange(receipt: MutationReceiptClaim): Promise<MutatedGroupDevice> {
     const outcome = await this.resolveRefusedClaim(receipt, replayNoLongerAuthorized());
     const recordedGroupId = requireOutcomeField(outcome.groupId, 'group_id');
     const recordedDeviceId = requireOutcomeField(outcome.deviceId, 'device_id');
@@ -2129,7 +2128,7 @@ export class DurablePairedDeviceRuntime {
       ),
     );
     const row = requireOneRow(rows, 'The recorded membership no longer exists.');
-    return { group: toGroup(row), device: toDevice(row) };
+    return { group: toGroup(row), device: toDevice(row), replayed: true };
   }
 
   /**

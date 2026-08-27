@@ -1,5 +1,9 @@
 import { createHmac, randomBytes as nodeRandomBytes } from 'node:crypto';
 
+// The port this runtime is a valid adapter for. Type-only in both directions:
+// `lifecycle.ts` names the models this module owns, and this module names the
+// one result shape the port declares, so neither import survives compilation.
+import type { RevokedPairedDevice } from './lifecycle.js';
 import { normalizePageSize as boundPageSize } from './paging.js';
 import {
   encodeFingerprintPayload,
@@ -687,7 +691,7 @@ export class PairedDeviceRuntime {
     groupId: string,
     deviceId: string,
     mutation?: MutationReceiptContext,
-  ): { readonly group: PairedGroup; readonly device: PairedDevice } {
+  ): RevokedPairedDevice {
     const claim = this.claimReceipt(
       'REVOKE_DEVICE',
       mutation,
@@ -756,6 +760,7 @@ export class PairedDeviceRuntime {
       // A device can remain globally online in another group. This result is
       // scoped to the membership just revoked, so expose its lifecycle state.
       device: { ...this.toPairedDevice(targetDevice, targetMembership), status: 'REVOKED' },
+      replayed: false,
     };
   }
 
@@ -768,7 +773,7 @@ export class PairedDeviceRuntime {
   private replayRevokedDevice(
     claim: MutationReceiptClaim,
     receipt: MutationReceiptRecord,
-  ): { readonly group: PairedGroup; readonly device: PairedDevice } {
+  ): RevokedPairedDevice {
     if (receipt.fingerprint !== claim.fingerprint) {
       throw new PairedDeviceRuntimeError(
         'ALREADY_EXISTS',
@@ -788,6 +793,7 @@ export class PairedDeviceRuntime {
     return {
       group: { ...copyGroup(group), revision },
       device: { ...this.toPairedDevice(device, membership), status: 'REVOKED' },
+      replayed: true,
     };
   }
 

@@ -10,7 +10,7 @@ import { DurableRealtimeEventStore } from '../realtime/eventStore.js';
 
 import { DurablePairedDeviceRuntime } from './durable-runtime.js';
 import { DurablePresenceStore } from './presence-store.js';
-import type { AuthenticatedDevice } from './runtime.js';
+import type { AuthenticatedDevice, PairedGroup } from './runtime.js';
 
 /**
  * Real PostgreSQL proof for the group administration, presence and publication
@@ -67,6 +67,39 @@ describeIntegration('durable group administration against real PostgreSQL', () =
       expect(stored[0]?.name).toBe('Штаб-1');
       // The retry bumped nothing: the group is still at the revision the first
       // rename produced.
+      expect(BigInt(stored[0]?.revision ?? '0')).toBe(first.group.revision);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'reports exactly one of two racing copies of a request as the mutation that ran',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const requestId = `rename-race-${uniqueSuffix()}`;
+      const rename = (): Promise<{ readonly replayed: boolean; readonly group: PairedGroup }> =>
+        runtime.updateGroup(owner.authenticated, owner.groupId, 'Штаб-гонка', { requestId });
+
+      // Two copies of one request in flight at once — what a client with a
+      // timeout actually produces. Measured rather than assumed: the unique
+      // index on `(scope, request_id_hash)` blocks the second claim until the
+      // first has committed, and by the time it proceeds the mutation has
+      // completed the receipt, so the loser is refused before it issues a
+      // statement at all. The statement's own gate covers the narrower
+      // interleaving where the second claim lands first; nothing here reaches
+      // it. Either way exactly one of the two ran, and that is what the
+      // announcement reads.
+      const [first, second] = await Promise.all([rename(), rename()]);
+
+      expect([first.replayed, second.replayed].toSorted()).toEqual([false, true]);
+      expect(second.group.revision).toBe(first.group.revision);
+      const stored = await database.query<{ revision: string }>({
+        text: 'SELECT revision::text AS revision FROM groups WHERE id = $1',
+        values: [owner.groupId],
+      });
+      // One rename, one revision: the race changed nothing about how often the
+      // group moved, only about which of the two calls moved it.
       expect(BigInt(stored[0]?.revision ?? '0')).toBe(first.group.revision);
     },
     networkTimeoutMs,

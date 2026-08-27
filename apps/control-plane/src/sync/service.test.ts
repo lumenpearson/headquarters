@@ -1,6 +1,6 @@
 import { create } from '@bufbuild/protobuf';
-import { Code, type HandlerContext } from '@connectrpc/connect';
-import { syncV1 } from '@gremuchaya/protocol';
+import { Code, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
+import { syncV1, type SyncService } from '@gremuchaya/protocol';
 import { describe, expect, it } from 'vitest';
 
 import { InMemoryRealtimeEventStore } from '../realtime/eventStore.js';
@@ -232,6 +232,47 @@ describe('SyncService device revocation', () => {
     expect(presence.forgets).toEqual([]);
   });
 
+  it('appends one event for a retried revoke, and one for every distinct one', async () => {
+    const { service, events, groupId, ownerToken, editorDeviceId } = await authenticatedService();
+    const ownerContext = handlerContext(`Bearer ${ownerToken}`);
+    const secondDeviceId = await pairAnalyst(service, groupId, ownerContext, 'ed25519:second');
+    const before = await logLength(events, groupId);
+    const requestId = 'revoke-editor-once';
+
+    const first = await service.revokeDevice?.(
+      revokeRequest(groupId, editorDeviceId, requestId),
+      ownerContext,
+    );
+    const retry = await service.revokeDevice?.(
+      revokeRequest(groupId, editorDeviceId, requestId),
+      ownerContext,
+    );
+
+    // The retry is answered from the receipt, so no mutation ran and there is
+    // nothing new to announce. Before the epilogue asked, the log took a second
+    // copy of the same snapshot at the same revision — a row every polling
+    // client reads back and every subscriber drops.
+    expect(retry?.result?.revision?.number).toBe(first?.result?.revision?.number);
+    expect(await logLength(events, groupId)).toBe(before + 1);
+
+    // The other direction, so this cannot pass by publishing nothing: a
+    // different request identifier is a different mutation and earns its own
+    // row.
+    const second = await service.revokeDevice?.(
+      revokeRequest(groupId, secondDeviceId, 'revoke-second-once'),
+      ownerContext,
+    );
+
+    expect(await logLength(events, groupId)).toBe(before + 2);
+    const appended = (await logEvents(events, groupId)).slice(before);
+    expect(
+      appended.map((event) => [event.kind, event.device?.id?.value, event.group?.revision?.number]),
+    ).toEqual([
+      [syncV1.GroupEventKind.DEVICE_UPDATED, editorDeviceId, first?.result?.revision?.number],
+      [syncV1.GroupEventKind.DEVICE_UPDATED, secondDeviceId, second?.result?.revision?.number],
+    ]);
+  });
+
   it('revokes without a presence store at all', async () => {
     const { service, events, groupId, ownerToken, editorDeviceId } = await authenticatedService({
       presence: false,
@@ -379,6 +420,47 @@ class RecordingPresenceStore implements PresenceStore {
   list(groupId: string): Promise<readonly PresenceSnapshot[]> {
     return this.#delegate.list(groupId);
   }
+}
+
+function revokeRequest(
+  groupId: string,
+  deviceId: string,
+  requestId: string,
+): syncV1.RevokeDeviceRequest {
+  return create(syncV1.RevokeDeviceRequestSchema, {
+    context: { requestId },
+    groupId: { value: groupId },
+    deviceId: { value: deviceId },
+  });
+}
+
+/** A second revocable member, so a suite can revoke twice without repeating itself. */
+async function pairAnalyst(
+  service: Partial<ServiceImpl<typeof SyncService>>,
+  groupId: string,
+  ownerContext: HandlerContext,
+  publicKey: string,
+): Promise<string> {
+  const grant = await service.createPairingCode?.(
+    create(syncV1.CreatePairingCodeRequestSchema, {
+      groupId: { value: groupId },
+      role: syncV1.DeviceRole.EDITOR,
+    }),
+    ownerContext,
+  );
+  const paired = await service.pairDevice?.(
+    create(syncV1.PairDeviceRequestSchema, {
+      pairingCode: grant?.pairingCode?.code ?? '',
+      deviceName: 'Second analyst',
+      publicKey,
+      platform: 'windows',
+      applicationVersion: '0.1.0',
+    }),
+    handlerContext(''),
+  );
+  const deviceId = paired?.device?.id?.value;
+  if (deviceId === undefined) throw new Error('Expected the paired device to have an id.');
+  return deviceId;
 }
 
 /** The group's log, as a client replaying it from the beginning would read it. */

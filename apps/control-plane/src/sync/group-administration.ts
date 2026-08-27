@@ -1,4 +1,4 @@
-import type { Awaitable } from './lifecycle.js';
+import type { Awaitable, MutationOutcome } from './lifecycle.js';
 import type { MutationReceiptContext } from './receipts.js';
 import type {
   AuthenticatedDevice,
@@ -7,6 +7,20 @@ import type {
   PairedDevice,
   PairedGroup,
 } from './runtime.js';
+
+/** What a group-shaped mutation answers with, plus whether it actually ran. */
+export interface MutatedGroup extends MutationOutcome {
+  readonly group: PairedGroup;
+}
+
+/**
+ * What a membership-shaped mutation answers with. The group rides along because
+ * every one of these bumps the group revision in the same statement, and that
+ * revision is how a subscriber orders the change.
+ */
+export interface MutatedGroupDevice extends MutatedGroup {
+  readonly device: PairedDevice;
+}
 
 /**
  * The administrative half of a paired group.
@@ -24,24 +38,24 @@ export interface GroupAdministration {
     groupId: string,
     name: string,
     mutation?: MutationReceiptContext,
-  ): Awaitable<{ readonly group: PairedGroup }>;
+  ): Awaitable<MutatedGroup>;
   setAuthorityMode(
     authenticated: AuthenticatedDevice,
     groupId: string,
     mode: AuthorityMode,
     mutation?: MutationReceiptContext,
-  ): Awaitable<{ readonly group: PairedGroup }>;
+  ): Awaitable<MutatedGroup>;
   setLeader(
     authenticated: AuthenticatedDevice,
     groupId: string,
     deviceId: string,
     mutation?: MutationReceiptContext,
-  ): Awaitable<{ readonly group: PairedGroup }>;
+  ): Awaitable<MutatedGroup>;
   setDeviceRole(
     authenticated: AuthenticatedDevice,
     groupId: string,
     deviceId: string,
     role: DeviceRole,
     mutation?: MutationReceiptContext,
-  ): Awaitable<{ readonly group: PairedGroup; readonly device: PairedDevice }>;
+  ): Awaitable<MutatedGroupDevice>;
 }
