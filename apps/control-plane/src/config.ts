@@ -183,6 +183,29 @@ const requiredStorageEnvironmentVariableNames = [
   'HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY',
 ] as const;
 
+/**
+ * The naming schemes a Redis REST pair may arrive under, in the order they are
+ * preferred.
+ *
+ * `HQ_CONTROL_PLANE_REDIS_REST_URL`/`_TOKEN` are this project's own names and
+ * always win. `KV_REST_API_URL`/`KV_REST_API_TOKEN` are the names the Vercel
+ * Upstash Marketplace integration writes into a project's Production and
+ * Preview environments: the platform cannot alias one variable onto another,
+ * and copying a live token by hand into a second variable is the manual
+ * credential handling this repository avoids everywhere else.
+ *
+ * Only those two are a REST pair. The same integration also writes `KV_URL` and
+ * `REDIS_URL`, which are `rediss://` connection strings for a TCP client rather
+ * than an HTTPS REST endpoint, and `KV_REST_API_READ_ONLY_TOKEN`, which cannot
+ * write a liveness key or a rate-limit counter. None of the three is read here,
+ * so their presence alone leaves the control plane in its no-Redis branch
+ * rather than half-configuring coordination that would fail on first use.
+ */
+const redisEnvironmentSchemes = [
+  { url: 'HQ_CONTROL_PLANE_REDIS_REST_URL', token: 'HQ_CONTROL_PLANE_REDIS_REST_TOKEN' },
+  { url: 'KV_REST_API_URL', token: 'KV_REST_API_TOKEN' },
+] as const;
+
 export function loadControlPlaneConfig(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): ControlPlaneConfig {
@@ -191,10 +214,7 @@ export function loadControlPlaneConfig(
   const allowedOrigins = parseOrigins(environment.HQ_CONTROL_PLANE_ALLOWED_ORIGINS);
   const databaseUrl = parseDatabaseUrl(environment.HQ_CONTROL_PLANE_DATABASE_URL);
   const databaseDriver = parseDatabaseDriver(environment.HQ_CONTROL_PLANE_DATABASE_DRIVER);
-  const redis = parseRedis(
-    environment.HQ_CONTROL_PLANE_REDIS_REST_URL,
-    environment.HQ_CONTROL_PLANE_REDIS_REST_TOKEN,
-  );
+  const redis = parseRedis(environment);
   const auth = parseAuth(environment, databaseUrl);
   const storage = parseStorage(environment);
   const runMigrationsOnStart = parseRunMigrationsOnStart(
@@ -307,26 +327,56 @@ function parseDatabaseDriver(value: string | undefined): SqlDriverName | undefin
   return driver;
 }
 
+/**
+ * The Redis REST pair, taken whole from one scheme in
+ * {@link redisEnvironmentSchemes} or from none at all.
+ *
+ * A scheme is selected by *either* of its two names being set, and the other
+ * scheme is never consulted to complete it. The two schemes can name two
+ * different Redis instances -- the one a marketplace integration provisioned and
+ * whatever an operator pointed the HQ_* names at -- so completing a half-written
+ * pair from the other scheme would pair a URL with a token minted elsewhere. That
+ * either authenticates nowhere or, on a second instance the same token happens to
+ * open, coordinates presence and rate limits against a database nobody chose,
+ * and neither failure names itself at startup. A split pair is a misconfiguration
+ * with two readings, so it is refused by naming the scheme that was selected and
+ * the half that is missing; half a deliberately-written scheme must not silently
+ * become the other scheme either.
+ *
+ * Absent both, this returns `undefined`, which is what selects the no-Redis
+ * branch in `configured-lifecycle.ts` and what `Health` reports as unconfigured.
+ */
 function parseRedis(
-  restUrl: string | undefined,
-  restToken: string | undefined,
+  environment: Readonly<Record<string, string | undefined>>,
 ): ControlPlaneConfig['redis'] {
-  const hasUrl = restUrl !== undefined && restUrl.trim().length > 0;
-  const hasToken = restToken !== undefined && restToken.trim().length > 0;
-  if (!hasUrl && !hasToken) return undefined;
-  if (!hasUrl || !hasToken) {
-    throw new Error(
-      'HQ_CONTROL_PLANE_REDIS_REST_URL and HQ_CONTROL_PLANE_REDIS_REST_TOKEN must be set together',
-    );
+  const scheme = redisEnvironmentSchemes.find(
+    (candidate) => isPresent(environment[candidate.url]) || isPresent(environment[candidate.token]),
+  );
+  if (scheme === undefined) return undefined;
+  const suppliedUrl = environment[scheme.url];
+  const suppliedToken = environment[scheme.token];
+  if (!isPresent(suppliedUrl) || !isPresent(suppliedToken)) {
+    throw new Error(`${scheme.url} and ${scheme.token} must be set together`);
   }
-  const url = new URL(restUrl);
+  // Trimmed before validation and before the return, not only for the presence
+  // checks: those read a trimmed value, so a token written as `"  x  "` passed
+  // them and then reached Upstash with its padding, failing authentication with
+  // no hint why.
+  const restUrl = suppliedUrl.trim();
+  const restToken = suppliedToken.trim();
+  // Guarded like parseStorageEndpoint: an unparseable value must not reach
+  // `new URL` unhandled, because Node attaches the raw input to the TypeError
+  // and a transposed pair would print the live token into the deployment log.
+  let url: URL;
+  try {
+    url = new URL(restUrl);
+  } catch {
+    throw new Error(`${scheme.url} must be an HTTPS Upstash REST URL`);
+  }
   if (url.protocol !== 'https:' || url.hostname.length === 0) {
-    throw new Error('HQ_CONTROL_PLANE_REDIS_REST_URL must be an HTTPS Upstash REST URL');
+    throw new Error(`${scheme.url} must be an HTTPS Upstash REST URL`);
   }
-  // Trimmed on the way out, not only on the way in: the presence checks above
-  // read the trimmed value, so a token written as `"  x  "` passed them and then
-  // reached Upstash with its padding, failing authentication with no hint why.
-  return { restUrl: restUrl.trim(), restToken: restToken.trim() };
+  return { restUrl, restToken };
 }
 
 function parseAuth(
@@ -594,7 +644,12 @@ function parseBoolean(value: string | undefined, name: string): boolean {
   throw new Error(`${name} must be true or false`);
 }
 
-function isPresent(value: string | undefined): boolean {
+/**
+ * A type predicate rather than a plain boolean, so that a caller which has just
+ * established a value is set can go on to trim and parse it without a second,
+ * differently-written check standing in for the same question.
+ */
+function isPresent(value: string | undefined): value is string {
   return value !== undefined && value.trim().length > 0;
 }
 

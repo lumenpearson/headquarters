@@ -288,6 +288,136 @@ describe('redis configuration', () => {
       loadControlPlaneConfig({ HQ_CONTROL_PLANE_REDIS_REST_URL: 'https://example.upstash.io' }),
     ).toThrow('must be set together');
   });
+
+  /*
+   * The Vercel Upstash Marketplace integration writes its own names into a
+   * project's Production and Preview environments and the platform cannot alias
+   * one variable onto another, so the pair is read under either naming scheme.
+   * The project's own names win, because a deployment that writes them is
+   * pointing somewhere on purpose and a platform-injected pair must not
+   * outrank that.
+   */
+  it('prefers the explicit HQ_* pair over the platform-injected one', () => {
+    const config = loadControlPlaneConfig({
+      HQ_CONTROL_PLANE_REDIS_REST_URL: 'https://explicit.upstash.io',
+      HQ_CONTROL_PLANE_REDIS_REST_TOKEN: 'explicit-token',
+      KV_REST_API_URL: 'https://platform.upstash.io',
+      KV_REST_API_TOKEN: 'platform-token',
+    });
+
+    expect(config.redis).toEqual({
+      restUrl: 'https://explicit.upstash.io',
+      restToken: 'explicit-token',
+    });
+  });
+
+  it('accepts the platform pair alone, trimmed and HTTPS-checked like the other', () => {
+    expect(
+      loadControlPlaneConfig({
+        KV_REST_API_URL: '  https://platform.upstash.io  ',
+        KV_REST_API_TOKEN: '  platform-token  ',
+      }).redis,
+    ).toEqual({ restUrl: 'https://platform.upstash.io', restToken: 'platform-token' });
+    expect(() =>
+      loadControlPlaneConfig({
+        KV_REST_API_URL: 'http://platform.upstash.io',
+        KV_REST_API_TOKEN: 'platform-token',
+      }),
+    ).toThrow('KV_REST_API_URL must be an HTTPS Upstash REST URL');
+    expect(() => loadControlPlaneConfig({ KV_REST_API_TOKEN: 'platform-token' })).toThrow(
+      'KV_REST_API_URL and KV_REST_API_TOKEN must be set together',
+    );
+    // Blank is not set: an all-whitespace explicit name does not select the
+    // HQ_* scheme, so a complete platform pair behind it is still taken. This
+    // is exactly what a half-edited .env copied from .env.example produces.
+    expect(
+      loadControlPlaneConfig({
+        HQ_CONTROL_PLANE_REDIS_REST_URL: '   ',
+        KV_REST_API_URL: 'https://platform.upstash.io',
+        KV_REST_API_TOKEN: 'platform-token',
+      }).redis,
+    ).toEqual({ restUrl: 'https://platform.upstash.io', restToken: 'platform-token' });
+  });
+
+  /*
+   * Node's `new URL` attaches the offending input to its TypeError, and the
+   * web route logs startup errors whole -- so an unparseable value (a token
+   * pasted into the URL variable, say) must be caught and replaced with the
+   * names-only message before it can reach a deployment log.
+   */
+  it('names the variable and never the value when the URL does not parse', () => {
+    const pastedToken = 'AXbc-live-token-pasted-into-the-url-slot';
+    let error: Error | undefined;
+    try {
+      loadControlPlaneConfig({
+        KV_REST_API_URL: pastedToken,
+        KV_REST_API_TOKEN: 'platform-token',
+      });
+    } catch (caught) {
+      error = caught instanceof Error ? caught : new Error(String(caught));
+    }
+    expect(error?.message).toBe('KV_REST_API_URL must be an HTTPS Upstash REST URL');
+    expect(error?.message).not.toContain(pastedToken);
+  });
+
+  /*
+   * A pair split across the two schemes is refused rather than completed from
+   * the other one: the two names can point at two different Redis instances, so
+   * a URL joined to a token minted elsewhere would either authenticate nowhere
+   * or coordinate against an instance nobody chose. The error names the scheme
+   * that was selected and never the token it was handed.
+   */
+  it('refuses a pair split across the two naming schemes', () => {
+    const platformToken = 'do-not-leak-this-platform-redis-token';
+    let error: Error | undefined;
+    try {
+      loadControlPlaneConfig({
+        HQ_CONTROL_PLANE_REDIS_REST_URL: 'https://explicit.upstash.io',
+        KV_REST_API_TOKEN: platformToken,
+      });
+    } catch (caught) {
+      error = caught instanceof Error ? caught : new Error(String(caught));
+    }
+    expect(error?.message).toBe(
+      'HQ_CONTROL_PLANE_REDIS_REST_URL and HQ_CONTROL_PLANE_REDIS_REST_TOKEN must be set together',
+    );
+    expect(error?.message).not.toContain(platformToken);
+
+    // The mirror image, which is the one that could have mixed instances
+    // silently: an HQ_* token beside a platform URL still selects HQ_*.
+    expect(() =>
+      loadControlPlaneConfig({
+        HQ_CONTROL_PLANE_REDIS_REST_TOKEN: 'explicit-token',
+        KV_REST_API_URL: 'https://platform.upstash.io',
+      }),
+    ).toThrow(
+      'HQ_CONTROL_PLANE_REDIS_REST_URL and HQ_CONTROL_PLANE_REDIS_REST_TOKEN must be set together',
+    );
+  });
+
+  /*
+   * The no-Redis branch is what an absent pair selects: `configured-lifecycle.ts`
+   * reads `config.redis === undefined` to keep the durable presence store, and
+   * `Health` reports Redis unconfigured. The same integration also injects
+   * `KV_URL`, `REDIS_URL` and `KV_REST_API_READ_ONLY_TOKEN`; none of them is a
+   * writable REST pair, so none of them may switch that branch.
+   */
+  it('leaves redis absent when neither scheme supplies a REST pair', () => {
+    expect(loadControlPlaneConfig({}).redis).toBeUndefined();
+    expect(
+      loadControlPlaneConfig({
+        HQ_CONTROL_PLANE_REDIS_REST_URL: '   ',
+        KV_REST_API_TOKEN: '  ',
+      }).redis,
+    ).toBeUndefined();
+    expect(
+      loadControlPlaneConfig({
+        KV_URL: 'rediss://default:platform-token@platform.upstash.io:6379',
+        REDIS_URL: 'rediss://default:platform-token@platform.upstash.io:6379',
+        KV_REST_API_READ_ONLY_TOKEN: 'platform-read-only-token',
+      }).redis,
+    ).toBeUndefined();
+  });
 });
 
 describe('object storage configuration', () => {
