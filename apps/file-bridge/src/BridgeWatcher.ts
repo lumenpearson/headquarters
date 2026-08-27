@@ -11,6 +11,7 @@ export type BridgeEventListener = (event: BridgeEvent) => void;
 
 export class BridgeWatcher {
   readonly #watchers: FSWatcher[] = [];
+  readonly #armed: Promise<void>[] = [];
 
   constructor(
     private readonly config: BridgeConfig,
@@ -27,6 +28,16 @@ export class BridgeWatcher {
         awaitWriteFinish: false,
         ignored: (path) => relative(canonicalRoot, path).split(/[\\/]/u).includes('.hq'),
       });
+      // `ignoreInitial` suppresses everything the initial scan meets, so a file
+      // created before `ready` fires is folded into that scan and never
+      // announced. Startup deliberately does not wait for the scan — a large
+      // media mount would hold the port shut behind it — so the promise is kept
+      // here instead, for a caller that must not miss the first event.
+      this.#armed.push(
+        new Promise<void>((resolve) => {
+          watcher.once('ready', () => resolve());
+        }),
+      );
       const emit = (
         type: 'FILE_ADDED' | 'FILE_CHANGED' | 'FILE_REMOVED' | 'DIRECTORY_CHANGED',
         physicalPath: string,
@@ -49,9 +60,15 @@ export class BridgeWatcher {
     }
   }
 
+  /** Resolves once every mount's initial scan is over and new files are reported. */
+  async whenArmed(): Promise<void> {
+    await Promise.all(this.#armed);
+  }
+
   async close(): Promise<void> {
     await Promise.all(this.#watchers.map((watcher) => watcher.close()));
     this.#watchers.length = 0;
+    this.#armed.length = 0;
   }
 
   async #emitWhenReady(mountId: string, root: string, physicalPath: string): Promise<void> {

@@ -9,6 +9,20 @@ export class BridgeEventHub {
     for (const subscriber of this.#subscribers) subscriber(event);
   }
 
+  /**
+   * How many Watch streams are currently attached.
+   *
+   * The hub keeps no history, so a caller has no other way to tell an admitted
+   * subscription from one that has not been registered yet, and an abandoned
+   * stream that failed to unregister looks exactly like a live one from the
+   * outside. Exposing the count is what lets a test wait for the subscription
+   * to exist before it triggers an event — and prove the generator's `finally`
+   * released it after the client went away, rather than assuming it did.
+   */
+  subscriberCount(): number {
+    return this.#subscribers.size;
+  }
+
   async *subscribe(
     mountIds: readonly string[],
     signal: AbortSignal,

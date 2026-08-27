@@ -81,6 +81,7 @@ export async function startBridge(config: BridgeConfig) {
     server,
     watcher,
     activePlaybackGrantCount: () => playback.activeCount(),
+    activeWatchSubscriberCount: () => events.subscriberCount(),
     close: async () => {
       playback.clear();
       await watcher.close();
