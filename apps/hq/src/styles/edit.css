@@ -82,7 +82,9 @@
   z-index: var(--z-dialog);
   display: grid;
   grid-template-rows: auto auto;
-  width: clamp(300px, 26vw, 400px);
+  /* Capped at 380px: the strip parks over the workspace, and the widest
+     right-column tiles keep their headers reachable beside it. */
+  width: clamp(300px, 22vw, 380px);
   border: 1px solid var(--line-2);
   background: var(--panel-raised);
   box-shadow:

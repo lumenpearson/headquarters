@@ -5,7 +5,11 @@ test('R16: the startup sequence plays on load and clears itself', async ({ page 
 
   const sequence = page.locator('.startup-sequence');
   await expect(sequence).toBeVisible();
-  await expect(sequence).toHaveAttribute('data-stage', 'field');
+  // A stage from the ladder, not `field` exactly: the readout starts at the
+  // load event `goto` resolves on, so by the time this assertion runs the
+  // first stage may already have yielded to the second. The test below proves
+  // both ends of the ladder are reached; this one proves a stage is showing.
+  await expect(sequence).toHaveAttribute('data-stage', /field|panels|status|ready/);
 
   // R26: the overlay is the viewport, never taller than it.
   expect(

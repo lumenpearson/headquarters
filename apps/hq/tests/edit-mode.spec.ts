@@ -353,11 +353,26 @@ async function selectTile(page: Page, tile: string): Promise<void> {
   await expect(page.locator(`[data-tile="${tile}"]`)).toBeVisible();
   await page.keyboard.press('Control+Shift+E');
   await expect(page.locator('.edit-mode-frame')).toBeVisible();
+  // The frame proves edit mode is on; the resize handles prove THIS tile has
+  // re-rendered as editable. A press dispatched between those two commits
+  // lands on a cell that is being replaced and selects nothing -- measured on
+  // /archive, where the screen behind the grid is heavy enough to open the
+  // window that the lighter routes close before a pointer can hit it.
+  await expect(page.locator(`[data-tile="${tile}"] .tile-grid__handle`).first()).toBeVisible();
+
+  // Hovered before it is measured: a hover waits for the element to stop
+  // moving, and on /archive the grid re-lays itself moments after edit mode
+  // opens, when the bridge probe comes back -- a box measured before that
+  // shift aims the press at whatever control lands on those coordinates
+  // after it. Seen as the press selecting nothing while a select of another
+  // tile swallowed the pointer.
+  const headerLocator = page.locator(`[data-tile="${tile}"] .ops-panel__header`);
+  await headerLocator.hover({ position: { x: 20, y: 12 } });
 
   // The grip is the panel header and nowhere else, so R12 keeps text selectable
   // in the body. Three pixels of jitter, as a real press has: a press with none
   // would pass against a build that treated the first pixel as a drag.
-  const header = await page.locator(`[data-tile="${tile}"] .ops-panel__header`).boundingBox();
+  const header = await headerLocator.boundingBox();
   if (header === null) throw new Error(`the ${tile} tile is not laid out`);
   await page.mouse.move(header.x + 20, header.y + header.height / 2);
   await page.mouse.down();
