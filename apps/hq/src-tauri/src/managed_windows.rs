@@ -166,8 +166,12 @@ pub fn open_screen_window(
 #[tauri::command]
 pub fn close_managed_windows(app: AppHandle) -> Result<(), String> {
     for (label, window) in app.webview_windows() {
-        if label.starts_with("screen-") || label.starts_with("wall-") || label.starts_with("scene-")
-        {
+        // Every managed window is labelled `screen-{screen_id}` above, so this
+        // is the only prefix that can match. It also tested `wall-` and
+        // `scene-`, which read as three window families and were none: the
+        // wall and scene ids are screen ids, and `wall-center` is the window
+        // `screen-wall-center`.
+        if label.starts_with("screen-") {
             window.close().map_err(|error| error.to_string())?;
         }
     }

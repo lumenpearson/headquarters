@@ -2,18 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Minimal capabilities for control and managed display windows",
-  "windows": ["control", "screen-*", "wall-*", "scene-*"],
+  "windows": ["control", "screen-*"],
   "permissions": [
     "core:default",
-    "core:event:default",
-    "core:window:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
-    "core:window:allow-close",
-    "fs:read-files",
-    "fs:read-dirs",
-    "fs:allow-watch",
-    "fs:allow-unwatch"
+    "core:window:allow-close"
   ]
 }

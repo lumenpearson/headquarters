@@ -20,7 +20,6 @@ pub fn run() {
     let media_gateway_supervisor = media_gateway.clone();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_fs::init())
         .manage(native_fs::NativeFsState::from_environment())
         .manage(native_fs::NativeWatchState::default())
         .manage(media_gateway)
