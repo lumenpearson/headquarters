@@ -70,24 +70,33 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
   const pageSize = useTablePageSize();
   const allCases = useMemo(() => Object.values(state.cases), [state.cases]);
   const normalizedQuery = foldCase(query.trim());
-  const { page: casePage, goToPage } = useRecordPage(allCases, {
-    pageSize,
-    filters: [
-      (caseFile) => statusFilter === 'all' || caseFile.status === statusFilter,
-      (caseFile) =>
-        normalizedQuery === '' ||
-        foldCase(`${caseFile.code} ${caseFile.title} ${caseFile.tags.join(' ')}`).includes(
-          normalizedQuery,
-        ),
-    ],
-    comparator: (left, right) => {
-      const a = left[sortKey];
-      const b = right[sortKey];
-      const result =
-        typeof a === 'number' && typeof b === 'number' ? a - b : compareText(String(a), String(b));
-      return descending ? -result : result;
+  // The question is the status filter plus the search text: either one
+  // narrows the registry, and without this the operator kept whatever page
+  // the previous filter had left them on.
+  const { page: casePage, goToPage } = useRecordPage(
+    allCases,
+    {
+      pageSize,
+      filters: [
+        (caseFile) => statusFilter === 'all' || caseFile.status === statusFilter,
+        (caseFile) =>
+          normalizedQuery === '' ||
+          foldCase(`${caseFile.code} ${caseFile.title} ${caseFile.tags.join(' ')}`).includes(
+            normalizedQuery,
+          ),
+      ],
+      comparator: (left, right) => {
+        const a = left[sortKey];
+        const b = right[sortKey];
+        const result =
+          typeof a === 'number' && typeof b === 'number'
+            ? a - b
+            : compareText(String(a), String(b));
+        return descending ? -result : result;
+      },
     },
-  });
+    `${statusFilter}:${normalizedQuery}`,
+  );
   const cases = casePage.items;
 
   /*

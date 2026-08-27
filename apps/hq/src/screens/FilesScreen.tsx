@@ -161,18 +161,25 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   );
   const pageSize = useTablePageSize();
   const normalizedQuery = foldCase(query);
-  const { page: filePage, goToPage } = useRecordPage(allFiles, {
-    pageSize,
-    filters: [
-      (file) => (archive ? file.status === 'ARCHIVED' || file.createdAt < '2026-09-12' : true),
-      (file) => state.ui.fileKindFilter === 'all' || file.kind === state.ui.fileKindFilter,
-      (file) =>
-        foldCase(`${file.id} ${file.title} ${file.tags.join(' ')} ${file.source}`).includes(
-          normalizedQuery,
-        ),
-    ],
-    comparator: (left, right) => compareText(String(left[sort]), String(right[sort])),
-  });
+  // The question is the category chip plus the search text: either one
+  // narrows the registry, and without this the operator kept whatever page
+  // the previous chip or word had left them on.
+  const { page: filePage, goToPage } = useRecordPage(
+    allFiles,
+    {
+      pageSize,
+      filters: [
+        (file) => (archive ? file.status === 'ARCHIVED' || file.createdAt < '2026-09-12' : true),
+        (file) => state.ui.fileKindFilter === 'all' || file.kind === state.ui.fileKindFilter,
+        (file) =>
+          foldCase(`${file.id} ${file.title} ${file.tags.join(' ')} ${file.source}`).includes(
+            normalizedQuery,
+          ),
+      ],
+      comparator: (left, right) => compareText(String(left[sort]), String(right[sort])),
+    },
+    `${state.ui.fileKindFilter}:${normalizedQuery}`,
+  );
   const files = filePage.items;
 
   const openImportDialog = () => {

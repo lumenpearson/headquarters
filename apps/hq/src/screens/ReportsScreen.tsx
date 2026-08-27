@@ -29,14 +29,21 @@ export function ReportsScreen() {
   const [sortKey, setSortKey] = useState<'id' | 'title' | 'kind' | 'createdAt'>('createdAt');
   const [descending, setDescending] = useState(true);
   const allReports = useMemo(() => Object.values(state.reports), [state.reports]);
-  const { page: reportPage, goToPage } = useRecordPage(allReports, {
-    pageSize,
-    filters: [(report) => kind === 'all' || report.kind === kind],
-    comparator: (left, right) => {
-      const result = compareText(String(left[sortKey]), String(right[sortKey]));
-      return descending ? -result : result;
+  // The question is the report type: it is the only thing that narrows this
+  // registry, and without this the operator kept whatever page the previous
+  // type had left them on.
+  const { page: reportPage, goToPage } = useRecordPage(
+    allReports,
+    {
+      pageSize,
+      filters: [(report) => kind === 'all' || report.kind === kind],
+      comparator: (left, right) => {
+        const result = compareText(String(left[sortKey]), String(right[sortKey]));
+        return descending ? -result : result;
+      },
     },
-  });
+    kind,
+  );
   const reports = reportPage.items;
   const selected = state.reports[selectedId] ?? reports[0];
 
