@@ -69,3 +69,9 @@ shared/materials/*
 # the repository. Untracked it would still be scanned by `pnpm format:check` and
 # `pnpm lint`, which is how a subagent run turned the local gate red.
 .claude/worktrees/
+
+# --- buf module cache ---
+# `buf generate` writes its module cache beside the module. It is a cache, not
+# a contract: the generated bindings under `packages/protocol/src/gen` are the
+# committed artefact.
+packages/protocol/v3/
