@@ -228,7 +228,14 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
 }) => {
   await page.setViewportSize({ width: 2560, height: 1440 });
   await page.goto('/overview');
-  await expect(page.locator('[data-tile="evidence"]')).toBeVisible();
+  /*
+   * `objectives` rather than `evidence`: the row budget counts the panel chrome
+   * the stylesheet draws at this width, which is 88px above the 2500px
+   * breakpoint, so the overview places ten of its twelve tiles here and names
+   * the other two in the notice. A switch is only worth asserting on a tile
+   * that is on the screen.
+   */
+  await expect(page.locator('[data-tile="objectives"]')).toBeVisible();
   await page.keyboard.press('Control+Shift+E');
   await expect(page.locator('.edit-mode-frame')).toBeVisible();
 
@@ -242,11 +249,11 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   const list = panel.locator('.edit-tiles');
   await expect(list).toBeVisible();
   // Named as the panel is titled, not as the setting keys it.
-  const evidence = list.getByRole('switch', { name: 'СОБРАННЫЕ ДОКАЗАТЕЛЬСТВА' });
-  await expect(evidence).toBeChecked();
+  const objectives = list.getByRole('switch', { name: 'ЦЕЛИ ОПЕРАЦИИ' });
+  await expect(objectives).toBeChecked();
 
-  await evidence.click();
-  await expect(page.locator('[data-tile="evidence"]')).toHaveCount(0);
+  await objectives.click();
+  await expect(page.locator('[data-tile="objectives"]')).toHaveCount(0);
   await expect(page.locator('[data-tile="brief"]')).toBeVisible();
 
   // Switching the group off disables the individual switch: the tile is gone
@@ -318,12 +325,15 @@ test('R10: a tile shows less at a smaller presentation, not the same list in a s
 test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
   await page.setViewportSize({ width: 2560, height: 1440 });
   await page.goto('/overview');
-  await expect(page.locator('[data-tile="evidence"]')).toBeVisible();
+  // `objectives` for the reason given above: at this width the overview has
+  // room for ten of its twelve tiles, and `evidence` is one of the two named
+  // in the notice instead.
+  await expect(page.locator('[data-tile="objectives"]')).toBeVisible();
 
   await page.goto('/settings');
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('overview:evidence');
+  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('overview:objectives');
 
   await page.goto('/overview');
   /*
@@ -333,11 +343,14 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
    * passed against a `TileGrid` that ignored the setting entirely.
    */
   await expect(page.locator('[data-tile="brief"]')).toBeVisible();
-  await expect(page.locator('[data-tile="evidence"]')).toHaveCount(0);
+  await expect(page.locator('[data-tile="objectives"]')).toHaveCount(0);
 
-  // A tile the operator hid is not a tile that did not fit: it never reaches
-  // the resolver, so it must not turn up in the notice offering to find it.
-  await expect(
-    page.locator('.tile-grid__displaced', { hasText: 'СОБРАННЫЕ ДОКАЗАТЕЛЬСТВА' }),
-  ).toHaveCount(0);
+  /*
+   * A tile the operator hid is not a tile that did not fit: it never reaches
+   * the resolver, so it must not turn up in the notice offering to find it.
+   * The notice is drawn here -- two other tiles are in it -- so this asserts an
+   * absence from a list that exists rather than the absence of the list.
+   */
+  await expect(page.locator('.tile-grid__displaced')).toBeVisible();
+  await expect(page.locator('.tile-grid__displaced', { hasText: 'ЦЕЛИ ОПЕРАЦИИ' })).toHaveCount(0);
 });

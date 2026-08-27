@@ -25,17 +25,25 @@ import { TileCaptionProvider } from './tileCaption';
 import { publishScreenTiles } from './tileRegistry';
 
 /**
- * The structural floor of a panel, measured rather than chosen: a 42px header
- * plus 24px of body padding. A tile that tall shows its title and nothing
- * else, so a row is allowed to be half of what a tile needs, not the minimum
- * a tile can survive -- doubled, a tile carries at least as much content as
- * chrome.
+ * A tile shows its title and nothing else at the structural floor of a panel,
+ * so a row is allowed to be half of what a tile needs, not the minimum a tile
+ * can survive -- doubled, a tile carries at least as much content as chrome.
  *
- * Unlike the `calc(100dvh - 244px)` this feature removed (C26), the number
- * does not stand in for anything that changes with the window: it is the
- * height of a header and two paddings, and those are the same everywhere.
+ * The floor itself is no longer a number here. It was 132px, written as a 42px
+ * header plus 24px of body padding on the grounds that "those are the same
+ * everywhere", and that stopped being true on 2026-08-27, when
+ * `sizes.panelHeader` (24..48), `sizes.panelPadding` (2..20) and
+ * `sizes.borderWidth` (1..3) reached the document: the same three roles make a
+ * floor of anywhere between 30 and 94px. They already differed by window
+ * before that -- `operations.css` writes a 54px header and 16px of padding
+ * above 2500px -- so at 2560x1440 the constant was counting 66px of chrome
+ * against the 88px the operator was looking at.
+ *
+ * What replaces it is a measurement of `.tile-grid__floor`, an empty panel the
+ * grid draws out of flow. One place decides what a panel's chrome is, and it
+ * is the stylesheet that draws the panel.
  */
-const minimumTileHeightPx = 132;
+const panelFloorsPerRow = 2;
 
 /**
  * How far the pointer travels before a press on a tile becomes a drag. Below
@@ -62,6 +70,39 @@ const presentationRank: Readonly<Record<TilePresentation, number>> = {
   compact: 2,
   minimal: 1,
 };
+
+/**
+ * Everything the row budget is counted from, measured on the document in one
+ * pass: the box the screen was given, the chrome of one panel, and the gap the
+ * stylesheet resolved between two rows.
+ */
+interface GridBox {
+  readonly height: number;
+  readonly floor: number;
+  readonly gap: number;
+}
+
+/** Before the first pass, and wherever there is no layout to measure. */
+const unmeasured: GridBox = { height: 0, floor: 0, gap: 0 };
+
+function sameBox(left: GridBox, right: GridBox): boolean {
+  return left.height === right.height && left.floor === right.floor && left.gap === right.gap;
+}
+
+/**
+ * How many rows the resolver may use.
+ *
+ * `n` rows of `h` with `n - 1` gaps between them fit a box of `A` while
+ * `n * h + (n - 1) * gap <= A`, which is `n <= (A + gap) / (h + gap)`. The gap
+ * used to be left out, and `sizes.tileGap` has a real default of 6px since
+ * 2026-08-27, so on a tall window the budget claimed a row the screen could
+ * not draw.
+ */
+function rowBudget(box: GridBox): number {
+  if (box.floor === 0) return 1;
+  const row = box.floor * panelFloorsPerRow;
+  return Math.max(1, Math.floor((box.height + box.gap) / (row + box.gap)));
+}
 
 type ResizeAxis = 'horizontal' | 'vertical' | 'corner';
 
@@ -112,7 +153,8 @@ export function TileGrid({
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [availableHeight, setAvailableHeight] = useState(0);
+  const floorRef = useRef<HTMLElement>(null);
+  const [box, setBox] = useState<GridBox>(unmeasured);
   const [drag, setDrag] = useState<DragState | null>(null);
   const editing = useOperationsStore((state) => state.edit.active);
   const selectedId = useOperationsStore((state) => state.edit.selectedElementId);
@@ -156,20 +198,42 @@ export function TileGrid({
   });
 
   /*
+   * The gap is read from the stylesheet below, not from here. `--ops-tile-gap`
+   * is written only once an operator moves `sizes.tileGap`, so at defaults the
+   * number in force is `operations.css`'s own -- but changing a gap resizes no
+   * element, so no observer fires and the measurement would stand stale. The
+   * value is a signal that it changed; what is used is what the document
+   * resolved.
+   */
+  const gapSetting = useOperationsStore(
+    (state) => state.personalization.draft.values['sizes.tileGap'],
+  );
+
+  /*
    * The grid is measured, not derived from `100dvh`. The shell chrome around
    * it is `clamp()`-sized, so the only honest source for how much room a
-   * screen has is the box the screen was actually given.
+   * screen has is the box the screen was actually given -- and the same is
+   * true of the panel chrome inside it, which is why the floor is an empty
+   * panel this component draws rather than a number it carries.
    */
   useEffect(() => {
     const element = containerRef.current;
-    if (element === null) return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry !== undefined) setAvailableHeight(entry.contentRect.height);
-    });
+    const floor = floorRef.current;
+    if (element === null || floor === null) return;
+    const measure = (): void => {
+      const gap = Number.parseFloat(window.getComputedStyle(element).rowGap);
+      const next: GridBox = {
+        height: element.getBoundingClientRect().height,
+        floor: floor.getBoundingClientRect().height,
+        gap: Number.isFinite(gap) ? gap : 0,
+      };
+      setBox((current) => (sameBox(current, next) ? current : next));
+    };
+    const observer = new ResizeObserver(measure);
     observer.observe(element);
+    observer.observe(floor);
     return () => observer.disconnect();
-  }, []);
+  }, [gapSetting]);
 
   /*
    * Published before hiding, not after: a surface that offers to bring a tile
@@ -180,6 +244,7 @@ export function TileGrid({
       tiles.map((tile) => ({
         key: `${screen}:${tile.descriptor.id}`,
         id: tile.descriptor.id,
+        screen,
         title: tile.title,
         category: tile.category,
       })),
@@ -214,10 +279,10 @@ export function TileGrid({
     [order, presentationCap, screen, spans, visible],
   );
 
-  const layout = useMemo(() => {
-    const maximumRows = Math.max(1, Math.floor(availableHeight / minimumTileHeightPx));
-    return resolveGridLayout({ columns, maximumRows, tiles: arranged });
-  }, [arranged, availableHeight, columns]);
+  const layout = useMemo(
+    () => resolveGridLayout({ columns, maximumRows: rowBudget(box), tiles: arranged }),
+    [arranged, box, columns],
+  );
 
   const byId = useMemo(() => new Map(visible.map((tile) => [tile.descriptor.id, tile])), [visible]);
   const placedById = useMemo(
@@ -341,9 +406,11 @@ export function TileGrid({
           Before the first measurement the resolver has one row to work with
           and would relocate almost everything. Rendering nothing for that one
           frame is quieter than rendering a layout that is about to be
-          replaced.
+          replaced. Both boxes have to have been measured: jsdom lays nothing
+          out and answers zero to each, so a component test draws no grid
+          unless it says what the boxes are.
         */}
-        {availableHeight === 0
+        {box.height === 0 || box.floor === 0
           ? null
           : layout.placed.map((placed) => {
               const tile = byId.get(placed.id);
@@ -411,6 +478,17 @@ export function TileGrid({
                 </div>
               );
             })}
+        {/*
+          The panel whose chrome the row budget is counted in: empty, so its
+          height is the floor and nothing else, and last, so the panels the
+          screen actually draws come first in document order. It carries the
+          real header and body classes but not `ops-panel`, so a surface that
+          asks the document for a panel gets one the operator can see.
+        */}
+        <section ref={floorRef} className="tile-grid__floor" aria-hidden="true">
+          <header className="ops-panel__header" />
+          <div className="ops-panel__body" />
+        </section>
       </div>
       {displaced.length === 0 ? null : (
         <footer className="tile-grid__displaced">

@@ -4,7 +4,6 @@ import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 import { useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
-import { parseContentElementId } from '@/application/edit/contentFields';
 import {
   elementTranslation,
   elementTranslationsFor,
@@ -17,6 +16,8 @@ import { buildTranslationRequestUrl } from '@/application/localization/translati
 import { repositoryDefaultBranch, repositorySlug } from '@/application/repository';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
+import { useSelectedTile } from './selectedTile';
+
 /**
  * R28's edit-mode half, and the link that carries it out of the application.
  *
@@ -27,19 +28,16 @@ import { operationsStore, useOperationsStore } from '@/state/operationsStore';
  * scope with every other change, which is the whole argument for not giving
  * edit mode a store of its own.
  *
- * The route is re-applied at read and at write, exactly as the motion picker
+ * The screen is re-applied at read and at write, exactly as the motion picker
  * does it: `edit.selectedElementId` holds a bare tile id, and `registry` is
  * the table on four screens. A caption stored without the screen would rename
- * all four.
+ * all four. Which screen that is comes from the tile registry rather than from
+ * the route -- see `./selectedTile`.
  */
 export function ElementTranslation() {
   const t = useTranslate();
   const locale = useAppLocale();
-  const selectedElement = useOperationsStore((state) => state.edit.selectedElementId);
-  // The selection is shared with content fields (R4) and with the motion
-  // picker; a content field is not a tile and has its own editor.
-  const selected = parseContentElementId(selectedElement) === undefined ? selectedElement : '';
-  const screen = useOperationsStore((state) => state.ui.route);
+  const selected = useSelectedTile();
   const entries = useOperationsStore((state) =>
     stringList(state.personalization.draft.values[elementTranslationsSetting]),
   );
@@ -49,7 +47,7 @@ export function ElementTranslation() {
   return (
     <div className="edit-tile-motion">
       <h3>{t('edit.translation.heading')}</h3>
-      {selected === '' ? (
+      {selected === null ? (
         // Said rather than hidden, in the idiom the motion picker uses: a
         // control that appears only once the operator has already done the
         // thing it needs cannot teach them to do it.
@@ -58,15 +56,25 @@ export function ElementTranslation() {
         <CaptionField
           // Keyed by the selection and the locale so a draft never carries
           // over from one element, or one language, to the next.
-          key={`${locale}:${screen}:${selected}`}
-          label={t('edit.translation.field', { element: selected.toUpperCase(), locale })}
+          key={`${locale}:${selected.screen}:${selected.id}`}
+          label={t('edit.translation.field', { element: selected.id.toUpperCase(), locale })}
           resetLabel={t('edit.translation.reset')}
-          value={elementTranslation(entries, { locale, screen, element: selected }) ?? ''}
+          value={
+            elementTranslation(entries, {
+              locale,
+              screen: selected.screen,
+              element: selected.id,
+            }) ?? ''
+          }
           onCommit={(text) => {
             operationsStore.getState().applySettingsPatch([
               {
                 id: elementTranslationsSetting,
-                value: withElementTranslation(entries, { locale, screen, element: selected }, text),
+                value: withElementTranslation(
+                  entries,
+                  { locale, screen: selected.screen, element: selected.id },
+                  text,
+                ),
               },
             ]);
           }}

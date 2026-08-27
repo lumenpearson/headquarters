@@ -12,8 +12,17 @@ import { useSyncExternalStore } from 'react';
  * screen is mounted at a time.
  */
 export interface RegisteredTile {
+  /** `screen:tile`, the address every per-tile setting is stored under. */
   readonly key: string;
   readonly id: string;
+  /**
+   * The screen the mounted grid placed this tile on, which is not always the
+   * route in `ui.route`: `/archive` draws the `files` screen, `/objects/:id`
+   * the `objects` one and `/cases/:id` the `cases` one. A surface that
+   * re-qualified a bare tile id with the route wrote per-tile settings under
+   * an address no grid reads -- measured on all three.
+   */
+  readonly screen: string;
   readonly title: string;
   readonly category: TileCategory;
 }

@@ -1500,7 +1500,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
   definition(
     'sizes.panelHeader',
     'sizes',
-    31,
+    42,
     'device',
     'Height of a panel header, in pixels.',
     numberWithin(24, 48),
@@ -1508,7 +1508,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
   definition(
     'sizes.panelPadding',
     'sizes',
-    8,
+    12,
     'device',
     'Padding inside a panel body, in pixels.',
     numberWithin(2, 20),

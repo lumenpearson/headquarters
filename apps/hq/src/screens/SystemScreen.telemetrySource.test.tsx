@@ -19,15 +19,22 @@ vi.mock('next/navigation', () => ({
 }));
 
 /*
- * `TileGrid` draws nothing until a `ResizeObserver` has told it how much room
- * the screen was given, and the shared stub in `vitest.setup.ts` observes
- * nothing on purpose. Reporting one box here is what puts the telemetry panel
- * on the screen at all; the assertions below read the numbers in it, never
- * where the resolver placed it.
+ * `TileGrid` draws nothing until it has measured two boxes, and the shared stub
+ * in `vitest.setup.ts` observes nothing on purpose. Reporting them here is what
+ * puts the telemetry panel on the screen at all; the assertions below read the
+ * numbers in it, never where the resolver placed it.
+ *
+ * The second box is `.tile-grid__floor`, the empty panel the grid counts its
+ * row budget in: 68px is what `operations.css` draws below 2500px -- a 42px
+ * header, two 12px paddings and two 1px borders. jsdom performs no layout, so
+ * a box it is not told cannot be measured.
  */
 globalThis.ResizeObserver = class {
   constructor(private readonly report: (entries: readonly ResizeObserverEntry[]) => void) {}
   observe(target: Element): void {
+    const floor = target.classList.contains('tile-grid__floor');
+    target.getBoundingClientRect = () =>
+      ({ height: floor ? 68 : 900, width: floor ? 0 : 1600 }) as DOMRect;
     this.report([{ target, contentRect: { height: 900, width: 1600 } } as ResizeObserverEntry]);
   }
   unobserve(): void {}

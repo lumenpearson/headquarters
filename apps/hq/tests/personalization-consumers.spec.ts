@@ -1,3 +1,4 @@
+import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
@@ -178,6 +179,32 @@ test('R14: a theme and an accent both reach the document and neither breaks the 
   );
 });
 
+/*
+ * The catalogue's number and the drawn one, on an untouched profile.
+ *
+ * A custom property is written only when the operator moves the setting, so the
+ * default an operator actually sees is whatever the stylesheet falls back to.
+ * Until 2026-08-27 the schema said a panel header is 31px while the design drew
+ * 42: the catalogue showed a number no screen used, and the first press of the
+ * stepper dropped the header from 42 to 32 — a jump nobody asked for. This case
+ * is what keeps the two from drifting apart again.
+ *
+ * It runs below the wide breakpoint only. Above 2500px the design draws its own
+ * 54px header and 16px padding, and one default cannot equal two responsive
+ * values; that divergence is deliberate and recorded in the plan.
+ */
+test('R6: an untouched profile draws the numbers the catalogue shows', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/overview');
+  await expect(page.locator('.ops-panel').first()).toBeVisible();
+
+  const drawn = await panelMetrics(page);
+
+  expect(drawn.headerMinHeight).toBe(`${schemaDefault('sizes.panelHeader')}px`);
+  expect(drawn.bodyPadding).toBe(`${schemaDefault('sizes.panelPadding')}px`);
+  expect(drawn.borderWidth).toBe(`${schemaDefault('sizes.borderWidth')}px`);
+});
+
 for (const viewport of geometryViewports) {
   test(`R6/R19: geometry settings resize the interface at ${viewport.label} without letting the page scroll`, async ({
     page,
@@ -302,6 +329,123 @@ for (const viewport of geometryViewports) {
     expect(after.columnGap).toBe('17px');
     expect(before.rowGap).toBe('6px');
     expect(before.columnGap).toBe('6px');
+  });
+
+  test(`R6/R10: a shorter panel floor buys the screen more rows at ${viewport.label}`, async ({
+    page,
+  }) => {
+    /*
+     * `TileGrid` turns the box it was given into a number of rows, and until
+     * 2026-08-27 it did so with a constant: 132px, "a 42px header plus 24px of
+     * body padding", doubled so a tile carries at least as much content as
+     * chrome. The three settings below own exactly those numbers and make that
+     * floor anything between 30 and 94px, so a screen whose panels the operator
+     * has made smaller is a screen with room for more rows.
+     *
+     * 24, 2 and 1 are the bottom of the schema's ranges and none of the numbers
+     * `operations.css` writes for those roles at either width -- it draws a 31,
+     * 42, 43 or 54px header and 8, 11, 12 or 16px of padding -- so no
+     * declaration can answer for them (C51).
+     */
+    await page.setViewportSize(viewport.size);
+    await page.goto('/overview');
+    await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+    const before = await gridRowCount(page);
+    const placedBefore = await page.locator('.tile-grid__cell').count();
+
+    await seedSettings(page, {
+      'sizes.panelHeader': 24,
+      'sizes.panelPadding': 2,
+      'sizes.borderWidth': 1,
+    });
+    await page.reload();
+    await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+    // The premise: the panels really are shorter. A budget that grew while the
+    // panels stayed put would be following something else.
+    await expect
+      .poll(() => panelMetrics(page).then((metrics) => metrics.headerMinHeight))
+      .toBe('24px');
+
+    await expect.poll(() => gridRowCount(page)).toBeGreaterThan(before);
+    // What the rows are for: the tiles that did not fit now do.
+    expect(await page.locator('.tile-grid__cell').count()).toBeGreaterThan(placedBefore);
+    await expect(page.locator('.tile-grid__displaced')).toHaveCount(0);
+  });
+}
+
+/*
+ * The two cases below run at 1920x1080 alone, and the width is an argument
+ * rather than a default.
+ *
+ * Above 2500px `operations.css` already draws a 54px header and 16px of body
+ * padding, so the floor there is 88px against a schema maximum of 94 -- the
+ * settings have almost nowhere left to push it, and both cases measure a
+ * budget that does not move. Measured: at 2560x1440 the grid draws five rows
+ * at the default geometry, five at 46/19/3 and five at a 20px gap. Below the
+ * breakpoint the design's floor is 68px, and the same seeds move the budget
+ * from five rows to four. The case above covers the wide window, in the
+ * direction the schema leaves room for.
+ */
+const belowTheBreakpoint = { width: 1920, height: 1080 } as const;
+
+test('R6/R10: taller panels leave the screen fewer rows', async ({ page }) => {
+  await page.setViewportSize(belowTheBreakpoint);
+  await page.goto('/overview');
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+  const before = await gridRowCount(page);
+  // Stated rather than assumed: a screen already laid out in one row has
+  // nothing to lose and would satisfy the comparison by starting at the floor.
+  expect(before).toBeGreaterThan(1);
+
+  // The numbers the geometry case above argues for: inside the schema's ranges
+  // and outside every set `operations.css` writes.
+  await seedSettings(page, {
+    'sizes.panelHeader': 46,
+    'sizes.panelPadding': 19,
+    'sizes.borderWidth': 3,
+  });
+  await page.reload();
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+  await expect.poll(() => panelMetrics(page).then((metrics) => metrics.headerHeight)).toBe(46);
+
+  await expect.poll(() => gridRowCount(page)).toBeLessThan(before);
+});
+
+test('R6/R10: the row budget leaves room for the gap between rows', async ({ page }) => {
+  /*
+   * `n` rows of `h` with `n - 1` gaps between them need `n * h + (n - 1) *
+   * gap`. The gap was left out of that sum, which cost nothing while
+   * `.tile-grid` drew no gap at all -- it drew `normal`, that is zero, until
+   * `sizes.tileGap` reached the document on 2026-08-27 with a real 6px
+   * default.
+   *
+   * 20 is the top of the schema's 0..20 and none of the numbers the stylesheet
+   * writes for a laid-out screen. Unlike the header and the padding, the gap
+   * has one default at every width -- `.tile-grid` declares it unconditionally
+   * -- so one window answers for both sides of the breakpoint.
+   */
+  await page.setViewportSize(belowTheBreakpoint);
+  await page.goto('/overview');
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+  const before = await gridRowCount(page);
+  expect(before).toBeGreaterThan(1);
+
+  await seedSettings(page, { 'sizes.tileGap': 20 });
+  await page.reload();
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+  await expect.poll(() => tileGridGap(page).then((gap) => gap.rowGap)).toBe('20px');
+
+  // The panels are the height they always were; only the space between them
+  // moved, so a budget that ignored it keeps a row it can no longer draw.
+  await expect.poll(() => gridRowCount(page)).toBeLessThan(before);
+});
+
+/** How many rows the resolver asked the grid for, read off the grid itself. */
+async function gridRowCount(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const grid = document.querySelector('.tile-grid');
+    if (grid === null) throw new Error('no tile grid is laid out');
+    return window.getComputedStyle(grid).gridTemplateRows.split(' ').length;
   });
 }
 
@@ -1377,3 +1521,14 @@ test('R28: a caption belongs to the screen it was written on, not to the tile na
   await expect(page.locator('.ops-panel[data-panel] .ops-panel__header h2').first()).toBeVisible();
   await expect(page.getByText('ДОСЬЕ СМЕНЫ', { exact: true })).toHaveCount(0);
 });
+
+/** The declared default, read from the schema rather than repeated here. */
+function schemaDefault(
+  id: 'sizes.panelHeader' | 'sizes.panelPadding' | 'sizes.borderWidth',
+): number {
+  const definition = getSettingDefinition(id);
+  if (definition === undefined) throw new Error(`no setting is declared as ${id}`);
+  const value = definition.defaultValue;
+  if (typeof value !== 'number') throw new Error(`${id} does not default to a number`);
+  return value;
+}

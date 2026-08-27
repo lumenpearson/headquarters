@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 test('an operator opens edit mode, docks the panel and edits without the page scrolling', async ({
   page,
@@ -251,3 +251,139 @@ for (const [option, attribute] of [
     await expect.poll(paintState).toBe('painted');
   });
 }
+
+/**
+ * What the edit panel writes and what the screen reads are one address.
+ *
+ * Every per-tile setting is stored under `screen:tile`, because a tile id is
+ * unique only within a screen -- `registry` is the table on four of them. The
+ * two pickers used to build that address from `ui.route`, and on three routes
+ * the route is not the screen the grid was given: `/archive` draws the `files`
+ * screen, `/objects/:id` the `objects` one and `/cases/:id` the `cases` one.
+ * A caption or a motion set there was saved, listed in the catalogue, and read
+ * by nobody.
+ *
+ * These cases run the operator's own gesture end to end -- select the tile,
+ * type into the panel, look at the screen -- rather than seeding the stored
+ * list, which is what the R28 cases in `personalization-consumers.spec.ts`
+ * already do and what cannot see this defect at all.
+ */
+async function selectTile(page: Page, tile: string): Promise<void> {
+  await expect(page.locator(`[data-tile="${tile}"]`)).toBeVisible();
+  await page.keyboard.press('Control+Shift+E');
+  await expect(page.locator('.edit-mode-frame')).toBeVisible();
+
+  // The grip is the panel header and nowhere else, so R12 keeps text selectable
+  // in the body. Three pixels of jitter, as a real press has: a press with none
+  // would pass against a build that treated the first pixel as a drag.
+  const header = await page.locator(`[data-tile="${tile}"] .ops-panel__header`).boundingBox();
+  if (header === null) throw new Error(`the ${tile} tile is not laid out`);
+  await page.mouse.move(header.x + 20, header.y + header.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(header.x + 22, header.y + header.height / 2 + 1);
+  await page.mouse.up();
+  await expect(page.locator(`[data-tile="${tile}"]`)).toHaveAttribute('data-selected', 'true');
+}
+
+async function openSection(page: Page, section: string): Promise<void> {
+  await page.locator('.edit-panel').getByRole('combobox', { name: 'Раздел' }).click();
+  await page.getByRole('option', { name: section, exact: true }).click();
+}
+
+/**
+ * The routes whose name is not the name of the screen they draw. `/objects/:id`
+ * is the third and is not driven here: it is the same `ScreenRenderer` branch
+ * as `/cases/:id`, reached with an object id this suite has no fixture for.
+ */
+const routesNamedAfterNoScreen = [
+  { route: '/archive', screen: 'files', tile: 'categories', shipped: 'КАТЕГОРИИ' },
+  { route: '/cases/CASE-01', screen: 'cases', tile: 'registry', shipped: 'РЕЕСТР ДЕЛ' },
+] as const;
+
+for (const subject of routesNamedAfterNoScreen) {
+  test(`R28: a caption typed in edit mode reaches the tile on ${subject.route}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    await page.goto(subject.route);
+    const heading = page.locator(`[data-tile="${subject.tile}"] .ops-panel__header h2`);
+    await expect(heading).toHaveText(subject.shipped);
+
+    await selectTile(page, subject.tile);
+    await openSection(page, 'ИНФОРМАЦИЯ');
+
+    const field = page.locator('.edit-panel').getByRole('textbox', {
+      name: `Подпись плитки ${subject.tile.toUpperCase()} на языке ru`,
+    });
+    await field.fill('ПАПКИ СМЕНЫ');
+    await field.press('Enter');
+
+    // The heading the operator is looking at, not the field they typed into:
+    // the caption used to come back to the same input and appear nowhere else.
+    await expect(heading).toHaveText('ПАПКИ СМЕНЫ');
+    // Stored against the screen the grid was given, which is the whole of the
+    // defect: `archive:categories` and `case-detail:registry` saved and renamed
+    // nothing.
+    expect(await storedCaptions(page)).toEqual([
+      `ru:${subject.screen}:${subject.tile}=${encodeURIComponent('ПАПКИ СМЕНЫ')}`,
+    ]);
+  });
+}
+
+/** The caption list as the draft holds it, so the address can be read back. */
+async function storedCaptions(page: Page): Promise<readonly string[]> {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem('gremuchaya-hq:operations:v3');
+    if (raw === null) throw new Error('the store has not been persisted');
+    const parsed = JSON.parse(raw) as {
+      personalization?: { draft?: { values?: Record<string, unknown> } };
+    };
+    const stored = parsed.personalization?.draft?.values?.['localization.elementOverrides'];
+    if (!Array.isArray(stored)) throw new Error('no caption list is stored');
+    return stored as readonly string[];
+  });
+}
+
+test('R28: the same gesture still lands on a route that shares its name with the screen', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  // `/overview` is one of the thirteen routes where the two agreed all along.
+  // Reading the address off the tile registry must not cost them anything.
+  await page.goto('/overview');
+  const heading = page.locator('[data-tile="brief"] .ops-panel__header h2');
+  await expect(heading).toHaveText('ОБЗОР ОПЕРАЦИИ');
+
+  await selectTile(page, 'brief');
+  await openSection(page, 'ИНФОРМАЦИЯ');
+
+  const field = page
+    .locator('.edit-panel')
+    .getByRole('textbox', { name: 'Подпись плитки BRIEF на языке ru' });
+  await field.fill('СВОДКА СМЕНЫ');
+  await field.press('Enter');
+
+  await expect(heading).toHaveText('СВОДКА СМЕНЫ');
+});
+
+test('R19: a motion chosen in edit mode reaches the tile on a route named after no screen', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto('/archive');
+  const tile = page.locator('[data-tile="categories"]');
+  // The default the resolver gives a tile no entry names, so the assertion
+  // below is a change rather than a reading that was already true.
+  await expect(tile).toHaveAttribute('data-tile-motion', 'fade');
+
+  await selectTile(page, 'categories');
+  await openSection(page, 'ДВИЖЕНИЕ И ДОСТУПНОСТЬ');
+
+  await page
+    .locator('.edit-panel')
+    .getByRole('combobox', { name: 'Движение плитки CATEGORIES' })
+    .click();
+  await page.getByRole('option', { name: 'РАЗВЁРТКА', exact: true }).click();
+
+  await expect(tile).toHaveAttribute('data-tile-motion', 'scan');
+});

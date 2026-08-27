@@ -3,7 +3,6 @@
 import { tileCategories } from '@gremuchaya/settings-schema';
 import { TerminalSelect } from '@gremuchaya/ui/primitives';
 
-import { parseContentElementId } from '@/application/edit/contentFields';
 import { useTranslate } from '@/application/localization/locale';
 import { tileCategoryLabel, tileMotionLabel } from '@/application/localization/tileLabels';
 import {
@@ -16,6 +15,8 @@ import {
 } from '@/application/personalization/tileMotion';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
+import { useSelectedTile } from './selectedTile';
+
 /**
  * The animation of one tile, and of a whole group of them.
  *
@@ -27,6 +28,10 @@ import { operationsStore, useOperationsStore } from '@/state/operationsStore';
  * Both controls write ordinary settings, so a per-tile animation lands in undo,
  * in the history and in the issue draft with everything else. That is the whole
  * argument for storing it as a setting rather than as a field of edit state.
+ *
+ * The screen a per-tile entry is addressed under comes from the tile registry,
+ * not from `ui.route`, because on three routes the two disagree -- see
+ * `./selectedTile`.
  */
 export function TileMotionPicker() {
   // The subscription behind every label here, including the ones
@@ -36,11 +41,7 @@ export function TileMotionPicker() {
     value: motion,
     label: tileMotionLabel(motion),
   }));
-  const selectedElement = useOperationsStore((state) => state.edit.selectedElementId);
-  // The selection is shared with content fields (R4); one of those is not a
-  // tile and gets no motion.
-  const selected = parseContentElementId(selectedElement) === undefined ? selectedElement : '';
-  const screen = useOperationsStore((state) => state.ui.route);
+  const selected = useSelectedTile();
   const tileEntries = useOperationsStore((state) =>
     stringList(state.personalization.draft.values['tiles.animations']),
   );
@@ -54,20 +55,25 @@ export function TileMotionPicker() {
   return (
     <div className="edit-tile-motion">
       <h3>{t('edit.tileMotion.heading')}</h3>
-      {selected === '' ? (
+      {selected === null ? (
         // Said rather than hidden: a control that appears only once the operator
         // has already done the thing it needs cannot teach them to do it.
         <p className="edit-tile-motion__hint">{t('edit.tileMotion.hint')}</p>
       ) : (
         <TerminalSelect
-          label={t('edit.tileMotion.tile', { tile: selected.toUpperCase() })}
-          value={perTile.get(`${screen}:${selected}`) ?? 'inherit'}
+          label={t('edit.tileMotion.tile', { tile: selected.id.toUpperCase() })}
+          value={perTile.get(`${selected.screen}:${selected.id}`) ?? 'inherit'}
           options={motionOptions}
           onValueChange={(value) =>
             operationsStore.getState().applySettingsPatch([
               {
                 id: 'tiles.animations',
-                value: withTileMotion(tileEntries, screen, selected, value as TileMotion),
+                value: withTileMotion(
+                  tileEntries,
+                  selected.screen,
+                  selected.id,
+                  value as TileMotion,
+                ),
               },
             ])
           }

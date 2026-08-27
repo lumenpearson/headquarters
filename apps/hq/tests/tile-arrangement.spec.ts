@@ -80,8 +80,20 @@ test('R7: dragging a tile onto another moves that tile and leaves the rest in or
   // The claim that separates a reorder from a reshuffle: every tile the
   // operator did not touch keeps the order it had.
   expect(after.filter((id) => id !== 'brief')).toEqual(before.filter((id) => id !== 'brief'));
-  // Stored qualified by screen, because `registry` is a tile on four of them.
-  expect(await settingValue(page, 'tiles.order')).toEqual(after.map((id) => `overview:${id}`));
+  /*
+   * Stored qualified by screen, because `registry` is a tile on four of them --
+   * and stored over every tile the screen declares, not only the ones it found
+   * room for. The ranking is seeded from the priorities in force so that moving
+   * one tile re-ranks nothing else, and a tile the window pushed out still has a
+   * place in it: the operator who makes room for it later finds it where they
+   * left it.
+   */
+  const stored = (await settingValue(page, 'tiles.order')) as readonly string[];
+  expect(stored.filter((entry) => after.includes(entry.slice('overview:'.length)))).toEqual(
+    after.map((id) => `overview:${id}`),
+  );
+  expect(stored.every((entry) => entry.startsWith('overview:'))).toBe(true);
+  expect(stored.length).toBeGreaterThanOrEqual(after.length);
 });
 
 test('R7: while a tile is being carried, the places it can go say so', async ({ page }) => {
