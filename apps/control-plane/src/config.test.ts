@@ -266,6 +266,23 @@ describe('control-plane configuration', () => {
       loadControlPlaneConfig({ HQ_CONTROL_PLANE_REDIS_REST_URL: 'https://hq-redis.upstash.io' }),
     ).toThrow('HQ_CONTROL_PLANE_REDIS_REST_URL');
   });
+
+  it('keeps a malformed database URL out of its own startup error', () => {
+    // A connection string that fails `new URL` still carries its password;
+    // the error must name the variable and never quote the value, because in
+    // a container this message lands in `docker compose logs`.
+    const malformed = 'postgres//hq:fixture-password-value@db.example.test:5432/hq';
+    let error: Error | undefined;
+    try {
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_DATABASE_URL: malformed });
+    } catch (caught) {
+      error = caught instanceof Error ? caught : new Error(String(caught));
+    }
+    expect(error?.message).toBe(
+      'HQ_CONTROL_PLANE_DATABASE_URL must be a PostgreSQL connection URL',
+    );
+    expect(error?.message).not.toContain('fixture-password-value');
+  });
 });
 
 describe('redis configuration', () => {

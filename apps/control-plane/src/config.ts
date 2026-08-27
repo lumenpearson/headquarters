@@ -301,7 +301,15 @@ function normalizeOrigin(value: string): string {
 
 function parseDatabaseUrl(value: string | undefined): string | undefined {
   if (value === undefined || value.trim().length === 0) return undefined;
-  const url = new URL(value);
+  // `new URL` guarded for the same reason as in parseRedis: Node attaches the
+  // raw input to the TypeError, and a malformed connection string carries its
+  // own password into the startup log.
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('HQ_CONTROL_PLANE_DATABASE_URL must be a PostgreSQL connection URL');
+  }
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.hostname.length === 0) {
     throw new Error('HQ_CONTROL_PLANE_DATABASE_URL must be a PostgreSQL connection URL');
   }
