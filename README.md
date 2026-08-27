@@ -284,7 +284,10 @@ transaction lock. Ту же процедуру выполняет сам сер�
 
 Для presence и ограничения частоты публикаций control-plane использует отдельный ленивый Upstash
 Redis adapter. Для включения надо передать **обе** server-only переменные;
-одна переменная без другой отклоняется при запуске:
+одна переменная без другой отклоняется при запуске. Когда ни одно из явных имён
+не задано, конфигурация берёт пару `KV_REST_API_URL` / `KV_REST_API_TOKEN`,
+которую пишет интеграция Vercel Marketplace; у явных имён приоритет, а пара,
+разорванная между двумя схемами имён, отклоняется так же, как половина одной:
 
 ```powershell
 $env:HQ_CONTROL_PLANE_REDIS_REST_URL = "https://<redis-id>.upstash.io"
@@ -334,6 +337,27 @@ pnpm --filter @gremuchaya/protocol generate
 pnpm --dir packages/protocol exec buf lint
 pnpm --filter @gremuchaya/protocol test
 ```
+
+#### Собственное развёртывание (Docker)
+
+Контрольную плоскость можно поднять у себя — со своей базой, своими секретами и без учётной записи
+где бы то ни было. Нужны Docker с Compose v2 и Node для генератора секретов:
+
+```powershell
+node scripts/generate-env.mjs
+docker compose up -d --build --wait
+docker compose ps
+docker compose down
+```
+
+Генератор пишет `.env` рядом с `compose.yaml`, печатает имена переменных и путь — но не значения — и
+без `--force` существующий файл не перезаписывает. Плоскость отвечает на `http://127.0.0.1:4100`
+поверх PostgreSQL в соседнем контейнере, а `--wait` возвращает управление только после того, как
+миграции прошли и `sync.device-lifecycle` с `sync.realtime-admission` включены.
+
+Что этот уровень умеет, чего не умеет и как подняться до объектного хранилища —
+`docs/release/self-hosting.md`. Почему в образ входит только `apps/control-plane` —
+`docs/adr/0010-container-deployment.md`.
 
 ### Tauri native roots
 

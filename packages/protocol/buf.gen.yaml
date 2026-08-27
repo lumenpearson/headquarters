@@ -4,3 +4,15 @@ plugins:
     out: src/gen
     opt:
       - target=ts
+      # protoc-gen-es defaults to `import_extension=none`, which TypeScript
+      # accepts under `moduleResolution: Bundler` and Node's ESM resolver does
+      # not. Every consumer that goes through a bundler -- `apps/hq`, Vitest,
+      # the Vercel build -- resolved the extensionless specifiers, so the
+      # omission was invisible until something ran the compiled output directly:
+      # `node dist/server.js` failed with ERR_MODULE_NOT_FOUND on
+      # `gen/gremuchaya/common/v1/common_pb`, which is the command
+      # `pnpm control-plane` runs and the command the container image's CMD is.
+      # `src/index.ts` already writes `.js` by hand; this makes the generated
+      # tree agree with it. `apps/control-plane/src/protocolBindings.test.ts` is
+      # the guard that fails if this line is ever dropped.
+      - import_extension=js

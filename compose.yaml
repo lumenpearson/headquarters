@@ -1,0 +1,127 @@
+# The offline deployment tier: this repository's control plane and a PostgreSQL
+# beside it, on one machine, with no account anywhere.
+#
+#     node scripts/generate-env.mjs
+#     docker compose up -d --build --wait
+#     docker compose ps
+#     docker compose down
+#
+# What this stack is and is not is set out in docs/release/self-hosting.md and
+# docs/adr/0010-container-deployment.md. In one line: it serves the durable
+# paired-device surface -- pairing, sessions, groups, settings, materials
+# metadata, telemetry, integrations and the realtime socket -- and it cannot
+# mint object-storage grants, because that needs an S3-compatible bucket this
+# file deliberately does not invent.
+#
+# There is no Redis service here. `parseRedis` in apps/control-plane/src/config.ts
+# requires an HTTPS REST endpoint, so a plain-HTTP Redis-over-REST container is
+# refused at startup by a check that exists for a reason and is not being
+# widened. Without Redis the control plane serves: presence reports the last
+# state a device recorded rather than noticing one gone, and group publications
+# are not rate limited. `Health` reports which of the two modes is in force.
+
+name: gremuchaya-hq
+
+services:
+  postgres:
+    # Major-only on purpose, where the Node base image is pinned exactly: the
+    # ten migrations target the major, patch releases do not change initdb
+    # output, and an exact patch pin here would go stale with nobody assigned
+    # to move it. The Node pin is different in kind — it must match
+    # `.tool-versions`, which a human already maintains.
+    image: postgres:18
+    # No published port. The database is reachable from the control plane over
+    # the compose network and from nowhere else; a database listening on the
+    # host is a second thing to secure for no benefit here.
+    environment:
+      POSTGRES_DB: headquarters
+      POSTGRES_USER: headquarters
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it by running node scripts/generate-env.mjs}
+      # Named explicitly, and one level below the mount point, because the
+      # official image's default data directory has moved between major
+      # versions. Saying where it is makes this file independent of that.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready --username=headquarters --dbname=headquarters']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  control-plane:
+    image: ${HQ_CONTROL_PLANE_IMAGE:-gremuchaya-control-plane}:${HQ_IMAGE_TAG:-local}
+    build:
+      # The repository root, not apps/control-plane: the image needs three
+      # workspace projects and the lockfile that pins them.
+      context: .
+      dockerfile: apps/control-plane/Dockerfile
+    # PID 1 in this container would otherwise be Node, which reaps no orphan and
+    # forwards no signal it was not written to expect.
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The database URL is assembled here rather than being a variable of its
+      # own, so the password exists in exactly one place. The generated password
+      # is base64url, whose alphabet needs no percent-encoding in a URL's
+      # userinfo -- which is why the generator mints that alphabet.
+      #
+      # `sslmode=disable` is deliberate and is the honest setting for a link
+      # that never leaves a container network. `pg` treats `sslmode=require` as
+      # `verify-full`, so it would refuse the stock image's self-signed
+      # certificate and the failure would read as a database that is down.
+      HQ_CONTROL_PLANE_DATABASE_URL: postgresql://headquarters:${POSTGRES_PASSWORD:?}@postgres:5432/headquarters?sslmode=disable
+      # The TCP driver, not the HTTP one. `neon` speaks HTTPS to Neon over the
+      # public internet; this deployment's whole point is that it does not need
+      # one.
+      HQ_CONTROL_PLANE_DATABASE_DRIVER: postgres
+      HQ_CONTROL_PLANE_AUTH_TOKEN_PEPPER: ${HQ_CONTROL_PLANE_AUTH_TOKEN_PEPPER:?set it by running node scripts/generate-env.mjs}
+      HQ_CONTROL_PLANE_BOOTSTRAP_SECRET: ${HQ_CONTROL_PLANE_BOOTSTRAP_SECRET:?set it by running node scripts/generate-env.mjs}
+      HQ_CONTROL_PLANE_ALLOWED_ORIGINS: ${HQ_CONTROL_PLANE_ALLOWED_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000,http://tauri.localhost,https://tauri.localhost}
+      # `HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START` is left unset, which means
+      # true: this is a long-lived process, so it completes the migration
+      # transaction before it registers a single RPC. The image also carries
+      # `dist/migrate.js` for a deployment that would rather run them as a step.
+    ports:
+      # Published to the host's loopback only. The packaged desktop shell's
+      # content security policy admits loopback and `*.vercel.app` and cannot be
+      # made to admit a LAN address, so publishing on 0.0.0.0 would offer an
+      # address that shell still could not use
+      # (docs/release/known-limitations.md).
+      - '127.0.0.1:${HQ_CONTROL_PLANE_PUBLISHED_PORT:-4100}:4100'
+    # Stronger than the image's own probe, which asks only that the service
+    # answers. This deployment configures durable authentication, so it states
+    # that: a container that started health-only -- because a secret was
+    # rejected or the database was unreachable -- answers `Health` with
+    # `SERVING` and would otherwise look healthy forever.
+    #
+    # `materials.storage-grants` is not refused here, even though this tier does
+    # not have it, because adding the five HQ_CONTROL_PLANE_STORAGE_* variables
+    # is a supported upgrade and must not turn the container unhealthy.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - dist/healthcheck.js
+        - --require-capability
+        - sync.device-lifecycle
+        - --require-capability
+        - sync.realtime-admission
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    # One, and not a knob. Realtime fan-out is single-process: two replicas both
+    # persist to `sync_events` and neither pushes the other's events to its own
+    # sockets, so a second replica silently splits the audience of every live
+    # publication (docs/release/known-limitations.md).
+    deploy:
+      replicas: 1
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

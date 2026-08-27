@@ -66,6 +66,24 @@ This is the largest gap in the build and the one most likely to be planned aroun
   having no pub/sub, which is wrong — it documents `POST /subscribe/{channel}` over Server-Sent
   Events, and the pinned `@upstash/redis` exposes `subscribe()`. The limitation is one nobody has
   lifted, not one that cannot be lifted.
+- **The container deployment is therefore one replica, and `compose.yaml` says so rather than
+  leaving it to a default.** `deploy.replicas: 1` is a constraint, not a starting point: a second
+  replica splits the audience of every live publication silently, because the entry above means
+  neither replica pushes the other's events to its own sockets. Scaling this stack needs the
+  cross-process carrier that does not exist, not a larger number.
+- **The compose tier has no object storage and no Redis, so two capabilities are off in it.**
+  `materials.storage-grants` is disabled and the four grant RPCs answer `FAILED_PRECONDITION`;
+  presence reports the last state a device recorded rather than noticing one gone, and group
+  publications are not rate limited. Both are upgrades that need an account, and both are reported
+  by `Health` and `GetCapabilities` rather than having to be inferred.
+  `docs/release/self-hosting.md` holds the full table of what each tier has; it is not repeated
+  here.
+- **The container image has never been built.** `apps/control-plane/Dockerfile`, `compose.yaml` and
+  `.github/workflows/container.yml` were written on a machine with no Docker installed, and the
+  workflow's first pull-request run is the first time any of it is executed. What was proved
+  without Docker: the three compiled entry points exist, and `node dist/server.js` and
+  `node dist/healthcheck.js` work against a hand-assembled copy of the layout the runtime stage
+  produces — production dependencies and the three `dist` trees, nothing else.
 - **On a group fed by polling, a playback command executes six seconds after it is
   pressed — on every screen, including the one that issued it.** The lead has to
   exceed the poll interval or the screens diverge by however long the page took to

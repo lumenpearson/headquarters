@@ -11,3 +11,6 @@ packages/protocol/src/gen
 playwright-report
 test-results
 .claude/worktrees
+.claude/skills/upstash-redis-js
+.claude/skills/upstash-ratelimit-js
+.agents/skills

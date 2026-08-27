@@ -87,7 +87,11 @@ detectors and are not sufficient for a security gate.
 ## Skills
 
 None of the shadcn/Vercel skills apply to the wire contract or the control plane — they are
-React/web-specific. For process discipline: invoke `superpowers:brainstorming` before
+React/web-specific. `upstash-redis-js` and `upstash-ratelimit-js` do apply to Redis work in
+`apps/control-plane`, with one standing caveat: their session-management and lock examples
+store raw token-shaped values and mutate with read-then-write pairs. Neither pattern overrides
+this package's rules — persist only purpose-separated HMAC hashes with a `hash_version`, and
+keep every mutation a single statement. For process discipline: invoke `superpowers:brainstorming` before
 designing a new RPC surface or a schema change, `superpowers:test-driven-development` before
 implementing it, `superpowers:systematic-debugging` when a handler or a migration misbehaves
 and the cause is unclear, and `superpowers:verification-before-completion` before reporting a

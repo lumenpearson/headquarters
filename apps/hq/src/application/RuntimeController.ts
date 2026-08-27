@@ -50,7 +50,6 @@ export class RuntimeController {
   readonly sceneService: SceneService;
   readonly explorerService: ExplorerService;
   readonly browserDirectory: BrowserDirectorySource;
-  readonly nativeFiles: TauriFileSource;
   readonly displays: TauriDisplayGateway;
   readonly snapshotService: SnapshotService;
   readonly #unsubscribeBus: () => void;
@@ -60,13 +59,12 @@ export class RuntimeController {
   private constructor(readonly config: RuntimeConfiguration) {
     this.bus = createScreenBus();
     this.browserDirectory = new BrowserDirectorySource();
-    this.nativeFiles = new TauriFileSource();
     this.displays = new TauriDisplayGateway();
     this.explorerService = new ExplorerService([
       new EmulatedFileSource(config.emulatedRoots),
       this.browserDirectory,
       new BridgeFileSource(config.project.bridgeUrl),
-      this.nativeFiles,
+      new TauriFileSource(),
     ]);
     this.sceneService = new SceneService(
       sceneRepository,
@@ -189,28 +187,24 @@ export class RuntimeController {
   }
 
   /**
-   * Moves the native watcher to the directory the operator is looking at.
+   * Moves every capable source's watch to the directory the operator is
+   * looking at.
    *
-   * One watch at a time on purpose: the native watcher is recursive, so a
-   * watcher per visited directory would report the same change several times
-   * over, and the explorer only ever shows one path.
+   * One watch at a time on purpose: a native or bridge watcher is recursive,
+   * so a watcher per visited directory would report the same change several
+   * times over, and the explorer only ever shows one path. There is no
+   * availability check and no late-arrival guard here because
+   * `ExplorerService.watch` covers both: a source with nothing to watch (no
+   * Tauri runtime -- the case on every call on the web build -- or an
+   * unreachable bridge) is skipped rather than stopping the others, and a
+   * source whose subscribe call resolves after this watch has already been
+   * replaced disposes itself on arrival instead of leaking.
    */
   async #watchActivePath(path: VirtualPath): Promise<void> {
     this.#explorerWatch?.dispose();
-    this.#explorerWatch = null;
-    if (!this.nativeFiles.isAvailable()) return;
-    try {
-      const watch = await this.nativeFiles.watch(path, () => {
-        this.#scheduleExplorerRefresh(path);
-      });
-      // Navigation can have moved on while the native call was in flight; the
-      // watch that arrives late belongs to a directory nobody is looking at.
-      if (appStore.getState().explorer.activePath === path) this.#explorerWatch = watch;
-      else watch.dispose();
-    } catch {
-      // A directory the native layer will not watch still lists and reads. The
-      // explorer simply keeps the refresh-on-navigate behaviour it had before.
-    }
+    this.#explorerWatch = await this.explorerService.watch(path, () => {
+      this.#scheduleExplorerRefresh(path);
+    });
   }
 
   #scheduleExplorerRefresh(path: VirtualPath): void {
@@ -420,9 +414,10 @@ export class RuntimeController {
   close(): void {
     if (this.#explorerRefreshTimer !== null) window.clearTimeout(this.#explorerRefreshTimer);
     this.#explorerRefreshTimer = null;
-    // Disposing the watch also releases the native watcher: `unwatch_directory`
-    // is what stops the OS handle, and a reloaded window would otherwise leave
-    // one behind for every navigation of the previous session.
+    // Disposing the merged watch releases every source behind it too --
+    // `unwatch_directory` for the native OS handle, an aborted `Watch` stream
+    // for the bridge -- and a reloaded window would otherwise leave one behind
+    // for every navigation of the previous session.
     this.#explorerWatch?.dispose();
     this.#explorerWatch = null;
     this.#unsubscribeBus();

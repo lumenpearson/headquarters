@@ -50,23 +50,32 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   const [sortKey, setSortKey] = useState<'id' | 'name' | 'threat' | 'lastSeenAt'>('id');
   const [descending, setDescending] = useState(false);
   const normalizedQuery = foldCase(query);
-  const { page: objectPage, goToPage } = useRecordPage(allObjects, {
-    pageSize,
-    filters: [
-      (object) => kind === 'all' || object.kind === kind,
-      (object) =>
-        foldCase(`${object.id} ${object.name} ${object.callsign} ${object.sectorId}`).includes(
-          normalizedQuery,
-        ),
-    ],
-    comparator: (left, right) => {
-      const a = left[sortKey];
-      const b = right[sortKey];
-      const result =
-        typeof a === 'number' && typeof b === 'number' ? a - b : compareText(String(a), String(b));
-      return descending ? -result : result;
+  // The question is the kind filter plus the search text: either one narrows
+  // the registry, and without this the operator kept whatever page the
+  // previous filter had left them on.
+  const { page: objectPage, goToPage } = useRecordPage(
+    allObjects,
+    {
+      pageSize,
+      filters: [
+        (object) => kind === 'all' || object.kind === kind,
+        (object) =>
+          foldCase(`${object.id} ${object.name} ${object.callsign} ${object.sectorId}`).includes(
+            normalizedQuery,
+          ),
+      ],
+      comparator: (left, right) => {
+        const a = left[sortKey];
+        const b = right[sortKey];
+        const result =
+          typeof a === 'number' && typeof b === 'number'
+            ? a - b
+            : compareText(String(a), String(b));
+        return descending ? -result : result;
+      },
     },
-  });
+    `${kind}:${normalizedQuery}`,
+  );
   const objects = objectPage.items;
 
   /*
