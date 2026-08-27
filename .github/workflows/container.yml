@@ -1,0 +1,229 @@
+name: Container
+
+# Builds the control-plane image on every pull request, and publishes it to the
+# GitHub Container Registry from `master` and from a `v*` tag.
+#
+# ONE THING THIS WORKFLOW CANNOT DO: make the published package public. GHCR
+# creates a package private, and its visibility is a setting on the package's
+# own page in the repository's Packages list. No workflow permission grants it
+# and no step here can perform it; it is done once, by hand, after the first
+# successful publish. Until it is done, an anonymous `docker pull` is asked for
+# credentials, which reads exactly like an image that does not exist.
+#
+# `ci.yml` is untouched by this. The container is gated here so that a red
+# Docker build cannot be mistaken for a red lint, typecheck or test run.
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only for the workflow. `packages: write` is granted to the publishing job
+# alone, so the job that builds an unreviewed branch's image holds no registry
+# credential at all.
+permissions:
+  contents: read
+
+env:
+  # Keep aligned with docs/release/environment.md, ci.yml and the ARG in
+  # apps/control-plane/Dockerfile.
+  NODE_VERSION: '24.3.0'
+  # One architecture. A second doubles every build for a platform nothing in
+  # this repository has been run on; multi-architecture manifests, signing and
+  # SBOM generation are all deliberately out of scope
+  # (docs/adr/0010-container-deployment.md).
+  PLATFORMS: linux/amd64
+  IMAGE_NAME: ${{ github.repository }}/control-plane
+  # The tag the smoke step runs. It is passed to compose as shell environment
+  # rather than written into `.env`, because a shell value wins over `.env` in
+  # Compose's interpolation and this way the CI tag cannot drift from the
+  # defaults `.env.example` carries for a person running the same commands.
+  CI_IMAGE_NAME: gremuchaya-control-plane
+  CI_IMAGE_TAG: ci
+
+jobs:
+  build:
+    name: Build and smoke-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      # `load: true` and `push: false`: the image lands in the runner's own
+      # daemon under the tag compose is about to ask for, so the smoke test
+      # exercises the artefact this job built rather than one it pulled. Nothing
+      # is pushed from this job on any event.
+      #
+      # A pull request from a fork can read the Actions cache and not write it,
+      # so `cache-to` warns there and the build proceeds uncached.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          # The repository root: the image needs three workspace projects and
+          # the lockfile that pins them.
+          context: .
+          file: apps/control-plane/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: false
+          load: true
+          tags: ${{ env.CI_IMAGE_NAME }}:${{ env.CI_IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # No attestation manifest. It is what puts an `unknown/unknown` entry
+          # beside the image on the package page, and this workflow claims no
+          # provenance it has not produced.
+          provenance: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # No `pnpm install` anywhere in this job. `scripts/generate-env.mjs` uses
+      # `node:` builtins only, so the smoke test needs the repository, Node and
+      # Docker and nothing else -- which is also the claim the self-hosting
+      # documentation makes to a third party, tested here rather than asserted.
+      #
+      # The secrets it mints exist for the length of this job and are never
+      # printed: the script reports variable names and the path it wrote.
+      - name: Generate the compose environment
+        run: node scripts/generate-env.mjs --out .env
+
+      # `--wait` blocks until every service reports healthy, so this step is the
+      # first assertion: PostgreSQL accepted a connection, the control plane
+      # applied ten migrations inside one advisory-locked transaction, and its
+      # compose healthcheck -- which requires `sync.device-lifecycle` and
+      # `sync.realtime-admission` -- passed. A container that had started
+      # health-only would never become healthy and this step would time out.
+      - name: Start the stack
+        env:
+          HQ_CONTROL_PLANE_IMAGE: ${{ env.CI_IMAGE_NAME }}
+          HQ_IMAGE_TAG: ${{ env.CI_IMAGE_TAG }}
+        # `--wait-timeout` bounds the wait: a container that comes up
+        # `running (unhealthy)` never exits, and an unbounded wait would ride
+        # to `timeout-minutes` and be cancelled — skipping every diagnostic
+        # step below.
+        run: docker compose up -d --wait --wait-timeout 180
+
+      # The whole deployment tier the documentation claims for this stack,
+      # asserted through the image's own probe, inside the container, over the
+      # only transport the service has.
+      #
+      # `--require-dependency database` proves the database is configured, not
+      # reached: `Health.dependencies[].status` is captured at startup and
+      # never probed (`apps/control-plane/src/routes.ts`). Connectivity is
+      # proven one step earlier — startup awaits `runMigrations` and
+      # `readInstallationId` against the real PostgreSQL with no catch, so a
+      # database that never answered rejects startup and the compose
+      # healthcheck above never passes.
+      #
+      # `--refuse-capability materials.storage-grants` asserts the documented
+      # loss rather than the documented gain. If a future change made this tier
+      # mint storage grants without a bucket, that would be a silent
+      # contradiction of docs/release/self-hosting.md, and this line is what
+      # turns it into a failed build.
+      - name: Assert the offline tier, including what it does not have
+        env:
+          HQ_CONTROL_PLANE_IMAGE: ${{ env.CI_IMAGE_NAME }}
+          HQ_IMAGE_TAG: ${{ env.CI_IMAGE_TAG }}
+        run: |
+          docker compose exec -T control-plane node dist/healthcheck.js \
+            --require-dependency database \
+            --require-capability control.health \
+            --require-capability transport.connect \
+            --require-capability transport.grpc-web \
+            --require-capability sync \
+            --require-capability sync.device-lifecycle \
+            --require-capability sync.realtime-admission \
+            --require-capability settings \
+            --require-capability materials \
+            --require-capability telemetry \
+            --require-capability integration \
+            --refuse-capability materials.storage-grants
+
+      # Startup errors from `apps/control-plane/src/config.ts` name the variable
+      # that was wrong and not its value, and neither image echoes a password,
+      # so these logs are safe to publish and are the only way to read why a
+      # failure above happened. `always()` rather than `failure()`: a wait that
+      # rides to the job timeout is a cancellation, and a cancelled job skips
+      # `failure()` steps — exactly the run whose logs matter most.
+      - name: Container logs
+        if: always()
+        env:
+          HQ_CONTROL_PLANE_IMAGE: ${{ env.CI_IMAGE_NAME }}
+          HQ_IMAGE_TAG: ${{ env.CI_IMAGE_TAG }}
+        run: docker compose logs --no-color
+
+      # `-v` as well as `down`, so the PostgreSQL volume goes with the stack. A
+      # runner is discarded anyway; what this protects is a maintainer running
+      # the same sequence locally and finding the next run migrating a database
+      # the previous one left behind.
+      - name: Stop the stack
+        if: always()
+        env:
+          HQ_CONTROL_PLANE_IMAGE: ${{ env.CI_IMAGE_NAME }}
+          HQ_IMAGE_TAG: ${{ env.CI_IMAGE_TAG }}
+        run: docker compose down -v
+
+  publish:
+    name: Publish to GHCR
+    needs: build
+    # `== 'push'`, not `!= 'pull_request'`: every tag rule below is conditioned
+    # on the default branch or a `v*` tag, so a `workflow_dispatch` from any
+    # other ref would reach the push step with an empty tag list and fail the
+    # build late instead of skipping the job.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `master` gets `edge` and `sha-<short>`: one moving tag to follow and one
+      # immutable tag to pin an incident to. A `v*` tag gets the version and
+      # `latest`. Nothing else is tagged, so `latest` never moves on a branch
+      # push.
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=edge,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # The same context and Dockerfile the smoke job just proved, rebuilt from
+      # the cache it populated rather than promoted from it: promoting a loaded
+      # image would need a registry to promote through, which is the thing being
+      # set up.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/control-plane/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          provenance: false

@@ -1,0 +1,55 @@
+# What never reaches the Docker build context.
+#
+# The context is the repository root, because the control-plane image needs
+# three workspace packages and the lockfile that pins them (see the header of
+# apps/control-plane/Dockerfile). Everything below is either rebuilt inside the
+# image, belongs to a different deployment profile, or must not be in a build
+# context at all.
+
+# Installed and generated trees. A host `node_modules` carries Windows
+# junctions and platform-specific binaries; a host `dist` would let a stale
+# local build silently become the image's, which is the one class of bug a
+# container is bought to remove.
+**/node_modules
+**/dist
+**/.next
+**/out
+**/coverage
+**/.turbo
+**/*.tsbuildinfo
+**/playwright-report
+**/test-results
+apps/hq/src-tauri/target
+apps/hq/src-tauri/gen
+packages/protocol/v3
+
+# Every environment file, including the examples. The image bakes no
+# configuration: secrets arrive as container environment at run time, so nothing
+# here needs one, and a context that cannot carry a `.env` cannot leak one into
+# a layer.
+**/.env
+**/.env.*
+**/*.local.json
+# Carries real shoot-machine mount paths; no COPY names it, this keeps it out
+# of the BuildKit context entirely.
+apps/file-bridge/bridge.config.json
+
+# The desktop and web profiles. Neither is containerized: `apps/hq` would put a
+# second copy of the RPC surface behind the same contract (ADR 0009), and its
+# static export needs no server at run time (ADR 0005).
+apps/hq/public
+apps/hq/tests
+apps/hq/src-tauri
+apps/file-bridge/src
+
+# Repository furniture with no bearing on a build.
+.git
+.gitattributes
+.github
+.husky
+.vscode
+.claude
+.agents
+docs
+shared
+**/*.md
