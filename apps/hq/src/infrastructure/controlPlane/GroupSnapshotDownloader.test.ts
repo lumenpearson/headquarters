@@ -131,8 +131,10 @@ describe('GroupSnapshotDownloader seniority', () => {
     const mirror = readGroupMirror(storage);
     expect(mirror?.revision).toBe(7);
     expect(mirror?.sequence).toBe(12);
-    // Only the group's share. 138 of the 154 definitions belong to the
-    // machine, and a copy of the group must carry none of them.
+    // Only the group's share: every definition whose `scope` is `device`
+    // belongs to the machine, and a copy of the group must carry none of them.
+    // The count is deliberately not written here -- it moved twice while this
+    // comment stood, and the assertion below does not depend on it.
     expect(mirror?.values).toEqual({ 'telemetry.source': 'native' });
     expect(mirror?.refreshedAt).toBe('2026-08-26T09:00:00.000Z');
   });

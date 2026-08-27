@@ -27,9 +27,10 @@ export const settingsHistoryScopes = ['device', 'group'] as const;
 /**
  * Whether a change reaches beyond this machine.
  *
- * `SettingScope` has declared `'group'` since the schema was written, five
- * definitions carry it, and the value was read in exactly one place — as text
- * in a label. It decided nothing (C23). Here it decides something: an entry is
+ * `SettingScope` has declared `'group'` since the schema was written, the
+ * definitions that carry it are whatever the registry says today, and the value
+ * was read in exactly one place — as text in a label. It decided nothing (C23).
+ * Here it decides something: an entry is
  * `group` when it changed at least one group-scoped setting, which is the same
  * as saying it will propagate once a group exists, and `device` when it changed
  * none.

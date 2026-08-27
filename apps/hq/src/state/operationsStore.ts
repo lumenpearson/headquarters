@@ -1010,8 +1010,11 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     publishLiveEdit(patches);
     // R6, the group half: a group-scoped change is also what the group agreed,
     // and `SettingsService` is where that is recorded. `publishGroupSettings`
-    // filters to the five group-scoped definitions and does nothing at all
-    // without a session, so a local-only client makes no call.
+    // filters to the definitions whose `scope` says `group` -- derived from
+    // the registry, never counted here, for the reason `GroupSettingsSync`
+    // gives: an earlier comment named the number and was wrong within a
+    // release. It does nothing at all without a session, so a local-only
+    // client makes no call.
     publishGroupSettings(patches);
   },
   resetSettingsCategory: (category) =>

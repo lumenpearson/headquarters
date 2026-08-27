@@ -38,7 +38,17 @@ export const settingCategories = [
 export type SettingCategory = (typeof settingCategories)[number];
 export type SettingValue = boolean | number | string | readonly string[];
 export type SettingValues = Readonly<Record<string, SettingValue>>;
-export type SettingScope = 'factory' | 'group' | 'device' | 'local-draft' | 'session-preview';
+/**
+ * The layers a value can come from, in order of precedence.
+ *
+ * `'local-draft'` and `'session-preview'` were declared here and never
+ * reached: no definition carried either, and nothing read them, so they
+ * widened every `Exclude<SettingScope, 'factory'>` for no one. Removing them
+ * makes that type say what it has always meant -- a definition belongs either
+ * to the group or to the machine. Drafts are not a scope: they are held by
+ * `PersonalizationState.draft` and resolved against these layers.
+ */
+export type SettingScope = 'factory' | 'group' | 'device';
 
 /**
  * A serialisable description of the only controls the safe editor is allowed
