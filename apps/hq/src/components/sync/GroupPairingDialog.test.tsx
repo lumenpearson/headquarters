@@ -1,25 +1,36 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DeviceRole, GroupDevice } from '@/application/sync/connection';
+import {
+  disconnectedConnection,
+  initialGroupMirrorSummary,
+  type DeviceRole,
+  type GroupDevice,
+} from '@/application/sync/connection';
 import type { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
 import type { PairingCodeGrant } from '@/application/sync/controlPlanePort';
 import { operationsStore } from '@/state/operationsStore';
+
+import { GroupPairingDialog, openGroupPairing } from './GroupPairingDialog';
 
 /*
  * The dialog's collaborator is the session, which the application holds in a
  * module of its own and a component test has no other way to supply. Mocking
  * the holder rather than exporting a setter from it keeps the runtime with one
  * writer, which is the reason the holder exists.
+ *
+ * `vi.hoisted` and a plain static import, rather than a `const` beside a
+ * dynamic `await import`. `vi.mock` is lifted above the imports, so the holder
+ * it closes over has to be lifted with it; the dynamic form was a way of
+ * ordering the two by hand, and hand-ordered module evaluation is the kind of
+ * thing that holds until the graph around it changes.
  */
-const held: { session: FakeSession | null } = { session: null };
+const held = vi.hoisted(() => ({ session: null as FakeSession | null }));
 vi.mock('./ControlPlaneRuntime', () => ({
   currentControlPlaneSession: () => held.session,
   subscribeControlPlaneSession: () => () => {},
 }));
-
-const { GroupPairingDialog, openGroupPairing } = await import('./GroupPairingDialog');
 
 /**
  * The session as this surface uses it: a transcript of what was asked of it,
@@ -64,15 +75,38 @@ function useSession(): FakeSession {
   return session;
 }
 
-function open(): void {
+/**
+ * Opens the dialog and answers with the popup every query below is scoped to.
+ *
+ * Three things are established here rather than assumed, because a case that
+ * assumes them does not fail when they stop holding -- it passes for a reason
+ * that has nothing to do with what it asserts.
+ *
+ * - **The popup is on screen.** `TerminalDialog` renders through
+ *   `Dialog.Portal`, so its content is not inside the container `render`
+ *   answered with, and it does not necessarily arrive in the same tick as the
+ *   state change that opened it. `findByRole` waits for the thing the case is
+ *   about to inspect.
+ * - **The queries are scoped to it.** Every assertion below reads this element
+ *   rather than the whole document, so nothing another case left behind can
+ *   satisfy or break one of them.
+ * - **The mocked holder is in effect.** `.group-pairing__note` renders exactly
+ *   when the dialog has no session. If the mock ever failed to apply, every
+ *   command would be absent and the negative assertions would pass while
+ *   proving nothing.
+ */
+async function open(): Promise<HTMLElement> {
   render(<GroupPairingDialog />);
   act(() => {
     openGroupPairing();
   });
+  const dialog = await screen.findByRole('dialog');
+  expect(dialog.querySelector('.group-pairing__note')).toBeNull();
+  return dialog;
 }
 
-function button(name: RegExp): HTMLButtonElement {
-  return screen.getByRole('button', { name }) as HTMLButtonElement;
+function button(dialog: HTMLElement, name: RegExp): HTMLButtonElement {
+  return within(dialog).getByRole('button', { name }) as HTMLButtonElement;
 }
 
 /** The group as a session that has joined one holds it. */
@@ -101,22 +135,46 @@ describe('GroupPairingDialog over the group administration commands', () => {
   beforeEach(() => {
     localStorage.clear();
     operationsStore.getState().resetWorld();
+    /*
+     * `resetWorld` deliberately keeps the `connection` slice: the group this
+     * session is in is not part of the simulated world, and the service that
+     * owns the slice is not told about a reset (`operationsStore.ts`). So the
+     * slice is cleared here, explicitly. Without this, a case whose whole
+     * premise is "nothing is paired" inherited a session and a roster from
+     * whichever case ran before it, and the file passed only in the order it
+     * was written.
+     *
+     * `disconnectedConnection` and not `initialConnectionState`, for the reason
+     * that helper exists: `patchConnection` merges, and the initial state
+     * leaves its optional fields out rather than naming them `undefined`, so
+     * spreading it over a joined session clears the mode and leaves the session
+     * itself standing.
+     */
+    operationsStore.getState().patchConnection({
+      ...disconnectedConnection('local-only'),
+      links: [],
+      mirror: initialGroupMirrorSummary,
+    });
     held.session = null;
+    // Cleanup runs in `vitest.setup.ts`. If it ever stops running, this says so
+    // at the first line of the next case rather than through a query further
+    // down matching an element the previous case left behind.
+    expect(document.body.textContent).toBe('');
   });
 
-  it('keeps the bootstrap secret off the surface until a group is actually being made', () => {
+  it('keeps the bootstrap secret off the surface until a group is actually being made', async () => {
     const session = useSession();
     // Nothing paired: the state an operator is in when the group does not exist
     // yet and the pairing code they are being asked for cannot exist either.
     act(() => {
       operationsStore.getState().patchConnection({ mode: 'reauth-required' });
     });
-    open();
+    const dialog = await open();
 
-    expect(screen.queryByLabelText('Секрет развёртывания')).toBeNull();
+    expect(within(dialog).queryByLabelText('Секрет развёртывания')).toBeNull();
 
     act(() => {
-      fireEvent.click(button(/создать новую группу/i));
+      fireEvent.click(button(dialog, /создать новую группу/i));
     });
 
     /*
@@ -124,7 +182,7 @@ describe('GroupPairingDialog over the group administration commands', () => {
      * operator is merely pairing, and it is never persisted: the field is
      * masked and holds the value for as long as this dialog is open.
      */
-    const secret = screen.getByLabelText('Секрет развёртывания') as HTMLInputElement;
+    const secret = within(dialog).getByLabelText('Секрет развёртывания') as HTMLInputElement;
     expect(secret.type).toBe('password');
     expect(session.calls).toEqual([]);
   });
@@ -134,26 +192,30 @@ describe('GroupPairingDialog over the group administration commands', () => {
     act(() => {
       operationsStore.getState().patchConnection({ mode: 'reauth-required' });
     });
-    open();
+    const dialog = await open();
     act(() => {
-      fireEvent.click(button(/создать новую группу/i));
+      fireEvent.click(button(dialog, /создать новую группу/i));
     });
 
     act(() => {
-      fireEvent.change(screen.getByLabelText('Имя новой группы'), { target: { value: 'ШТАБ' } });
-      fireEvent.change(screen.getByLabelText('Имя устройства'), { target: { value: 'MON-01' } });
-      fireEvent.change(screen.getByLabelText('Секрет развёртывания'), {
+      fireEvent.change(within(dialog).getByLabelText('Имя новой группы'), {
+        target: { value: 'ШТАБ' },
+      });
+      fireEvent.change(within(dialog).getByLabelText('Имя устройства'), {
+        target: { value: 'MON-01' },
+      });
+      fireEvent.change(within(dialog).getByLabelText('Секрет развёртывания'), {
         target: { value: 'secret-value' },
       });
     });
     await act(async () => {
-      fireEvent.click(button(/\[N\] создать группу/i));
+      fireEvent.click(button(dialog, /\[N\] создать группу/i));
     });
 
     expect(session.calls).toEqual(['createGroup:ШТАБ:MON-01:secret-value']);
     // The block folds away on success and the secret goes with it; a value left
     // in a mounted field is a value one screenshot away from being shared.
-    expect(screen.queryByLabelText('Секрет развёртывания')).toBeNull();
+    expect(within(dialog).queryByLabelText('Секрет развёртывания')).toBeNull();
   });
 
   it('shows an issued code with the deadline it stops working at', async () => {
@@ -161,13 +223,13 @@ describe('GroupPairingDialog over the group administration commands', () => {
     const expiresAtMs = Date.UTC(2026, 7, 27, 9, 41, 5);
     session.grant = { code: 'PAIR-0001', role: 'EDITOR', expiresAtMs };
     joined('ADMIN');
-    open();
+    const dialog = await open();
 
     await act(async () => {
-      fireEvent.click(button(/выпустить код пары/i));
+      fireEvent.click(button(dialog, /выпустить код пары/i));
     });
 
-    const shown = document.querySelector('.group-pairing__code')?.textContent ?? '';
+    const shown = dialog.querySelector('.group-pairing__code')?.textContent ?? '';
     expect(shown).toContain('PAIR-0001');
     /*
      * A code without its deadline is one an operator is still reading out after
@@ -188,72 +250,81 @@ describe('GroupPairingDialog over the group administration commands', () => {
     const session = useSession();
     session.grant = { code: 'PAIR-0001', role: 'EDITOR', expiresAtMs: Date.now() + 600_000 };
     joined('ADMIN');
-    open();
+    const dialog = await open();
     await act(async () => {
-      fireEvent.click(button(/выпустить код пары/i));
+      fireEvent.click(button(dialog, /выпустить код пары/i));
     });
-    expect(document.querySelector('.group-pairing__code')).not.toBeNull();
+    expect(dialog.querySelector('.group-pairing__code')).not.toBeNull();
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Закрыть' }));
     });
     act(() => {
       openGroupPairing();
     });
+    const reopened = await screen.findByRole('dialog');
 
     /*
      * A code is a credential with a deadline. Leaving the last one on screen
      * would have an operator read out a code the server forgot minutes ago,
      * from a dialog they opened for something else entirely.
      */
-    expect(document.querySelector('.group-pairing__code')).toBeNull();
+    expect(reopened.querySelector('.group-pairing__code')).toBeNull();
   });
 
-  it('offers no rename to the name the group already has', () => {
+  it('offers no rename to the name the group already has', async () => {
     useSession();
     joined('ADMIN');
-    open();
+    const dialog = await open();
 
     act(() => {
-      fireEvent.change(screen.getByLabelText('Новое имя группы'), { target: { value: ' ШТАБ ' } });
+      fireEvent.change(within(dialog).getByLabelText('Новое имя группы'), {
+        target: { value: ' ШТАБ ' },
+      });
     });
 
     // The control plane would accept it and spend a revision and a log row on a
     // change of nothing.
-    expect(button(/переименовать группу/i).disabled).toBe(true);
+    expect(button(dialog, /переименовать группу/i).disabled).toBe(true);
 
     act(() => {
-      fireEvent.change(screen.getByLabelText('Новое имя группы'), { target: { value: 'ШТАБ-2' } });
+      fireEvent.change(within(dialog).getByLabelText('Новое имя группы'), {
+        target: { value: 'ШТАБ-2' },
+      });
     });
-    expect(button(/переименовать группу/i).disabled).toBe(false);
+    expect(button(dialog, /переименовать группу/i).disabled).toBe(false);
   });
 
-  it('offers no group command while the address answers for another database', () => {
+  it('offers no group command while the address answers for another database', async () => {
     useSession();
     joined('ADMIN');
     act(() => {
       operationsStore.getState().patchConnection({ mode: 'installation-changed' });
     });
-    open();
+    const dialog = await open();
 
     /*
      * The stored session is good and the group behind this address is not the
      * one it belongs to. Renaming or promoting here would be a command aimed at
-     * a database this device never joined.
+     * a database this device never joined. The roster is still drawn, which is
+     * what makes this an absence rather than an empty dialog.
      */
-    expect(document.querySelector('.group-pairing__admin')).toBeNull();
+    expect(dialog.querySelector('.group-pairing__admin')).toBeNull();
+    expect(dialog.querySelector('.group-pairing__devices')).not.toBeNull();
   });
 
-  it('offers an administrator only the two roles a pairing code can grant', () => {
+  it('offers an administrator only the two roles a pairing code can grant', async () => {
     useSession();
     joined('ADMIN');
-    open();
+    const dialog = await open();
 
     act(() => {
-      fireEvent.click(screen.getByLabelText('Роль для нового устройства'));
+      fireEvent.click(within(dialog).getByLabelText('Роль для нового устройства'));
     });
 
-    // The selected item carries the `[×]` indicator; the role is what is read.
+    // The option list is a portal of its own, so it is read from the document
+    // rather than from the dialog; the selected item carries the `[×]`
+    // indicator, and the role is what is read.
     const options = screen
       .getAllByRole('option')
       .map((option) => (option.textContent ?? '').replace('[×]', ''));
@@ -264,20 +335,20 @@ describe('GroupPairingDialog over the group administration commands', () => {
     expect(options).toEqual(['РЕДАКТОР', 'НАБЛЮДАТЕЛЬ']);
   });
 
-  it('closes every administrative command to a viewer, and sends nothing', () => {
+  it('closes every administrative command to a viewer, and sends nothing', async () => {
     const session = useSession();
     joined('VIEWER');
-    open();
+    const dialog = await open();
 
-    const leaderButtons = screen.getAllByRole('button', {
+    const leaderButtons = within(dialog).getAllByRole('button', {
       name: /\[G\] главная/i,
     }) as HTMLButtonElement[];
-    expect(button(/выпустить код пары/i).disabled).toBe(true);
-    expect(button(/переименовать группу/i).disabled).toBe(true);
+    expect(button(dialog, /выпустить код пары/i).disabled).toBe(true);
+    expect(button(dialog, /переименовать группу/i).disabled).toBe(true);
     expect(leaderButtons.every((entry) => entry.disabled)).toBe(true);
 
     act(() => {
-      fireEvent.click(button(/выпустить код пары/i));
+      fireEvent.click(button(dialog, /выпустить код пары/i));
       leaderButtons.forEach((entry) => fireEvent.click(entry));
     });
 
@@ -288,15 +359,15 @@ describe('GroupPairingDialog over the group administration commands', () => {
      * and the dialog prints its refusal.
      */
     expect(session.calls).toEqual([]);
-    expect(screen.getByText(/распоряжается администратор группы/i)).not.toBeNull();
+    expect(within(dialog).getByText(/распоряжается администратор группы/i)).not.toBeNull();
   });
 
-  it('opens those same commands the moment this session role is raised', () => {
+  it('opens those same commands the moment this session role is raised', async () => {
     useSession();
     joined('EDITOR');
-    open();
+    const dialog = await open();
 
-    expect(button(/выпустить код пары/i).disabled).toBe(true);
+    expect(button(dialog, /выпустить код пары/i).disabled).toBe(true);
 
     // What the group log does to this slice when an administrator on another
     // machine promotes this device; `groupDevicePatch` is what writes it.
@@ -306,16 +377,16 @@ describe('GroupPairingDialog over the group administration commands', () => {
       });
     });
 
-    expect(button(/выпустить код пары/i).disabled).toBe(false);
+    expect(button(dialog, /выпустить код пары/i).disabled).toBe(false);
   });
 
-  it('closes a demotion the control plane would refuse, and says why', () => {
+  it('closes a demotion the control plane would refuse, and says why', async () => {
     useSession();
     joined('ADMIN', [
       { deviceId: 'device-a', name: 'ЭКРАН 1', role: 'ADMIN', status: 'ONLINE' },
       { deviceId: 'device-b', name: 'ЭКРАН 2', role: 'EDITOR', status: 'ONLINE' },
     ]);
-    open();
+    const dialog = await open();
 
     /*
      * One administrator left. `setDeviceRole` refuses to remove the last one
@@ -323,12 +394,13 @@ describe('GroupPairingDialog over the group administration commands', () => {
      * memberships that statement counts, so the option is closed here rather
      * than offered and refused.
      */
-    const rows = [...document.querySelectorAll('.group-pairing__devices article')];
+    const rows = [...dialog.querySelectorAll('.group-pairing__devices article')];
+    expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain('ХОТЯ БЫ ОДИН АДМИНИСТРАТОР');
     expect(rows[1]?.textContent).not.toContain('ХОТЯ БЫ ОДИН АДМИНИСТРАТОР');
 
     act(() => {
-      fireEvent.click(screen.getByLabelText('Роль устройства ЭКРАН 1'));
+      fireEvent.click(within(dialog).getByLabelText('Роль устройства ЭКРАН 1'));
     });
 
     // The reason is printed and the option is closed; a hint beside an option
@@ -338,7 +410,7 @@ describe('GroupPairingDialog over the group administration commands', () => {
     ).toEqual([null, 'true', 'true']);
   });
 
-  it('closes a demotion of the leader while the group runs on one leader', () => {
+  it('closes a demotion of the leader while the group runs on one leader', async () => {
     useSession();
     act(() => {
       operationsStore.getState().patchConnection({
@@ -350,15 +422,16 @@ describe('GroupPairingDialog over the group administration commands', () => {
         devices: defaultDevices(),
       });
     });
-    open();
+    const dialog = await open();
 
     // Under `LEADER` authority the server refuses to demote the leader out of
     // `ADMIN` and names the order: move the leadership first.
-    const rows = [...document.querySelectorAll('.group-pairing__devices article')];
+    const rows = [...dialog.querySelectorAll('.group-pairing__devices article')];
+    expect(rows).toHaveLength(2);
     expect(rows[1]?.textContent).toContain('ПЕРЕДАЙТЕ ГЛАВНУЮ СЕССИЮ');
   });
 
-  it('prints what the control plane refused rather than swallowing it', () => {
+  it('prints what the control plane refused rather than swallowing it', async () => {
     useSession();
     joined('ADMIN');
     act(() => {
@@ -366,9 +439,9 @@ describe('GroupPairingDialog over the group administration commands', () => {
         failure: 'ЗАПРОС К CONTROL PLANE ОТКЛОНЁН: A group must retain at least one administrator.',
       });
     });
-    open();
+    const dialog = await open();
 
     // The one line an operator has to see when a command did nothing.
-    expect(screen.getByText(/ЗАПРОС К CONTROL PLANE ОТКЛОНЁН/)).not.toBeNull();
+    expect(within(dialog).getByText(/ЗАПРОС К CONTROL PLANE ОТКЛОНЁН/)).not.toBeNull();
   });
 });
