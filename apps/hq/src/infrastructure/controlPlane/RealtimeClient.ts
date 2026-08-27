@@ -496,15 +496,32 @@ export class RealtimeClient {
  * path is replaced rather than appended, because a base URL with a trailing
  * segment would otherwise produce `/api/realtime`, which the server does not
  * serve. No query string is ever added -- see the class comment.
+ *
+ * A relative base is resolved against the document, because the web deployment
+ * names its own control plane `/api`: the interface and the RPC share an
+ * origin there, and no absolute address can be baked into the build when every
+ * preview deployment answers on a host of its own. Without the second argument
+ * `new URL` throws on such a base, which would turn a configuration that RPC
+ * handles perfectly well into a crash on the first socket attempt.
  */
 export function realtimeUrl(baseUrl: string): string {
-  const url = new URL(baseUrl);
+  const url = new URL(baseUrl, documentOrigin());
   if (url.protocol === 'http:') url.protocol = 'ws:';
   else if (url.protocol === 'https:') url.protocol = 'wss:';
   url.pathname = realtimePath;
   url.search = '';
   url.hash = '';
   return url.toString();
+}
+
+/**
+ * The page's own address, when there is a page. `undefined` outside a browser
+ * keeps `new URL` at its previous behaviour, so an absolute base resolves the
+ * same way it always did and a relative one still throws where nothing could
+ * resolve it.
+ */
+function documentOrigin(): string | undefined {
+  return typeof globalThis.location === 'undefined' ? undefined : globalThis.location.href;
 }
 
 function toBytes(data: unknown): Uint8Array | null {

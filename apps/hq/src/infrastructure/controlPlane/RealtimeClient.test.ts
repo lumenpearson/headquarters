@@ -1,7 +1,7 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
 import { realtimeV1, syncV1 } from '@gremuchaya/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { RealtimeLinkState } from '@/application/sync/connection';
 import type { GroupEventEnvelope, RealtimeIdentity } from '@/application/sync/groupChannel';
@@ -222,6 +222,31 @@ describe('RealtimeClient', () => {
     expect(realtimeUrl('https://plane.example:8443/api/v2?key=secret#frag')).toBe(
       'wss://plane.example:8443/realtime',
     );
+  });
+
+  /**
+   * The web deployment names its own control plane `/api`: interface and RPC
+   * share an origin, and no absolute address can be baked into a build whose
+   * host is minted per deployment. RPC handles that base by string
+   * concatenation, so a socket attempt was the only thing that would have
+   * thrown on it.
+   *
+   * `location` is stubbed rather than assumed: this suite runs in the node
+   * environment, where it does not exist, and that absence is itself the
+   * behaviour the second half asserts.
+   */
+  it('resolves a relative base against the page it is running on', () => {
+    vi.stubGlobal('location', { href: 'https://headquarters.example/overview' });
+    try {
+      expect(realtimeUrl('/api')).toBe('wss://headquarters.example/realtime');
+      // An absolute base is unaffected by the fallback.
+      expect(realtimeUrl('http://127.0.0.1:4100')).toBe('ws://127.0.0.1:4100/realtime');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // With no page to resolve against, a relative base is still refused rather
+    // than silently pointed somewhere.
+    expect(() => realtimeUrl('/api')).toThrow(TypeError);
   });
 
   it('greets from sequence zero, then replays in order and acknowledges each event', () => {
