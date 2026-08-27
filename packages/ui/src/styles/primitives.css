@@ -897,20 +897,33 @@ body.terminal-theme {
   color: currentcolor;
 }
 
+/*
+ * A dialog backdrop blurs the window behind it rather than merely darkening
+ * it: `backdrop-filter` on this fixed layer reaches everything painted below
+ * `--z-dialog` -- the shell, its chrome, any panel -- while the popup above it
+ * and the toast viewport at `--z-popup + 1` stay sharp. Notifications must
+ * never blur the window: they have no backdrop at all, so the rule holds by
+ * construction. The tint is lighter than the flat 64% it replaces because the
+ * blur now carries most of the separation.
+ */
 .terminal-dialog__backdrop,
 .terminal-drawer__backdrop {
   position: fixed;
   z-index: var(--z-dialog);
   inset: 0;
-  background: rgb(0 0 0 / 64%);
+  backdrop-filter: blur(16px) saturate(90%);
+  background: rgb(0 0 0 / 42%);
   opacity: 1;
-  transition: opacity var(--motion-standard) linear;
+  transition:
+    opacity var(--motion-standard) linear,
+    backdrop-filter var(--motion-standard) ease;
 }
 
 .terminal-dialog__backdrop[data-starting-style],
 .terminal-dialog__backdrop[data-ending-style],
 .terminal-drawer__backdrop[data-starting-style],
 .terminal-drawer__backdrop[data-ending-style] {
+  backdrop-filter: blur(0px) saturate(100%);
   opacity: 0;
 }
 
@@ -945,7 +958,7 @@ body.terminal-theme {
 .terminal-dialog[data-starting-style],
 .terminal-dialog[data-ending-style] {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(10px) scale(0.985);
 }
 
 .terminal-dialog__header,
@@ -1001,7 +1014,7 @@ body.terminal-theme {
 }
 
 .terminal-drawer__backdrop {
-  background: rgb(0 0 0 / 34%);
+  background: rgb(0 0 0 / 26%);
 }
 
 .terminal-drawer {
