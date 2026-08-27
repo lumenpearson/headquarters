@@ -11,6 +11,13 @@ import { RealtimeClient, realtimeUrl, type RealtimeSocketLike } from './Realtime
 /** A ping interval no backoff step could ever equal. */
 const pingIntervalMs = 1_000_000;
 
+/**
+ * Where the injected clock starts. Wall-clock scale rather than zero, because
+ * a ping carries the reading itself and zero is what the client reads as "this
+ * pong answered no ping of mine".
+ */
+const startMs = 1_700_000_000_000;
+
 const accessToken = 'access-token-that-must-never-be-in-a-url';
 
 const identity: RealtimeIdentity = {
@@ -76,11 +83,17 @@ interface Harness {
   readonly sockets: FakeSocket[];
   readonly events: GroupEventEnvelope[];
   readonly statuses: RealtimeLinkState[];
+  /** Every round trip the client reported, in the order the pongs arrived. */
+  readonly latencies: number[];
   /** Reconnect delays only; the ping timer is filtered out by its interval. */
   readonly backoffDelays: () => number[];
   /** Runs every timer the client scheduled, oldest first. */
   readonly flushTimers: () => void;
   readonly latest: () => FakeSocket;
+  /** The instant the injected clock currently reads. */
+  readonly nowMs: () => number;
+  /** Moves the injected clock forward, which is what a round trip is measured as. */
+  readonly advance: (deltaMs: number) => void;
 }
 
 function harness(
@@ -99,13 +112,17 @@ function harness(
   const sockets: FakeSocket[] = [];
   const events: GroupEventEnvelope[] = [];
   const statuses: RealtimeLinkState[] = [];
+  const latencies: number[] = [];
   const delays: number[] = [];
   let pending: (() => void)[] = [];
+  let clockMs = startMs;
   const client = new RealtimeClient({
     baseUrl: 'http://127.0.0.1:4100',
     identity: overrides.identity ?? (() => identity),
     onEvent: (event) => events.push(event),
     onStatus: (state) => statuses.push(state),
+    onLatencySample: (roundTripMs) => latencies.push(roundTripMs),
+    now: () => clockMs,
     ...(overrides.onResync === undefined ? {} : { onResync: overrides.onResync }),
     ...(overrides.onReauthenticationRequired === undefined
       ? {}
@@ -132,6 +149,11 @@ function harness(
     sockets,
     events,
     statuses,
+    latencies,
+    nowMs: () => clockMs,
+    advance: (deltaMs) => {
+      clockMs += deltaMs;
+    },
     backoffDelays: () => delays.filter((delay) => delay !== pingIntervalMs),
     flushTimers: () => {
       const due = pending;
@@ -191,6 +213,32 @@ function resyncFrame(requested: bigint, earliest: bigint) {
       },
     },
   });
+}
+
+/**
+ * A pong as the hub sends one: the ping's own reading, echoed untouched.
+ *
+ * `serverTime` is stamped decades away from the injected clock on purpose. The
+ * round trip is measured against this client's clock alone, so a server whose
+ * own clock is nowhere near it must not change the figure by a millisecond.
+ */
+function pongFrame(clientMonotonicMs: bigint) {
+  return create(realtimeV1.RealtimeServerFrameSchema, {
+    payload: {
+      case: 'pong',
+      value: { clientMonotonicMs, serverTime: timestampFromDate(new Date(315_532_800_000)) },
+    },
+  });
+}
+
+/** What the client last put on the wire as a ping. */
+function pingOf(socket: FakeSocket): realtimeV1.ClientPing {
+  const frame = socket
+    .frames()
+    .reverse()
+    .find((candidate) => candidate.payload.case === 'ping');
+  if (frame?.payload.case !== 'ping') throw new Error('No ping was sent.');
+  return frame.payload.value;
 }
 
 function errorFrame(code: string) {
@@ -439,6 +487,56 @@ describe('RealtimeClient', () => {
     test.client.start();
     expect(test.sockets).toHaveLength(0);
     expect(test.statuses.at(-1)?.status).toBe('off');
+  });
+
+  it('reports the round trip of every ping the server answers', () => {
+    const test = harness();
+    test.client.start();
+    const socket = test.latest();
+    socket.open();
+    socket.deliver(readyFrame(0n));
+
+    // The ping timer is the only one armed on a socket that has not dropped.
+    test.flushTimers();
+    const firstSent = pingOf(socket).clientMonotonicMs;
+    expect(firstSent).toBe(BigInt(startMs));
+    test.advance(37);
+    socket.deliver(pongFrame(firstSent));
+
+    test.flushTimers();
+    const secondSent = pingOf(socket).clientMonotonicMs;
+    test.advance(12);
+    socket.deliver(pongFrame(secondSent));
+
+    // Every exchange is a sample: the caller decides what to do with the
+    // series, and one that arrived late is still a reading of this link.
+    expect(test.latencies).toEqual([37, 12]);
+    // A pong changes nothing else about the socket.
+    expect(test.statuses.at(-1)?.status).toBe('live');
+    expect(test.events).toHaveLength(0);
+  });
+
+  /**
+   * The echo is what makes the measurement stateless, and it is also what makes
+   * it refusable. A pong carrying no reading of ours would otherwise be
+   * reported as the whole age of the epoch, which is a figure no median
+   * recovers from within a shoot.
+   */
+  it('refuses a pong that echoes no reading this client ever took', () => {
+    const test = harness();
+    test.client.start();
+    const socket = test.latest();
+    socket.open();
+    socket.deliver(readyFrame(0n));
+    test.flushTimers();
+
+    // A server that echoed nothing at all.
+    socket.deliver(pongFrame(0n));
+    // A reading from ahead of this client's clock, which no ping of its own
+    // could have carried.
+    socket.deliver(pongFrame(BigInt(test.nowMs() + 5_000)));
+
+    expect(test.latencies).toEqual([]);
   });
 
   it('ignores a text frame rather than decoding it as Protobuf', () => {

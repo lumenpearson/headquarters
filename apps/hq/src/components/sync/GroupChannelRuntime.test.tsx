@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { create } from '@bufbuild/protobuf';
+import { create, toBinary } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
-import { syncV1 } from '@gremuchaya/protocol';
+import { realtimeV1, syncV1 } from '@gremuchaya/protocol';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,17 +30,73 @@ const cloudPlane = 'https://plane.example';
 const installationId = '3f1c2b7a-0d4e-4f6a-9c2b-8e1d5a7c9f30';
 
 /**
- * The session state machine as this component uses it, which is only
- * `ensureFreshSession` on a socket that was refused. Nothing in these cases
- * opens one, so the stub records the fact that it was never needed.
+ * The session state machine as this component uses it: `ensureFreshSession` on
+ * a socket that was refused, and `recordLatencySample` on every pong. Both
+ * transcripts are held rather than counted, because the claims are about which
+ * plane reached for them and how often.
  */
-function sessionStub(refreshes: string[]): ControlPlaneSession {
+function sessionStub(refreshes: string[], latencies: number[] = []): ControlPlaneSession {
   return {
     ensureFreshSession: async () => {
       refreshes.push('called');
       return true;
     },
+    recordLatencySample: (roundTripMs: number) => latencies.push(roundTripMs),
   } as unknown as ControlPlaneSession;
+}
+
+/** The parts of a `WebSocket` `RealtimeClient` drives, as a test can drive them. */
+interface FakeRealtimeSocket {
+  readonly url: string;
+  onmessage: ((event: { readonly data: unknown }) => void) | null;
+}
+
+/**
+ * Every realtime socket the runtime opened, with the browser's constructor
+ * replaced.
+ *
+ * The constructor and not an injected factory: what is under test is the
+ * composition this component builds, and it injects no factory, so a socket
+ * handed in through one would be a socket this code path never opens.
+ */
+function recordRealtimeSockets(): FakeRealtimeSocket[] {
+  const sockets: FakeRealtimeSocket[] = [];
+  vi.stubGlobal(
+    'WebSocket',
+    class {
+      binaryType = '';
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { readonly data: unknown }) => void) | null = null;
+      onclose: ((event: { readonly code: number; readonly reason: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor(readonly url: string) {
+        sockets.push(this);
+      }
+
+      send(): void {}
+
+      close(): void {
+        this.readyState = 3;
+      }
+    },
+  );
+  return sockets;
+}
+
+/** A pong as the hub answers a ping: the client's own reading, echoed back. */
+function pongBytes(clientMonotonicMs: number): ArrayBuffer {
+  const frame = create(realtimeV1.RealtimeServerFrameSchema, {
+    payload: {
+      case: 'pong',
+      value: {
+        clientMonotonicMs: BigInt(clientMonotonicMs),
+        serverTime: timestampFromDate(new Date(1_700_000_000_000)),
+      },
+    },
+  });
+  return toBinary(realtimeV1.RealtimeServerFrameSchema, frame).buffer as ArrayBuffer;
 }
 
 /**
@@ -276,6 +332,47 @@ describe('GroupChannelRuntime over two planes of one group', () => {
     setStatus('link-0', 'polling');
     expect(await publishedTo()).toContain(nearPlane);
     expect(currentGroupRuntime()?.channel).toBe(channel);
+  });
+
+  it('measures the round trip on the primary plane socket and on no other', async () => {
+    recordFetch();
+    const sockets = recordRealtimeSockets();
+    const latencies: number[] = [];
+    const { links } = twoLinks();
+    joinGroup([
+      linkState({ delivery: 'socket' }),
+      linkState({
+        linkId: 'link-1',
+        baseUrl: cloudPlane,
+        role: 'secondary',
+        delivery: 'socket',
+      }),
+    ]);
+
+    render(<GroupChannelRuntime links={links} session={sessionStub([], latencies)} />);
+    await settle();
+
+    const near = sockets.find((socket) => socket.url.startsWith('ws://127.0.0.1:4100'));
+    const cloud = sockets.find((socket) => socket.url.startsWith('wss://plane.example'));
+    if (near === undefined || cloud === undefined) {
+      throw new Error('Both planes were expected to open a realtime socket.');
+    }
+
+    const sentMs = Date.now() - 24;
+    near.onmessage?.({ data: pongBytes(sentMs) });
+    cloud.onmessage?.({ data: pongBytes(sentMs) });
+
+    /*
+     * One sample, from the near plane. `connection.clock` is the estimate
+     * against the plane `ControlPlaneSession` holds, and the cloud plane's
+     * round trip is a different path through a different network: folding both
+     * into one median would report a link that is neither of them.
+     */
+    expect(latencies).toHaveLength(1);
+    expect(latencies[0]).toBeGreaterThanOrEqual(24);
+    // The socket carried the ping's own reading, so the figure is the elapsed
+    // time and not the age of the epoch.
+    expect(latencies[0]).toBeLessThan(5_000);
   });
 
   it('asks the session to refresh from no feed of its own accord', async () => {

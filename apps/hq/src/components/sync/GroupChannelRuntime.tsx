@@ -257,6 +257,17 @@ export function GroupChannelRuntime({ links, session }: GroupChannelRuntimeProps
           cursor: channel,
           onStatus: report,
           onResync: resumeFromSnapshot,
+          /*
+           * Only the primary plane's socket refines the clock. `connection.clock`
+           * is the estimate against the plane `ControlPlaneSession` holds, and
+           * the cloud plane's round trip is a different path through a different
+           * network: folding both into one median would report a link that is
+           * neither of them. The secondary still pings -- that is what proves
+           * its socket to its server -- and simply measures nothing.
+           */
+          ...(link.linkId === primary.linkId
+            ? { onLatencySample: (roundTripMs: number) => session.recordLatencySample(roundTripMs) }
+            : {}),
           onReauthenticationRequired: () => {
             /*
              * The server closed the socket because the triple no longer checks

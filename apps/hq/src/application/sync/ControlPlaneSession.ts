@@ -1,5 +1,5 @@
 import { resolveAuthority } from './authority';
-import { summarizeClockSamples } from './clock';
+import { median, summarizeClockSamples } from './clock';
 import {
   disconnectedConnection,
   groupDevicePatch,
@@ -20,6 +20,17 @@ import {
   type CreateGroupRequest,
   type PairingCodeGrant,
 } from './controlPlanePort';
+
+/**
+ * How many realtime round trips the reported latency is the median of.
+ *
+ * Five, as `clockRounds` is five, and for the same reason: one sample delayed
+ * by a scheduler pause or a retransmission must not become the answer. At the
+ * socket's ten-second ping that is a window of under a minute, so a link that
+ * genuinely slows down is reported as slow within one `TimeSync` interval
+ * rather than being averaged against the shoot's whole history.
+ */
+const latencySampleWindow = 5;
 
 export interface ControlPlaneSessionOptions {
   readonly client: ControlPlanePort;
@@ -71,6 +82,8 @@ export class ControlPlaneSession {
   readonly #now: () => number;
   readonly #clockRounds: number;
   readonly #refreshLeadMs: number;
+  /** The most recent realtime round trips, oldest first; see {@link latencySampleWindow}. */
+  readonly #latencySamples: number[] = [];
   #state: ConnectionState = initialConnectionState;
 
   constructor(options: ControlPlaneSessionOptions) {
@@ -360,6 +373,41 @@ export class ControlPlaneSession {
   }
 
   /**
+   * Folds one realtime round trip into the estimate's latency (R27).
+   *
+   * `sampleClock` runs on a minute's timer and costs a unary call per round;
+   * the socket's ping goes out every ten seconds and is sent whether anyone
+   * measures it or not. Reading its pong is therefore the cheapest refinement
+   * of R27's millisecond promise available, and it measures the link the
+   * group's events actually travel on rather than a second path to the same
+   * address.
+   *
+   * **Latency only, and deliberately.** `ServerPong` carries one server instant
+   * rather than the receive and send pair `estimateClock` subtracts, so a pong
+   * yields the raw round trip: the server's own processing is still in it and
+   * no offset can be derived from it. `offsetMs` therefore stays whatever
+   * `sampleClock` last established -- `PlaybackSyncCoordinator` reads it, and a
+   * figure guessed from half a round would be worse than an older measured one.
+   * `sampledAt` does move, because it is what gates the estimate being shown at
+   * all, and a socket answering is the freshest evidence this session has that
+   * the link is there.
+   */
+  recordLatencySample(roundTripMs: number): void {
+    // A pong that outlived its session describes a connection the slice no
+    // longer holds, which is the same reason `sampleClock` refuses to run.
+    if (this.#state.mode !== 'online') return;
+    this.#latencySamples.push(Math.max(0, roundTripMs));
+    if (this.#latencySamples.length > latencySampleWindow) this.#latencySamples.shift();
+    this.#set({
+      clock: {
+        ...this.#state.clock,
+        latencyMs: Math.round(median(this.#latencySamples)),
+        sampledAt: new Date(this.#now()).toISOString(),
+      },
+    });
+  }
+
+  /**
    * Brings `groups.authority` and the group's mode into agreement.
    *
    * The precedence is stated in `authority.ts`: the server owns the decision,
@@ -506,6 +554,10 @@ export class ControlPlaneSession {
   }
 
   #reset(mode: ConnectionState['mode'], capabilities?: ConnectionState['capabilities']): void {
+    // The round trips do not survive it, unlike the capabilities: they measured
+    // a socket that is now closed, and carrying them over would go on reporting
+    // it until the next session's readings outnumbered them.
+    this.#latencySamples.length = 0;
     // The capabilities survive a reset: what this deployment can do is a fact
     // about the control plane, not about the session that was just revoked.
     this.#set({ ...disconnectedConnection(mode), capabilities });

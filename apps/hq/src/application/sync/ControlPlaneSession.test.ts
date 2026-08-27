@@ -510,6 +510,77 @@ describe('ControlPlaneSession', () => {
     expect(read().presence.map((entry) => entry.deviceId)).toEqual(['device-c', 'device-b']);
   });
 
+  it('refines the latency from realtime round trips and leaves the offset to TimeSync', async () => {
+    const client = new FakeControlPlane();
+    client.samples = [
+      { clientSendMs: 0, serverReceiveMs: 60, serverSendMs: 62, clientReceiveMs: 20 },
+      { clientSendMs: 0, serverReceiveMs: 55, serverSendMs: 57, clientReceiveMs: 20 },
+      { clientSendMs: 0, serverReceiveMs: 900, serverSendMs: 902, clientReceiveMs: 20 },
+    ];
+    let nowMs = 1_700_000_000_000;
+    const { created, read } = session(client, () => nowMs);
+
+    await created.pair('CODE-1', 'MON-01');
+    expect(read().clock.latencyMs).toBe(18);
+
+    nowMs += 10_000;
+    // Three pongs, the middle one held up somewhere in the network.
+    created.recordLatencySample(30);
+    created.recordLatencySample(900);
+    created.recordLatencySample(34);
+
+    expect(read().clock.latencyMs).toBe(34);
+    /*
+     * `ServerPong` carries one server instant rather than the receive and send
+     * pair `estimateClock` subtracts, so a pong yields no offset at all. The
+     * one `TimeSync` established therefore stands, and `PlaybackSyncCoordinator`
+     * goes on converting against a measured figure rather than a guessed one.
+     */
+    expect(read().clock.offsetMs).toBe(51);
+    // The socket answering is the freshest evidence the link is there, and
+    // `sampledAt` is what gates the estimate being shown at all.
+    expect(read().clock.sampledAt).toBe(new Date(nowMs).toISOString());
+  });
+
+  it('reports the last five round trips and forgets the ones before them', async () => {
+    const client = new FakeControlPlane();
+    const { created, read } = session(client);
+
+    await created.pair('CODE-1', 'MON-01');
+    for (let sample = 0; sample < 5; sample += 1) created.recordLatencySample(100);
+    expect(read().clock.latencyMs).toBe(100);
+
+    /*
+     * The link got quicker. Three pongs later the window holds two of the old
+     * readings and three of the new, so the median is the new one; an unbounded
+     * series would still be reporting 100, and would go on doing so until the
+     * quick readings outnumbered a whole shoot day of slow ones.
+     */
+    for (let sample = 0; sample < 3; sample += 1) created.recordLatencySample(10);
+    expect(read().clock.latencyMs).toBe(10);
+  });
+
+  it('records no round trip once the session has ended, and starts the series over', async () => {
+    const client = new FakeControlPlane();
+    const { created, read } = session(client);
+
+    await created.pair('CODE-1', 'MON-01');
+    for (let sample = 0; sample < 3; sample += 1) created.recordLatencySample(10);
+    expect(read().clock.latencyMs).toBe(10);
+
+    created.unpair();
+    created.recordLatencySample(30);
+    // A pong that outlived its socket describes a connection the slice no
+    // longer holds, exactly as `sampleClock` refuses to run without one.
+    expect(read().clock).toEqual({ offsetMs: 0, latencyMs: 0, sampledAt: '' });
+
+    await created.pair('CODE-2', 'MON-01');
+    created.recordLatencySample(500);
+    // The new session's first pong is the whole series. Carrying the previous
+    // one's readings over would report the closed socket for four more pongs.
+    expect(read().clock.latencyMs).toBe(500);
+  });
+
   it('records the revision every answer about the group carries', async () => {
     /*
      * The revision is what the other path -- the group log, read by

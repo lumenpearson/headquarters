@@ -106,6 +106,15 @@ export interface RealtimeClientOptions {
   readonly schedule?: (callback: () => void, delayMs: number) => () => void;
   readonly backoffMs?: readonly number[];
   readonly pingIntervalMs?: number;
+  /**
+   * The round trip of one ping, in milliseconds, once its pong has answered.
+   *
+   * Beside `pingIntervalMs` because the two describe one exchange: the interval
+   * decides how often a sample is taken and this is where the sample goes.
+   * Absent, the pings are still sent -- they are what proves the socket to the
+   * server -- and nothing is measured.
+   */
+  readonly onLatencySample?: (roundTripMs: number) => void;
   readonly now?: () => number;
 }
 
@@ -132,6 +141,7 @@ export class RealtimeClient {
   readonly #schedule: (callback: () => void, delayMs: number) => () => void;
   readonly #backoffMs: readonly number[];
   readonly #pingIntervalMs: number;
+  readonly #now: () => number;
   #socket: RealtimeSocketLike | null = null;
   #cancelReconnect: (() => void) | null = null;
   #cancelPing: (() => void) | null = null;
@@ -172,6 +182,7 @@ export class RealtimeClient {
       });
     this.#backoffMs = options.backoffMs ?? defaultBackoffMs;
     this.#pingIntervalMs = options.pingIntervalMs ?? defaultPingIntervalMs;
+    this.#now = options.now ?? (() => Date.now());
   }
 
   /** The socket address, path only. Exposed so a test can assert what it is not. */
@@ -305,6 +316,7 @@ export class RealtimeClient {
         this.#resync(socket, frame.payload.value);
         return;
       case 'pong':
+        this.#measureRoundTrip(frame.payload.value);
         return;
       case 'error':
         this.#applyError(socket, frame.payload.value.code);
@@ -428,15 +440,42 @@ export class RealtimeClient {
     }, delayMs);
   }
 
+  /**
+   * The round trip one pong reports, from the instant it echoes back.
+   *
+   * Stateless by design: the server returns `ClientPing.client_monotonic_ms`
+   * untouched (`realtime/server.ts`), so the send instant travels with the
+   * exchange and this client keeps no table of pings in flight -- a table that
+   * a dropped socket, a resync or a reconnect would each have to clear.
+   *
+   * **The raw round trip and nothing else.** `ServerPong` carries one server
+   * instant, not the receive/send pair `estimateClock` subtracts, so the
+   * server's own processing cannot be removed from this figure and no clock
+   * offset can be derived from it. The unary `TimeSync` stays the only source
+   * of a processing-corrected latency and of the offset; this refines the
+   * latency between its rounds and claims nothing more.
+   */
+  #measureRoundTrip(pong: realtimeV1.ServerPong): void {
+    const onLatencySample = this.#options.onLatencySample;
+    if (onLatencySample === undefined) return;
+    const sentMs = Number(pong.clientMonotonicMs);
+    const roundTripMs = this.#now() - sentMs;
+    // A pong echoing zero answered no ping this client sent -- the field is a
+    // clock reading and never that -- and would be reported as the whole age of
+    // the epoch. A negative trip is a clock stepped between the two reads.
+    // Neither is a measurement, and one of them would set the median alone.
+    if (sentMs <= 0 || roundTripMs < 0) return;
+    onLatencySample(roundTripMs);
+  }
+
   #startPing(socket: RealtimeSocketLike): void {
     this.#stopPing();
-    const now = this.#options.now ?? (() => Date.now());
     const tick = () => {
       if (this.#socket !== socket) return;
       const frame = create(realtimeV1.RealtimeClientFrameSchema, {
         payload: {
           case: 'ping',
-          value: { clientMonotonicMs: BigInt(Math.max(0, Math.floor(now()))) },
+          value: { clientMonotonicMs: BigInt(Math.max(0, Math.floor(this.#now()))) },
         },
       });
       this.#send(socket, realtimeV1.RealtimeClientFrameSchema, frame);
