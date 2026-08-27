@@ -41,11 +41,15 @@ export interface RecordPresenceInput {
 }
 
 /**
- * A renewal names the device and nothing else, because it changes nothing the
- * device reported. The identifier always comes from the caller's own
- * authenticated session; there is no field on the wire that could name another.
+ * One device in one group, and nothing else.
+ *
+ * The two operations shaped like this — keeping a liveness key alive and
+ * withdrawing it — change nothing the device reported, so there is nothing else
+ * to name. Neither identifier is ever chosen by a client: a renewal takes it
+ * from the caller's own authenticated session, and a withdrawal takes it from
+ * the membership the server just revoked.
  */
-export interface RenewPresenceInput {
+export interface PresenceDeviceInput {
   readonly groupId: string;
   readonly deviceId: string;
 }
@@ -63,7 +67,20 @@ export interface PresenceStore {
    * refreshed on its own, and the log records only the two facts that are
    * events — a device joined, a device left.
    */
-  renew(input: RenewPresenceInput): Promise<void>;
+  renew(input: PresenceDeviceInput): Promise<void>;
+  /**
+   * Withdraws a device's liveness because it has stopped being a member.
+   *
+   * `record` with `OFFLINE` is how a device withdraws itself, and it cannot
+   * serve here: it re-checks membership inside the write and refuses a device
+   * whose membership has just been revoked, which is the guard that keeps a
+   * revoked device from announcing itself. So revocation needs its own way to
+   * say the same thing, taken on the device's behalf rather than from it.
+   *
+   * Like `renew`, this appends nothing to the group log. The revocation itself
+   * is the event, and it is published by the handler that performed it.
+   */
+  forget(input: PresenceDeviceInput): Promise<void>;
   list(groupId: string): Promise<readonly PresenceSnapshot[]>;
 }
 
@@ -165,6 +182,19 @@ export class DurablePresenceStore implements PresenceStore {
     return Promise.resolve();
   }
 
+  /**
+   * There is no key to withdraw here either, and the row is not one.
+   *
+   * `list` below joins `presence_snapshots` to an unrevoked membership, so a
+   * revoked device leaves the answer the moment its membership is revoked,
+   * whatever its row still says. Deleting the row would throw away the last
+   * state that device reported — which is what an operator reading the table
+   * after an incident is looking for — and change no answer this store gives.
+   */
+  forget(): Promise<void> {
+    return Promise.resolve();
+  }
+
   async list(groupId: string): Promise<readonly PresenceSnapshot[]> {
     const rows = await this.query(
       sql(
@@ -227,6 +257,19 @@ export class InMemoryPresenceStore implements PresenceStore {
 
   /** Nothing in this map expires either, so there is nothing to extend. */
   renew(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /**
+   * Drops the entry, which the durable store does not have to.
+   *
+   * This map holds no memberships, so its `list` has no join to hide a revoked
+   * device behind; the withdrawal is the only thing that can. Removing the
+   * entry is therefore what makes this adapter agree with the durable one on
+   * the answer, which is what a suite reading it is entitled to assume.
+   */
+  forget(input: PresenceDeviceInput): Promise<void> {
+    this.#byGroup.get(input.groupId)?.delete(input.deviceId);
     return Promise.resolve();
   }
 

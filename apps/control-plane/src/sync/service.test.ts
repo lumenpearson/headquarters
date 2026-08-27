@@ -8,10 +8,10 @@ import { RealtimeHub } from '../realtime/hub.js';
 
 import {
   InMemoryPresenceStore,
+  type PresenceDeviceInput,
   type PresenceSnapshot,
   type PresenceStore,
   type RecordPresenceInput,
-  type RenewPresenceInput,
 } from './presence-store.js';
 import { PairedDeviceRuntime } from './runtime.js';
 import { createPairedDeviceSyncService } from './service.js';
@@ -138,6 +138,121 @@ describe('SyncService presence renewal', () => {
   });
 });
 
+describe('SyncService device revocation', () => {
+  it('appends one event naming the device, with the revision the revoke produced', async () => {
+    const { service, events, groupId, ownerToken, editorToken, editorDeviceId } =
+      await authenticatedService();
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, { groupId: { value: groupId } }),
+      handlerContext(`Bearer ${editorToken}`),
+    );
+    const before = await logEvents(events, groupId);
+    const revisionBefore = before.at(-1)?.group?.revision?.number ?? 0n;
+
+    const revoked = await service.revokeDevice?.(
+      create(syncV1.RevokeDeviceRequestSchema, {
+        groupId: { value: groupId },
+        deviceId: { value: editorDeviceId },
+      }),
+      handlerContext(`Bearer ${ownerToken}`),
+    );
+
+    // One event, not none and not two: a neighbour that already learned of the
+    // revocation learns of it once, and the log a polling client reads back in
+    // pages grows by the single fact that happened.
+    const appended = (await logEvents(events, groupId)).slice(before.length);
+    expect(appended).toHaveLength(1);
+    const event = appended[0];
+    expect(event?.kind).toBe(syncV1.GroupEventKind.DEVICE_UPDATED);
+    expect(event?.device?.id?.value).toBe(editorDeviceId);
+    // The status is the point of the event. A subscriber that received only a
+    // group revision would have to call `ListDevices` to find out what changed,
+    // which is the call this event exists to stop it from needing.
+    expect(event?.device?.status).toBe(syncV1.DeviceStatus.REVOKED);
+    // Published from the mutation's own result, so the snapshot is the state
+    // after the revoke rather than the state that was read to perform it. A
+    // subscriber ignores an event whose revision it already holds, so a
+    // snapshot taken a moment early would be dropped by every neighbour.
+    expect(event?.group?.revision?.number).toBe(revoked?.result?.revision?.number);
+    expect(event?.group?.revision?.number ?? 0n).toBeGreaterThan(revisionBefore);
+  });
+
+  it('withdraws the revoked device from presence, and only that device', async () => {
+    const { service, presence, groupId, ownerToken, ownerDeviceId, editorToken, editorDeviceId } =
+      await authenticatedService();
+    for (const token of [ownerToken, editorToken]) {
+      await service.joinGroup?.(
+        create(syncV1.JoinGroupRequestSchema, { groupId: { value: groupId } }),
+        handlerContext(`Bearer ${token}`),
+      );
+    }
+
+    await service.revokeDevice?.(
+      create(syncV1.RevokeDeviceRequestSchema, {
+        groupId: { value: groupId },
+        deviceId: { value: editorDeviceId },
+      }),
+      handlerContext(`Bearer ${ownerToken}`),
+    );
+
+    // Announcing presence is what creates a liveness key, and a revoked device
+    // can no longer announce anything — its sessions went with its membership.
+    // Nothing else would ever withdraw the key it already holds.
+    expect(presence.forgets).toEqual([{ groupId, deviceId: editorDeviceId }]);
+    const listed = await service.getPresence?.(
+      create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+      handlerContext(`Bearer ${ownerToken}`),
+    );
+    expect(listed?.devices.map((entry) => entry.deviceId?.value)).toEqual([ownerDeviceId]);
+  });
+
+  it('publishes nothing and withdraws nothing when the revoke is refused', async () => {
+    const { service, events, presence, groupId, ownerToken, ownerDeviceId } =
+      await authenticatedService();
+    const before = await logLength(events, groupId);
+
+    // An administrator revoking its own session is refused by the mutation
+    // itself. Every guard it enforces — this one, the last administrator, the
+    // sitting leader — happens inside the statement, so the only way an event
+    // can be certain of what it reports is to be published after that
+    // statement returned.
+    await expect(
+      Promise.resolve(
+        service.revokeDevice?.(
+          create(syncV1.RevokeDeviceRequestSchema, {
+            groupId: { value: groupId },
+            deviceId: { value: ownerDeviceId },
+          }),
+          handlerContext(`Bearer ${ownerToken}`),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.FailedPrecondition });
+
+    expect(await logLength(events, groupId)).toBe(before);
+    expect(presence.forgets).toEqual([]);
+  });
+
+  it('revokes without a presence store at all', async () => {
+    const { service, events, groupId, ownerToken, editorDeviceId } = await authenticatedService({
+      presence: false,
+    });
+
+    const revoked = await service.revokeDevice?.(
+      create(syncV1.RevokeDeviceRequestSchema, {
+        groupId: { value: groupId },
+        deviceId: { value: editorDeviceId },
+      }),
+      handlerContext(`Bearer ${ownerToken}`),
+    );
+
+    // Presence is one of the collaborators a reduced startup may omit, and
+    // revocation never needed it. Requiring it here would turn a working
+    // deployment's revoke into `unimplemented`.
+    expect(revoked?.result?.resourceId?.value).toBe(editorDeviceId);
+    expect(await logLength(events, groupId)).toBe(1);
+  });
+});
+
 describe('SyncService group event stream', () => {
   it('delivers an event published while the consumer was between yields', async () => {
     const { service, hub, ownerToken, groupId } = await authenticatedService();
@@ -187,7 +302,7 @@ describe('SyncService group event stream', () => {
   });
 });
 
-async function authenticatedService() {
+async function authenticatedService(options: { readonly presence?: boolean } = {}) {
   const runtime = new PairedDeviceRuntime({ tokenPepper });
   const created = runtime.createGroup({
     name: 'Stream group',
@@ -213,7 +328,7 @@ async function authenticatedService() {
   const service = createPairedDeviceSyncService({
     runtime,
     verifyBootstrapSecret: () => true,
-    presence,
+    ...(options.presence === false ? {} : { presence }),
     hub,
   });
   return {
@@ -237,16 +352,28 @@ async function authenticatedService() {
  * doing it.
  */
 class RecordingPresenceStore implements PresenceStore {
-  readonly renewals: RenewPresenceInput[] = [];
+  readonly renewals: PresenceDeviceInput[] = [];
+  readonly forgets: PresenceDeviceInput[] = [];
   readonly #delegate = new InMemoryPresenceStore();
 
   record(input: RecordPresenceInput): Promise<PresenceSnapshot> {
     return this.#delegate.record(input);
   }
 
-  renew(input: RenewPresenceInput): Promise<void> {
+  renew(input: PresenceDeviceInput): Promise<void> {
     this.renewals.push(input);
     return Promise.resolve();
+  }
+
+  /**
+   * Records the withdrawal and performs it. Which device Redis would drop is a
+   * property of `CoordinatedPresenceStore` and is proved against a deadline
+   * keeping double in its own suite; what only this layer can show is that the
+   * handler asks for the withdrawal at all, and for the right device.
+   */
+  forget(input: PresenceDeviceInput): Promise<void> {
+    this.forgets.push(input);
+    return this.#delegate.forget(input);
   }
 
   list(groupId: string): Promise<readonly PresenceSnapshot[]> {
@@ -254,10 +381,18 @@ class RecordingPresenceStore implements PresenceStore {
   }
 }
 
+/** The group's log, as a client replaying it from the beginning would read it. */
+async function logEvents(
+  events: InMemoryRealtimeEventStore,
+  groupId: string,
+): Promise<readonly syncV1.GroupEvent[]> {
+  const replayed = await events.replay({ groupId, afterSequence: 0n, limit: 512 });
+  return replayed.events;
+}
+
 /** How many events the group's log holds, counted through the replay a client would read. */
 async function logLength(events: InMemoryRealtimeEventStore, groupId: string): Promise<number> {
-  const replayed = await events.replay({ groupId, afterSequence: 0n, limit: 512 });
-  return replayed.events.length;
+  return (await logEvents(events, groupId)).length;
 }
 
 /**

@@ -238,6 +238,155 @@ describeIntegration('SyncService over binary gRPC-Web against real PostgreSQL', 
   );
 
   it(
+    'writes one log row when a device is revoked, and drops it from the device list',
+    async () => {
+      const { sync, close } = await startWireClient();
+      closeControlPlane = close;
+
+      const created = await sync.createGroup(
+        {
+          name: 'Штаб-4',
+          initialDevice: device('Primary workstation', 'ed25519:wire-primary-4'),
+        },
+        { headers: { 'x-hq-bootstrap-secret': bootstrapSecret } },
+      );
+      const groupId = required(created.group?.id?.value, 'group id');
+      const adminId = required(created.device?.id?.value, 'admin device id');
+      const adminHeaders = {
+        authorization: `Bearer ${required(created.session?.accessToken, 'admin token')}`,
+      };
+      const grant = await sync.createPairingCode(
+        { groupId: { value: groupId }, role: syncV1.DeviceRole.EDITOR },
+        { headers: adminHeaders },
+      );
+      const paired = await sync.pairDevice({
+        pairingCode: required(grant.pairingCode?.code, 'pairing code'),
+        deviceName: 'Analyst laptop',
+        publicKey: 'ed25519:wire-analyst-4',
+        platform: 'windows',
+        applicationVersion: '0.1.0',
+      });
+      const editorId = required(paired.device?.id?.value, 'editor device id');
+      const editorHeaders = {
+        authorization: `Bearer ${required(paired.session?.accessToken, 'editor token')}`,
+      };
+      await sync.joinGroup({ groupId: { value: groupId } }, { headers: editorHeaders });
+      const beforeRevoke = await countEvents(groupId);
+
+      const revoked = await sync.revokeDevice(
+        { groupId: { value: groupId }, deviceId: { value: editorId } },
+        { headers: adminHeaders },
+      );
+
+      // Counted in the table, not argued from the code: exactly one row more
+      // than the revocation found. Until this handler published, the count did
+      // not move at all, and a neighbour learned of a revoked device only from
+      // whatever `ListDevices` it happened to make next.
+      expect(await countEvents(groupId)).toBe(beforeRevoke + 1);
+      const page = await sync.readGroupEvents(
+        { groupId: { value: groupId }, afterSequence: 0n },
+        { headers: adminHeaders },
+      );
+      expect(page.events).toHaveLength(beforeRevoke + 1);
+      const event = page.events.at(-1);
+      expect(event?.kind).toBe(syncV1.GroupEventKind.DEVICE_UPDATED);
+      expect(event?.device?.id?.value).toBe(editorId);
+      expect(event?.device?.status).toBe(syncV1.DeviceStatus.REVOKED);
+      // The revision the mutation produced, so a session that already applied
+      // the revocation from the answer to its own call ignores this copy, and a
+      // session that has not applied it takes it.
+      expect(event?.group?.revision?.number).toBe(revoked.result?.revision?.number);
+
+      // The two paths agree on the device and differ on how long they show it:
+      // the log says "this one is revoked" once, and the list stops carrying
+      // the row at all.
+      const devices = await sync.listDevices(
+        { groupId: { value: groupId } },
+        { headers: adminHeaders },
+      );
+      expect(devices.devices.map((entry) => entry.id?.value)).toEqual([adminId]);
+      const presence = await sync.getPresence(
+        { groupId: { value: groupId } },
+        { headers: adminHeaders },
+      );
+      expect(presence.devices.map((entry) => entry.deviceId?.value)).toEqual([]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'answers a retried revoke from its receipt and revises the group once',
+    async () => {
+      const { sync, close } = await startWireClient();
+      closeControlPlane = close;
+
+      const created = await sync.createGroup(
+        {
+          name: 'Штаб-5',
+          initialDevice: device('Primary workstation', 'ed25519:wire-primary-5'),
+        },
+        { headers: { 'x-hq-bootstrap-secret': bootstrapSecret } },
+      );
+      const groupId = required(created.group?.id?.value, 'group id');
+      const adminHeaders = {
+        authorization: `Bearer ${required(created.session?.accessToken, 'admin token')}`,
+      };
+      const grant = await sync.createPairingCode(
+        { groupId: { value: groupId }, role: syncV1.DeviceRole.EDITOR },
+        { headers: adminHeaders },
+      );
+      const paired = await sync.pairDevice({
+        pairingCode: required(grant.pairingCode?.code, 'pairing code'),
+        deviceName: 'Analyst laptop',
+        publicKey: 'ed25519:wire-analyst-5',
+        platform: 'windows',
+        applicationVersion: '0.1.0',
+      });
+      const editorId = required(paired.device?.id?.value, 'editor device id');
+      const requestId = `revoke-${crypto.randomUUID()}`;
+      const beforeRevoke = await countEvents(groupId);
+
+      const first = await sync.revokeDevice(
+        { context: { requestId }, groupId: { value: groupId }, deviceId: { value: editorId } },
+        { headers: adminHeaders },
+      );
+      const retry = await sync.revokeDevice(
+        { context: { requestId }, groupId: { value: groupId }, deviceId: { value: editorId } },
+        { headers: adminHeaders },
+      );
+
+      // The receipt is what makes the mutation once-only: the group is revised
+      // once however often the call is retried, and the retry is answered with
+      // the revision its own request produced rather than whatever the group
+      // has drifted to.
+      expect(retry.result?.revision?.number).toBe(first.result?.revision?.number);
+      const revisions = await database.query<{ revision: string }>({
+        text: 'SELECT revision::text AS revision FROM groups WHERE id = $1',
+        values: [groupId],
+      });
+      expect(revisions[0]?.revision).toBe(String(first.result?.revision?.number));
+
+      // The publication is an epilogue and runs once per call, so a retry does
+      // append a second copy of the same snapshot. It carries the same
+      // revision, which is the field a subscriber drops a repeat by, so the
+      // duplicate changes no state anywhere. Measured rather than claimed as
+      // desirable: `UpdateGroup`, `SetLeader`, `SetAuthorityMode` and
+      // `SetDeviceRole` all publish this way, and making an epilogue skip a
+      // replay is one change for the five of them, not one for this handler.
+      expect(await countEvents(groupId)).toBe(beforeRevoke + 2);
+      const page = await sync.readGroupEvents(
+        { groupId: { value: groupId }, afterSequence: BigInt(beforeRevoke) },
+        { headers: adminHeaders },
+      );
+      expect(page.events.map((event) => [event.kind, event.group?.revision?.number])).toEqual([
+        [syncV1.GroupEventKind.DEVICE_UPDATED, first.result?.revision?.number],
+        [syncV1.GroupEventKind.DEVICE_UPDATED, first.result?.revision?.number],
+      ]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'refuses a viewer publication and a foreign group with the codes a client checks for',
     async () => {
       const { sync, close } = await startWireClient();

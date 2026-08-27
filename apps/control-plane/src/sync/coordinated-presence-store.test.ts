@@ -90,6 +90,38 @@ describe('coordinated presence store', () => {
     expect(await coordination.listPresence('group-01')).toEqual([]);
   });
 
+  it('takes a revoked device out of the membership set, which a lapsed key never does', async () => {
+    const clock = new TestClock();
+    const redis = new FakeRedis(clock);
+    const { store, coordination } = coordinatedPair(redis);
+    for (const deviceId of ['device-live', 'device-revoked', 'device-silent']) {
+      await store.record({ groupId: 'group-01', deviceId, status: 'ONLINE' });
+    }
+
+    await store.forget({ groupId: 'group-01', deviceId: 'device-revoked' });
+    // The group stays awake: one device keeps polling, and the renewal script
+    // extends the membership set along with that device's own key.
+    for (let elapsed = 0; elapsed < 60; elapsed += pollIntervalSeconds) {
+      clock.advanceSeconds(pollIntervalSeconds);
+      await store.renew({ groupId: 'group-01', deviceId: 'device-live' });
+    }
+
+    // Both halves again, and this is the argument for withdrawing rather than
+    // waiting. `device-silent` went quiet without leaving: its key lapsed, so
+    // `listPresence` no longer reports it — and its identifier is still in the
+    // set, because nothing but an explicit withdrawal ever removes one, and
+    // the set outlives every key in it for as long as one device renews. The
+    // revoked device is out of the set entirely, so it is not fetched again on
+    // every poll for the life of the group.
+    expect(await redis.smembers('hq:group:group-01:presence:members')).toEqual([
+      'device-live',
+      'device-silent',
+    ]);
+    expect((await coordination.listPresence('group-01')).map((entry) => entry.deviceId)).toEqual([
+      'device-live',
+    ]);
+  });
+
   it('reports a device offline once its liveness key has gone', async () => {
     const clock = new TestClock();
     const store = coordinatedStore(new FakeRedis(clock));

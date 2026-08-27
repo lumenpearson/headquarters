@@ -1557,6 +1557,27 @@ export enum GroupEventKind {
   SESSION_COMMAND = 5,
 
   /**
+   * Declared, and deliberately published by nothing.
+   *
+   * Whether a resume point is still answerable is a verdict about one reader:
+   * it compares that caller's `after_sequence` against the oldest sequence the
+   * group still retains. A `GroupEvent` is the opposite — one row of the
+   * group's log, delivered in order to every reader alike — so it cannot carry
+   * the verdict. Appended at the head it would reach readers whose cursor is
+   * perfectly current and tell them to discard a history they still have; and
+   * it would lengthen the very log whose length is the problem.
+   *
+   * The two transports that answer a resume report it out of band and to the
+   * one caller who asked: `gremuchaya.realtime.v1.ResyncRequired` on the
+   * socket, and `ReadGroupEventsResponse.resync_required` on the page. Both
+   * read the same decision, so a deployment serving both cannot disagree with
+   * itself; a third copy of the rule inside the log would have no such
+   * guarantee.
+   *
+   * The value stays because removing one from a versioned enum is its own
+   * compatibility decision, and because a client must keep decoding a kind
+   * some future server might have reason to send.
+   *
    * @generated from enum value: GROUP_EVENT_KIND_SNAPSHOT_REQUIRED = 6;
    */
   SNAPSHOT_REQUIRED = 6,

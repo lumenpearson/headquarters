@@ -1,10 +1,10 @@
 import type { UpstashCoordination } from '../redis/coordination.js';
 
 import type {
+  PresenceDeviceInput,
   PresenceSnapshot,
   PresenceStore,
   RecordPresenceInput,
-  RenewPresenceInput,
 } from './presence-store.js';
 
 /**
@@ -77,8 +77,31 @@ export class CoordinatedPresenceStore implements PresenceStore {
    * so a device that never joined, or that left, stays absent from presence no
    * matter how often it reads it.
    */
-  async renew(input: RenewPresenceInput): Promise<void> {
+  async renew(input: PresenceDeviceInput): Promise<void> {
     await this.#coordination.renewPresence({
+      groupId: input.groupId,
+      deviceId: input.deviceId,
+    });
+  }
+
+  /**
+   * Takes a revoked device out of Redis, which is the half that does not
+   * notice a revocation on its own.
+   *
+   * The durable half does: `list` below reads it first, and its join to an
+   * unrevoked membership drops the device from the answer whatever the key
+   * says. What survives is the membership set. Nothing prunes it except an
+   * explicit withdrawal — a key that simply lapses leaves its identifier
+   * behind — and every device still present renews the set's own expiry, so in
+   * a group that stays awake the set keeps a revoked identifier for good and
+   * `listPresence` fetches it again on every poll.
+   *
+   * Revocation is the one moment the server knows the device will not come
+   * back: `PairDevice` inserts a new device row every time, so the identifier
+   * cannot be reused by the same operator pairing again.
+   */
+  async forget(input: PresenceDeviceInput): Promise<void> {
+    await this.#coordination.forgetPresence({
       groupId: input.groupId,
       deviceId: input.deviceId,
     });

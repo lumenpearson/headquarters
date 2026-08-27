@@ -1,3 +1,6 @@
+import { readFile, readdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import { decideReplay, resyncRequiredReason } from './replayDecision.js';
@@ -60,3 +63,67 @@ describe('retained replay window', () => {
     );
   });
 });
+
+/**
+ * That the verdict above is never turned into a log row.
+ *
+ * `GROUP_EVENT_KIND_SNAPSHOT_REQUIRED` is declared in the contract and decoded
+ * by the client, and no line of this control plane sends it — the socket
+ * reports the same fact as a `ResyncRequired` frame and the poll as the
+ * `resync_required` field of a page. That is a decision, written down beside
+ * the enum value in `sync.proto`, and this is the guard on it.
+ *
+ * A change detector by construction, and that is the whole intent (rule 2.3):
+ * it proves nothing about behaviour, and it fails the day a publication is
+ * added, so whoever adds one has to say why the contract note no longer holds.
+ * The reason it cannot hold as written is that the verdict is about one
+ * reader's cursor while a log row is the same for every reader, so a row would
+ * either reach readers it does not describe or lengthen the log it complains
+ * about.
+ */
+describe('the group log and the resync verdict', () => {
+  it('never publishes the snapshot-required kind from anywhere in this control plane', async () => {
+    const mentions = await mentionsOf('SNAPSHOT_REQUIRED');
+
+    // Both surviving mentions are the exhaustive translation of a kind into
+    // the text of the `sync_events.kind` column: a decoder for whatever a
+    // future client sends, not a publisher. Nothing here builds a draft with
+    // this kind, and nothing hands one to the hub or the event store.
+    expect(mentions).toEqual([
+      { file: 'realtime/eventStore.ts', line: 'case syncV1.GroupEventKind.SNAPSHOT_REQUIRED:' },
+      { file: 'realtime/eventStore.ts', line: "return 'SNAPSHOT_REQUIRED';" },
+    ]);
+  });
+});
+
+/**
+ * Every mention of a token in the control plane's own source, tests excluded.
+ *
+ * Tests are excluded because a suite naming a kind is not a deployment sending
+ * it — this file names it twice itself.
+ */
+async function mentionsOf(
+  token: string,
+): Promise<readonly { readonly file: string; readonly line: string }[]> {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  const sources = entries
+    .filter(
+      (entry) => entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts'),
+    )
+    .map((entry) => `${entry.parentPath}/${entry.name}`)
+    .sort();
+
+  const mentions: { readonly file: string; readonly line: string }[] = [];
+  for (const source of sources) {
+    const contents = await readFile(source, 'utf8');
+    for (const line of contents.split('\n')) {
+      if (!line.includes(token)) continue;
+      mentions.push({
+        file: source.slice(root.length).replaceAll('\\', '/'),
+        line: line.trim(),
+      });
+    }
+  }
+  return mentions;
+}

@@ -173,6 +173,17 @@ export function createPairedDeviceSyncService(
       });
     },
 
+    /**
+     * Takes a device out of the group, and tells the group so.
+     *
+     * The revocation is durable before anything else happens: the statement
+     * below revokes the membership, the device's pairing codes, its sessions
+     * and its access tokens, and bumps the group revision, all in one. Only
+     * then is the withdrawal announced. An announcement made first would be a
+     * promise the mutation might not keep — the statement still refuses a
+     * revoke that would empty the group of administrators or unseat its
+     * leader — and a neighbour cannot un-drop a device.
+     */
     async revokeDevice(request, context) {
       return withRuntimeErrors(async () => {
         const authenticated = await authenticateRequest(options.runtime, context);
@@ -186,6 +197,28 @@ export function createPairedDeviceSyncService(
             ...context,
           ),
         );
+        // Liveness goes before the announcement, so that the state an event
+        // sends a neighbour to read is already settled. The revoked device
+        // renews nothing itself — its sessions and tokens were revoked by the
+        // statement above, so it can no longer authenticate the read that
+        // renews — but a key it left behind outlives it, and the Redis
+        // membership set outlives the key. Optional like the hub: a startup
+        // with no presence store revokes exactly as it did before.
+        await options.presence?.forget({
+          groupId: revoked.group.id,
+          deviceId: revoked.device.id,
+        });
+        // `DEVICE_UPDATED`, and not `GROUP_UPDATED`, because a neighbour has to
+        // learn *which* device left; the group snapshot rides along because the
+        // same statement bumped the revision, and that revision is what orders
+        // this event against the answer to whatever call a session makes next.
+        // The device snapshot says `REVOKED` rather than being omitted: a
+        // subscriber holding a device it must now distrust is better served by
+        // the fact than by an absence it cannot tell from an event about a
+        // device it never knew. `ListDevices` stays the path that drops the
+        // row, so the two agree on the device and differ only on whether a
+        // departed member is still worth showing.
+        await publishDeviceUpdate(options, revoked.group, revoked.device);
         return {
           result: {
             resourceId: { value: revoked.device.id },
@@ -267,12 +300,7 @@ export function createPairedDeviceSyncService(
             ...receiptContext,
           ),
         );
-        await options.hub?.publish({
-          groupId: changed.group.id,
-          kind: syncV1.GroupEventKind.DEVICE_UPDATED,
-          group: create(syncV1.GroupSchema, toGroup(changed.group)),
-          device: create(syncV1.DeviceSchema, toDevice(changed.device)),
-        });
+        await publishDeviceUpdate(options, changed.group, changed.device);
         return { device: toDevice(changed.device) };
       });
     },
@@ -900,6 +928,28 @@ async function publishGroupUpdate(
     groupId: group.id,
     kind: syncV1.GroupEventKind.GROUP_UPDATED,
     group: create(syncV1.GroupSchema, toGroup(group)),
+  });
+}
+
+/**
+ * The one event that says a device is not what it was.
+ *
+ * Both callers — a role change and a revocation — change a device and bump the
+ * group's revision in the same statement, so both send both snapshots. Written
+ * once rather than at each call site because a second copy would be free to
+ * carry only half of that, and a subscriber deciding by revision cannot use an
+ * event that omits it.
+ */
+async function publishDeviceUpdate(
+  options: PairedDeviceServiceOptions,
+  group: PairedGroup,
+  device: PairedDevice,
+): Promise<void> {
+  await options.hub?.publish({
+    groupId: group.id,
+    kind: syncV1.GroupEventKind.DEVICE_UPDATED,
+    group: create(syncV1.GroupSchema, toGroup(group)),
+    device: create(syncV1.DeviceSchema, toDevice(device)),
   });
 }
 
