@@ -37,12 +37,21 @@ const watchEventTypes: Readonly<Record<FileEventKind, FileSourceEvent['type'] | 
   [FileEventKind.READY]: 'FILE_READY',
 };
 
+/** One registered listener for one directory, held while its stream is live. */
+interface BridgeWatcher {
+  readonly path: VirtualPath;
+  readonly listener: FileSourceListener;
+}
+
 export class BridgeFileSource implements FileSourcePort {
   readonly id = 'file-bridge';
   readonly label = 'GRPC FILE BRIDGE';
   readonly #files = new Map<VirtualPath, RealFileNode>();
   readonly #client: Client<typeof FileBridgeService>;
   readonly #watchClient: BridgeWatchClient;
+  readonly #watchers = new Set<BridgeWatcher>();
+  /** The one live `Watch` stream all of `#watchers` share, if any is open. */
+  #stream: { readonly controller: AbortController } | null = null;
 
   constructor(
     baseUrl: string,
@@ -137,47 +146,93 @@ export class BridgeFileSource implements FileSourcePort {
    * so the subtree filter is applied here, which leaves both adapters
    * answering for a directory and its descendants.
    *
+   * Every watcher on this mount shares one `Watch` stream instead of opening
+   * its own: `WatchRequest` already names a mount, not a directory, so a
+   * second watch of the same mount was duplicating an identical RPC and its
+   * wire traffic. The stream opens on the first `watch()` and stays live
+   * while `#watchers` is non-empty; the `dispose()` that empties it is what
+   * aborts the stream, and the next `watch()` after that opens a fresh one --
+   * this never reopens on its own. Two consequences follow: a watcher that
+   * survives its stream ending goes deaf until another `watch()` call is
+   * made (acceptable because the only consumer, `RuntimeController`,
+   * re-watches on every navigation), and one transport failure now stops
+   * every watcher on this mount at once -- structural, but was already the
+   * whole watch in practice, since `RuntimeController` never holds more than
+   * one open.
+   *
    * The stream is pumped detached from this call: the RPC has no first message
    * to wait for, and a watch that only started once an event arrived would
    * report nothing until something moved.
    */
   async watch(path: VirtualPath, listener: FileSourceListener): Promise<Disposable> {
-    const controller = new AbortController();
-    const stream = this.#watchClient.watch(
-      { mountIds: [this.mountId] },
-      { signal: controller.signal },
-    );
-    void this.#pump(stream, path, listener, controller.signal);
+    const watcher: BridgeWatcher = { path, listener };
+    this.#watchers.add(watcher);
+    if (this.#stream === null) {
+      const controller = new AbortController();
+      this.#stream = { controller };
+      const stream = this.#watchClient.watch(
+        { mountIds: [this.mountId] },
+        { signal: controller.signal },
+      );
+      void this.#pump(stream, controller.signal);
+    }
+    let disposed = false;
     return {
       dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        this.#watchers.delete(watcher);
+        if (this.#watchers.size > 0) return;
         // Aborting is what ends the RPC, on both sides: the cancellation
         // reaches the server's `watch` as its own context signal, which is
         // what `BridgeEventHub.subscribe` drops its subscriber on.
-        controller.abort();
+        this.#stream?.controller.abort();
+        this.#stream = null;
       },
     };
   }
 
-  async #pump(
-    stream: AsyncIterable<WatchResponse>,
-    path: VirtualPath,
-    listener: FileSourceListener,
-    signal: AbortSignal,
-  ): Promise<void> {
+  async #pump(stream: AsyncIterable<WatchResponse>, signal: AbortSignal): Promise<void> {
     try {
       for await (const response of stream) {
-        // A response already in flight when `dispose` ran must not reach a
-        // listener the caller has finished with.
+        // A response already in flight when the last watcher disposed must
+        // not reach listeners the caller has finished with.
         if (signal.aborted) return;
-        const event = this.#toFileSourceEvent(response, path);
-        if (event !== null) listener(event);
+        for (const watcher of this.#watchers) {
+          const event = this.#toFileSourceEvent(response, watcher.path);
+          if (event === null) continue;
+          try {
+            watcher.listener(event);
+          } catch {
+            // No error channel on the port, and multiplexing means this
+            // listener is one of several sharing the mount's stream: before,
+            // a throw here only cost its own stream; now it must not kill the
+            // stream for every other watcher too.
+          }
+        }
       }
     } catch {
-      // Both endings arrive as a throw: `Code.Canceled` for the abort `dispose`
-      // asked for, a transport error when the bridge goes away. Neither can be
-      // reported -- `FileSourcePort.watch` gives the listener no error channel
-      // and this runs detached from the caller, where a re-throw would surface
-      // as an unhandled rejection. The watch stops.
+      // Both endings arrive as a throw: `Code.Canceled` for the abort the last
+      // `dispose` asked for, a transport error when the bridge goes away.
+      // Neither can be reported -- `FileSourcePort.watch` gives the listener no
+      // error channel and this runs detached from every caller, where a
+      // re-throw would surface as an unhandled rejection. The watch stops.
+    } finally {
+      // This never reopens the stream, and does not make `watch()` race-free:
+      // `watch()` decides liveness solely by `#stream === null`, and this
+      // `finally` can land turns after the stream actually died, not before
+      // it. A `watch()` call in that window joins the dying stream and is
+      // left deaf once this runs -- the same degradation any transport death
+      // produces, bounded by the only consumer, `RuntimeController`,
+      // re-watching on every navigation. The identity check below does not
+      // narrow that window; it only stops a *late* teardown from nulling a
+      // *different*, newer stream a later `watch()` has since opened, which
+      // would otherwise leave that stream leaked past its own last dispose
+      // and open the door to two live streams fanning out to one `#watchers`
+      // set. `#watchers` itself is left untouched either way.
+      if (this.#stream !== null && this.#stream.controller.signal === signal) {
+        this.#stream = null;
+      }
     }
   }
 
