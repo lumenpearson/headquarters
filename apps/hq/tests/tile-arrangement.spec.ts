@@ -31,6 +31,29 @@ function settingValue(page: Page, id: string): Promise<unknown> {
   }, id);
 }
 
+/**
+ * Whether the operator's draft records a change to this setting.
+ *
+ * The draft is seeded from the factory snapshot, so every setting is present in
+ * `values` from the first render -- `tiles.order` included, as an empty list.
+ * Reading `values` therefore cannot tell "the operator moved nothing" from "the
+ * operator moved something": only `changedIds` can, and it is what the
+ * catalogue itself reads to mark a row as edited.
+ *
+ * The absent blob answers `false`, which is the same statement: a store that
+ * was never persisted recorded no change either.
+ */
+function settingChanged(page: Page, id: string): Promise<boolean> {
+  return page.evaluate((settingId) => {
+    const raw = localStorage.getItem('gremuchaya-hq:operations:v3');
+    if (raw === null) return false;
+    const parsed = JSON.parse(raw) as {
+      personalization?: { draft?: { changedIds?: readonly string[] } };
+    };
+    return (parsed.personalization?.draft?.changedIds ?? []).includes(settingId);
+  }, id);
+}
+
 test('R7: dragging a tile onto another moves that tile and leaves the rest in order', async ({
   page,
 }) => {
@@ -238,5 +261,17 @@ test('R7: outside edit mode a tile has no handles and a drag rearranges nothing'
   await page.mouse.up();
 
   expect(await tileOrder(page)).toEqual(before);
-  expect(await settingValue(page, 'tiles.order')).toEqual(null);
+  /*
+   * `changedIds`, not the value.
+   *
+   * This line read `settingValue(...) === null` until 2026-08-27, and that
+   * passed only while nothing persisted the store during the test: the draft
+   * carries `tiles.order` as an empty list from its first render, so the null
+   * was the absence of the whole blob rather than the absence of a change. On
+   * a loaded CI runner something else persisted the store inside this test's
+   * window, the helper read the seeded empty list, and the case failed twice
+   * over -- for a reason it was never about. What it is about is that the
+   * operator's draft records no reordering, and that is `changedIds`.
+   */
+  expect(await settingChanged(page, 'tiles.order')).toBe(false);
 });
