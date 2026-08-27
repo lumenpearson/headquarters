@@ -154,7 +154,7 @@ stopped existing.
 
 ### Skills
 
-`.claude/skills/` holds eight skills, tracked in git and pinned by `skills-lock.json`. Each
+`.claude/skills/` holds ten skills, tracked in git and pinned by `skills-lock.json`. Each
 agent's own `## Skills` section says which apply to it. Three carry repository-specific weight:
 
 - `shadcn` + `migrate-radix-to-base` — **always paired.** The shadcn CLI pulls Radix; `packages/ui`
