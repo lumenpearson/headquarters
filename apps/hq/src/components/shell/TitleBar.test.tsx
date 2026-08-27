@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { resolvePresentation } from '@/application/personalization/presentation';
+import { disconnectedConnection, initialGroupMirrorSummary } from '@/application/sync/connection';
 import { operationsStore } from '@/state/operationsStore';
 
 import { ManagedWindowFrame, TitleBar } from './TitleBar';
@@ -54,6 +55,22 @@ beforeEach(() => {
   // Rebuilds the personalization slice from the factory snapshot, so each case
   // starts from the schema default rather than the previous patch.
   operationsStore.getState().resetWorld();
+  /*
+   * `resetWorld` deliberately keeps the connection slice -- the group a session
+   * is in is not part of the simulated world -- so a case that joins a group
+   * hands it to whichever case runs next. The `titlebar.information` case reads
+   * that slice, and under a shuffled order it read a joined session and failed.
+   *
+   * `disconnectedConnection` and not `initialConnectionState`, for the reason
+   * that helper exists: `patchConnection` merges, and the initial state leaves
+   * its optional fields out rather than naming them `undefined`, so spreading it
+   * over a joined session clears the mode and leaves the session standing.
+   */
+  operationsStore.getState().patchConnection({
+    ...disconnectedConnection('local-only'),
+    links: [],
+    mirror: initialGroupMirrorSummary,
+  });
 });
 
 afterEach(() => {
