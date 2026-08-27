@@ -1,6 +1,11 @@
 import type { UpstashCoordination } from '../redis/coordination.js';
 
-import type { PresenceSnapshot, PresenceStore, RecordPresenceInput } from './presence-store.js';
+import type {
+  PresenceSnapshot,
+  PresenceStore,
+  RecordPresenceInput,
+  RenewPresenceInput,
+} from './presence-store.js';
 
 /**
  * Presence read through Redis and written to both stores.
@@ -50,8 +55,33 @@ export class CoordinatedPresenceStore implements PresenceStore {
         clockOffsetMs: Number(snapshot.clockOffsetMs),
         latencyMs: snapshot.latencyMs,
       });
+    } else {
+      // Leaving withdraws the key rather than letting it run out. The durable
+      // row already says OFFLINE, and `list` below prefers a live key over the
+      // row, so a key left behind would keep reporting a departed device as
+      // present — and, now that a read refreshes the caller's own key, would
+      // keep reporting it for as long as the departed device stayed open.
+      await this.#coordination.forgetPresence({
+        groupId: input.groupId,
+        deviceId: input.deviceId,
+      });
     }
     return snapshot;
+  }
+
+  /**
+   * Refreshes the caller's own liveness key, and touches neither store's state.
+   *
+   * The durable store has nothing to renew and says so; the Redis key is the
+   * only thing here with a clock running out. The renewal cannot create a key,
+   * so a device that never joined, or that left, stays absent from presence no
+   * matter how often it reads it.
+   */
+  async renew(input: RenewPresenceInput): Promise<void> {
+    await this.#coordination.renewPresence({
+      groupId: input.groupId,
+      deviceId: input.deviceId,
+    });
   }
 
   async list(groupId: string): Promise<readonly PresenceSnapshot[]> {

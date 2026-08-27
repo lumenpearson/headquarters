@@ -6,14 +6,21 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryRealtimeEventStore } from '../realtime/eventStore.js';
 import { RealtimeHub } from '../realtime/hub.js';
 
-import { InMemoryPresenceStore } from './presence-store.js';
+import {
+  InMemoryPresenceStore,
+  type PresenceSnapshot,
+  type PresenceStore,
+  type RecordPresenceInput,
+  type RenewPresenceInput,
+} from './presence-store.js';
 import { PairedDeviceRuntime } from './runtime.js';
 import { createPairedDeviceSyncService } from './service.js';
 
 /**
  * Offline proofs for the parts of the service layer the wire suite cannot
- * isolate: what a method does when its collaborator was never supplied, and
- * whether the streaming bridge drops an event that arrives between two yields.
+ * isolate: what a method does when its collaborator was never supplied, which
+ * device a read keeps alive and what it writes while doing so, and whether the
+ * streaming bridge drops an event that arrives between two yields.
  *
  * Everything about storage, locking and receipts is proved against a live
  * engine elsewhere; a scripted collaborator here would only restate the code.
@@ -66,12 +73,77 @@ describe('SyncService without its optional collaborators', () => {
   });
 });
 
+describe('SyncService presence renewal', () => {
+  it('keeps the reading device alive without writing a line of the group log', async () => {
+    const { service, events, presence, groupId, editorToken } = await authenticatedService();
+    const editorContext = handlerContext(`Bearer ${editorToken}`);
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, { groupId: { value: groupId } }),
+      editorContext,
+    );
+    const afterJoin = await logLength(events, groupId);
+
+    for (let poll = 0; poll < 8; poll += 1) {
+      await service.getPresence?.(
+        create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+        editorContext,
+      );
+    }
+
+    // Eight polls, eight renewals, and not one new row. This is the whole
+    // reason renewal is not a second `JoinGroup`: that call publishes
+    // `PRESENCE_UPDATED` through the hub, so a fifteen-second heartbeat per
+    // device would grow the log by thousands of rows a day — a log every
+    // polling client reads back in pages.
+    expect(presence.renewals).toHaveLength(8);
+    expect(await logLength(events, groupId)).toBe(afterJoin);
+  });
+
+  it('renews the device the bearer token names and no other', async () => {
+    const { service, presence, groupId, ownerToken, ownerDeviceId, editorToken, editorDeviceId } =
+      await authenticatedService();
+
+    await service.getPresence?.(
+      create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+      handlerContext(`Bearer ${editorToken}`),
+    );
+    await service.getPresence?.(
+      create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+      handlerContext(`Bearer ${ownerToken}`),
+    );
+
+    // `GetPresenceRequest` carries a group and nothing else, so there is no
+    // field on the wire a caller could use to name a device; the identifier can
+    // only come from the session the bearer token authenticated. A reader
+    // therefore cannot keep another operator's laptop looking present.
+    expect(presence.renewals).toEqual([
+      { groupId, deviceId: editorDeviceId },
+      { groupId, deviceId: ownerDeviceId },
+    ]);
+  });
+
+  it('renews nothing for a caller who cannot be authenticated', async () => {
+    const { service, presence, groupId } = await authenticatedService();
+
+    await expect(
+      Promise.resolve(
+        service.getPresence?.(
+          create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+          handlerContext('Bearer not-a-token'),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.Unauthenticated });
+
+    expect(presence.renewals).toEqual([]);
+  });
+});
+
 describe('SyncService group event stream', () => {
   it('delivers an event published while the consumer was between yields', async () => {
-    const { service, hub, token, groupId } = await authenticatedService();
+    const { service, hub, ownerToken, groupId } = await authenticatedService();
     const stream = service.watchGroup?.(
       create(syncV1.WatchGroupRequestSchema, { groupId: { value: groupId }, afterSequence: 0n }),
-      handlerContext(`Bearer ${token}`),
+      handlerContext(`Bearer ${ownerToken}`),
     );
     if (stream === undefined) throw new Error('watchGroup must be implemented');
     const iterator = stream[Symbol.asyncIterator]();
@@ -94,11 +166,11 @@ describe('SyncService group event stream', () => {
   });
 
   it('stops when the caller aborts, so the subscription cannot outlive it', async () => {
-    const { service, hub, token, groupId } = await authenticatedService();
+    const { service, hub, ownerToken, groupId } = await authenticatedService();
     const abort = new AbortController();
     const stream = service.watchGroup?.(
       create(syncV1.WatchGroupRequestSchema, { groupId: { value: groupId }, afterSequence: 0n }),
-      handlerContext(`Bearer ${token}`, abort.signal),
+      handlerContext(`Bearer ${ownerToken}`, abort.signal),
     );
     if (stream === undefined) throw new Error('watchGroup must be implemented');
     const iterator = stream[Symbol.asyncIterator]();
@@ -126,19 +198,66 @@ async function authenticatedService() {
       applicationVersion: '0.1.0',
     },
   });
-  const hub = new RealtimeHub({ store: new InMemoryRealtimeEventStore() });
+  const owner = runtime.authenticateAccessToken(created.session.accessToken);
+  const grant = runtime.createPairingCode(owner, created.group.id, 'EDITOR');
+  const paired = runtime.pairDevice({
+    pairingCode: grant.code,
+    name: 'Analyst',
+    publicKey: 'ed25519:analyst',
+    platform: 'windows',
+    applicationVersion: '0.1.0',
+  });
+  const events = new InMemoryRealtimeEventStore();
+  const hub = new RealtimeHub({ store: events });
+  const presence = new RecordingPresenceStore();
   const service = createPairedDeviceSyncService({
     runtime,
     verifyBootstrapSecret: () => true,
-    presence: new InMemoryPresenceStore(),
+    presence,
     hub,
   });
   return {
     service,
     hub,
-    token: created.session.accessToken,
+    events,
+    presence,
     groupId: created.group.id,
+    ownerToken: created.session.accessToken,
+    ownerDeviceId: created.device.id,
+    editorToken: paired.session.accessToken,
+    editorDeviceId: paired.device.id,
   };
+}
+
+/**
+ * Records renewals and delegates the rest. Whether a lease actually outlives
+ * its clock is a property of Redis and is proved against a deadline-keeping
+ * double in `coordinated-presence-store.test.ts`; what only this layer can show
+ * is which device the handler renews, how often, and what it publishes while
+ * doing it.
+ */
+class RecordingPresenceStore implements PresenceStore {
+  readonly renewals: RenewPresenceInput[] = [];
+  readonly #delegate = new InMemoryPresenceStore();
+
+  record(input: RecordPresenceInput): Promise<PresenceSnapshot> {
+    return this.#delegate.record(input);
+  }
+
+  renew(input: RenewPresenceInput): Promise<void> {
+    this.renewals.push(input);
+    return Promise.resolve();
+  }
+
+  list(groupId: string): Promise<readonly PresenceSnapshot[]> {
+    return this.#delegate.list(groupId);
+  }
+}
+
+/** How many events the group's log holds, counted through the replay a client would read. */
+async function logLength(events: InMemoryRealtimeEventStore, groupId: string): Promise<number> {
+  const replayed = await events.replay({ groupId, afterSequence: 0n, limit: 512 });
+  return replayed.events.length;
 }
 
 /**

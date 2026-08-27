@@ -197,6 +197,47 @@ describeIntegration('SyncService over binary gRPC-Web against real PostgreSQL', 
   );
 
   it(
+    'adds nothing to the durable log however often a device asks who is present',
+    async () => {
+      const { sync, close } = await startWireClient();
+      closeControlPlane = close;
+
+      const created = await sync.createGroup(
+        {
+          name: 'Штаб-3',
+          initialDevice: device('Primary workstation', 'ed25519:wire-primary-3'),
+        },
+        { headers: { 'x-hq-bootstrap-secret': bootstrapSecret } },
+      );
+      const groupId = required(created.group?.id?.value, 'group id');
+      const adminHeaders = {
+        authorization: `Bearer ${required(created.session?.accessToken, 'admin token')}`,
+      };
+      await sync.joinGroup({ groupId: { value: groupId } }, { headers: adminHeaders });
+      const afterJoining = await countEvents(groupId);
+
+      for (let poll = 0; poll < 10; poll += 1) {
+        const presence = await sync.getPresence(
+          { groupId: { value: groupId } },
+          { headers: adminHeaders },
+        );
+        expect(presence.devices[0]?.deviceId?.value).toBe(created.device?.id?.value);
+      }
+
+      // Ten polls, and `sync_events` holds exactly what the join left there.
+      // Renewing liveness through a second `JoinGroup` would have written ten
+      // more rows and spent ten more sequence numbers, and a client polls every
+      // fifteen seconds for as long as it is open — this count is what says the
+      // renewal took the other road. Counted in the table rather than argued
+      // from the code: an event appended anywhere on this path would show up
+      // here.
+      expect(await countEvents(groupId)).toBe(afterJoining);
+      expect(afterJoining).toBe(1);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'refuses a viewer publication and a foreign group with the codes a client checks for',
     async () => {
       const { sync, close } = await startWireClient();
@@ -248,6 +289,14 @@ describeIntegration('SyncService over binary gRPC-Web against real PostgreSQL', 
     },
     networkTimeoutMs,
   );
+
+  async function countEvents(groupId: string): Promise<number> {
+    const rows = await database.query<{ n: number }>({
+      text: 'SELECT count(*)::int AS n FROM sync_events WHERE group_id = $1',
+      values: [groupId],
+    });
+    return rows[0]?.n ?? -1;
+  }
 
   async function startWireClient(): Promise<{
     readonly sync: Client<typeof SyncService>;

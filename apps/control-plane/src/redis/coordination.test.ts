@@ -54,6 +54,42 @@ describe('Upstash coordination', () => {
     });
   });
 
+  it('renews a liveness key without rewriting it, and withdraws one outright', async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const coordination = createUpstashCoordination(redisConfig, () => fakeRedis(calls));
+
+    await expect(
+      coordination.renewPresence({ groupId: 'group-01', deviceId: 'device-01' }),
+    ).resolves.toBe(true);
+    await coordination.forgetPresence({ groupId: 'group-01', deviceId: 'device-01' });
+
+    // A change detector for the statement, not a proof of expiry: what a
+    // renewal does to a key that is or is not there is proved against a
+    // deadline-keeping double in `sync/coordinated-presence-store.test.ts`.
+    // Both keys travel in one script because `listPresence` reads the
+    // membership set first, and the default lease is the same forty-five
+    // seconds an announcement gets.
+    expect(calls).toContainEqual({
+      method: 'script.exec',
+      args: [
+        'RENEW-PRESENCE',
+        ['hq:group:group-01:presence:device-01', 'hq:group:group-01:presence:members'],
+        ['45'],
+      ],
+    });
+    // Nothing is written: a renewal must not be able to invent a device that
+    // never joined, and it does not overwrite what one reported either.
+    expect(calls.map((call) => call.method)).not.toContain('set');
+    expect(calls).toContainEqual({
+      method: 'del',
+      args: ['hq:group:group-01:presence:device-01'],
+    });
+    expect(calls).toContainEqual({
+      method: 'srem',
+      args: ['hq:group:group-01:presence:members', 'device-01'],
+    });
+  });
+
   it('uses compare-and-set scripts for lease renewal and release', async () => {
     const calls: Array<{ method: string; args: unknown[] }> = [];
     const coordination = createUpstashCoordination(redisConfig, () => fakeRedis(calls));
@@ -102,12 +138,18 @@ describe('Upstash coordination', () => {
     expect(rateLimiterFactory).toHaveBeenCalledOnce();
   });
 
-  it('does not initialize an absent Redis configuration', () => {
+  it('does not initialize an absent Redis configuration', async () => {
     const coordination = createUpstashCoordination(undefined);
 
     expect(() => coordination.nextSequence('group-01', 'settings')).toThrow(
       RedisConfigurationError,
     );
+    // Renewal is no exception: without Redis there is no key with a clock
+    // running out, so the path that would renew one must not quietly open a
+    // connection to look for it.
+    await expect(
+      coordination.renewPresence({ groupId: 'group-01', deviceId: 'device-01' }),
+    ).rejects.toThrow(RedisConfigurationError);
     expect(coordination.configured).toBe(false);
     expect(coordination.initialized).toBe(false);
   });
@@ -121,6 +163,14 @@ function fakeRedis(calls: Array<{ method: string; args: unknown[] }>): Coordinat
     },
     async sadd(...args) {
       calls.push({ method: 'sadd', args });
+      return 1;
+    },
+    async srem(...args) {
+      calls.push({ method: 'srem', args });
+      return 1;
+    },
+    async del(...args) {
+      calls.push({ method: 'del', args });
       return 1;
     },
     async expire(...args) {
@@ -140,11 +190,18 @@ function fakeRedis(calls: Array<{ method: string; args: unknown[] }>): Coordinat
       return 1;
     },
     createScript(source) {
-      const operation = source.includes('EXPIRE') ? 'EXPIRE' : 'DEL';
+      // The lease scripts compare a holder before acting, so they read; the
+      // presence renewal only extends. Classifying on `GET` keeps the three
+      // apart now that two of them call `EXPIRE`.
+      const operation = !source.includes('GET')
+        ? 'RENEW-PRESENCE'
+        : source.includes('EXPIRE')
+          ? 'EXPIRE'
+          : 'DEL';
       return {
         async exec(keys, args) {
           calls.push({ method: 'script.exec', args: [operation, keys, args] });
-          return operation === 'EXPIRE' ? 1 : 0;
+          return operation === 'DEL' ? 0 : 1;
         },
       };
     },

@@ -20,6 +20,17 @@ export interface PresenceInput extends Omit<PresenceRecord, 'observedAtMs'> {
   readonly ttlSeconds?: number;
 }
 
+/**
+ * A renewal names only a group and a device: it carries no state, because it
+ * changes none. What the device last reported stays exactly as `recordPresence`
+ * left it; only the moment the key lapses moves.
+ */
+export interface PresenceRenewalInput {
+  readonly groupId: string;
+  readonly deviceId: string;
+  readonly ttlSeconds?: number;
+}
+
 export interface LeaderLeaseInput {
   readonly groupId: string;
   readonly deviceId: string;
@@ -44,6 +55,8 @@ export interface CoordinationRedisClient {
     options?: { readonly ex?: number; readonly nx?: boolean },
   ): Promise<'OK' | null>;
   sadd(key: string, ...members: readonly string[]): Promise<number>;
+  srem(key: string, ...members: readonly string[]): Promise<number>;
+  del(...keys: readonly string[]): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
   smembers(key: string): Promise<string[]>;
   mget<Value>(...keys: readonly string[]): Promise<(Value | null)[]>;
@@ -81,6 +94,7 @@ export class RedisConfigurationError extends Error {
 export class UpstashCoordination {
   #client: CoordinationRedisClient | undefined;
   #mutationRateLimiter: RateLimiter | undefined;
+  #renewPresenceScript: RedisScript<number> | undefined;
   #renewLeaseScript: RedisScript<number> | undefined;
   #releaseLeaseScript: RedisScript<number> | undefined;
 
@@ -115,6 +129,50 @@ export class UpstashCoordination {
       client.set(presenceKey(input.groupId, input.deviceId), record, { ex: ttlSeconds }),
       client.sadd(membershipKey, input.deviceId),
       client.expire(membershipKey, ttlSeconds),
+    ]);
+  }
+
+  /**
+   * Extends a liveness key that already exists, and nothing else.
+   *
+   * `EXPIRE` answers 0 for a key that is not there, so a renewal can only keep
+   * alive what a join established: a device that left the session, or whose key
+   * already lapsed, is not brought back by asking who is present. Announcing
+   * presence stays the one operation that creates it, which is why this one is
+   * cheap enough to run on every read.
+   *
+   * The membership set is extended inside the same script because
+   * `listPresence` reads it first: letting the set lapse while the device keys
+   * lived would report an empty group. Doing both in one script also means a
+   * renewal cannot half-apply.
+   */
+  async renewPresence(input: PresenceRenewalInput): Promise<boolean> {
+    const ttlSeconds = normalizeTtl(input.ttlSeconds, defaultPresenceTtlSeconds);
+    const client = this.getClient();
+    this.#renewPresenceScript ??= client.createScript<number>(
+      'if redis.call("EXPIRE", KEYS[1], ARGV[1]) == 1 then redis.call("EXPIRE", KEYS[2], ARGV[1]) return 1 else return 0 end',
+    );
+    return (
+      (await this.#renewPresenceScript.exec(
+        [presenceKey(input.groupId, input.deviceId), presenceMembershipKey(input.groupId)],
+        [String(ttlSeconds)],
+      )) === 1
+    );
+  }
+
+  /**
+   * Withdraws a device's liveness immediately rather than waiting out its TTL.
+   *
+   * Leaving the synchronized session has to remove the key, not merely stop
+   * refreshing it: a device that left and kept polling would otherwise renew
+   * itself for as long as it stayed open, and until this existed a departure
+   * was invisible for up to a full TTL anyway.
+   */
+  async forgetPresence(input: Pick<PresenceRenewalInput, 'groupId' | 'deviceId'>): Promise<void> {
+    const client = this.getClient();
+    await Promise.all([
+      client.del(presenceKey(input.groupId, input.deviceId)),
+      client.srem(presenceMembershipKey(input.groupId), input.deviceId),
     ]);
   }
 

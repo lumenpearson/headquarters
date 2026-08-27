@@ -326,12 +326,43 @@ export function createPairedDeviceSyncService(
       });
     },
 
+    /**
+     * Reads the group's presence and, in the same call, keeps the reader alive.
+     *
+     * This is deliberately not a pure read, and the trade is worth naming. A
+     * device announces itself once, at `JoinGroup`, and its liveness key lasts
+     * forty-five seconds; a client that only ever asked who was present
+     * therefore reported itself `OFFLINE` three quarters of a minute after
+     * joining, while sitting on the connection. Renewing through `JoinGroup`
+     * would fix the reading and wreck the log: that call publishes
+     * `PRESENCE_UPDATED` through the hub, which appends a durable `sync_events`
+     * row and spends a sequence number, so a fifteen-second heartbeat per
+     * device would add thousands of rows a day to the history every polling
+     * client reads back in pages.
+     *
+     * A separate heartbeat RPC would keep the read pure at the cost of a change
+     * to the versioned contract and a second timer on every client, carrying
+     * the same single fact this call already carries. Asking who is present is
+     * itself evidence of being present, so the two travel together: any client
+     * that shows presence keeps itself alive by showing it, and none can forget
+     * to.
+     *
+     * The device renewed is the one the bearer token authenticated, never one
+     * named by the request — `GetPresenceRequest` carries no device field at
+     * all — and `assertAuthenticatedGroup` has already refused a session
+     * reaching into another group. A revoked device, session or token fails
+     * authentication above and renews nothing.
+     */
     async getPresence(request, context) {
       return withRuntimeErrors(async () => {
         const presence = requirePresence(options.presence);
         const authenticated = await authenticateRequest(options.runtime, context);
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
+        // Before the read, so the answer already accounts for the renewal the
+        // caller just earned. No event is published: liveness that lasts until
+        // it lapses is not a change worth a row in the group's history.
+        await presence.renew({ groupId, deviceId: authenticated.device.id });
         const devices = await presence.list(groupId);
         return { devices: devices.map(toPresence) };
       });

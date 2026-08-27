@@ -40,8 +40,30 @@ export interface RecordPresenceInput {
   readonly latencyMs?: number;
 }
 
+/**
+ * A renewal names the device and nothing else, because it changes nothing the
+ * device reported. The identifier always comes from the caller's own
+ * authenticated session; there is no field on the wire that could name another.
+ */
+export interface RenewPresenceInput {
+  readonly groupId: string;
+  readonly deviceId: string;
+}
+
 export interface PresenceStore {
   record(input: RecordPresenceInput): Promise<PresenceSnapshot>;
+  /**
+   * Keeps an already-announced device alive without reporting anything new.
+   *
+   * `record` is what enters and leaves the session, and each call of it also
+   * appends a durable `PRESENCE_UPDATED` row to `sync_events` and consumes a
+   * sequence number. A device that is merely still here must not pay that: a
+   * renewal every fifteen seconds per device would add thousands of rows a day
+   * to the log every polling client reads back in pages. So liveness is
+   * refreshed on its own, and the log records only the two facts that are
+   * events — a device joined, a device left.
+   */
+  renew(input: RenewPresenceInput): Promise<void>;
   list(groupId: string): Promise<readonly PresenceSnapshot[]>;
 }
 
@@ -126,6 +148,23 @@ export class DurablePresenceStore implements PresenceStore {
     return toPresenceSnapshot(row);
   }
 
+  /**
+   * There is no lease here to keep alive.
+   *
+   * A `presence_snapshots` row never expires, so without Redis a device stays
+   * exactly as `JoinGroup` left it until it says otherwise, and `list` reads
+   * `status` without ever comparing `observed_at` to now. Writing `observed_at`
+   * on every poll would therefore cost one row write per device every fifteen
+   * seconds and change no answer this store gives. What a reader gets here
+   * remains "what this device last reported, and when" rather than "this device
+   * is here now" — the weaker reading `Health` already names when it reports
+   * Redis unconfigured. A deployment that needs presence to expire configures
+   * Redis; that is the trade, and it is not hidden.
+   */
+  renew(): Promise<void> {
+    return Promise.resolve();
+  }
+
   async list(groupId: string): Promise<readonly PresenceSnapshot[]> {
     const rows = await this.query(
       sql(
@@ -184,6 +223,11 @@ export class InMemoryPresenceStore implements PresenceStore {
     group.set(input.deviceId, snapshot);
     this.#byGroup.set(input.groupId, group);
     return Promise.resolve(snapshot);
+  }
+
+  /** Nothing in this map expires either, so there is nothing to extend. */
+  renew(): Promise<void> {
+    return Promise.resolve();
   }
 
   list(groupId: string): Promise<readonly PresenceSnapshot[]> {
