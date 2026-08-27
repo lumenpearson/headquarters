@@ -4,6 +4,7 @@ import type { OpsSeverity, OpsStatus } from '@gremuchaya/domain';
 import { TerminalDrawer, TerminalTooltip } from '@gremuchaya/ui/primitives';
 import type { ReactElement, ReactNode } from 'react';
 import { useStringSetting } from '@/application/personalization/useSetting';
+import { ContentEditor } from '@/components/edit/ContentEditor';
 import { TileCaptionProvider, useElementCaption } from '@/components/layout/tileCaption';
 
 const statusLabels: Readonly<Record<OpsStatus, string>> = {
@@ -240,6 +241,20 @@ export function Tooltip({
   return <TerminalTooltip label={label}>{children}</TerminalTooltip>;
 }
 
+/**
+ * A record card, over the screen and modal while it is open.
+ *
+ * The content editor is mounted inside it, after the card's own content, so
+ * that the fields the card carries can be edited from where they are. The card
+ * traps focus and hides the rest of the document from assistive technology --
+ * that is what a modal dialog is -- which left the editor in the floating
+ * panel visible, selectable and unreachable (R4). Last rather than first: the
+ * editor appears the moment a value is selected, and inserting it above the
+ * card's body would move the value the operator had just pointed at.
+ *
+ * It draws nothing outside edit mode and nothing while no value is selected,
+ * so a card that carries no editable value is the card it always was.
+ */
 export function Drawer({
   title,
   eyebrow,
@@ -264,6 +279,7 @@ export function Drawer({
       bodyClassName="ops-drawer__body"
     >
       {children}
+      <ContentEditor host="drawer" />
     </TerminalDrawer>
   );
 }

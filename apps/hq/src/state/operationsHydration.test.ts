@@ -258,4 +258,67 @@ describe('initializeOperationsClient', () => {
     expect(operationsStore.getState().cases['CASE-01']?.createdAt).toBe(seedCreatedAt);
     expect(operationsStore.getState().cases['CASE-01']?.title).toBe('ДЕЛО / ПРОВЕРЕНО');
   });
+
+  /*
+   * `startup.restoreWorld` names what the simulation did -- alerts, tasks, the
+   * audit trail -- and the store says in as many words that a content edit is
+   * not one of those and comes back whatever the setting says. Both settings
+   * are run, because "regardless" is a claim about two answers and a case that
+   * only ever asks one of them cannot make it.
+   *
+   * The setting is seeded to `false` in the first case, which is not its
+   * default (`true`): a case seeded with the default passes against a build
+   * where the setting was deleted, and proves nothing about it (C51).
+   */
+  for (const restoreWorld of [false, true]) {
+    it(`brings content edits back with startup.restoreWorld ${restoreWorld}`, () => {
+      const state = operationsStore.getState();
+      const { snapshots: _snapshots, ...production } = state.production;
+      const alertId = Object.keys(state.alerts)[0];
+      const seededAlert = alertId === undefined ? undefined : state.alerts[alertId];
+      if (alertId === undefined || seededAlert === undefined) {
+        throw new Error('the seed has no alert to restore');
+      }
+      // A lifecycle the seed does not hold for this alert, so "the blob won"
+      // and "the seed won" are two readings this case can tell apart.
+      const storedLifecycle = seededAlert.lifecycle === 'RESOLVED' ? 'NEW' : 'RESOLVED';
+      const seedTitle = operationsStore.getState().cases['CASE-05']?.title;
+      localStorage.setItem(
+        persistedStateKey,
+        JSON.stringify({
+          version: 5,
+          ui: state.ui,
+          production,
+          alerts: { ...state.alerts, [alertId]: { ...seededAlert, lifecycle: storedLifecycle } },
+          tasks: state.tasks,
+          personalization: {
+            ...state.personalization,
+            draft: {
+              ...state.personalization.draft,
+              values: {
+                ...state.personalization.draft.values,
+                'startup.restoreWorld': restoreWorld,
+              },
+            },
+          },
+          content: { overrides: { 'case.title@CASE-05': 'ДЕЛО / ВОССТАНОВЛЕНО' } },
+        }),
+      );
+
+      dispose = initializeOperationsClient();
+
+      // The promise itself: the correction the operator made is on the screen
+      // again, on both answers.
+      expect(operationsStore.getState().cases['CASE-05']?.title).toBe('ДЕЛО / ВОССТАНОВЛЕНО');
+      expect(operationsStore.getState().content.overrides).toEqual({
+        'case.title@CASE-05': 'ДЕЛО / ВОССТАНОВЛЕНО',
+      });
+      expect(seedTitle).not.toBe('ДЕЛО / ВОССТАНОВЛЕНО');
+      // And the setting was read, so the first case is not passing because
+      // everything comes back: what it governs followed it.
+      expect(operationsStore.getState().alerts[alertId]?.lifecycle).toBe(
+        restoreWorld ? storedLifecycle : seededAlert.lifecycle,
+      );
+    });
+  }
 });

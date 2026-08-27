@@ -178,6 +178,87 @@ test('R17: state changes land instantly while edit mode is on, and ease again on
   await expect.poll(motionDuration).toBe(configured);
 });
 
+/**
+ * R4: the four editable values on the event card are edited from the card.
+ *
+ * A record card is a modal dialog. While one is open Base UI traps the tab
+ * ring inside it, marks every other body child `aria-hidden` and lays a
+ * full-screen backdrop over the document -- measured here before this case
+ * existed: twelve consecutive Tab presses never left the card, `.edit-panel`
+ * carried `aria-hidden="true"`, and a click on the content field in the panel
+ * was refused for four seconds. The operator could select an event's date and
+ * reach nothing that changed it.
+ *
+ * This drives the gesture rather than the markup: open the card, point at the
+ * date, type a new one, read the card. A case that only asserted the editor
+ * had rendered would have passed against the build that had the defect.
+ */
+test('R4: an event card opened in edit mode is edited from inside the card', async ({ page }) => {
+  await page.goto('/overview');
+  await expect(page.locator('.ops-shell')).toBeVisible();
+  await page.keyboard.press('Control+Shift+E');
+  await expect(page.locator('.edit-panel')).toBeVisible();
+
+  await page.locator('.operation-timeline button').first().click();
+  const card = page.locator('.ops-drawer');
+  await expect(card).toBeVisible();
+
+  const printedDate = card.locator('.editable-content[title="ДАТА СОБЫТИЯ"]');
+  const seeded = ((await printedDate.textContent()) ?? '').trim();
+  // The seed sits in September 2026, so the date typed below is a change and
+  // not the value that was already there.
+  expect(seeded).not.toBe('15.01.2026');
+
+  await printedDate.click();
+  await expect(printedDate).toHaveAttribute('aria-pressed', 'true');
+
+  // Inside the card, and only there: two mounted copies would be two drafts
+  // of one field and two elements sharing the error message's id.
+  const control = card.locator('.edit-content input[type="date"]');
+  await expect(control).toBeVisible();
+  await expect(page.locator('.edit-panel .edit-content')).toHaveCount(0);
+
+  // Reachable with the keyboard, which is the half a pointer test cannot see:
+  // the ring is closed, so a control outside it is never tabbed to.
+  const focusedControl = async (): Promise<boolean> =>
+    page.evaluate(() => document.activeElement?.getAttribute('type') === 'date');
+  await printedDate.focus();
+  let tabs = 0;
+  while (tabs < 10 && !(await focusedControl())) {
+    await page.keyboard.press('Tab');
+    tabs += 1;
+  }
+  expect(await focusedControl()).toBe(true);
+
+  await control.fill('2026-01-15');
+
+  // The card the operator is looking at, not the field they typed into.
+  await expect(printedDate).toHaveText('15.01.2026');
+  // The time of day is the operator's to change separately, and a date edit
+  // leaves it where it was.
+  const printedTime = card.locator('.editable-content[title="ВРЕМЯ СОБЫТИЯ"]');
+  const keptTime = ((await printedTime.textContent()) ?? '').trim();
+  expect(keptTime).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+
+  const stored = await page.evaluate(() => {
+    const raw = localStorage.getItem('gremuchaya-hq:operations:v3');
+    if (raw === null) throw new Error('the store has not been persisted');
+    const parsed = JSON.parse(raw) as { content?: { overrides?: Record<string, string> } };
+    return parsed.content?.overrides ?? {};
+  });
+  expect(Object.keys(stored)).toHaveLength(1);
+  expect(Object.keys(stored)[0]).toMatch(/^event\.date@EV-\d+$/);
+
+  // The way back is in the card too, so an edit made there can be undone
+  // without closing the card to find the button.
+  await card.getByRole('button', { name: /^Вернуть исходное значение: event\.date@/ }).click();
+  await expect(printedDate).toHaveText(seeded);
+  // The list of changes empties with it; the field stays selected, because a
+  // reset is a correction and not a reason to stop editing.
+  await expect(card.locator('.edit-content__changed')).toHaveCount(0);
+  await expect(control).toBeVisible();
+});
+
 // R13: every declared patterns.focus value has to change what a focused
 // element looks like. Three of the seven -- brackets (the default), barber and
 // scan -- used to change only the data attribute, so the setting was a control

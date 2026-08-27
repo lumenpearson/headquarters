@@ -28,16 +28,38 @@ const rejectionLabels: Readonly<Record<ContentPatchRejection, string>> = {
 };
 
 /**
- * The content section of the edit panel (R4): the field the operator selected
- * on screen, then every content value that differs from the seed, each with
- * its own way back.
+ * Where this instance of the editor is mounted. The editor is rendered from
+ * two places and draws in exactly one of them at a time; see
+ * {@link ContentEditor}.
+ */
+export type ContentEditorHost = 'panel' | 'drawer';
+
+/**
+ * The content section of edit mode (R4): the field the operator selected on
+ * screen, then every content value that differs from the seed, each with its
+ * own way back.
  *
  * Nothing here when nothing is selected and nothing is changed. The values on
  * screen are what teach the gesture -- in edit mode each one wears a dashed
- * edge -- so a standing hint in the panel would say what the screen already
- * shows.
+ * edge -- so a standing hint would say what the screen already shows.
+ *
+ * **It follows the selection into a card.** Four editable values live inside
+ * the event card, and a card is a modal dialog: while one is open Base UI
+ * marks every other body child `aria-hidden`, traps the tab ring inside the
+ * popup and lays a full-screen backdrop over the document. Measured on the
+ * running application -- twelve consecutive Tab presses never left the card,
+ * `.edit-panel` carried `aria-hidden="true"`, and a click on the field in the
+ * panel was refused for four seconds -- so an operator could select an event's
+ * date and never reach the control that changes it. The editor therefore
+ * renders inside the card while a card is open and back in the panel when it
+ * closes, rather than in both at once: two mounted copies would mean two
+ * drafts of one field and two elements sharing the error message's id.
  */
-export function ContentEditor() {
+export function ContentEditor({ host = 'panel' }: { readonly host?: ContentEditorHost } = {}) {
+  const active = useOperationsStore((state) => state.edit.active);
+  // A card, not this component, is what makes the panel unreachable, so which
+  // host draws is decided by whether a card is open at all.
+  const carded = useOperationsStore((state) => state.ui.drawer !== null);
   const selected = useOperationsStore((state) => state.edit.selectedElementId);
   const overrides = useOperationsStore((state) => state.content.overrides);
   const target = parseContentElementId(selected);
@@ -49,6 +71,11 @@ export function ContentEditor() {
   );
   const changed = Object.entries(overrides);
 
+  // The panel only exists in edit mode; a card exists whether or not edit mode
+  // does, so the mode is checked here rather than left to the caller.
+  if (!active) return null;
+  if (host === 'drawer' && !carded) return null;
+  if (host === 'panel' && carded) return null;
   if (definition === undefined && changed.length === 0) return null;
 
   return (
