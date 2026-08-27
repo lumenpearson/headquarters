@@ -5,6 +5,7 @@ import { connectNodeAdapter } from '@connectrpc/connect-node';
 import type { syncV1 } from '@gremuchaya/protocol';
 
 import { loadControlPlaneConfig, type ControlPlaneConfig } from './config.js';
+import { isEntrypoint } from './entrypoint.js';
 import { decideRpcHttpPolicy } from './http-policy.js';
 import { attachRealtimeTransport } from './realtime/server.js';
 import type { GroupEventPublication } from './realtime/server.js';
@@ -92,10 +93,4 @@ if (isEntrypoint(import.meta.url, process.argv[1])) {
   const address = running.server.address();
   const port = typeof address === 'object' && address !== null ? address.port : config.port;
   process.stdout.write(`gremuchaya-control-plane listening on http://${config.host}:${port}\n`);
-}
-
-function isEntrypoint(moduleUrl: string, executablePath: string | undefined): boolean {
-  if (executablePath === undefined) return false;
-  const modulePath = new URL(moduleUrl).pathname.replace(/^\//u, '').replaceAll('/', '\\');
-  return modulePath.toLocaleLowerCase('en-US') === executablePath.toLocaleLowerCase('en-US');
 }
