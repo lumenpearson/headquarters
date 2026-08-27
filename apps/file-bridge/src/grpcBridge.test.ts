@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { createClient } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
 import { bridgeHealthSchema, type BridgeConfig } from '@gremuchaya/config';
+import { createVirtualPath } from '@gremuchaya/domain';
 import { EntryKind, FileBridgeService } from '@gremuchaya/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -34,9 +35,18 @@ describe('gRPC-Web file bridge', () => {
       port: 0,
       readOnly: true,
       allowedOrigins: ['http://127.0.0.1:3000'],
-      mounts: [{ id: 'incoming', label: 'ВХОДЯЩИЕ', root, virtualPath: '/ВХОДЯЩИЕ' }],
+      mounts: [
+        { id: 'incoming', label: 'ВХОДЯЩИЕ', root, virtualPath: createVirtualPath('/ВХОДЯЩИЕ') },
+      ],
       stableFile: { probeIntervalMs: 50, timeoutMs: 500 },
       watchDebounceMs: 25,
+      // The parser defaults this and the schema refuses `enabled` on a read-only
+      // bridge, so the disabled form is the only one this configuration can take.
+      materialImport: {
+        enabled: false,
+        maxFileBytes: 5 * 1024 * 1024 * 1024,
+        chunkSizeBytes: 1024 * 1024,
+      },
     };
     const running = await startBridge(config);
     closeBridge = running.close;
@@ -113,7 +123,7 @@ describe('gRPC-Web file bridge', () => {
           id: 'materials',
           label: 'ОБЩИЕ МАТЕРИАЛЫ',
           root,
-          virtualPath: '/МАТЕРИАЛЫ',
+          virtualPath: createVirtualPath('/МАТЕРИАЛЫ'),
         },
       ],
       stableFile: { probeIntervalMs: 50, timeoutMs: 500 },
@@ -193,7 +203,7 @@ describe('gRPC-Web file bridge', () => {
           id: 'materials',
           label: 'ОБЩИЕ МАТЕРИАЛЫ',
           root,
-          virtualPath: '/МАТЕРИАЛЫ',
+          virtualPath: createVirtualPath('/МАТЕРИАЛЫ'),
         },
       ],
       stableFile: { probeIntervalMs: 50, timeoutMs: 500 },

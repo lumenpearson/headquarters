@@ -23,9 +23,13 @@ describe('MaterialPlaybackRegistry', () => {
       /^http:\/\/127\.0\.0\.1:4177\/v1\/material-playback\/[0-9a-f-]{36}\/[0-9a-f]{64}$/u,
     );
     expect(grant.url).not.toContain('opaque-object');
-    const [, grantId, token] = grant.url.match(
-      /\/v1\/material-playback\/([0-9a-f-]{36})\/([0-9a-f]{64})$/u,
-    ) ?? ['', '', ''];
+    const match = /\/v1\/material-playback\/([0-9a-f-]{36})\/([0-9a-f]{64})$/u.exec(grant.url);
+    // Asserted rather than defaulted: a URL shape that stopped matching would
+    // otherwise make the two calls below pass empty strings and read as a
+    // registry that refuses everything, which is the same result as success.
+    expect(match).not.toBeNull();
+    const grantId = match?.[1] ?? '';
+    const token = match?.[2] ?? '';
     expect(registry.authorize(grantId, token)).toEqual(source);
     expect(registry.authorize(grantId, '0'.repeat(64))).toBeUndefined();
   });

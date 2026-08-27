@@ -15,7 +15,7 @@
   "scripts": {
     "generate": "buf generate && node ./scripts/normalize-generated.mjs",
     "build": "tsc -b",
-    "typecheck": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.test.json --pretty false",
     "lint": "eslint src && buf lint",
     "test": "vitest run"
   },

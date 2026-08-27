@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { BridgeConfig } from '@gremuchaya/config';
+import { createVirtualPath } from '@gremuchaya/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { MaterialMirror, MaterialMirrorError } from './MaterialMirror.js';
@@ -118,7 +119,14 @@ function materialConfig(root: string): BridgeConfig {
     port: 0,
     readOnly: false,
     allowedOrigins: ['http://127.0.0.1:3000'],
-    mounts: [{ id: 'materials', label: 'ОБЩИЕ МАТЕРИАЛЫ', root, virtualPath: '/МАТЕРИАЛЫ' }],
+    mounts: [
+      {
+        id: 'materials',
+        label: 'ОБЩИЕ МАТЕРИАЛЫ',
+        root,
+        virtualPath: createVirtualPath('/МАТЕРИАЛЫ'),
+      },
+    ],
     stableFile: { probeIntervalMs: 50, timeoutMs: 500 },
     watchDebounceMs: 25,
     materialImport: { enabled: true, maxFileBytes: 1024 * 1024, chunkSizeBytes: 65_536 },
