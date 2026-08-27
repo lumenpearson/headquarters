@@ -5,13 +5,26 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalCheckbox } from '@gremuchaya/ui/primitives';
 
 import { useNumberSetting, useStringSetting } from '@/application/personalization/useSetting';
+import { useRecordPage } from '@/application/records/useRecordPage';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
+import { RecordPagination } from '@/components/operations/RecordPagination';
 import { YandexTacticalMap } from '@/components/operations/YandexTacticalMap';
 import { type MapLayer, useOperationsStore } from '@/state/operationsStore';
 
 const MOSCOW_OPERATION_CENTER = [55.7558, 37.6173] as const;
+
+/**
+ * Rows the channel table holds, and therefore its page size.
+ *
+ * Not `tables.pageSize`: that setting sizes the registry screens, where the
+ * table is the screen, and its default of 50 in a tile declared five columns
+ * by one row beside the map surface would push the workspace past its bounds
+ * (R26). Six is the number of rows the tile drew before it had pages -- the
+ * same budget, with the rest of the channels now reachable instead of cut off.
+ */
+const channelsPerPage = 6;
 
 type ChannelSort = 'id' | 'encryption' | 'load' | 'packetLoss' | 'latency';
 
@@ -147,22 +160,26 @@ export function TacticalMapScreen() {
    * The one table on this screen, and the last of the data screens to have no
    * ordering of its own: an operator looking for the channel that is losing
    * packets had to read all of them.
+   *
+   * The ordering is now the comparator the shared pass takes rather than a
+   * sort this screen runs itself, which keeps it ahead of the slice:
+   * `queryRecords` orders the whole set and pages the result, so the first
+   * page is the first six channels by the chosen column and not the first six
+   * of the page the operator happens to be on (R9).
    */
   const [channelSort, setChannelSort] = useState<ChannelSort>('id');
   const [channelDescending, setChannelDescending] = useState(false);
-  const channels = useMemo(
-    () =>
-      [...Object.values(state.channels)].sort((left, right) => {
-        const a = left[channelSort];
-        const b = right[channelSort];
-        const result =
-          typeof a === 'number' && typeof b === 'number'
-            ? a - b
-            : String(a).localeCompare(String(b));
-        return channelDescending ? -result : result;
-      }),
-    [channelDescending, channelSort, state.channels],
-  );
+  const channelRecords = useMemo(() => Object.values(state.channels), [state.channels]);
+  const { page: channelPage, goToPage: goToChannelPage } = useRecordPage(channelRecords, {
+    pageSize: channelsPerPage,
+    comparator: (left, right) => {
+      const a = left[channelSort];
+      const b = right[channelSort];
+      const result =
+        typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b));
+      return channelDescending ? -result : result;
+    },
+  });
 
   /*
    * The map surface holds the top priority and names no route: it is what
@@ -308,6 +325,14 @@ export function TacticalMapScreen() {
         },
         render: () => (
           <Panel title="АКТИВНЫЕ ТРЕВОГИ" eyebrow="ALERTS / CURRENT AREA" className="map-alerts">
+            {/*
+              A head, not a page. `map.alertRows` states how many alerts the
+              operator wants beside the surface; the rest of them are on the
+              map itself and in `/alerts`, which is where the whole set is
+              read. Giving this list pages would put a page-turner on a summary
+              whose point is that it does not ask to be turned -- the channel
+              table below is the paged one, and this is deliberately not it.
+            */}
             <div className="compact-alert-list">
               {Object.values(state.alerts)
                 .filter((alert) => alert.lifecycle !== 'RESOLVED')
@@ -446,6 +471,12 @@ export function TacticalMapScreen() {
         },
         render: () => (
           <Panel title="СИГНАЛЫ И ДАТЧИКИ" eyebrow="SENSORS / LIVE" className="map-sensors-panel">
+            {/*
+              A head, not a page, for the same reason as the alert tile: every
+              sensor is drawn on the surface under the `sensors` layer, and
+              this list is the seven the operator glances at. Do not route it
+              through `queryRecords` -- there is nothing here to turn to.
+            */}
             <div className="sensor-list">
               {Object.values(state.sensors)
                 .slice(0, 7)
@@ -498,7 +529,7 @@ export function TacticalMapScreen() {
                 </tr>
               </thead>
               <tbody>
-                {channels.slice(0, 6).map((channel) => (
+                {channelPage.items.map((channel) => (
                   <tr
                     key={channel.id}
                     data-interactive="true"
@@ -515,6 +546,18 @@ export function TacticalMapScreen() {
                 ))}
               </tbody>
             </table>
+            {/*
+              Shown only when there is a second page: the seeded world has ten
+              channels and the tile holds six, so the footer earns its row here
+              and disappears on a deployment with fewer channels than rows.
+            */}
+            {channelPage.pageCount > 1 ? (
+              <RecordPagination
+                page={channelPage}
+                onPage={goToChannelPage}
+                label="Страницы таблицы каналов связи"
+              />
+            ) : null}
           </Panel>
         ),
       },
@@ -522,8 +565,9 @@ export function TacticalMapScreen() {
     [
       activeAlerts,
       channelDescending,
+      channelPage,
       channelSort,
-      channels,
+      goToChannelPage,
       hiddenLayers,
       mapAlertRows,
       representation,

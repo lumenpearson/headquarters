@@ -5,7 +5,10 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
 import { dateTimeFormat, foldCase } from '@/application/localization/intl';
+import { useRecordPage } from '@/application/records/useRecordPage';
+import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, SeverityBadge, StatusBadge } from '@/components/operations/OpsUi';
+import { RecordPagination } from '@/components/operations/RecordPagination';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useOperationsStore } from '@/state/operationsStore';
 
@@ -66,7 +69,6 @@ export function SearchScreen() {
         })),
       ...state.events
         .filter((item) => includes(`${item.id} ${item.title} ${item.description} ${item.source}`))
-        .slice(0, 30)
         .map((item) => ({
           id: item.id,
           kind: 'event' as const,
@@ -83,8 +85,29 @@ export function SearchScreen() {
           detail: `${item.source} · ${item.sectorId} · ${item.lifecycle}`,
           severity: item.level,
         })),
-    ].slice(0, 80);
+    ];
   }, [query, state.alerts, state.attachments, state.cases, state.events, state.objects]);
+
+  /*
+   * The whole match set, paged rather than truncated.
+   *
+   * Two ceilings stood here -- thirty on the events and eighty on the union --
+   * and neither said so on screen: the header counted the hits that survived
+   * them, so a query matching two hundred records reported eighty and the rest
+   * were unreachable (R9). Paging is the same clamp made navigable, and it is
+   * the pass every registry already runs.
+   *
+   * No comparator: each source contributes its matches in the order its own
+   * predicate found them, and the union's kind-by-kind order is the ranking
+   * this screen offers. No filters either -- the predicates differ per source
+   * and belong with the fields they read.
+   */
+  const pageSize = useTablePageSize();
+  // The question is the search text: it narrows the set on every keystroke, and
+  // without this the operator kept whatever page the previous word had left them
+  // on, landing partway down results they had not seen the top of.
+  const { page: hitPage, goToPage } = useRecordPage(hits, { pageSize }, query);
+  const pagedHits = hitPage.items;
 
   // Stable, because the tiles depend on it: redefined every render it would
   // rebuild both panels on every keystroke in the search field.
@@ -143,11 +166,11 @@ export function SearchScreen() {
                 </p>
                 <span>CTRL+K — ОТКРЫТЬ ПОИСК ИЗ ЛЮБОГО РАЗДЕЛА</span>
               </div>
-            ) : hits.length === 0 ? (
+            ) : hitPage.total === 0 ? (
               <EmptyState>СОВПАДЕНИЙ НЕ НАЙДЕНО</EmptyState>
             ) : (
               <div className="search-hit-list">
-                {hits.map((hit, index) => (
+                {pagedHits.map((hit, index) => (
                   <TerminalButton
                     key={`${hit.kind}-${hit.id}-${index}`}
                     onClick={() => openHit(hit)}
@@ -169,6 +192,20 @@ export function SearchScreen() {
                 ))}
               </div>
             )}
+            {/*
+              A registry draws its footer unconditionally because the registry
+              is the screen. This panel also holds the prompt shown before a
+              query and the "no matches" state, and a page counter reading
+              01 / 01 under either of them describes nothing, so the control
+              appears only when there is a page to turn to.
+            */}
+            {hitPage.pageCount > 1 ? (
+              <RecordPagination
+                page={hitPage}
+                onPage={goToPage}
+                label="Страницы результатов поиска"
+              />
+            ) : null}
           </Panel>
         ),
       },
@@ -220,7 +257,7 @@ export function SearchScreen() {
         ),
       },
     ],
-    [hits, openHit, query, state],
+    [goToPage, hitPage, openHit, pagedHits, query, state],
   );
 
   return (
@@ -239,7 +276,9 @@ export function SearchScreen() {
           <kbd>ESC</kbd>
         </label>
         <small>
-          {query.length === 0 ? 'ВВЕДИТЕ ЗАПРОС' : `${hits.length} СОВПАДЕНИЙ / LOCAL INDEX`}
+          {/* The whole match set, not the page: the count is what the index
+              holds, and the footer says which slice of it is on screen. */}
+          {query.length === 0 ? 'ВВЕДИТЕ ЗАПРОС' : `${hitPage.total} СОВПАДЕНИЙ / LOCAL INDEX`}
         </small>
       </header>
       <TileGrid tiles={tiles} columns={12} className="search-layout" screen="search" />
