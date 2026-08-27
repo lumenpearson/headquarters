@@ -15,10 +15,13 @@ import {
  * it does today; this route is the second adapter for the browser build, not a
  * replacement for that process.
  *
- * One origin for the interface and the RPC means the browser client sends no
- * `Origin` header at all here, so the allowlist is never consulted for a
- * same-origin call. It still is for the packaged shell and for any other
- * machine, which is why the shared policy answers this route as well.
+ * One origin for the interface and the RPC does not mean the browser omits
+ * `Origin`: it is sent on every request whose method is not GET or HEAD, and
+ * every RPC is a POST. What keeps the allowlist out of the way is
+ * `decideRpcHttpPolicy` comparing that header against the origin the request
+ * was addressed to, which `fetch-adapter.ts` reads from the request URL. The
+ * allowlist still decides for the packaged shell and for any other machine,
+ * which is why the shared policy answers this route as well.
  */
 
 // `node:crypto`, `node:net` and the Postgres driver: the Edge runtime has

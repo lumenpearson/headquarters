@@ -138,6 +138,56 @@ describe('control-plane Fetch adapter over binary gRPC-Web', () => {
     );
   });
 
+  /**
+   * Measured against a live Vercel deployment on 2026-08-27, before the policy
+   * knew what origin it had been addressed on: the interface and the RPC shared
+   * one origin, and the deployment answered its own application with 403.
+   *
+   * `Origin` is sent on every request whose method is not GET or HEAD, and
+   * every RPC is a POST, so the header is always there; what no configuration
+   * could supply is the host, which a preview deployment mints per build and a
+   * production deployment can also be reached on through an alias. Revert the
+   * comparison in `decideRpcHttpPolicy` and this returns 403 again.
+   */
+  it('serves a call from the origin it was addressed on, which no allowlist names', async () => {
+    const { handler } = await mountedHandler();
+    const selfOrigin = new URL(baseUrl).origin;
+    // The premise: this origin is deliberately absent from the allowlist.
+    expect(selfOrigin).not.toBe(origin);
+
+    const response = await handler(
+      new Request(`${baseUrl}/gremuchaya.control.v1.ControlPlaneService/Health`, {
+        method: 'POST',
+        headers: { origin: selfOrigin, 'content-type': 'application/json' },
+        body: '{}',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ service: 'gremuchaya-control-plane' });
+    expect(response.headers.get('access-control-allow-origin')).toBe(selfOrigin);
+  });
+
+  it('answers a same-origin preflight the allowlist does not name', async () => {
+    const { handler } = await mountedHandler();
+    const selfOrigin = new URL(baseUrl).origin;
+
+    const response = await handler(
+      new Request(`${baseUrl}/gremuchaya.sync.v1.SyncService/CreateGroup`, {
+        method: 'OPTIONS',
+        headers: {
+          origin: selfOrigin,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'content-type,x-hq-bootstrap-secret',
+        },
+      }),
+    );
+
+    // Without this the browser never sends the POST above at all.
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe(selfOrigin);
+  });
+
   it('answers a preflight with the two headers pairing actually sends', async () => {
     const { handler } = await mountedHandler();
 
@@ -160,6 +210,40 @@ describe('control-plane Fetch adapter over binary gRPC-Web', () => {
     expect(allowedHeaders).toContain('x-hq-bootstrap-secret');
     expect(response.headers.get('access-control-max-age')).toBe('7200');
     expect(response.headers.get('vary')).toContain('Origin');
+  });
+
+  /**
+   * Measured on a live Vercel deployment on 2026-08-27, which reported
+   * `sync.realtime-admission` enabled while serving no socket at all.
+   *
+   * `ControlPlaneRuntime` reads that flag to choose `'socket'` over
+   * `'poll'`, so the deployment was telling its own client to open a
+   * connection nothing would accept -- and the polling feed Э6 built for
+   * exactly this deployment would never have been used. An admission
+   * collaborator authorizes a socket; it does not serve one.
+   */
+  it('reports realtime admission off even when an admission collaborator exists', async () => {
+    const handler = await createControlPlaneFetchHandler(
+      { port: 0, host: '127.0.0.1', allowedOrigins: [origin] },
+      {
+        prefix: '/api',
+        syncService: createPairedDeviceSyncService({
+          runtime: new PairedDeviceRuntime({ tokenPepper }),
+          verifyBootstrapSecret: (candidate) => candidate === bootstrapSecret,
+          presence: new InMemoryPresenceStore(),
+        }),
+        // Present, and deliberately never consulted: this adapter has no HTTP
+        // server for `attachRealtimeTransport` to hang an upgrade handler on.
+        realtime: { admission: { admit: () => false } },
+      },
+    );
+
+    const capabilities = await capabilitiesThrough(handler);
+
+    expect(capabilities['sync.realtime-admission']).toBe(false);
+    // The neighbouring flag stays on, so this is the realtime surface being
+    // reported honestly rather than the whole capability list collapsing.
+    expect(capabilities['sync.device-lifecycle']).toBe(true);
   });
 
   it('answers a path the router never registered with 404 rather than a prefix match', async () => {
@@ -223,6 +307,24 @@ function throughHandler(
     responses.push(response.clone());
     return response;
   };
+}
+
+/** The capability list as a name -> enabled map, read over the mounted route. */
+async function capabilitiesThrough(
+  handler: ControlPlaneFetchHandler,
+): Promise<Record<string, boolean>> {
+  const response = await handler(
+    new Request(`${baseUrl}/gremuchaya.control.v1.ControlPlaneService/GetCapabilities`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    }),
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    readonly capabilities: readonly { readonly name: string; readonly enabled?: boolean }[];
+  };
+  return Object.fromEntries(body.capabilities.map((c) => [c.name, c.enabled === true]));
 }
 
 function capabilityEnabled(

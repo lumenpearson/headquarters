@@ -24,7 +24,10 @@ export async function startControlPlane(
   config: ControlPlaneConfig,
   options: ControlPlaneStartOptions = {},
 ): Promise<RunningControlPlane> {
-  const collaborators = await resolveControlPlaneCollaborators(config, options);
+  const resolved = await resolveControlPlaneCollaborators(config, options);
+  // This adapter owns the HTTP server that `attachRealtimeTransport` below
+  // hangs the `upgrade` handler on, so it is the one that serves the socket.
+  const collaborators = { ...resolved, realtimeSocketServed: true };
   const startedAt = timestampNow();
   const rpcHandler = connectNodeAdapter({
     connect: true,

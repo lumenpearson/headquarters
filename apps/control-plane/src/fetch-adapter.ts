@@ -64,8 +64,15 @@ export async function createControlPlaneFetchHandler(
   }
 
   return async (request: Request): Promise<Response> => {
+    // Parsed once and read twice: the origin the deployment was addressed on,
+    // which no configuration can know in advance, and the path dispatched below.
+    const url = new URL(request.url);
     const policy = decideRpcHttpPolicy(
-      { method: request.method, origin: request.headers.get('origin') ?? undefined },
+      {
+        method: request.method,
+        origin: request.headers.get('origin') ?? undefined,
+        selfOrigin: url.origin,
+      },
       config.allowedOrigins,
     );
     if (policy.terminalStatus !== undefined) {
@@ -75,7 +82,7 @@ export async function createControlPlaneFetchHandler(
     // Dispatch on the path alone. A router that fell back to a prefix match
     // would answer a method it never registered, and a client cannot tell a
     // deployment that lacks a service from one that mis-routes it.
-    const route = routes.get(new URL(request.url).pathname);
+    const route = routes.get(url.pathname);
     if (route === undefined) {
       return new Response(null, { status: 404, headers: policyHeaders(policy) });
     }

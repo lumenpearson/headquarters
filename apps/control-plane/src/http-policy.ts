@@ -17,6 +17,21 @@ export interface RpcHttpRequest {
   readonly method: string | undefined;
   /** The `Origin` header verbatim, or `undefined` when the caller sent none. */
   readonly origin: string | undefined;
+  /**
+   * The origin the request was addressed to, when the adapter can name it.
+   *
+   * A serverless web deployment answers on a host no configuration can list in
+   * advance: every preview deployment gets its own, and the production host can
+   * be reached through an alias or a custom domain as well. The interface and
+   * the RPC then share an origin, and the browser still sends `Origin` --
+   * every RPC is a POST, and a same-origin POST carries the header -- so the
+   * allowlist refused the application's own calls with 403.
+   *
+   * Left `undefined` by the Node adapter, whose behaviour is therefore
+   * unchanged: it serves the packaged desktop and the set's LAN, where the
+   * origins that may call are exactly the ones an operator configured.
+   */
+  readonly selfOrigin?: string | undefined;
 }
 
 export interface RpcHttpPolicy {
@@ -51,10 +66,16 @@ export function decideRpcHttpPolicy(
   const headers: [string, string][] = securityHeaders();
   const origin = request.origin;
 
+  // A request addressed to the origin it came from is the application calling
+  // itself; the allowlist exists to decide which *other* origins may call, and
+  // it is never consulted here. Compared verbatim, so a deployment reached on a
+  // second host is same-origin on that host and cross-origin from the first.
+  const sameOrigin = origin !== undefined && origin === request.selfOrigin;
+
   // A disallowed origin is refused before anything else is decided, and the
   // refusal carries no `Access-Control-Allow-Origin`: a browser must not be
   // able to read a reply the allowlist did not authorize.
-  if (origin !== undefined && !allowedOrigins.includes(origin)) {
+  if (origin !== undefined && !sameOrigin && !allowedOrigins.includes(origin)) {
     return { headers, terminalStatus: 403 };
   }
 

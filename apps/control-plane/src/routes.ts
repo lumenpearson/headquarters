@@ -43,6 +43,18 @@ export interface ResolvedControlPlaneCollaborators {
   readonly integrationService?: Partial<ServiceImpl<typeof IntegrationService>>;
   readonly realtime?: RealtimeTransportOptions;
   /**
+   * Whether this transport actually accepts the realtime WebSocket upgrade.
+   *
+   * An admission collaborator says who *may* open a socket; it is built
+   * whenever authentication is configured, on both adapters. Only the Node
+   * adapter owns an HTTP server for `attachRealtimeTransport` to put an
+   * `upgrade` handler on, so it alone sets this. A serverless Fetch
+   * deployment leaves it unset, and `getCapabilities` then reports
+   * `sync.realtime-admission` off -- which is what makes the client choose the
+   * polling feed over a socket nothing would answer.
+   */
+  readonly realtimeSocketServed?: boolean;
+  /**
    * Present only when a durable event log was built. `getCapabilities` reports
    * the `sync` surface from this rather than from a constant, so a reduced
    * startup cannot advertise methods it answers `unimplemented`.
@@ -82,7 +94,11 @@ export function registerControlPlaneRoutes(
   collaborators: ResolvedControlPlaneCollaborators,
 ): void {
   const pairedDeviceLifecycleEnabled = collaborators.syncService !== undefined;
-  const authenticatedRealtimeEnabled = collaborators.realtime?.admission !== undefined;
+  // Both halves are required: someone to authorize the connection, and a
+  // transport that can accept it. Reporting the first alone told a Vercel
+  // deployment's own client to open a socket the deployment cannot serve.
+  const authenticatedRealtimeEnabled =
+    collaborators.realtime?.admission !== undefined && collaborators.realtimeSocketServed === true;
   router.service(ControlPlaneService, {
     health() {
       return {
