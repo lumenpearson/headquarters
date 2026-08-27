@@ -44,11 +44,12 @@ export function resolveStartupPlan({
   // not sit behind a timer that will never draw anything.
   if (!play) return { play: false, stageMs: 0, totalMs: 0 };
 
-  // Same shape as the shell's own motion duration, one step shorter at each
-  // end, so a low intensity reads as the same restraint everywhere.
+  // Same shape as the shell's own motion duration, held longer at both ends:
+  // the sequence only starts once the document has loaded and the window is
+  // visible, so it is a deliberate boot shot rather than a cover for loading,
+  // and at the old 60..180ms it cleared before an operator registered it.
   // `startup.stageHold` multiplies the whole readout. On a shoot the boot
-  // screen is a shot, and its length is a directing decision. At 1 this is the
-  // expression that was here before.
-  const stageMs = Math.round((60 + intensity * 120) * stageHold);
+  // screen is a shot, and its length is a directing decision.
+  const stageMs = Math.round((140 + intensity * 260) * stageHold);
   return { play: true, stageMs, totalMs: stageMs * startupStages.length };
 }

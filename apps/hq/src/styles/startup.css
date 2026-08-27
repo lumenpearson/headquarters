@@ -32,24 +32,61 @@
   color: var(--accent);
   font-size: var(--font-xs);
   letter-spacing: 0.12em;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
   /* Each line is new on the frame it appears, so animating it in is enough --
      the staggering is done by the component revealing one line per stage. */
-  animation: startup-line-in var(--startup-stage-duration, 140ms) linear both;
+  animation: startup-line-in var(--startup-stage-duration, 320ms) ease-out both;
+}
+
+/* The cursor sits on the newest line, the way the terminal it imitates would. */
+.startup-sequence__line:last-of-type::after {
+  animation: startup-caret 640ms step-end infinite;
+  content: ' █';
+}
+
+/*
+ * The fill runs over the whole readout rather than per stage, so its length is
+ * the sequence's length: `--startup-total-duration` is `stageMs × stages` from
+ * the same plan that drives the interval.
+ */
+.startup-sequence__progress {
+  height: 2px;
+  margin-top: var(--space-2);
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
+  animation: startup-progress var(--startup-total-duration, 1280ms) linear both;
+  transform-origin: left center;
 }
 
 .startup-sequence[data-stage='ready'] {
-  animation: startup-clear var(--startup-stage-duration, 140ms) linear both;
+  animation: startup-clear var(--startup-stage-duration, 320ms) ease-in both;
 }
 
 @keyframes startup-line-in {
   from {
     opacity: 0;
-    transform: translateX(-4px);
+    transform: translateX(-14px);
   }
 
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes startup-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes startup-progress {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
   }
 }
 
@@ -71,6 +108,8 @@
  */
 @media (prefers-reduced-motion: reduce) {
   .startup-sequence__line,
+  .startup-sequence__line:last-of-type::after,
+  .startup-sequence__progress,
   .startup-sequence[data-stage='ready'] {
     animation: none;
   }
