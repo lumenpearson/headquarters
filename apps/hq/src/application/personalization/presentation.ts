@@ -568,6 +568,26 @@ export const settingsDerivedIntoPresentation: Readonly<Record<string, string>> =
     'Spent by OperationsShell as `--ops-motion-duration` and `--ops-background-duration`.',
 };
 
+const controlFloorProperty = '--ops-control-floor';
+const controlSizingAttribute = 'data-control-sizing';
+
+/**
+ * What `resolvePresentation` writes outside the binding table.
+ *
+ * Neither can be a binding, because a binding maps one setting to one property
+ * and these are computed from two settings at once. That is why they were the
+ * only two outputs no consumption check could see: both checks walk
+ * {@link presentationBindings}, and a property written beside the loop is
+ * exactly as capable of being read by nothing as one written inside it.
+ *
+ * Naming them here, and writing them from these constants rather than from
+ * literals below, is what puts them back under those checks.
+ */
+export const derivedPresentationOutputs = {
+  customProperties: [controlFloorProperty],
+  attributes: [controlSizingAttribute],
+} as const;
+
 /** Every definition that is not bound to the document one-to-one. */
 export const settingsWithoutPresentation: Readonly<Record<string, string>> = {
   ...settingsReadElsewhere,
@@ -608,13 +628,13 @@ export function resolvePresentation(values: SettingValues): ResolvedPresentation
   }
   const controlFloor = resolveControlFloor(values);
   if (controlFloor !== undefined) {
-    customProperties['--ops-control-floor'] = controlFloor;
+    customProperties[controlFloorProperty] = controlFloor;
     // The attribute is what makes the rule exist at all. A `min-height`
     // declaration on the primitives outranks the heights they set themselves,
     // and an unset variable resolves to `unset` rather than falling back to
     // those — so at defaults the rule must not be written, not merely be given
     // a neutral value.
-    attributes['data-control-sizing'] = 'custom';
+    attributes[controlSizingAttribute] = 'custom';
   }
   return { attributes, customProperties };
 }

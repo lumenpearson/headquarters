@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  derivedPresentationOutputs,
   presentationBindings,
   resolvePresentation,
   settingsReadElsewhere,
@@ -96,18 +97,30 @@ describe('personalization presentation bindings', () => {
    * under the very bridge built to close it.
    */
   it('emits no custom property that nothing reads', () => {
-    const unread = presentationBindings
-      .filter((binding) => binding.kind === 'custom-property')
-      .map((binding) => binding.property)
-      .filter((property) => !consumingSources.includes(property));
+    const unread = [
+      ...presentationBindings
+        .filter((binding) => binding.kind === 'custom-property')
+        .map((binding) => binding.property),
+      // The fourth turn of the same screw. `--ops-control-floor` is written
+      // beside the binding loop, not inside it, so for as long as this list
+      // read only the table the one property computed from two settings was
+      // the one property nothing verified.
+      ...derivedPresentationOutputs.customProperties,
+    ].filter((property) => !consumingSources.includes(property));
 
     expect(unread).toEqual([]);
   });
 
   it('emits no attribute that nothing selects on', () => {
-    const unread = presentationBindings
-      .filter((binding) => binding.kind === 'attribute')
-      .map((binding) => binding.attribute)
+    const unread = [
+      ...presentationBindings
+        .filter((binding) => binding.kind === 'attribute')
+        .map((binding) => binding.attribute),
+      // `data-control-sizing` is the switch that makes the floor rule exist at
+      // all: without a selector on it the property above is inert even when a
+      // stylesheet reads it.
+      ...derivedPresentationOutputs.attributes,
+    ]
       // A stylesheet selects on it, or a module reads it. Either is a consumer;
       // neither being present means the operator moves a control for nothing.
       .filter((attribute) => !consumingSources.includes(attribute));
