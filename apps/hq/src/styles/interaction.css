@@ -46,6 +46,32 @@ html[data-edit-mode='on'] body.terminal-theme {
 }
 
 /*
+ * R12: content that is genuinely the operator's to take stays selectable
+ * outside edit mode as well.
+ *
+ * The instrument chrome -- tile headers, filter buttons, table headings,
+ * glyphs -- stays under the global `none`; what is exempted here is the
+ * material an operator reads and quotes: the text body of a file preview, the
+ * transcripts and message logs, and the data cells of a table. `th` is
+ * deliberately absent -- a column heading is chrome -- and the second rule
+ * returns the controls that sit inside those surfaces to `none`, so a drag
+ * across a row can take its figures without ever painting a button's label.
+ */
+body.terminal-theme .local-material-preview--text pre,
+body.terminal-theme .ops-file-preview,
+body.terminal-theme .ops-transcript,
+body.terminal-theme .message-log,
+body.terminal-theme .ops-table td {
+  user-select: text;
+}
+
+body.terminal-theme .local-material-preview--text :is(button, a, svg, img),
+body.terminal-theme .ops-file-preview :is(button, a, svg, img),
+body.terminal-theme .ops-table td :is(button, a, svg, img) {
+  user-select: none;
+}
+
+/*
  * R12: the selection colour, on the accent the operator actually chose.
  *
  * The previous rule painted `--accent-strong` from `:root`, which no theme and

@@ -65,6 +65,7 @@ const groupByCategory: Readonly<Record<SettingCategory, SettingGroup>> = {
   keybinds: 'session',
   groups: 'session',
   titlebar: 'session',
+  statusline: 'session',
 
   telemetry: 'system',
   simulation: 'system',

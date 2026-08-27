@@ -94,9 +94,9 @@ function sameBox(left: GridBox, right: GridBox): boolean {
  *
  * `n` rows of `h` with `n - 1` gaps between them fit a box of `A` while
  * `n * h + (n - 1) * gap <= A`, which is `n <= (A + gap) / (h + gap)`. The gap
- * used to be left out, and `sizes.tileGap` has a real default of 6px since
- * 2026-08-27, so on a tall window the budget claimed a row the screen could
- * not draw.
+ * used to be left out, and `sizes.tileGap` has had a real nonzero default
+ * since 2026-08-27, so on a tall window the budget claimed a row the screen
+ * could not draw.
  */
 function rowBudget(box: GridBox): number {
   if (box.floor === 0) return 1;

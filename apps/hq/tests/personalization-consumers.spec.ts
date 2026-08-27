@@ -312,8 +312,8 @@ for (const viewport of geometryViewports) {
 
     /*
      * 17 is inside the schema's 0..20 and is none of the numbers the stylesheet
-     * writes for a laid-out screen — 7, 10, 12 and `clamp(6px, 0.55vw, 14px)`
-     * all appear on the layout classes, and 6 is the schema's own default, so
+     * writes for a laid-out screen — 7, 10, 12 and `--ops-content-gap`'s 6px
+     * all appear on the layout classes, and 4 is the schema's own default, so
      * seeding any of them would let a declaration answer for the setting.
      *
      * The default itself is asserted below rather than assumed: this grid drew
@@ -327,8 +327,8 @@ for (const viewport of geometryViewports) {
     const after = await tileGridGap(page);
 
     expect(after.columnGap).toBe('17px');
-    expect(before.rowGap).toBe('6px');
-    expect(before.columnGap).toBe('6px');
+    expect(before.rowGap).toBe(`${schemaDefault('sizes.tileGap')}px`);
+    expect(before.columnGap).toBe(`${schemaDefault('sizes.tileGap')}px`);
   });
 
   test(`R6/R10: a shorter panel floor buys the screen more rows at ${viewport.label}`, async ({
@@ -1550,7 +1550,7 @@ test('R28: a caption belongs to the screen it was written on, not to the tile na
 
 /** The declared default, read from the schema rather than repeated here. */
 function schemaDefault(
-  id: 'sizes.panelHeader' | 'sizes.panelPadding' | 'sizes.borderWidth',
+  id: 'sizes.panelHeader' | 'sizes.panelPadding' | 'sizes.borderWidth' | 'sizes.tileGap',
 ): number {
   const definition = getSettingDefinition(id);
   if (definition === undefined) throw new Error(`no setting is declared as ${id}`);

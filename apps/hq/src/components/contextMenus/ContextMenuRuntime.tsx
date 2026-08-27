@@ -230,14 +230,22 @@ export function ContextMenuRuntime() {
        * menu stops the walk without naming a surface, so nothing opens over it.
        * Two menus for one click would be two places deciding what the right
        * button does.
+       *
+       * No declared surface falls back to the shell menu rather than to the
+       * web engine's. The engine's menu offers reload and inspection commands
+       * that mean nothing to an operator, and it used to appear on every
+       * surface outside `.ops-shell` -- the portalled dialogs, the edit panel
+       * -- because only the shell root carried the attribute. The two ways to
+       * keep it are still deliberate: a field under `popups.fieldMenu:
+       * 'native'` above, and an element owning a Base UI menu here.
        */
       const surface = target.closest('[data-context-menu], [data-context-menu-own]');
-      if (surface === null) return false;
-      const definition = contextMenuFor(surface.getAttribute('data-context-menu') ?? '');
+      if (surface !== null && surface.getAttribute('data-context-menu') === null) return false;
+      const definition = contextMenuFor(surface?.getAttribute('data-context-menu') ?? 'shell');
       if (definition === undefined) return false;
       setOpen({
         definition,
-        subject: surface.getAttribute('data-context-subject') ?? undefined,
+        subject: surface?.getAttribute('data-context-subject') ?? undefined,
         x,
         y,
       });
