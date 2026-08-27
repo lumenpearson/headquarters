@@ -44,7 +44,11 @@ Package ownership:
   It is read-only unless a local config sets `readOnly: false` and enables `materialImport`, which
   adds a resumable upload mirror and a grant-scoped playback route.
 - `@gremuchaya/control-plane`: ConnectRPC composition root, served by two adapters over one route
-  registration (ADR-0009). `ControlPlaneService` always serves; `SyncService`, `SettingsService`,
+  registration (ADR-0009). It compiles to three entry points — `dist/server.js` (the Node adapter
+  and the socket), `dist/migrate.js` (the schema alone) and `dist/healthcheck.js` (a gRPC-Web
+  probe over its own `ControlPlaneService`) — and ships as a container image built from
+  `apps/control-plane/Dockerfile`, the only application in this repository that does (ADR-0010).
+  `ControlPlaneService` always serves; `SyncService`, `SettingsService`,
   `MaterialService`, `TelemetryService` and `IntegrationService` are registered only when durable
   auth config is present. `src/routes.ts` holds the registration both adapters call,
   `src/http-policy.ts` the origin and header decision they share, `src/server.ts` the Node adapter

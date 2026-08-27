@@ -33,6 +33,8 @@ One file: `pnpm --filter @gremuchaya/hq test -- src/state/x.test.ts` (same shape
 - **Protobuf codegen** after any `.proto` edit, or `check:protocol-generation` fails:
   `pnpm --filter @gremuchaya/protocol generate`
 - **Migrations:** `pnpm --filter @gremuchaya/control-plane migrate`
+- **Self-hosted control plane:** `node scripts/generate-env.mjs` then `docker compose up -d --build
+--wait` (`docs/release/self-hosting.md`; the generator prints variable names, never values)
 - **Packaging:** `pnpm tauri:build` (NSIS installer under
   `apps/hq/src-tauri/target/release/bundle/nsis/`); `cargo check --manifest-path
 apps/hq/src-tauri/Cargo.toml` for a Rust-only check.

@@ -338,6 +338,27 @@ pnpm --dir packages/protocol exec buf lint
 pnpm --filter @gremuchaya/protocol test
 ```
 
+#### Собственное развёртывание (Docker)
+
+Контрольную плоскость можно поднять у себя — со своей базой, своими секретами и без учётной записи
+где бы то ни было. Нужны Docker с Compose v2 и Node для генератора секретов:
+
+```powershell
+node scripts/generate-env.mjs
+docker compose up -d --build --wait
+docker compose ps
+docker compose down
+```
+
+Генератор пишет `.env` рядом с `compose.yaml`, печатает имена переменных и путь — но не значения — и
+без `--force` существующий файл не перезаписывает. Плоскость отвечает на `http://127.0.0.1:4100`
+поверх PostgreSQL в соседнем контейнере, а `--wait` возвращает управление только после того, как
+миграции прошли и `sync.device-lifecycle` с `sync.realtime-admission` включены.
+
+Что этот уровень умеет, чего не умеет и как подняться до объектного хранилища —
+`docs/release/self-hosting.md`. Почему в образ входит только `apps/control-plane` —
+`docs/adr/0010-container-deployment.md`.
+
 ### Tauri native roots
 
 Перед запуском Tauri задайте allowlist каталогов через стандартный path-list разделитель Windows:
