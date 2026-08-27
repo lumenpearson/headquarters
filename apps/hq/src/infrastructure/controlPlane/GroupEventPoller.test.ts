@@ -19,6 +19,8 @@ import {
 } from '@/infrastructure/media/PlaybackSyncCoordinator';
 import { operationsStore } from '@/state/operationsStore';
 
+import { connectGroupState } from '@/application/sync/GroupStateSync';
+
 import { ControlPlaneGroupChannel } from './ControlPlaneGroupChannel';
 import { GroupEventPoller } from './GroupEventPoller';
 import { createGroupLiveEditTransport, liveEditDocumentId } from './GroupLiveEditTransport';
@@ -657,6 +659,254 @@ describe('one order, two transports', () => {
     // Both planes carried the event to the merge point; only the first of them
     // reached a subscriber.
     expect(channel.appliedSequence()).toBe(1n);
+  });
+});
+
+describe('the group own state follows the same log', () => {
+  const group = {
+    groupId: 'group-a',
+    name: 'ШТАБ',
+    authority: 'leader' as const,
+    leaderDeviceId: 'device-a',
+    revision: 7,
+  };
+
+  /** The session as it stands after `JoinGroup`, revision included. */
+  function joined(): void {
+    operationsStore.getState().patchConnection({
+      mode: 'online',
+      session: { deviceId: 'device-a', groupId: 'group-a', role: 'ADMIN' },
+      groupName: group.name,
+      authority: group.authority,
+      leaderDeviceId: group.leaderDeviceId,
+      groupRevision: group.revision,
+      devices: [
+        { deviceId: 'device-a', name: 'ЭКРАН 1', role: 'ADMIN', status: 'ONLINE' },
+        { deviceId: 'device-b', name: 'ЭКРАН 2', role: 'EDITOR', status: 'ONLINE' },
+      ],
+      presence: [],
+    });
+  }
+
+  function subscribe(channel: ControlPlaneGroupChannel): () => void {
+    return connectGroupState({
+      channel,
+      read: () => {
+        const { connection } = operationsStore.getState();
+        return {
+          groupRevision: connection.groupRevision,
+          session: connection.session,
+          devices: connection.devices,
+          presence: connection.presence,
+        };
+      },
+      apply: (patch) => operationsStore.getState().patchConnection(patch),
+    });
+  }
+
+  it('moves the leader on a session that made no call and reconnected to nothing', async () => {
+    /*
+     * The consequence, stated as the operator experiences it: an administrator
+     * on another machine moved the leader, this session called nothing, opened
+     * nothing and rejoined nothing, and what it holds about the group changed
+     * on the next page of the log. Before the subscriber existed the same page
+     * arrived and was dropped, and the new leader was learned by reconnecting.
+     */
+    joined();
+    const channel = groupChannel();
+    const disconnect = subscribe(channel);
+    const log = new FakeGroupLog();
+    log.append(
+      envelope(1n, {
+        kind: 'group-updated',
+        actorDeviceId: 'device-b',
+        group: { ...group, leaderDeviceId: 'device-b', revision: 8 },
+      }),
+    );
+    const poller = new GroupEventPoller({
+      reader: log,
+      cursor: channel,
+      deliver: channel.deliver,
+      isVisible: () => true,
+      subscribeVisibility: () => () => {},
+    });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    poller.stop();
+    disconnect();
+
+    expect(operationsStore.getState().connection.leaderDeviceId).toBe('device-b');
+    expect(operationsStore.getState().connection.groupRevision).toBe(8);
+  });
+
+  it('keeps the newer leader when a resync replays the older one on top', async () => {
+    /*
+     * Ordering against state, not against arrival. The server sent the feed
+     * back to the oldest sequence it still retains, so the whole retained
+     * window is read again -- every snapshot in it valid, every one of them
+     * older than what this session already holds. Arrival order alone would put
+     * the previous leader back on every resync.
+     */
+    joined();
+    const channel = groupChannel();
+    const disconnect = subscribe(channel);
+    channel.deliver(
+      envelope(9n, {
+        kind: 'group-updated',
+        group: { ...group, leaderDeviceId: 'device-c', revision: 12 },
+      }),
+    );
+    expect(operationsStore.getState().connection.leaderDeviceId).toBe('device-c');
+
+    channel.rewindTo(0n);
+    const log = new FakeGroupLog();
+    log.append(
+      envelope(3n, {
+        kind: 'group-updated',
+        group: { ...group, leaderDeviceId: 'device-b', revision: 8 },
+      }),
+    );
+    log.append(
+      envelope(9n, {
+        kind: 'group-updated',
+        group: { ...group, leaderDeviceId: 'device-c', revision: 12 },
+      }),
+    );
+    const poller = new GroupEventPoller({
+      reader: log,
+      cursor: channel,
+      deliver: channel.deliver,
+      isVisible: () => true,
+      subscribeVisibility: () => () => {},
+    });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    poller.stop();
+    disconnect();
+
+    expect(operationsStore.getState().connection.leaderDeviceId).toBe('device-c');
+    expect(operationsStore.getState().connection.groupRevision).toBe(12);
+  });
+
+  it('applies one page carried by both planes once, counted where a repeat would show', async () => {
+    /*
+     * One device, two links, one group: both planes stand in front of the same
+     * database and carry the same log with the same numbers. The page here
+     * carries two events at once -- a live-edit delta and a leader change --
+     * because the counter that can see a repeat belongs to the first:
+     * `applySettingsPatch` writes a history entry per application, so a
+     * duplicate that reached a subscriber writes two entries for one change.
+     * The leader change rides the same page to show that the new subscriber is
+     * behind the same merge point rather than beside a transport.
+     */
+    joined();
+    const channel = groupChannel();
+    const disconnect = subscribe(channel);
+    const liveEdit = createGroupLiveEditTransport({ channel });
+    liveEdit.subscribe((patches) => operationsStore.getState().applySettingsPatch(patches));
+
+    const delta = envelope(1n, { documentDelta: liveEditDelta(false) });
+    const moved = envelope(2n, {
+      kind: 'group-updated',
+      actorDeviceId: 'device-b',
+      group: { ...group, leaderDeviceId: 'device-b', revision: 8 },
+    });
+    const nearLog = new FakeGroupLog();
+    const cloudLog = new FakeGroupLog();
+    for (const log of [nearLog, cloudLog]) {
+      log.append(delta);
+      log.append(moved);
+      log.hold();
+    }
+    const feeds = [nearLog, cloudLog].map(
+      (log) =>
+        new GroupEventPoller({
+          reader: log,
+          cursor: channel,
+          deliver: channel.deliver,
+          isVisible: () => true,
+          subscribeVisibility: () => () => {},
+        }),
+    );
+
+    const before = operationsStore.getState().personalization.history.length;
+    for (const feed of feeds) feed.start();
+    await vi.advanceTimersByTimeAsync(0);
+    // Both feeds asked from the same position, which is the window a second
+    // cursor would fall through and a sequential test would never open.
+    expect(nearLog.requests.map((request) => request.afterSequence)).toEqual([0n]);
+    expect(cloudLog.requests.map((request) => request.afterSequence)).toEqual([0n]);
+
+    for (const log of [nearLog, cloudLog]) log.release();
+    await vi.advanceTimersByTimeAsync(0);
+    for (const feed of feeds) feed.stop();
+    liveEdit.close();
+    disconnect();
+
+    expect(operationsStore.getState().personalization.history.length - before).toBe(1);
+    expect(operationsStore.getState().connection.leaderDeviceId).toBe('device-b');
+    expect(operationsStore.getState().connection.groupRevision).toBe(8);
+    expect(channel.appliedSequence()).toBe(2n);
+  });
+
+  it('turns a neighbour that left offline between two presence ticks', async () => {
+    joined();
+    operationsStore.getState().patchConnection({
+      presence: [
+        {
+          deviceId: 'device-b',
+          status: 'ONLINE',
+          activeScreen: 'video',
+          clockOffsetMs: 0,
+          latencyMs: 4,
+          observedAt: new Date(baseMs).toISOString(),
+        },
+      ],
+    });
+    const channel = groupChannel();
+    const disconnect = subscribe(channel);
+    const log = new FakeGroupLog();
+    log.append(
+      envelope(1n, {
+        kind: 'presence-updated',
+        actorDeviceId: 'device-b',
+        presence: {
+          deviceId: 'device-b',
+          status: 'OFFLINE',
+          activeScreen: '',
+          clockOffsetMs: 0,
+          latencyMs: 0,
+          observedAt: new Date(baseMs + 2_000).toISOString(),
+        },
+      }),
+    );
+    const poller = new GroupEventPoller({
+      reader: log,
+      cursor: channel,
+      deliver: channel.deliver,
+      isVisible: () => true,
+      subscribeVisibility: () => () => {},
+    });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    poller.stop();
+    disconnect();
+
+    // No `GetPresence` was made: the timer keeps the call, its renewal and the
+    // whole list; the log only writes down the device an event named.
+    expect(operationsStore.getState().connection.presence).toEqual([
+      {
+        deviceId: 'device-b',
+        status: 'OFFLINE',
+        activeScreen: '',
+        clockOffsetMs: 0,
+        latencyMs: 0,
+        observedAt: new Date(baseMs + 2_000).toISOString(),
+      },
+    ]);
   });
 });
 

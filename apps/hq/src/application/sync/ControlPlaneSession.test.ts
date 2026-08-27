@@ -6,12 +6,12 @@ import {
   type ConnectionSession,
   type ConnectionState,
   type ControlPlaneCapabilities,
+  type GroupSummary,
 } from './connection';
 import {
   ControlPlaneError,
   type ClockSample,
   type ControlPlanePort,
-  type GroupSummary,
   type PairingResult,
 } from './controlPlanePort';
 
@@ -33,6 +33,7 @@ const group: GroupSummary = {
   name: 'ШТАБ',
   authority: 'leader',
   leaderDeviceId: 'device-a',
+  revision: 4,
 };
 
 const identity: ConnectionSession = { deviceId: 'device-a', groupId: 'group-a', role: 'ADMIN' };
@@ -143,13 +144,24 @@ class FakeControlPlane implements ControlPlanePort {
   async setAuthorityMode(mode: 'leader' | 'multi-authority'): Promise<GroupSummary> {
     this.calls.push(`setAuthorityMode:${mode}`);
     if (this.authorityError !== null) throw this.authorityError;
-    this.serverGroup = { ...this.serverGroup, authority: mode };
+    // Every group mutation bumps the revision inside the same statement on the
+    // server (`group-mutations.ts`, `groupMutationEpilogue`); a fake that left
+    // it still would let a session pass a check no deployment offers.
+    this.serverGroup = {
+      ...this.serverGroup,
+      authority: mode,
+      revision: this.serverGroup.revision + 1,
+    };
     return this.serverGroup;
   }
 
   async setLeader(deviceId: string): Promise<GroupSummary> {
     this.calls.push(`setLeader:${deviceId}`);
-    this.serverGroup = { ...this.serverGroup, leaderDeviceId: deviceId };
+    this.serverGroup = {
+      ...this.serverGroup,
+      leaderDeviceId: deviceId,
+      revision: this.serverGroup.revision + 1,
+    };
     return this.serverGroup;
   }
 
@@ -444,6 +456,29 @@ describe('ControlPlaneSession', () => {
     expect(read().clock.latencyMs).toBe(18);
     // Online sessions sort first, so the list does not reorder under the pointer.
     expect(read().presence.map((entry) => entry.deviceId)).toEqual(['device-c', 'device-b']);
+  });
+
+  it('records the revision every answer about the group carries', async () => {
+    /*
+     * The revision is what the other path -- the group log, read by
+     * `connectGroupState` -- compares against, and this is the only place it
+     * can be learned from a call. A session that recorded the leader without
+     * the revision it was read at would leave the log free to replay an older
+     * snapshot on top: the retained window is full of valid, older ones.
+     */
+    const client = new FakeControlPlane();
+    const { created, read } = session(client);
+
+    await created.pair('CODE-1', 'MON-01');
+    expect(read().groupRevision).toBe(4);
+
+    await created.setLeader('device-b');
+    expect(read().leaderDeviceId).toBe('device-b');
+    expect(read().groupRevision).toBe(5);
+
+    await created.reconcileAuthority('multi-authority');
+    expect(read().authority).toBe('multi-authority');
+    expect(read().groupRevision).toBe(6);
   });
 
   it('stays online without presence when the deployment has no presence store', async () => {

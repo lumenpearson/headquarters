@@ -1,3 +1,5 @@
+import type { GroupDevice, GroupSummary, PresenceEntry } from './connection';
+
 /**
  * The group's event channel, as the application reasons about it (R27).
  *
@@ -77,6 +79,21 @@ export interface GroupEventEnvelope {
   readonly documentId: string;
   readonly documentDelta: Uint8Array;
   readonly sessionCommand?: GroupSessionCommand | undefined;
+  /**
+   * The group as it stands after the change, on `group-updated` and on
+   * `device-updated`.
+   *
+   * A snapshot and not a delta, which is what makes it applicable on its own,
+   * and it carries the group's `revision` -- the server-owned counter every
+   * group mutation bumps. That counter is the only thing that orders it against
+   * the same snapshot arriving as an answer to a call, so a subscriber must
+   * read it rather than trust arrival order.
+   */
+  readonly group?: GroupSummary | undefined;
+  /** The device the change is about, on `device-updated`. Never the actor. */
+  readonly device?: GroupDevice | undefined;
+  /** One device's presence, on `presence-updated`. Never the whole group's. */
+  readonly presence?: PresenceEntry | undefined;
   readonly hybridLogicalClock: bigint;
   /** ISO 8601, or empty when the server sent no instant. */
   readonly occurredAt: string;

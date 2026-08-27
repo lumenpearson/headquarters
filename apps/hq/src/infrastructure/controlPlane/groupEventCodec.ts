@@ -1,6 +1,13 @@
 import { syncV1 } from '@gremuchaya/protocol';
 
 import type {
+  DeviceRole,
+  GroupDevice,
+  GroupSummary,
+  PresenceEntry,
+  PresenceStatus,
+} from '@/application/sync/connection';
+import type {
   GroupEventEnvelope,
   GroupEventKind,
   GroupSessionAction,
@@ -19,14 +26,70 @@ import type {
  * arrives by both after a resume.
  */
 
-/** The wire timestamp, spelled out as `ControlPlaneClient` spells it. */
-interface WireTimestamp {
+/*
+ * Wire shapes, declared structurally rather than imported from the generated
+ * bindings, in the idiom `BridgeMaterialClient` set: the generated messages are
+ * assignable to these, and so is a hand-written fake in a test. Only the fields
+ * a conversion reads are named. They live here and not in `ControlPlaneClient`
+ * because both paths convert the same four messages -- a call answers a group,
+ * a device and a presence, and the log carries the very same three -- and two
+ * declarations of one shape are two places for it to drift.
+ */
+
+/** The wire timestamp, spelled out because `@bufbuild/protobuf` is not a dependency here. */
+export interface WireTimestamp {
   readonly seconds: bigint;
   readonly nanos: number;
 }
 
+export interface WireResourceId {
+  readonly value: string;
+}
+
+/** Only `number` is read; `etag` names the same revision in another alphabet. */
+export interface WireRevision {
+  readonly number: bigint;
+}
+
+export interface WireGroup {
+  readonly id?: WireResourceId | undefined;
+  readonly name: string;
+  readonly authorityMode: number;
+  readonly leaderDeviceId?: WireResourceId | undefined;
+  readonly revision?: WireRevision | undefined;
+}
+
+export interface WireDevice {
+  readonly id?: WireResourceId | undefined;
+  readonly name: string;
+  readonly role: number;
+  readonly status: number;
+}
+
+export interface WirePresence {
+  readonly deviceId?: WireResourceId | undefined;
+  readonly status: number;
+  readonly activeScreen: string;
+  readonly clockOffsetMs: bigint;
+  readonly latencyMs: number;
+  readonly observedAt?: WireTimestamp | undefined;
+}
+
+/**
+ * One log event, with every payload the six kinds carry.
+ *
+ * `group`, `device` and `presence` are converted here rather than left on the
+ * wire because a subscriber to the channel is application code and must not see
+ * a generated message. They are the whole of what `GROUP_UPDATED`,
+ * `DEVICE_UPDATED` and `PRESENCE_UPDATED` mean: the kinds carry no delta, only
+ * the new state of the thing they name, which is why a subscriber can apply one
+ * without having seen the events before it.
+ */
 export function toGroupEventEnvelope(event: syncV1.GroupEvent): GroupEventEnvelope {
   const command = event.sessionCommand;
+  const group = event.group;
+  const device = event.device;
+  const presence = event.presence;
   return {
     sequence: event.sequence,
     kind: toGroupEventKind(event.kind),
@@ -34,8 +97,62 @@ export function toGroupEventEnvelope(event: syncV1.GroupEvent): GroupEventEnvelo
     documentId: event.documentId?.value ?? '',
     documentDelta: event.documentDelta,
     ...(command === undefined ? {} : { sessionCommand: toGroupSessionCommand(command) }),
+    ...(group === undefined ? {} : { group: toGroupSummary(group) }),
+    ...(device === undefined ? {} : { device: toGroupDevice(device) }),
+    ...(presence === undefined ? {} : { presence: toPresenceEntry(presence) }),
     hybridLogicalClock: event.hybridLogicalClock,
     occurredAt: toIsoInstant(event.occurredAt),
+  };
+}
+
+export function toDeviceRole(role: number): DeviceRole {
+  if (role === syncV1.DeviceRole.ADMIN) return 'ADMIN';
+  if (role === syncV1.DeviceRole.EDITOR) return 'EDITOR';
+  return 'VIEWER';
+}
+
+export function toPresenceStatus(status: number): PresenceStatus {
+  if (status === syncV1.DeviceStatus.ONLINE) return 'ONLINE';
+  if (status === syncV1.DeviceStatus.REVOKED) return 'REVOKED';
+  return 'OFFLINE';
+}
+
+/**
+ * The group as this application holds it, revision included.
+ *
+ * The revision is the one field a caller cannot recompute and the one the log
+ * path depends on: it is how a snapshot replayed out of the retained window is
+ * told from one that is news. Zero when the message carried none.
+ */
+export function toGroupSummary(group: WireGroup): GroupSummary {
+  return {
+    groupId: group.id?.value ?? '',
+    name: group.name,
+    authority:
+      group.authorityMode === syncV1.AuthorityMode.MULTI_AUTHORITY ? 'multi-authority' : 'leader',
+    leaderDeviceId: group.leaderDeviceId?.value ?? '',
+    revision: Number(group.revision?.number ?? 0n),
+  };
+}
+
+export function toGroupDevice(device: WireDevice): GroupDevice {
+  return {
+    deviceId: device.id?.value ?? '',
+    name: device.name,
+    role: toDeviceRole(device.role),
+    status: toPresenceStatus(device.status),
+  };
+}
+
+export function toPresenceEntry(presence: WirePresence): PresenceEntry {
+  const observed = toEpochMs(presence.observedAt);
+  return {
+    deviceId: presence.deviceId?.value ?? '',
+    status: toPresenceStatus(presence.status),
+    activeScreen: presence.activeScreen,
+    clockOffsetMs: Number(presence.clockOffsetMs),
+    latencyMs: presence.latencyMs,
+    observedAt: observed === 0 ? '' : new Date(observed).toISOString(),
   };
 }
 

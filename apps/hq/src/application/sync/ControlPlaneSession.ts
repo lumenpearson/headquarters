@@ -3,16 +3,16 @@ import { summarizeClockSamples } from './clock';
 import {
   disconnectedConnection,
   initialConnectionState,
+  sortPresence,
   type AuthorityMode,
   type ConnectionState,
-  type PresenceEntry,
+  type GroupSummary,
 } from './connection';
 import {
   isControlPlaneError,
   type ClockSample,
   type ControlPlaneErrorKind,
   type ControlPlanePort,
-  type GroupSummary,
 } from './controlPlanePort';
 
 export interface ControlPlaneSessionOptions {
@@ -166,12 +166,8 @@ export class ControlPlaneSession {
     this.#set({ mode: 'connecting', failure: '' });
     try {
       const paired = await this.#client.pair(pairingCode, deviceName, signal);
-      this.#set({
-        session: paired.session,
-        groupName: paired.group.name,
-        authority: paired.group.authority,
-        leaderDeviceId: paired.group.leaderDeviceId,
-      });
+      this.#set({ session: paired.session });
+      this.#applyGroup(paired.group);
     } catch (error: unknown) {
       this.#set({ mode: 'reauth-required', failure: describe(error, 'КОД ПАРЫ НЕ ПРИНЯТ') });
       return;
@@ -367,11 +363,21 @@ export class ControlPlaneSession {
     }
   }
 
+  /**
+   * Records what a call answered about the group, revision included.
+   *
+   * The revision travels with the three fields rather than beside them because
+   * it is what lets the other path -- the group log, read by `connectGroupState`
+   * -- tell a snapshot that is news from one a resume replayed. A patch that
+   * moved the leader without moving the revision would leave the log free to
+   * put the previous leader back.
+   */
   #applyGroup(group: GroupSummary): void {
     this.#set({
       groupName: group.name,
       authority: group.authority,
       leaderDeviceId: group.leaderDeviceId,
+      groupRevision: group.revision,
     });
   }
 
@@ -408,12 +414,4 @@ export class ControlPlaneSession {
 function describe(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message.trim() : '';
   return message.length === 0 ? fallback : `${fallback}: ${message}`;
-}
-
-/** Online sessions first, then by device id, so the list does not jump. */
-function sortPresence(presence: readonly PresenceEntry[]): readonly PresenceEntry[] {
-  return [...presence].sort((left, right) => {
-    if (left.status !== right.status) return left.status === 'ONLINE' ? -1 : 1;
-    return left.deviceId.localeCompare(right.deviceId, 'en-US');
-  });
 }

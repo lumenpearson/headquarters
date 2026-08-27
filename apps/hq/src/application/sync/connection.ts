@@ -202,6 +202,33 @@ export interface GroupDevice {
 }
 
 /**
+ * The group itself, as every path that reports it reports it.
+ *
+ * Answered by `JoinGroup`, `PairDevice`, `SetLeader` and `SetAuthorityMode`,
+ * and carried on `GROUP_UPDATED` and `DEVICE_UPDATED` events, so the two paths
+ * describe one thing rather than two shapes of it. It lives beside
+ * `ConnectionState` rather than on the port because it is what this session
+ * knows about its group, and the port is only one of the ways it learns.
+ *
+ * `revision` is the group's own counter, bumped by the server on every mutation
+ * that changes any field here (`group-mutations.ts`, `groupMutationEpilogue`).
+ * It is what orders a snapshot that arrived over the log against one that
+ * arrived as an answer to a call: the replayed window a feed reads on resume
+ * carries perfectly valid snapshots that are simply older than what a `JoinGroup`
+ * already established, and without a version there is no way to tell one from
+ * news. Zero means the group reported none -- a control plane older than the
+ * column, which the schema makes impossible from migration 1 onward, since
+ * `groups.revision` starts at 1.
+ */
+export interface GroupSummary {
+  readonly groupId: string;
+  readonly name: string;
+  readonly authority: AuthorityMode;
+  readonly leaderDeviceId: string;
+  readonly revision: number;
+}
+
+/**
  * The clock estimate against the control plane, NTP-style: `offsetMs` is what
  * to add to this machine's clock to read the server's, `latencyMs` the
  * one-way trip. `sampledAt` is empty until the first round completes, in the
@@ -260,6 +287,14 @@ export interface ConnectionState {
   readonly groupName?: string | undefined;
   readonly authority?: AuthorityMode | undefined;
   readonly leaderDeviceId?: string | undefined;
+  /**
+   * The revision the three fields above were last read at (F14 tail).
+   *
+   * Written by whichever path reported them, and read by the one that reports
+   * them next, so an older snapshot cannot land on top of a newer one. Zero is
+   * "nothing learned yet", which is also what a session that never joined has.
+   */
+  readonly groupRevision: number;
   readonly presence: readonly PresenceEntry[];
   readonly devices: readonly GroupDevice[];
   readonly clock: ClockEstimate;
@@ -289,6 +324,7 @@ export const initialGroupMirrorSummary: GroupMirrorSummary = {
 
 export const initialConnectionState: ConnectionState = {
   mode: 'local-only',
+  groupRevision: 0,
   presence: [],
   devices: [],
   clock: { offsetMs: 0, latencyMs: 0, sampledAt: '' },
@@ -404,6 +440,21 @@ export function connectionModeLabel(mode: ConnectionMode): string {
     case 'installation-changed':
       return 'ПО ЭТОМУ АДРЕСУ ДРУГАЯ БАЗА CONTROL PLANE';
   }
+}
+
+/**
+ * Online sessions first, then by device id, so the list does not jump.
+ *
+ * One order for one list. `ControlPlaneSession` sorts what `GetPresence`
+ * answers on its timer and `connectGroupState` sorts what the group log
+ * carries in between; two orders over one list would make the display reshuffle
+ * every fifteen seconds.
+ */
+export function sortPresence(presence: readonly PresenceEntry[]): readonly PresenceEntry[] {
+  return [...presence].sort((left, right) => {
+    if (left.status !== right.status) return left.status === 'ONLINE' ? -1 : 1;
+    return left.deviceId.localeCompare(right.deviceId, 'en-US');
+  });
 }
 
 export function deviceRoleLabel(role: DeviceRole): string {

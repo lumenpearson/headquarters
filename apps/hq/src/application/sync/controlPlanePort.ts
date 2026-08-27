@@ -3,6 +3,7 @@ import type {
   ConnectionSession,
   ControlPlaneCapabilities,
   GroupDevice,
+  GroupSummary,
   PresenceEntry,
 } from './connection';
 import type {
@@ -96,13 +97,6 @@ export interface ControlPlanePort {
    * shortened page looks exactly like the end of the log.
    */
   readGroupEvents(afterSequence: bigint, signal?: AbortSignal): Promise<GroupEventPage>;
-}
-
-export interface GroupSummary {
-  readonly groupId: string;
-  readonly name: string;
-  readonly authority: AuthorityMode;
-  readonly leaderDeviceId: string;
 }
 
 export interface PairingResult {

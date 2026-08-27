@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
+import { create } from '@bufbuild/protobuf';
+import { timestampFromDate } from '@bufbuild/protobuf/wkt';
+import { syncV1 } from '@gremuchaya/protocol';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ControlPlaneLinkState } from '@/application/sync/connection';
 import type { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
-import { ControlPlaneClient } from '@/infrastructure/controlPlane/ControlPlaneClient';
+import {
+  ControlPlaneClient,
+  type ControlRpcClient,
+  type SyncRpcClient,
+} from '@/infrastructure/controlPlane/ControlPlaneClient';
 import {
   DeviceSessionStore,
   memoryStorage,
@@ -13,6 +20,7 @@ import { operationsStore } from '@/state/operationsStore';
 
 import type { ControlPlaneLink } from './ControlPlaneRuntime';
 import { GroupChannelRuntime } from './GroupChannelRuntime';
+import { GroupPairingDialog, openGroupPairing } from './GroupPairingDialog';
 import { currentGroupRuntime } from './groupRuntimeHolder';
 
 /* Placeholder addresses: the plane on the set's LAN, and the cloud plane. */
@@ -286,5 +294,163 @@ describe('GroupChannelRuntime over two planes of one group', () => {
     // minter of refresh request ids against one stored token, which the server
     // reads as a stolen-token replay.
     expect(refreshes).toEqual([]);
+  });
+});
+
+describe('the group own state, as the operator sees it', () => {
+  /**
+   * The near plane, answering `ReadGroupEvents` with real generated messages.
+   *
+   * RPC clients are injected rather than a `fetch` stubbed, because what is
+   * under test here runs the whole client path -- the generated `GroupEvent`,
+   * the codec, the poll feed, the channel's cursor, the subscriber and the
+   * store -- and a hand-rolled envelope would skip the first two of those.
+   */
+  function planeServing(events: readonly syncV1.GroupEvent[]): {
+    readonly links: readonly ControlPlaneLink[];
+    readonly reads: bigint[];
+  } {
+    const sessionStore = new DeviceSessionStore(memoryStorage());
+    sessionStore.write({
+      version: 3,
+      pairedAtUrl: nearPlane,
+      controlPlaneInstallationId: installationId,
+      accessToken: 'access-1',
+      refreshToken: 'refresh-1',
+      accessTokenExpiresAt: Date.now() + 600_000,
+      refreshTokenExpiresAt: Date.now() + 6_000_000,
+      deviceId: 'device-a',
+      groupId: 'group-a',
+      role: 'ADMIN',
+    });
+    const reads: bigint[] = [];
+    const sync = {
+      readGroupEvents: (request: { readonly afterSequence: bigint }) => {
+        reads.push(request.afterSequence);
+        return Promise.resolve({
+          events: events.filter((event) => event.sequence > request.afterSequence),
+          earliestAvailableSequence: events[0]?.sequence ?? 0n,
+          hasMore: false,
+          resyncRequired: false,
+        });
+      },
+    } as unknown as SyncRpcClient;
+    const control = {} as unknown as ControlRpcClient;
+    return {
+      reads,
+      links: [
+        {
+          linkId: 'link-0',
+          baseUrl: nearPlane,
+          role: 'primary',
+          client: new ControlPlaneClient({
+            baseUrl: nearPlane,
+            sessionStore,
+            credentials: 'owner',
+            clients: { control, sync },
+          }),
+        },
+      ],
+    };
+  }
+
+  function leaderMoved(sequence: bigint, leaderDeviceId: string, revision: bigint) {
+    return create(syncV1.GroupEventSchema, {
+      sequence,
+      kind: syncV1.GroupEventKind.GROUP_UPDATED,
+      actorDeviceId: { value: 'device-b' },
+      occurredAt: timestampFromDate(new Date()),
+      group: {
+        id: { value: 'group-a' },
+        name: 'ШТАБ',
+        authorityMode: syncV1.AuthorityMode.LEADER,
+        leaderDeviceId: { value: leaderDeviceId },
+        revision: { number: revision, etag: `group-a-${revision.toString()}` },
+      },
+    });
+  }
+
+  /** The group as `JoinGroup` left it: two devices, the first of them leading. */
+  function joined(links: readonly ControlPlaneLinkState[]): void {
+    act(() => {
+      operationsStore.getState().patchConnection({
+        mode: 'online',
+        session: { deviceId: 'device-a', groupId: 'group-a', role: 'ADMIN' },
+        capabilities: {
+          installationId,
+          sync: true,
+          deviceLifecycle: true,
+          realtimeAdmission: false,
+          settings: false,
+          materials: false,
+        },
+        groupName: 'ШТАБ',
+        authority: 'leader',
+        leaderDeviceId: 'device-a',
+        groupRevision: 7,
+        devices: [
+          { deviceId: 'device-a', name: 'ЭКРАН 1', role: 'ADMIN', status: 'ONLINE' },
+          { deviceId: 'device-b', name: 'ЭКРАН 2', role: 'EDITOR', status: 'ONLINE' },
+        ],
+        links,
+      });
+    });
+  }
+
+  /** Which device the pairing surface prints the leader mark against. */
+  function leaderOnScreen(): string | undefined {
+    const marked = [...document.querySelectorAll('.group-pairing__devices article')].find(
+      (entry) => entry.querySelector('small')?.textContent?.includes('· ГЛАВНАЯ') === true,
+    );
+    return marked?.querySelector('strong')?.textContent ?? undefined;
+  }
+
+  it('moves the leader mark a session never asked for, without reconnecting', async () => {
+    const { links, reads } = planeServing([leaderMoved(1n, 'device-b', 8n)]);
+    joined([linkState({})]);
+
+    render(
+      <>
+        <GroupChannelRuntime links={links} session={sessionStub([])} />
+        <GroupPairingDialog />
+      </>,
+    );
+    act(() => {
+      openGroupPairing();
+    });
+    expect(leaderOnScreen()).toBe('ЭКРАН 1');
+
+    await settle();
+
+    /*
+     * Nothing here reconnected, rejoined or called `SetLeader`: the only
+     * request the session made is the page of the log it was already reading.
+     * That page is what moved the mark, and before the subscriber existed it
+     * was decoded and dropped.
+     */
+    expect(reads).toEqual([0n]);
+    expect(leaderOnScreen()).toBe('ЭКРАН 2');
+    expect(operationsStore.getState().connection.leaderDeviceId).toBe('device-b');
+  });
+
+  it('leaves the mark where it is when the page replays an older revision', async () => {
+    const { links } = planeServing([leaderMoved(1n, 'device-c', 4n)]);
+    joined([linkState({})]);
+
+    render(
+      <>
+        <GroupChannelRuntime links={links} session={sessionStub([])} />
+        <GroupPairingDialog />
+      </>,
+    );
+    act(() => {
+      openGroupPairing();
+    });
+    await settle();
+
+    // The session joined at revision 7. A snapshot from revision 4 is a page of
+    // the retained window and not news, whatever order it arrived in.
+    expect(leaderOnScreen()).toBe('ЭКРАН 1');
+    expect(operationsStore.getState().connection.leaderDeviceId).toBe('device-a');
   });
 });

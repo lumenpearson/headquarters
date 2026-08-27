@@ -5,10 +5,9 @@ import type {
   AuthorityMode,
   ConnectionSession,
   ControlPlaneCapabilities,
-  DeviceRole,
   GroupDevice,
+  GroupSummary,
   PresenceEntry,
-  PresenceStatus,
 } from '@/application/sync/connection';
 import {
   ControlPlaneError,
@@ -16,7 +15,6 @@ import {
   type ClockSample,
   type ControlPlaneErrorKind,
   type ControlPlanePort,
-  type GroupSummary,
   type PairingResult,
 } from '@/application/sync/controlPlanePort';
 import type {
@@ -34,45 +32,30 @@ import { DeviceSessionStore, type StoredDeviceSession } from './DeviceSessionSto
 import {
   fromGroupSessionAction,
   fromSynchronizedDocumentType,
+  toDeviceRole,
   toEpochMs,
+  toGroupDevice,
   toGroupEventEnvelope,
   toGroupSessionCommand,
+  toGroupSummary,
+  toPresenceEntry,
   toSynchronizedDocumentType,
   toWireTimestamp,
+  type WireDevice,
+  type WireGroup,
+  type WirePresence,
+  type WireResourceId,
+  type WireTimestamp,
 } from './groupEventCodec';
 import { createControlPlaneTransport } from './transport';
 
 /*
- * Wire shapes, declared structurally rather than imported from the generated
- * bindings, in the idiom `BridgeMaterialClient` set: the generated client is
- * assignable to these, and so is a hand-written fake in a test. Only the
- * fields this facade reads are named. `Timestamp` is spelled out because
- * `@bufbuild/protobuf` is a dependency of `@gremuchaya/protocol`, not of this
- * application, and the two fields are all a conversion needs.
+ * The wire shapes this facade reads live in `groupEventCodec`, beside the
+ * conversions, because the very same group, device and presence messages arrive
+ * both as answers to these calls and as events on the log. What is declared
+ * here is only what the log never carries: the session and the mutation
+ * context.
  */
-interface WireTimestamp {
-  readonly seconds: bigint;
-  readonly nanos: number;
-}
-
-interface WireResourceId {
-  readonly value: string;
-}
-
-interface WireGroup {
-  readonly id?: WireResourceId | undefined;
-  readonly name: string;
-  readonly authorityMode: number;
-  readonly leaderDeviceId?: WireResourceId | undefined;
-}
-
-interface WireDevice {
-  readonly id?: WireResourceId | undefined;
-  readonly name: string;
-  readonly role: number;
-  readonly status: number;
-}
-
 interface WireSession {
   readonly accessToken: string;
   readonly refreshToken: string;
@@ -81,15 +64,6 @@ interface WireSession {
   readonly deviceId?: WireResourceId | undefined;
   readonly groupId?: WireResourceId | undefined;
   readonly role: number;
-}
-
-interface WirePresence {
-  readonly deviceId?: WireResourceId | undefined;
-  readonly status: number;
-  readonly activeScreen: string;
-  readonly clockOffsetMs: bigint;
-  readonly latencyMs: number;
-  readonly observedAt?: WireTimestamp | undefined;
 }
 
 /**
@@ -485,13 +459,13 @@ export class ControlPlaneClient implements ControlPlanePort {
       refreshTokenExpiresAt: toEpochMs(session.refreshTokenExpiresAt),
       deviceId: session.deviceId?.value ?? '',
       groupId: session.groupId?.value ?? '',
-      role: toRole(session.role),
+      role: toDeviceRole(session.role),
     };
     this.#store.write(stored);
     return {
       session: { deviceId: stored.deviceId, groupId: stored.groupId, role: stored.role },
-      group: toGroup(group),
-      device: toDevice(device),
+      group: toGroupSummary(group),
+      device: toGroupDevice(device),
     };
   }
 
@@ -535,7 +509,7 @@ export class ControlPlaneClient implements ControlPlanePort {
       refreshToken: session.refreshToken,
       accessTokenExpiresAt: toEpochMs(session.accessTokenExpiresAt),
       refreshTokenExpiresAt: toEpochMs(session.refreshTokenExpiresAt),
-      role: toRole(session.role),
+      role: toDeviceRole(session.role),
     });
     return { deviceId: next.deviceId, groupId: next.groupId, role: next.role };
   }
@@ -549,7 +523,7 @@ export class ControlPlaneClient implements ControlPlanePort {
         options(signal),
       ),
     );
-    return toGroup(required(response.group, 'Control plane returned no group on join.'));
+    return toGroupSummary(required(response.group, 'Control plane returned no group on join.'));
   }
 
   async leave(signal?: AbortSignal): Promise<void> {
@@ -575,7 +549,7 @@ export class ControlPlaneClient implements ControlPlanePort {
           options(signal),
         ),
       );
-      devices.push(...response.devices.map(toDevice));
+      devices.push(...response.devices.map(toGroupDevice));
       if (response.page === undefined || !response.page.hasMore) break;
       cursor = response.page.nextCursor;
     }
@@ -609,7 +583,7 @@ export class ControlPlaneClient implements ControlPlanePort {
         options(signal),
       ),
     );
-    return toGroup(required(response.group, 'Control plane returned no group.'));
+    return toGroupSummary(required(response.group, 'Control plane returned no group.'));
   }
 
   async setLeader(deviceId: string, signal?: AbortSignal): Promise<GroupSummary> {
@@ -624,7 +598,7 @@ export class ControlPlaneClient implements ControlPlanePort {
         options(signal),
       ),
     );
-    return toGroup(required(response.group, 'Control plane returned no group.'));
+    return toGroupSummary(required(response.group, 'Control plane returned no group.'));
   }
 
   /**
@@ -658,7 +632,7 @@ export class ControlPlaneClient implements ControlPlanePort {
     const response = await call(() =>
       this.#sync.getPresence({ groupId: { value: stored.groupId } }, options(signal)),
     );
-    return response.devices.map(toPresence);
+    return response.devices.map(toPresenceEntry);
   }
 
   /**
@@ -902,47 +876,4 @@ function required<Value>(value: Value | undefined, message: string): Value {
  */
 function toWireSessionCommand(command: WireSessionCommand): GroupSessionCommand {
   return toGroupSessionCommand(command as unknown as Parameters<typeof toGroupSessionCommand>[0]);
-}
-
-function toRole(role: number): DeviceRole {
-  if (role === syncV1.DeviceRole.ADMIN) return 'ADMIN';
-  if (role === syncV1.DeviceRole.EDITOR) return 'EDITOR';
-  return 'VIEWER';
-}
-
-function toStatus(status: number): PresenceStatus {
-  if (status === syncV1.DeviceStatus.ONLINE) return 'ONLINE';
-  if (status === syncV1.DeviceStatus.REVOKED) return 'REVOKED';
-  return 'OFFLINE';
-}
-
-function toGroup(group: WireGroup): GroupSummary {
-  return {
-    groupId: group.id?.value ?? '',
-    name: group.name,
-    authority:
-      group.authorityMode === syncV1.AuthorityMode.MULTI_AUTHORITY ? 'multi-authority' : 'leader',
-    leaderDeviceId: group.leaderDeviceId?.value ?? '',
-  };
-}
-
-function toDevice(device: WireDevice): GroupDevice {
-  return {
-    deviceId: device.id?.value ?? '',
-    name: device.name,
-    role: toRole(device.role),
-    status: toStatus(device.status),
-  };
-}
-
-function toPresence(presence: WirePresence): PresenceEntry {
-  const observed = toEpochMs(presence.observedAt);
-  return {
-    deviceId: presence.deviceId?.value ?? '',
-    status: toStatus(presence.status),
-    activeScreen: presence.activeScreen,
-    clockOffsetMs: Number(presence.clockOffsetMs),
-    latencyMs: presence.latencyMs,
-    observedAt: observed === 0 ? '' : new Date(observed).toISOString(),
-  };
 }

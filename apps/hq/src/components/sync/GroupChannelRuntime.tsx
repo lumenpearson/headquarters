@@ -8,6 +8,7 @@ import type { ControlPlanePort } from '@/application/sync/controlPlanePort';
 import type { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
 import { connectGroupSettings } from '@/application/sync/groupSettingsBus';
 import { GroupSettingsSync } from '@/application/sync/GroupSettingsSync';
+import { connectGroupState } from '@/application/sync/GroupStateSync';
 import { mirrorSummary } from '@/application/sync/localMirror';
 import { ControlPlaneGroupChannel } from '@/infrastructure/controlPlane/ControlPlaneGroupChannel';
 import { GroupEventPoller } from '@/infrastructure/controlPlane/GroupEventPoller';
@@ -146,6 +147,35 @@ export function GroupChannelRuntime({ links, session }: GroupChannelRuntimeProps
     setGroupRuntime({ groupId, deviceId, channel, delivery, settings, materials });
 
     /*
+     * The group's own state, kept current from the log rather than from
+     * whichever call happened to ask next.
+     *
+     * Subscribed here, before any feed is built, for two reasons. It is behind
+     * `channel.deliver` -- the one merge point, where an event carried by both
+     * the socket and the poll is dropped the second time -- rather than beside a
+     * transport, which would see both copies. And it is registered before the
+     * first tick, so the page a feed reads on that tick is delivered into a
+     * listener set that already contains it.
+     *
+     * The view is read from the store per event instead of captured, because
+     * `ControlPlaneSession` writes the same fields from the answers to calls and
+     * a captured copy would be stale exactly when the version check matters.
+     */
+    const disconnectGroupState = connectGroupState({
+      channel,
+      read: () => {
+        const { connection } = operationsStore.getState();
+        return {
+          groupRevision: connection.groupRevision,
+          session: connection.session,
+          devices: connection.devices,
+          presence: connection.presence,
+        };
+      },
+      apply: (patch) => operationsStore.getState().patchConnection(patch),
+    });
+
+    /*
      * The resume point when the retained log no longer covers the cursor. One
      * function for every feed: the socket reports the verdict as a
      * `ResyncRequired` frame and a polled page as its `resync_required` field,
@@ -271,6 +301,7 @@ export function GroupChannelRuntime({ links, session }: GroupChannelRuntimeProps
       controller.abort();
       for (const realtime of realtimes) realtime.stop();
       for (const poller of pollers) poller.stop();
+      disconnectGroupState();
       disconnectSettings?.();
       channel.close();
       setGroupRuntime(null);
