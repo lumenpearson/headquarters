@@ -257,6 +257,55 @@ const isSpanList = withEditor(
   (value): value is readonly string[] =>
     Array.isArray(value) && value.every((item) => typeof item === 'string' && spanEntry.test(item)),
 );
+
+/**
+ * The languages the application ships a catalogue for.
+ *
+ * Written once rather than at each of the two definitions that need it:
+ * `localization.locale` names one of them, and a `localization.elementOverrides`
+ * entry is addressed to one of them. A roster spelled out twice inside a single
+ * file is a roster that will be extended once.
+ *
+ * `apps/hq` repeats these names in its own catalogue and `locale.test.ts` binds
+ * the two lists together, exactly as `schemes.test.ts` binds `keybindSchemes` to
+ * `keybinds.scheme`. The schema stays the trust boundary: it decides which
+ * locale an entry may be stored under, and it does not read the client's
+ * message tables to do it.
+ */
+const applicationLocales = ['ru', 'en'] as const;
+
+/**
+ * `locale:screen:element=caption`, the caption percent-encoded.
+ *
+ * Three parts, and each is already paid for elsewhere. The screen is carried
+ * for the reason spans and motions carry it -- a tile identifier is unique only
+ * within a screen, and `registry` is the table on four of them. The locale is
+ * carried because a caption that applied in every language is the one thing a
+ * translation cannot mean: without it, writing an English caption would
+ * overwrite the Russian one.
+ *
+ * The caption itself is matched as `\S+` rather than as free text because the
+ * writer percent-encodes it. That escapes the `,` the string-list editor splits
+ * on and the `=` and `:` this entry is split on, and it turns every space into
+ * `%20` -- so an entry carrying whitespace is one that was hand-typed in a shape
+ * that would not survive the next read, and is refused here rather than dropped
+ * silently later.
+ */
+const elementCaptionEntry = /^([a-z]{2}):[a-z][a-z0-9-]*:[a-z][a-z0-9-]*=\S+$/u;
+const isElementCaptionList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every((item) => {
+      if (typeof item !== 'string') return false;
+      const locale = elementCaptionEntry.exec(item)?.[1];
+      // The shape and the roster, the way a category motion is checked: a
+      // caption filed under a language the application has no catalogue for
+      // could never be drawn, and storing it would be storing a caption the
+      // operator can no longer find.
+      return locale !== undefined && (applicationLocales as readonly string[]).includes(locale);
+    }),
+);
 /**
  * Everything the custom title bar can draw, in the order it draws them by
  * default (R25).
@@ -1027,7 +1076,15 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'ru',
     'device',
     'Application locale.',
-    oneOf(['ru', 'en']),
+    oneOf(applicationLocales),
+  ),
+  definition(
+    'localization.elementOverrides',
+    'localization',
+    [],
+    'device',
+    'Captions the operator wrote for individual elements, as `locale:screen:element=text` entries with the text percent-encoded.',
+    isElementCaptionList,
   ),
   definition(
     'dateTime.mode',

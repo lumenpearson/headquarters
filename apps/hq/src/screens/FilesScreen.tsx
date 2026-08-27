@@ -10,6 +10,8 @@ import {
   TerminalSelect,
 } from '@gremuchaya/ui/primitives';
 
+import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
+import { formatChord } from '@/application/keybinds/match';
 import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
 import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
@@ -184,6 +186,22 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   };
 
   useKeybind('files.import', openImportDialog);
+
+  /*
+   * The chord printed on the dialog, taken from the collection now in force.
+   *
+   * It was written out as `[CTRL+SHIFT+ALT+S]`, which is the `terminal-default`
+   * chord and nothing else: `vim-inspired` moves this gesture to Shift+R and
+   * the accessibility collection to Ctrl+S, so under either the dialog named a
+   * combination that would not open it. That is the defect
+   * `application/keybinds/activeScheme.ts` names as its own reason for
+   * existing, and the one `entryShortcut` fixed for the context menus (C35).
+   * Uppercased because the eyebrow is machine register; the chord itself is
+   * never spelled here.
+   */
+  const importKeybind = useActiveKeybinds().find((keybind) => keybind.id === 'files.import');
+  const importChord =
+    importKeybind === undefined ? '' : `[${formatChord(importKeybind.chord).toUpperCase()}] / `;
 
   useEffect(() => {
     if (!importOpen) return;
@@ -559,7 +577,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
             ? 'ИМПОРТ МАТЕРИАЛОВ В ГРУППУ'
             : 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ'
         }
-        eyebrow={`[CTRL+SHIFT+ALT+S] / ${materialClient.origin === 'group-library' ? 'CONTROL PLANE GRPC-WEB' : 'LOOPBACK GRPC-WEB'}`}
+        eyebrow={`${importChord}${materialClient.origin === 'group-library' ? 'CONTROL PLANE GRPC-WEB' : 'LOOPBACK GRPC-WEB'}`}
         description={
           materialClient.origin === 'group-library'
             ? 'Материалы уходят в библиотеку группы: control plane резервирует части, браузер пишет их прямо в объектное хранилище по подписанным адресам.'

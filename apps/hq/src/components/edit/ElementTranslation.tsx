@@ -1,6 +1,5 @@
 'use client';
 
-import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 import { useState } from 'react';
 import type { KeyboardEvent } from 'react';
@@ -45,24 +44,12 @@ export function ElementTranslation() {
     stringList(state.personalization.draft.values[elementTranslationsSetting]),
   );
 
-  /*
-   * The definition is looked up rather than assumed.
-   *
-   * `packages/settings-schema` does not declare `localization.elementOverrides`
-   * yet, and `applyDraftPatch` answers an unknown id by throwing
-   * `UnknownSettingError` -- so a field wired straight to `applySettingsPatch`
-   * would take a caption and fail on the keystroke that committed it. The
-   * panel says what is missing instead of offering a control that cannot work.
-   */
-  const stored = getSettingDefinition(elementTranslationsSetting) !== undefined;
   const mine = elementTranslationsFor(entries, locale);
 
   return (
     <div className="edit-tile-motion">
       <h3>{t('edit.translation.heading')}</h3>
-      {!stored ? (
-        <p className="edit-tile-motion__hint">{t('edit.translation.unavailable')}</p>
-      ) : selected === '' ? (
+      {selected === '' ? (
         // Said rather than hidden, in the idiom the motion picker uses: a
         // control that appears only once the operator has already done the
         // thing it needs cannot teach them to do it.

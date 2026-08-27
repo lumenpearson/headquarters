@@ -40,11 +40,12 @@ import { appLocales, type AppLocale } from './messages';
 /**
  * The definition this list is stored under.
  *
- * Named here rather than at each call site, and checked before the surface
- * offers to write: `packages/settings-schema` does not declare it yet, and
- * `applyDraftPatch` answers an unknown id with `UnknownSettingError` rather
- * than by ignoring it. See `ElementTranslation` for what the panel shows while
- * the definition is absent.
+ * Named here rather than at each call site, so the panel that writes a caption
+ * and the tile header that draws one address the same list. The definition
+ * itself lives in `packages/settings-schema`, which validates the entry shape
+ * this module writes -- the schema is the trust boundary, and a caption that
+ * reached the draft in a shape no reader can parse would be a caption the
+ * operator wrote and never saw again.
  */
 export const elementTranslationsSetting = 'localization.elementOverrides';
 
@@ -119,6 +120,29 @@ export function elementTranslation(
   address: ElementTranslationAddress,
 ): string | undefined {
   return readElementTranslations(entries).get(elementTranslationKey(address));
+}
+
+/**
+ * What one element is called on screen right now: the caption the operator
+ * wrote for it in the language in force, or the one the application ships.
+ *
+ * This is R28's read path, and it is deliberately a pure function rather than a
+ * hook or a store reader. The entries and the locale arrive as arguments so the
+ * single subscription lives in `TileGrid`, which already holds one for every
+ * other per-tile setting; a resolver that read the store itself would put a
+ * second subscription under every panel on the screen and would be untestable
+ * without one.
+ *
+ * The fallback is the source caption, never the empty string and never the
+ * element id. An override is a rename, and a rename that could erase a heading
+ * would let one malformed entry leave a panel with no name at all.
+ */
+export function elementCaption(
+  entries: readonly string[],
+  address: ElementTranslationAddress,
+  source: string,
+): string {
+  return elementTranslation(entries, address) ?? source;
 }
 
 /**

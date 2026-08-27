@@ -59,6 +59,27 @@ describe('message catalogue', () => {
   });
 });
 
+describe('what a keybind description promises', () => {
+  it('does not promise the import writes locally, because it may not', () => {
+    /*
+     * The description read `Локальный импорт материалов` / `Local material
+     * import`. The gesture opens one dialog, and that dialog writes to the
+     * group library whenever a group is admitted -- it says so itself, in two
+     * different titles and two different descriptions. The shortcut list had no
+     * such branch and named the destination anyway, so under an admitted group
+     * it named the wrong one.
+     *
+     * The claim held here is the honest one: this label may not name a
+     * destination. It is not a check that the wording never changes.
+     */
+    for (const locale of appLocales) {
+      expect(translateWith(locale, 'keybind.files.import'), locale).not.toMatch(
+        /локальн|local|групп|group/iu,
+      );
+    }
+  });
+});
+
 describe('the non-translatable namespace', () => {
   it('answers with the same token whichever locale is asked', () => {
     for (const id of Object.keys(tokens) as MessageId[]) {

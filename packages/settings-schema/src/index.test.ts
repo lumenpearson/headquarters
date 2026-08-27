@@ -494,3 +494,63 @@ describe('titlebar settings', () => {
     expect(getSettingsDefinitionsForCategory('titlebar')).toHaveLength(4);
   });
 });
+
+/**
+ * The store R28's per-element captions live in.
+ *
+ * The entry form is not this file's invention: `apps/hq` writes and reads
+ * `locale:screen:element=caption` with the caption percent-encoded, and this
+ * definition is the trust boundary in front of that list. What the tests below
+ * hold is that the boundary refuses exactly what no reader could make sense of
+ * -- an address without a screen, a language the application has no catalogue
+ * for, a caption carrying a separator it does not mean.
+ */
+describe('per-element captions', () => {
+  const patch = (value: unknown) =>
+    applyDraftPatch(
+      createSettingsDraft(createFactorySnapshot()),
+      [{ id: 'localization.elementOverrides', value }],
+      event('caption-1'),
+    );
+
+  it('is a per-device list that starts empty', () => {
+    // Empty rather than seeded: a caption is one shoot's word for one tile, and
+    // a factory default here would be the application renaming its own panels.
+    expect(getSettingDefinition('localization.elementOverrides')).toMatchObject({
+      category: 'localization',
+      scope: 'device',
+      defaultValue: [],
+      editor: { kind: 'string-list', delimiter: ',' },
+    });
+  });
+
+  it('accepts the entry the application writes', () => {
+    const entry = `ru:overview:brief=${encodeURIComponent('СВОДКА СМЕНЫ')}`;
+
+    expect(patch([entry]).values['localization.elementOverrides']).toEqual([entry]);
+  });
+
+  it('accepts a screen and a tile whose names carry a hyphen', () => {
+    // `object-detail`, `video-archive` and `ui-gallery` are routes, and a
+    // pattern that refused them would refuse to rename three screens' tiles.
+    const entry = 'en:object-detail:live-feed=Live%20feed';
+
+    expect(patch([entry]).values['localization.elementOverrides']).toEqual([entry]);
+  });
+
+  it.each([
+    ['an address with no screen', ['ru:brief=%D0%A1']],
+    ['an address with no locale', ['overview:brief=%D0%A1']],
+    ['a language the application has no catalogue for', ['de:overview:brief=Lage']],
+    ['a locale spelled as a region tag', ['ru-RU:overview:brief=%D0%A1']],
+    ['a screen that starts with a digit', ['ru:2overview:brief=%D0%A1']],
+    ['a screen in the wrong case', ['ru:Overview:brief=%D0%A1']],
+    ['an entry with no caption at all', ['ru:overview:brief=']],
+    ['a caption carrying a raw space, which the reader would cut in half', ['ru:o:b=two words']],
+    ['whitespace around an entry', [' ru:overview:brief=%D0%A1 ']],
+    ['a bare string rather than a list', 'ru:overview:brief=%D0%A1'],
+    ['a list holding something that is not a string', [42]],
+  ])('refuses %s', (_reason, value) => {
+    expect(() => patch(value)).toThrow(InvalidSettingValueError);
+  });
+});

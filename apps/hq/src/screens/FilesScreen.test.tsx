@@ -82,3 +82,46 @@ describe('the import dialog category', () => {
     expect(selectedCategory()).toContain('ПЕРЕХВАТ');
   });
 });
+
+/**
+ * The chord the dialog advertises, against the collection actually in force.
+ *
+ * It was written out as `[CTRL+SHIFT+ALT+S]`, which is true of exactly one of
+ * the three collections `keybinds.scheme` offers. Under `vim-inspired` the
+ * gesture is Shift+R and under `accessibility` it is Ctrl+S, so the dialog
+ * named a combination that would not have opened it -- the same defect
+ * `activeScheme.ts` names as its reason for existing and `entryShortcut` fixed
+ * for the context menus.
+ */
+describe('the chord the import dialog prints', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  function eyebrow(): string {
+    return screen.getByText(/GRPC-WEB/).textContent ?? '';
+  }
+
+  it('prints the default collection’s chord when that is what is chosen', () => {
+    render(<FilesScreen archive={false} />);
+    openImportDialog();
+
+    expect(eyebrow()).toContain('[CTRL + SHIFT + ALT + S]');
+  });
+
+  it.each([
+    ['vim-inspired', '[SHIFT + R]'],
+    ['accessibility', '[CTRL + S]'],
+  ])('follows %s to the chord that actually opens it', (scheme, printed) => {
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'keybinds.scheme', value: scheme }]);
+    });
+    render(<FilesScreen archive={false} />);
+    openImportDialog();
+
+    expect(eyebrow()).toContain(printed);
+    // Not merely "some chord": the collection that is no longer in force must
+    // be gone from the line, or a stale literal beside a live one would pass.
+    expect(eyebrow()).not.toContain('ALT');
+  });
+});

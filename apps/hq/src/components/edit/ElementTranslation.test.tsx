@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { getSettingDefinition } from '@gremuchaya/settings-schema';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { elementTranslationsSetting } from '@/application/localization/elementTranslations';
@@ -14,23 +14,37 @@ describe('the element-translation surface', () => {
     operationsStore.getState().enterEditMode();
   });
 
-  it('says what is missing rather than offering a field that cannot store', () => {
+  it('offers a field that stores, because the definition it stores into exists', () => {
     /*
-     * `packages/settings-schema` does not declare
-     * `localization.elementOverrides` yet, and `applyDraftPatch` answers an
-     * unknown id with `UnknownSettingError` -- so a field wired straight to
-     * `applySettingsPatch` would accept a caption and throw on the keystroke
-     * that committed it. This asserts the honest state, and it is the
-     * assertion that flips the day the definition lands: the notice goes and
-     * the field appears.
+     * This assertion is the one that flipped. It used to hold the honest state
+     * of a panel with nowhere to write: `packages/settings-schema` declared no
+     * `localization.elementOverrides`, `applyDraftPatch` answers an unknown id
+     * with `UnknownSettingError`, and the panel said so rather than taking a
+     * caption and throwing on the keystroke that committed it. The definition
+     * has landed, so the notice is gone and the field is here.
      */
-    expect(getSettingDefinition(elementTranslationsSetting)).toBeUndefined();
+    expect(getSettingDefinition(elementTranslationsSetting)).toBeDefined();
 
     operationsStore.getState().selectEditElement('brief');
     render(<ElementTranslation />);
 
-    expect(screen.getByText(/localization.elementOverrides/)).toBeTruthy();
-    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('textbox')).toBeTruthy();
+  });
+
+  it('commits a caption into the draft rather than throwing on it', () => {
+    // The whole point of the definition landing: the keystroke that used to be
+    // refused now reaches the same draft as every other setting, which is what
+    // carries it into undo, the history and the group scope.
+    operationsStore.getState().selectEditElement('brief');
+    render(<ElementTranslation />);
+
+    const field = screen.getByRole('textbox');
+    fireEvent.change(field, { target: { value: 'СВОДКА СМЕНЫ' } });
+    fireEvent.blur(field);
+
+    expect(
+      operationsStore.getState().personalization.draft.values[elementTranslationsSetting],
+    ).toEqual([`ru:overview:brief=${encodeURIComponent('СВОДКА СМЕНЫ')}`]);
   });
 
   it('offers no proposal while there is nothing to propose', () => {

@@ -1292,3 +1292,88 @@ test('R24: the title bar takes a row of the window rather than covering one', as
   const workspace = boxes[3]?.height ?? 0;
   expect(workspace).toBeGreaterThan(filled - workspace);
 });
+
+/**
+ * R28's second half, on the screen rather than in the field it was typed into.
+ *
+ * `localization.elementOverrides` had no reader at all: a caption committed in
+ * edit mode came back to the same input and appeared nowhere else, so the
+ * requirement was observable on no screen in the application. These cases seed
+ * the stored list and read the heading the operator actually looks at.
+ *
+ * The caption seeded is a phrase no screen ships and no stylesheet writes, so
+ * none of these can pass by coinciding with a default (C51).
+ */
+const shiftBrief = 'СВОДКА СМЕНЫ';
+const briefEntry = (locale: string): string =>
+  `${locale}:overview:brief=${encodeURIComponent(shiftBrief)}`;
+
+function briefHeading(page: Page) {
+  return page.locator('.ops-panel.overview-brief .ops-panel__header h2');
+}
+
+test('R28: a caption the operator wrote stands on the tile instead of the shipped title', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  // The shipped title first, so the assertion below is a change and not a
+  // reading that was already true.
+  await expect(briefHeading(page)).toHaveText('ОБЗОР ОПЕРАЦИИ');
+
+  await seedSettings(page, { 'localization.elementOverrides': [briefEntry('ru')] });
+  await page.reload();
+
+  await expect(briefHeading(page)).toHaveText(shiftBrief);
+  // The heading, not a second element added beside it: a rename that left the
+  // original standing would be two names for one panel.
+  await expect(page.getByText('ОБЗОР ОПЕРАЦИИ', { exact: true })).toHaveCount(0);
+});
+
+test('R28: an empty list leaves every tile with the caption the application ships', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await seedSettings(page, { 'localization.elementOverrides': [] });
+  await page.goto('/overview');
+
+  await expect(briefHeading(page)).toHaveText('ОБЗОР ОПЕРАЦИИ');
+});
+
+test('R28: a caption written in the other language does not reach this one', async ({ page }) => {
+  await page.setViewportSize(wide);
+  // Stored under `en`, read in a `ru` session — the locale default. A resolver
+  // that ignored the locale would put the English wording on a Russian screen,
+  // and the per-locale address the caption is stored under would buy nothing.
+  await seedSettings(page, { 'localization.elementOverrides': [briefEntry('en')] });
+  await page.goto('/overview');
+
+  await expect(briefHeading(page)).toHaveText('ОБЗОР ОПЕРАЦИИ');
+
+  // The same entry, once the session is in the language it was written for.
+  await seedSettings(page, {
+    'localization.elementOverrides': [briefEntry('en')],
+    'localization.locale': 'en',
+  });
+  await page.reload();
+
+  await expect(briefHeading(page)).toHaveText(shiftBrief);
+});
+
+test('R28: a caption belongs to the screen it was written on, not to the tile name', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  // `registry` is the table on four screens. A caption stored against the
+  // cases registry must not rename the objects registry.
+  await seedSettings(page, {
+    'localization.elementOverrides': [`ru:cases:registry=${encodeURIComponent('ДОСЬЕ СМЕНЫ')}`],
+  });
+  await page.goto('/cases');
+  await expect(page.locator('.ops-panel[data-panel] .ops-panel__header h2').first()).toBeVisible();
+  await expect(page.getByText('ДОСЬЕ СМЕНЫ', { exact: true })).toHaveCount(1);
+
+  await page.goto('/objects');
+  await expect(page.locator('.ops-panel[data-panel] .ops-panel__header h2').first()).toBeVisible();
+  await expect(page.getByText('ДОСЬЕ СМЕНЫ', { exact: true })).toHaveCount(0);
+});

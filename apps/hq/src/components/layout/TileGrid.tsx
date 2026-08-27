@@ -13,9 +13,15 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 
 import type { TileCategory } from '@gremuchaya/settings-schema';
 
+import {
+  elementCaption,
+  elementTranslationsSetting,
+} from '@/application/localization/elementTranslations';
+import { useAppLocale } from '@/application/localization/locale';
 import { resolveTileMotion } from '@/application/personalization/tileMotion';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
+import { TileCaptionProvider } from './tileCaption';
 import { publishScreenTiles } from './tileRegistry';
 
 /**
@@ -128,6 +134,19 @@ export function TileGrid({
   const categoryMotionEntries = useOperationsStore((state) =>
     stringList(state.personalization.draft.values['tiles.categoryAnimations']),
   );
+  /*
+   * R28's read path, subscribed once for the whole screen.
+   *
+   * The captions and the locale are held here rather than in the panel for the
+   * same reason the spans and the motions are: a screen draws a dozen panels,
+   * and a setting read inside each of them is a dozen subscriptions to the same
+   * value. What a panel is handed is the address (`./tileCaption`); the resolver
+   * itself is pure.
+   */
+  const captionEntries = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values[elementTranslationsSetting]),
+  );
+  const locale = useAppLocale();
   const enteringAllowed = useOperationsStore(
     (state) => state.personalization.draft.values['animations.tileEnter'] !== false,
   );
@@ -364,7 +383,16 @@ export function TileGrid({
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
                 >
-                  {tile.render(placed.presentation)}
+                  <TileCaptionProvider
+                    scope={{
+                      entries: captionEntries,
+                      locale,
+                      screen,
+                      element: placed.id,
+                    }}
+                  >
+                    {tile.render(placed.presentation)}
+                  </TileCaptionProvider>
                   {editing ? (
                     <>
                       {(['horizontal', 'vertical', 'corner'] as const).map((axis) => (
@@ -390,13 +418,21 @@ export function TileGrid({
           {displaced.map((entry) => {
             const tile = byId.get(entry.id);
             if (tile === undefined) return null;
+            // The operator's caption here too: this notice names a panel they
+            // cannot currently see, and naming it by the title they replaced
+            // would be naming a panel they no longer recognise.
+            const caption = elementCaption(
+              captionEntries,
+              { locale, screen, element: entry.id },
+              tile.title,
+            );
             return entry.route === undefined ? (
               <b key={entry.id} title="Для этой плитки нет отдельного экрана">
-                {tile.title}
+                {caption}
               </b>
             ) : (
               <TerminalButton key={entry.id} onClick={() => router.push(entry.route)}>
-                {tile.title}
+                {caption}
               </TerminalButton>
             );
           })}

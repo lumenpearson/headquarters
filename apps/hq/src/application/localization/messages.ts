@@ -93,7 +93,7 @@ const ru = {
   'keybind.shell.togglePlayback': 'Пуск и пауза видео (на видеоэкранах)',
   'keybind.edit.toggle': 'Режим редактирования',
   'keybind.keybinds.list': 'Список сочетаний клавиш',
-  'keybind.files.import': 'Локальный импорт материалов',
+  'keybind.files.import': 'Импорт материалов',
   'keybind.scene.commandPalette': 'Палитра команд сцены',
   'keybind.scene.sectionFiles': 'Раздел: файлы',
   'keybind.scene.sectionMap': 'Раздел: карта',
@@ -211,8 +211,6 @@ const ru = {
   'edit.translation.reset': 'Вернуть исходную подпись',
   'edit.translation.count': 'Своих подписей: {count}',
   'edit.translation.propose': 'ЧЕРНОВИК ПЕРЕВОДА',
-  'edit.translation.unavailable':
-    'Хранилище подписей ещё не объявлено в схеме настроек: определение localization.elementOverrides отсутствует, и подпись сохранить некуда.',
   /*
    * Said in the panel rather than only in a commit message: the operator is
    * about to leave the application for a GitHub form, and an application that
@@ -258,7 +256,7 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
   'keybind.shell.togglePlayback': 'Play and pause video (on video screens)',
   'keybind.edit.toggle': 'Edit mode',
   'keybind.keybinds.list': 'Keyboard shortcut list',
-  'keybind.files.import': 'Local material import',
+  'keybind.files.import': 'Material import',
   'keybind.scene.commandPalette': 'Scene command palette',
   'keybind.scene.sectionFiles': 'Section: files',
   'keybind.scene.sectionMap': 'Section: map',
@@ -353,8 +351,6 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
   'edit.translation.reset': 'Restore the original caption',
   'edit.translation.count': 'Own captions: {count}',
   'edit.translation.propose': 'TRANSLATION DRAFT',
-  'edit.translation.unavailable':
-    'The caption store is not declared in the settings schema yet: the localization.elementOverrides definition is missing, so a caption has nowhere to go.',
   'edit.translation.proposeHint':
     'A GitHub form opens with the translation file already filled in. You create the pull request when you commit — this application never learns its address and cannot show a link to it.',
 

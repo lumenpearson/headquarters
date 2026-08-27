@@ -4,6 +4,7 @@ import type { OpsSeverity, OpsStatus } from '@gremuchaya/domain';
 import { TerminalDrawer, TerminalTooltip } from '@gremuchaya/ui/primitives';
 import type { ReactElement, ReactNode } from 'react';
 import { useStringSetting } from '@/application/personalization/useSetting';
+import { TileCaptionProvider, useElementCaption } from '@/components/layout/tileCaption';
 
 const statusLabels: Readonly<Record<OpsStatus, string>> = {
   ACTIVE: 'АКТИВЕН',
@@ -38,6 +39,17 @@ export function Panel({
   readonly onClick?: () => void;
 }) {
   const Element = onClick === undefined ? 'section' : 'button';
+  /*
+   * R28's second half, where an operator can see it: the caption they wrote for
+   * this tile in the language now in force, or the one the application ships.
+   * The address comes from `TileGrid` through `TileCaptionProvider`; a panel
+   * drawn outside a tile grid has no address and keeps its own title.
+   *
+   * `data-panel` deliberately keeps the shipped title. It is how a stylesheet
+   * and a test name this panel, and an identity that changed when the operator
+   * renamed a heading would be an identity in the operator's gift.
+   */
+  const caption = useElementCaption(title);
   return (
     <Element
       className={`ops-panel ${onClick === undefined ? '' : 'ops-panel--clickable'} ${className}`}
@@ -48,11 +60,18 @@ export function Panel({
       <header className="ops-panel__header">
         <div>
           {eyebrow === undefined ? null : <span>{eyebrow}</span>}
-          <h2>{title}</h2>
+          <h2>{caption}</h2>
         </div>
         {actions}
       </header>
-      <div className="ops-panel__body">{children}</div>
+      {/*
+       * The scope ends at this heading. A panel nested in the body draws its
+       * own heading, and letting it inherit would rename every panel inside a
+       * renamed tile along with it.
+       */}
+      <div className="ops-panel__body">
+        <TileCaptionProvider scope={null}>{children}</TileCaptionProvider>
+      </div>
     </Element>
   );
 }
