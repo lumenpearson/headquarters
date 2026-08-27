@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm -w run build:web && pnpm --filter @gremuchaya/control-plane migrate"
+}

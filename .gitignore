@@ -69,3 +69,6 @@ shared/materials/*
 # the repository. Untracked it would still be scanned by `pnpm format:check` and
 # `pnpm lint`, which is how a subagent run turned the local gate red.
 .claude/worktrees/
+
+.vercel
+.env*

@@ -94,11 +94,18 @@ eight of them can be run twice — once through each driver — rather than dupl
 
 ### The deployment target, and the ceilings that shape it
 
-**Nothing is deployed.** No Vercel project exists, no Neon project has been provisioned through the
-Vercel Marketplace, and no blob store has been created. Every number below was read from the
-platform's own documentation on 2026-08-26 and none of it has been observed here; rule 2.2 in
-`docs/plans/actual_plan.md` calls that "written, not run", and it stays that way until stage 5 of
-F14 is executed against a real account.
+**Deployed since 2026-08-27**, and the ceilings below are still read from documentation rather
+than observed. The Vercel project is `codeilluminators/headquarters` (root directory `apps/hq`,
+Node 24.x); the database is the Neon project `gremuchaya-hq-control-plane`, whose default branch
+serves production and whose `vercel-preview` branch serves every preview deployment, so a preview
+build never migrates or writes the shoot's group data. No blob store has been created, and
+`materials.storage-grants` is reported off accordingly.
+
+What has been observed, against a preview deployment on real PostgreSQL: `Health` with the
+database dependency `SERVING`, `GetCapabilities` with `sync.realtime-admission` off and an
+installation identity present, `CreateGroup`, `CreatePairingCode` and `PairDevice`. What has
+**not** been observed is any of it from the packaged desktop shell, which is the half of stage 5's
+acceptance that remains open, and any figure in the table below.
 
 | Ceiling                               | Value                                              | What it decides here                                                                                                                                                                                               |
 | ------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -112,7 +119,9 @@ F14 is executed against a real account.
 | Neon Free: storage / compute / egress | 0.5 GB · 100 CU-hours · 5 GB                       | Sized for a control plane that stores events and settings, not media.                                                                                                                                              |
 | Neon Free: autosuspend                | 5 minutes, not disableable                         | Why `neon` (HTTP, holds no connection) is the right driver against Neon and `postgres` (TCP pool) is the right one against a database on the set.                                                                  |
 
-Provisioning is intended through the Vercel Marketplace's native Neon integration rather than a
-separate Neon account, so one invoice covers both. That integration writes `DATABASE_URL` (pooled)
-and `DATABASE_URL_UNPOOLED` (direct) into the project; `HQ_CONTROL_PLANE_DATABASE_URL` can take
-either, because the HTTP driver holds no connection for a pooler to manage.
+Provisioning was intended through the Vercel Marketplace's native Neon integration, so that one
+invoice would cover both. It was **not** done that way: the Neon project was created directly, and
+the two accounts bill separately. The practical consequence is that nothing writes `DATABASE_URL`
+or `DATABASE_URL_UNPOOLED` into the Vercel project, so `HQ_CONTROL_PLANE_DATABASE_URL` is set
+explicitly per environment and a rotated Neon password has to be copied across by hand. Either form
+of the URL works, because the HTTP driver holds no connection for a pooler to manage.
