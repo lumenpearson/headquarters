@@ -91,14 +91,23 @@ body.terminal-theme kbd {
  * nothing anywhere -- the rule that read it never applied to a button, a field
  * or a select.
  *
- * The property is declared on `.ops-shell`, so it reaches the controls inside
- * the shell and the fallback stands for the portalled surfaces outside it.
+ * `--ops-focus-ring-width` is mirrored onto `body` alongside the shell root
+ * (`OperationsShell`), so it reaches a portalled dialog's controls too; the
+ * fallback stands only for a route that never mounts the shell.
+ *
+ * The colour follows the active ops theme's accent rather than this file's
+ * own `--accent-strong`: `--ops-orange-bright` is themed by `data-theme` and
+ * `data-accent` (operations.css), so a control under `terminal-green`,
+ * `cold-cyan` or `monochrome` no longer flashes orange on focus regardless of
+ * the chosen accent. `--accent-strong` is the fallback for a route with no
+ * ops palette declared at all, where it resolves to the same value this rule
+ * used to hardcode.
  */
 body.terminal-theme button:focus-visible,
 body.terminal-theme input:focus-visible,
 body.terminal-theme select:focus-visible,
 body.terminal-theme textarea:focus-visible {
-  outline: var(--ops-focus-ring-width, 1px) solid var(--accent-strong);
+  outline: var(--ops-focus-ring-width, 1px) solid var(--ops-orange-bright, var(--accent-strong));
   outline-offset: -2px;
 }
 

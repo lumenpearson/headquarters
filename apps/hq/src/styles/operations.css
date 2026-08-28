@@ -15,7 +15,18 @@
   --ops-titlebar-height: 28px;
 }
 
-.ops-shell {
+/*
+ * The `--ops-*` palette, declared on `body` rather than on `.ops-shell`.
+ *
+ * Base UI portals popups, dialogs, menus and toasts to `document.body`, which
+ * puts them outside `.ops-shell` in the DOM — a custom property declared only
+ * on the shell element never reaches them, so they lost the palette, the
+ * fluid type scale and the focus-ring width. Custom properties inherit
+ * through whatever tree they are declared in, so the family lives here and
+ * `.ops-shell` keeps only the declarations that are not themselves custom
+ * properties.
+ */
+body {
   --ops-bg: #050706;
   --ops-bg-1: #080c09;
   --ops-bg-2: #0c120e;
@@ -49,6 +60,16 @@
   --ops-red: #d45c52;
   --ops-yellow: #d3b45e;
   --ops-cell: 8px;
+  /*
+   * The shell's fluid base font size, spent by `.ops-shell` below and by
+   * every portalled popup that wants the same operator-controlled scale.
+   * Declared once here rather than recomputed at each consumer, the way the
+   * fluid matrix further down this file already does for `.ops-shell` itself.
+   */
+  --ops-font-size: calc(clamp(10px, 0.56vw, 15px) * var(--ops-type-scale, 1));
+}
+
+.ops-shell {
   display: grid;
   grid-template: var(--ops-titlebar-height) 54px minmax(0, 1fr) 24px / 178px minmax(0, 1fr);
   width: 100vw;
@@ -3814,36 +3835,46 @@ button.is-active {
   min-height: 0;
 }
 
-/* Safe settings-draft preview: values are schema-bound, never arbitrary CSS. */
-.ops-shell[data-theme='terminal-green'] {
+/*
+ * Safe settings-draft preview: values are schema-bound, never arbitrary CSS.
+ *
+ * Declared on `body`, not `.ops-shell`: the matrix a theme or an accent
+ * overrides is the same `--ops-*` family declared on `body` above, and a
+ * portalled dialog needs the override as much as it needs the base palette.
+ * The guard `:not([data-theme='high-contrast-…'])` on each accent block, and
+ * the specificity race it protects, both carry over unchanged from `body` to
+ * `body` -- an attribute selector's specificity does not depend on the tag it
+ * qualifies.
+ */
+body[data-theme='terminal-green'] {
   --ops-orange: #57b978;
   --ops-orange-bright: #9ae0ad;
   --ops-green: #68c98a;
   --ops-green-bright: #a7e5b7;
 }
 
-.ops-shell[data-theme='amber-crt'] {
+body[data-theme='amber-crt'] {
   --ops-orange: #d9a74b;
   --ops-orange-bright: #f2cf79;
   --ops-green: #b8a65e;
   --ops-green-bright: #dfcc84;
 }
 
-.ops-shell[data-theme='cold-cyan'] {
+body[data-theme='cold-cyan'] {
   --ops-orange: #46b8c4;
   --ops-orange-bright: #92dce1;
   --ops-green: #5bb8aa;
   --ops-green-bright: #9cddd3;
 }
 
-.ops-shell[data-theme='monochrome'] {
+body[data-theme='monochrome'] {
   --ops-orange: #c3c7ca;
   --ops-orange-bright: #f2f4f5;
   --ops-green: #9ca2a6;
   --ops-green-bright: #d7dcdf;
 }
 
-.ops-shell[data-theme='high-contrast-dark'] {
+body[data-theme='high-contrast-dark'] {
   /*
    * R14: `colors.lineOpacity` cannot reach this theme. The composed
    * `--ops-line` in the base block multiplies the channel by the operator's
@@ -3870,7 +3901,7 @@ button.is-active {
   --ops-orange-bright: #fff08a;
 }
 
-.ops-shell[data-theme='high-contrast-light'] {
+body[data-theme='high-contrast-light'] {
   /*
    * R14: `colors.lineOpacity` cannot reach this theme. The composed
    * `--ops-line` in the base block multiplies the channel by the operator's
@@ -3897,7 +3928,7 @@ button.is-active {
   --ops-orange-bright: #551600;
 }
 
-.ops-shell[data-theme='light-operations'] {
+body[data-theme='light-operations'] {
   --ops-bg: #e9ece9;
   --ops-bg-1: #ffffff;
   --ops-bg-2: #f4f6f3;
@@ -3914,28 +3945,28 @@ button.is-active {
   --ops-orange-bright: #762509;
 }
 
-.ops-shell[data-accent='green']:not([data-theme='high-contrast-dark']):not(
+body[data-accent='green']:not([data-theme='high-contrast-dark']):not(
     [data-theme='high-contrast-light']
   ) {
   --ops-orange: #53b979;
   --ops-orange-bright: #a6e2b9;
 }
 
-.ops-shell[data-accent='amber']:not([data-theme='high-contrast-dark']):not(
+body[data-accent='amber']:not([data-theme='high-contrast-dark']):not(
     [data-theme='high-contrast-light']
   ) {
   --ops-orange: #d8a547;
   --ops-orange-bright: #f3cb78;
 }
 
-.ops-shell[data-accent='cyan']:not([data-theme='high-contrast-dark']):not(
+body[data-accent='cyan']:not([data-theme='high-contrast-dark']):not(
     [data-theme='high-contrast-light']
   ) {
   --ops-orange: #45b9c6;
   --ops-orange-bright: #9bdfeb;
 }
 
-.ops-shell[data-accent='red']:not([data-theme='high-contrast-dark']):not(
+body[data-accent='red']:not([data-theme='high-contrast-dark']):not(
     [data-theme='high-contrast-light']
   ) {
   --ops-orange: #dc5c57;
@@ -4268,7 +4299,7 @@ button.is-active {
   grid-template-rows:
     var(--ops-titlebar-height) clamp(50px, 3.1vw, 72px) clamp(38px, 2.3vw, 52px)
     minmax(0, 1fr) clamp(22px, 1.4vw, 30px);
-  font-size: calc(clamp(10px, 0.56vw, 15px) * var(--ops-type-scale, 1));
+  font-size: var(--ops-font-size);
 }
 
 /* Edge to edge: the five shell rows span the window, the status line
@@ -4923,7 +4954,10 @@ button.is-active {
  * controls, oversized readouts and low-contrast ASCII telemetry.
  */
 
-.ops-shell {
+/* The Signal Mesh palette, on `body` for the same reason the base palette is:
+   a portalled dialog needs it too, and a theme or an accent set on `body`
+   still has to outrank it there exactly as it does on `.ops-shell`. */
+body {
   --ops-bg: #030303;
   --ops-bg-1: #060606;
   --ops-bg-2: #0a0a0a;
@@ -4941,6 +4975,9 @@ button.is-active {
   --ops-orange-bright: #ff5a24;
   --ops-red: #ff3030;
   --ops-yellow: #ff7a38;
+}
+
+.ops-shell {
   position: relative;
   isolation: isolate;
   grid-template: var(--ops-titlebar-height) 58px 42px minmax(0, 1fr) 24px / minmax(0, 1fr);
@@ -5838,10 +5875,10 @@ button.is-active {
   grid-template-rows:
     var(--ops-titlebar-height) clamp(50px, 3.1vw, 72px) clamp(38px, 2.3vw, 52px)
     minmax(0, 1fr) clamp(22px, 1.4vw, 30px);
-  /* The responsive size is the fallback, not the value: this declaration
-     matches the same element as the base rule and comes later, so writing a
-     number outright left `typography.scale` and `sizes.scale` inert here. */
-  font-size: calc(clamp(10px, 0.56vw, 15px) * var(--ops-type-scale, 1));
+  /* `--ops-font-size`, not a number outright: this declaration matches the
+     same element as the base rule and comes later, so writing a number here
+     left `typography.scale` and `sizes.scale` inert. */
+  font-size: var(--ops-font-size);
 }
 
 /* Edge to edge: the five shell rows span the window, the status line
