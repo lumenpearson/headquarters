@@ -20,13 +20,13 @@ describe('StartupSequence', () => {
     const { container } = render(<StartupSequence />);
     expect(overlay(container)?.dataset.stage).toBe(startupStages[0]);
 
-    // 138ms per stage at the default intensity of 0.65.
+    // 309ms per stage at the default intensity of 0.65.
     for (const stage of startupStages.slice(1)) {
-      act(() => void vi.advanceTimersByTime(138));
+      act(() => void vi.advanceTimersByTime(309));
       expect(overlay(container)?.dataset.stage).toBe(stage);
     }
 
-    act(() => void vi.advanceTimersByTime(138));
+    act(() => void vi.advanceTimersByTime(309));
     expect(overlay(container)).toBeNull();
   });
 
@@ -43,7 +43,7 @@ describe('StartupSequence', () => {
     // first-ever start. Persisting "already seen" anywhere -- localStorage or
     // sessionStorage -- would silence every launch after the first.
     const { container, unmount } = render(<StartupSequence />);
-    act(() => void vi.advanceTimersByTime(138 * startupStages.length));
+    act(() => void vi.advanceTimersByTime(309 * startupStages.length));
     expect(overlay(container)).toBeNull();
     unmount();
 

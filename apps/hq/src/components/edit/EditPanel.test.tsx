@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { settingsDefinitions } from '@gremuchaya/settings-schema';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { contentElementId } from '../../application/edit/contentFields';
 import { settingGroups } from '../../application/personalization/catalog';
@@ -235,5 +235,52 @@ describe('EditPanel content editing (R4)', () => {
 
     expect(screen.getByText('ЗНАЧЕНИЕ ОТКЛОНЕНО')).toBeTruthy();
     expect(operationsStore.getState().content.overrides).toEqual({});
+  });
+});
+
+/*
+ * The drag lifecycle, at the one point the pointer contract is easy to get
+ * wrong: a cancelled pointer -- the window losing focus mid-drag, a touch
+ * stolen by the system -- delivers `pointercancel` and never `pointerup`.
+ * Before the cancel handler existed, the panel stayed in `data-dragging`
+ * forever: transitions off, grabbing cursor, and the next click on the
+ * header could not clear it because the click path returned before touching
+ * the state.
+ */
+describe('EditPanel drag lifecycle', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+    operationsStore.getState().exitEditMode();
+    // jsdom implements no pointer capture; the handlers only need the calls
+    // to exist, the way the screen tests stub ResizeObserver.
+    Object.assign(HTMLElement.prototype, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: () => false,
+    });
+  });
+
+  it('a cancelled drag does not leave the panel stuck in the dragging state', () => {
+    operationsStore.getState().enterEditMode();
+    const { container } = render(<EditPanel />);
+    const panel = container.querySelector('.edit-panel');
+    if (panel === null) throw new Error('the edit panel did not render');
+    const title = screen.getByText('РЕДАКТИРОВАНИЕ');
+
+    fireEvent.pointerDown(title, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(title, { pointerId: 1, clientX: 140, clientY: 120 });
+    expect(panel.getAttribute('data-dragging')).toBe('true');
+
+    fireEvent.pointerCancel(panel, { pointerId: 1 });
+    expect(panel.getAttribute('data-dragging')).toBe('false');
+
+    // The next press on the header is a click again: it must neither re-dock
+    // the panel with the coordinates the cancelled drag left behind nor put
+    // the dragging state back.
+    const before = operationsStore.getState().edit.dockEdge;
+    fireEvent.pointerDown(title, { pointerId: 2, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(title, { pointerId: 2, clientX: 101, clientY: 100 });
+    expect(panel.getAttribute('data-dragging')).toBe('false');
+    expect(operationsStore.getState().edit.dockEdge).toBe(before);
   });
 });

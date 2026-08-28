@@ -254,6 +254,12 @@ export const presentationBindings: readonly PresentationBinding[] = [
   { kind: 'custom-property', setting: 'sizes.tileGap', property: '--ops-tile-gap', toCss: px },
   {
     kind: 'custom-property',
+    setting: 'sizes.contentGap',
+    property: '--ops-content-gap',
+    toCss: px,
+  },
+  {
+    kind: 'custom-property',
     setting: 'sizes.borderWidth',
     property: '--ops-border-width',
     toCss: px,
@@ -520,6 +526,10 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'titlebar.elements': 'Read by TitleBar, which draws exactly the elements it names, in order.',
   'titlebar.information': 'Read by TitleBar, which picks the reading its information slot shows.',
   'titlebar.dragRegion': 'Read by TitleBar, which marks that much of the bar as a drag region.',
+  'statusline.elements':
+    'Read by OpsStatusLine, which draws exactly the elements it names, in order.',
+  'layout.settingsNavSide':
+    'Read by SettingsScreen, which puts its section navigation on that side.',
 };
 
 /**

@@ -27,6 +27,7 @@ export const settingCategories = [
   'groups',
   'materials',
   'titlebar',
+  'statusline',
   'accessibility',
   'performance',
   'privacy',
@@ -63,6 +64,13 @@ export type SettingEditor =
       readonly minimum: number;
       readonly maximum: number;
       readonly step: number;
+      /**
+       * `slider` asks the editor for a dragged control rather than a typed
+       * field. Absent means a field: most numbers here are read as exact
+       * values, and a slider is only the better control where the operator is
+       * tuning by eye -- a gap, an opacity -- and the bounds are tight.
+       */
+      readonly control?: 'slider';
     }
   | { readonly kind: 'string-list'; readonly delimiter: ',' }
   /**
@@ -192,6 +200,23 @@ const numberWithin = (minimum: number, maximum: number, step?: number) =>
       minimum,
       maximum,
       step: step ?? (Number.isInteger(minimum) && Number.isInteger(maximum) ? 1 : 0.01),
+    },
+    (value): value is number =>
+      typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum,
+  );
+/**
+ * A number tuned by eye rather than typed: same contract as `numberWithin`,
+ * rendered as a slider. The validator is identical -- the control is
+ * presentation metadata, not a different acceptance rule.
+ */
+const sliderWithin = (minimum: number, maximum: number, step?: number) =>
+  withEditor(
+    {
+      kind: 'number',
+      minimum,
+      maximum,
+      step: step ?? (Number.isInteger(minimum) && Number.isInteger(maximum) ? 1 : 0.01),
+      control: 'slider',
     },
     (value): value is number =>
       typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum,
@@ -341,6 +366,35 @@ const isTitlebarElementList = withEditor(
     Array.isArray(value) &&
     new Set(value).size === value.length &&
     value.every((item) => (titlebarElements as readonly string[]).includes(item as string)),
+);
+/**
+ * Everything the status line can draw, in the order it draws them by default.
+ *
+ * The same contract as `titlebarElements`: `statusline.elements` is an
+ * arrangement of this roster and nothing else, so an operator can drop or
+ * reorder an entry and cannot name one the bar has no way to draw.
+ */
+export const statuslineElements = [
+  'system',
+  'route',
+  'cpu',
+  'ram',
+  'net',
+  'probe',
+  'alerts',
+  'encoding',
+  'clock',
+  'hints',
+] as const;
+
+export type StatuslineElement = (typeof statuslineElements)[number];
+
+const isStatuslineElementList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    new Set(value).size === value.length &&
+    value.every((item) => (statuslineElements as readonly string[]).includes(item as string)),
 );
 const oneOfNumbers = (values: readonly number[]) =>
   withEditor(
@@ -554,6 +608,14 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Screen density preset.',
     oneOf(['comfortable', 'dense', 'mainframe']),
+  ),
+  definition(
+    'layout.settingsNavSide',
+    'layout',
+    'left',
+    'device',
+    'Which side of the settings screen holds its section navigation.',
+    oneOf(['left', 'right']),
   ),
   definition(
     'tiles.hiddenIds',
@@ -1332,6 +1394,14 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     oneOf(['route', 'clock', 'operation', 'connection', 'none']),
   ),
   definition(
+    'statusline.elements',
+    'statusline',
+    [...statuslineElements],
+    'device',
+    `Status line elements the operator kept, in the order drawn: ${statuslineElements.join(', ')}.`,
+    isStatuslineElementList,
+  ),
+  definition(
     'titlebar.dragRegion',
     'titlebar',
     'full',
@@ -1526,10 +1596,18 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
   definition(
     'sizes.tileGap',
     'sizes',
-    6,
+    4,
     'device',
     'Gap between tiles on a laid-out screen, in pixels.',
-    numberWithin(0, 20),
+    sliderWithin(0, 20),
+  ),
+  definition(
+    'sizes.contentGap',
+    'sizes',
+    6,
+    'device',
+    'Gap between the content blocks of a screen layout, in pixels.',
+    sliderWithin(0, 24),
   ),
   definition(
     'sizes.borderWidth',

@@ -23,13 +23,29 @@ pub fn run() {
         .manage(native_fs::NativeFsState::from_environment())
         .manage(native_fs::NativeWatchState::default())
         .manage(media_gateway)
-        .setup(move |_| {
+        .setup(move |app| {
             tauri::async_runtime::spawn(async move {
                 if media_gateway_server.serve().await.is_err() {
                     eprintln!("loopback media gateway stopped unexpectedly");
                 }
             });
             tauri::async_runtime::spawn(media_gateway_supervisor.supervise());
+            // The control window is created hidden and the frontend shows it
+            // once the document has fully loaded, so a cold start never paints
+            // a half-loaded page. If the frontend fails before reaching that
+            // call, the window must still appear rather than leave the process
+            // running invisibly with no way to close it.
+            if let Some(window) = app.get_webview_window("control") {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    // An unreadable visibility errs toward showing: `show` on a
+                    // window that is already visible is a no-op, while skipping
+                    // it on a hidden one leaves the process without a window.
+                    if !window.is_visible().unwrap_or(false) {
+                        let _ = window.show();
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

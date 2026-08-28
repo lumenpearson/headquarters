@@ -512,7 +512,7 @@ test('keeps settings overflow inside its own pane at 720p', async ({ page }) => 
   await expect
     .poll(() =>
       page
-        .locator('.settings-layout')
+        .locator('.settings-docs__content')
         .evaluate((element) => element.scrollHeight > element.clientHeight),
     )
     .toBe(true);

@@ -2,7 +2,12 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type CSSProperties, useEffect, useMemo } from 'react';
+import { type CSSProperties, Fragment, type ReactNode, useEffect, useMemo } from 'react';
+import {
+  getSettingDefinition,
+  statuslineElements,
+  type StatuslineElement,
+} from '@gremuchaya/settings-schema';
 import {
   TerminalButton,
   TerminalInput,
@@ -451,8 +456,11 @@ function OpsNavigation({ route }: { readonly route: OperationsRoute }) {
 }
 
 function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
+  const router = useRouter();
   const metrics = useOperationsStore((state) => state.metrics);
   const alerts = useOperationsStore((state) => state.alerts);
+  const openDrawer = useOperationsStore((state) => state.openDrawer);
+  const elements = useStringListSetting('statusline.elements');
   const bus = typeof BroadcastChannel === 'undefined' ? 'FALLBACK' : 'BROADCAST';
   const mode = useDateTimeMode();
   const clock = useShellClock();
@@ -473,31 +481,114 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
     })
     .filter((entry): entry is string => entry !== undefined)
     .join(' · ');
-  return (
-    <footer className="ops-statusline">
-      {/* Each entry declares the verbosity it belongs to, and the shell hides
-          the tiers above the chosen one. Tiering in CSS rather than in this
-          list keeps the status line one row of markup at every level, so a
-          change of verbosity cannot reflow the shell. */}
-      <strong>[ SYSTEM:READY ]</strong>
-      <span>~/{route}</span>
-      <span data-detail="standard">CPU {metrics.cpu}%</span>
-      <span data-detail="standard">RAM {metrics.ram}%</span>
-      <span data-detail="verbose">
+
+  const newAlerts = Object.values(alerts).filter((alert) => alert.lifecycle === 'NEW');
+  const cycleDateTimeMode = () => {
+    const definition = getSettingDefinition('dateTime.mode');
+    if (definition === undefined || definition.editor.kind !== 'enum') return;
+    const options = definition.editor.options;
+    const next = options[(options.indexOf(mode) + 1) % options.length];
+    if (next !== undefined) {
+      operationsStore.getState().applySettingsPatch([{ id: 'dateTime.mode', value: next }]);
+    }
+  };
+
+  /*
+   * `statusline.elements` decides which of these are drawn and in what order,
+   * the way `titlebar.elements` arranges the bar above. Each entry still
+   * declares the verbosity it belongs to, and the shell hides the tiers above
+   * the chosen one in CSS, so neither setting can reflow the shell.
+   *
+   * The readouts that have a destination are buttons rather than inert text:
+   * the system badge opens `/system`, the load counters open `/analytics`,
+   * the alert counter opens the newest unhandled alert, and the clock cycles
+   * `dateTime.mode` through the same enum the settings screen offers.
+   */
+  const entries: Readonly<Record<StatuslineElement, ReactNode>> = {
+    system: (
+      <TerminalButton
+        className="ops-statusline__action"
+        title="Открыть состояние системы"
+        onClick={() => router.push('/system')}
+      >
+        <strong>[ SYSTEM:READY ]</strong>
+      </TerminalButton>
+    ),
+    route: <span>~/{route}</span>,
+    cpu: (
+      <TerminalButton
+        className="ops-statusline__action"
+        data-detail="standard"
+        title="Открыть аналитику нагрузки"
+        onClick={() => router.push('/analytics')}
+      >
+        CPU {metrics.cpu}%
+      </TerminalButton>
+    ),
+    ram: (
+      <TerminalButton
+        className="ops-statusline__action"
+        data-detail="standard"
+        title="Открыть аналитику нагрузки"
+        onClick={() => router.push('/analytics')}
+      >
+        RAM {metrics.ram}%
+      </TerminalButton>
+    ),
+    net: (
+      <TerminalButton
+        className="ops-statusline__action"
+        data-detail="verbose"
+        title="Открыть аналитику нагрузки"
+        onClick={() => router.push('/analytics')}
+      >
         NET {metrics.networkIn}/{metrics.networkOut}
-      </span>
-      <TransportProbe bus={bus} />
-      <span>AL:{Object.values(alerts).filter((alert) => alert.lifecycle === 'NEW').length}</span>
-      <span data-detail="verbose">UTF-8</span>
-      {/* The marker names which clock this is, because the same digits mean
-          different things in the three modes and the header shows only the
-          digits. */}
-      <span data-detail="standard">
+      </TerminalButton>
+    ),
+    probe: <TransportProbe bus={bus} />,
+    alerts: (
+      <TerminalButton
+        className="ops-statusline__action"
+        title="Открыть новую тревогу"
+        disabled={newAlerts.length === 0}
+        onClick={() => {
+          const first = newAlerts[0];
+          if (first !== undefined) openDrawer('alert', first.id);
+        }}
+      >
+        AL:{newAlerts.length}
+      </TerminalButton>
+    ),
+    encoding: <span data-detail="verbose">UTF-8</span>,
+    /* The marker names which clock this is, because the same digits mean
+       different things in the three modes and the header shows only the
+       digits. */
+    clock: (
+      <TerminalButton
+        className="ops-statusline__action"
+        data-detail="standard"
+        title="Переключить режим часов"
+        onClick={cycleDateTimeMode}
+      >
         <span data-clock-label>{dateTimeModeLabel(mode)}</span> {clock}
-      </span>
+      </TerminalButton>
+    ),
+    hints: (
       <span data-detail="standard" data-keybind-hint>
         {hint}
       </span>
+    ),
+  };
+
+  const shown = elements.filter((element): element is StatuslineElement =>
+    (statuslineElements as readonly string[]).includes(element),
+  );
+
+  return (
+    <footer className="ops-statusline">
+      {shown.map((element) => (
+        <Fragment key={element}>{entries[element]}</Fragment>
+      ))}
     </footer>
   );
 }

@@ -1049,8 +1049,8 @@ body.terminal-theme .workspace-window header button:hover {
 body.terminal-theme .developer-panel {
   inset: 54px 7px 29px auto;
   grid-template-rows: 37px 32px 1fr;
-  background: var(--bg-0);
-  backdrop-filter: none;
+  background: color-mix(in srgb, var(--bg-0) 86%, transparent);
+  backdrop-filter: blur(14px) saturate(90%);
 }
 
 body.terminal-theme .developer-panel > header,
@@ -1076,8 +1076,8 @@ body.terminal-theme .developer-panel > nav button.is-active {
 }
 
 body.terminal-theme .palette-backdrop {
-  background: rgb(0 0 0 / 72%);
-  backdrop-filter: none;
+  background: rgb(0 0 0 / 42%);
+  backdrop-filter: blur(16px) saturate(90%);
 }
 
 body.terminal-theme .command-palette {

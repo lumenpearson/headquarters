@@ -63,7 +63,21 @@
   z-index: var(--z-dialog);
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  backdrop-filter: blur(16px) saturate(90%);
+  background: color-mix(in srgb, var(--bg-0) 62%, transparent);
+  animation: keybind-intro-in var(--motion-standard, 240ms) ease-out both;
+}
+
+@keyframes keybind-intro-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keybind-intro {
+    animation: none;
+  }
 }
 
 .keybind-intro__card {

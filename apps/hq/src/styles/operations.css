@@ -571,8 +571,51 @@
   color: #071008;
 }
 
-.ops-statusline span:last-child {
+.ops-statusline > :last-child {
   margin-left: auto;
+}
+
+/*
+ * The interactive readouts keep the line's own typography: the terminal
+ * button chrome is undone rather than restyled, the way `.editable-content`
+ * is inside edit mode, so a configurable element reads the same whether it is
+ * a destination or plain text.
+ */
+.ops-statusline .ops-statusline__action {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  align-self: stretch;
+  min-height: 0;
+  padding: 0 10px;
+  border-block: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition:
+    background var(--motion-micro, 80ms) linear,
+    color var(--motion-micro, 80ms) linear;
+}
+
+.ops-statusline .ops-statusline__action:hover:not(:disabled),
+.ops-statusline .ops-statusline__action:focus-visible {
+  background: rgb(255 255 255 / 5%);
+  color: var(--ops-text-strong);
+}
+
+.ops-statusline .ops-statusline__action:disabled {
+  cursor: default;
+}
+
+/* The system badge fills its button the way it filled its own cell. */
+.ops-statusline .ops-statusline__action strong {
+  margin: 0 -10px;
+  padding: 0 10px;
 }
 
 .ops-screen {
@@ -1033,13 +1076,45 @@ button.is-active {
   width: min(420px, 42vw);
   border: 1px solid var(--ops-orange);
   background: #060a07;
+  /* Opacity on the box, travel on its children: a transform here would turn
+     the fixed `::before` scrim into a child of the drawer's own box for the
+     length of the animation. */
+  animation: ops-drawer-in var(--motion-standard, 240ms) ease-out both;
 }
 
+.ops-drawer > header,
+.ops-drawer .ops-drawer__body {
+  animation: ops-drawer-slide var(--motion-standard, 240ms) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes ops-drawer-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ops-drawer-slide {
+  from {
+    transform: translateX(18px);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+/*
+ * The scrim blurs the workspace behind the drawer rather than only darkening
+ * it. Its inset deliberately stops at the chrome: the title bar, top bar and
+ * status line stay sharp and usable while a record card or preview is open,
+ * and toasts paint above the drawer's stacking context and are never blurred.
+ */
 .ops-drawer::before {
   position: fixed;
   z-index: -1;
   inset: calc(54px + var(--ops-titlebar-height)) 0 24px;
-  background: rgb(0 0 0 / 34%);
+  backdrop-filter: blur(14px) saturate(90%);
+  background: rgb(0 0 0 / 26%);
   content: '';
 }
 
@@ -1056,11 +1131,13 @@ button.is-active {
 }
 
 .ops-drawer--scrim-clear::before {
+  backdrop-filter: none;
   background: transparent;
 }
 
 .ops-drawer--scrim-opaque::before {
-  background: rgb(0 0 0 / 72%);
+  backdrop-filter: blur(20px) saturate(85%);
+  background: rgb(0 0 0 / 64%);
 }
 
 .ops-drawer > header {
@@ -1103,6 +1180,35 @@ button.is-active {
   overflow: auto;
   border: 1px solid var(--ops-orange);
   background: rgb(4 7 5 / 97%);
+  /* Same split as the drawer: opacity here, travel on the children, so the
+     fixed `::before` scrim keeps the viewport as its containing block. */
+  animation: ops-drawer-in var(--motion-standard, 240ms) ease-out both;
+}
+
+.production-panel > header,
+.production-panel .production-panel__grid {
+  animation: ops-panel-rise var(--motion-standard, 240ms) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes ops-panel-rise {
+  from {
+    transform: translateY(10px);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+/* The modal production panel gets the same chrome-sparing blur as the drawer:
+   the workspace it covers is blurred, the bars around it are not. */
+.production-panel::before {
+  position: fixed;
+  z-index: -1;
+  inset: calc(54px + var(--ops-titlebar-height)) 0 24px;
+  backdrop-filter: blur(14px) saturate(90%);
+  background: rgb(0 0 0 / 26%);
+  content: '';
 }
 
 .ops-shell--compact .production-panel {
@@ -3127,14 +3233,131 @@ button.is-active {
   line-height: 1.8;
 }
 
-/* Settings and UI gallery */
-.settings-layout {
+/* Settings: a documentation layout -- section navigation on one side, one
+   centred scrolling column of content. `layout.settingsNavSide` names the
+   side; below the narrow breakpoint the navigation hides behind the [≡]
+   toggle in the screen title and covers the settings screen instead. */
+.settings-docs {
+  position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr 0.85fr;
-  gap: 7px;
+  grid-template-columns: clamp(180px, 16vw, 240px) minmax(0, 1fr);
+  gap: var(--ops-content-gap, 6px);
+  min-height: 0;
 }
-.settings-data {
-  grid-column: span 2;
+
+.settings-screen[data-nav-side='right'] .settings-docs {
+  grid-template-columns: minmax(0, 1fr) clamp(180px, 16vw, 240px);
+}
+
+.settings-screen[data-nav-side='right'] .settings-docs__nav {
+  order: 2;
+}
+
+.settings-docs__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid var(--ops-line);
+  background: var(--ops-bg-1);
+  overflow-y: auto;
+}
+
+.settings-docs__nav-title {
+  padding: 2px 8px 8px;
+  color: var(--ops-muted);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+}
+
+.settings-docs .settings-docs__link {
+  justify-content: flex-start;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ops-muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-align: left;
+  transition:
+    background var(--motion-micro, 80ms) linear,
+    color var(--motion-micro, 80ms) linear;
+}
+
+.settings-docs .settings-docs__link:hover {
+  background: rgb(255 255 255 / 5%);
+  color: var(--ops-text-strong);
+}
+
+.settings-docs .settings-docs__link[data-active='true'] {
+  background: rgb(255 255 255 / 6%);
+  color: var(--ops-orange-bright);
+  box-shadow: inset 2px 0 0 var(--ops-orange);
+}
+
+.settings-docs__content {
+  min-height: 0;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.settings-docs__column {
+  display: grid;
+  gap: var(--ops-content-gap, 6px);
+  align-content: start;
+  width: min(940px, 100%);
+  margin-inline: auto;
+  padding-bottom: 24px;
+}
+
+.settings-nav-toggle {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-docs__content {
+    scroll-behavior: auto;
+  }
+}
+
+@media (max-width: 1180px) {
+  .settings-screen .settings-nav-toggle {
+    display: inline-flex;
+  }
+
+  .settings-screen[data-nav-side] .settings-docs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-screen[data-nav-side] .settings-docs__nav {
+    display: none;
+  }
+
+  /* The vercel.com idiom: the section menu covers the settings screen. */
+  .settings-screen[data-nav-side][data-nav-open='true'] .settings-docs__nav {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    padding: 20px;
+    backdrop-filter: blur(16px) saturate(90%);
+    background: color-mix(in srgb, #050706 78%, transparent);
+    animation: settings-nav-in var(--motion-standard, 240ms) ease-out both;
+  }
+}
+
+@keyframes settings-nav-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .settings-saved {
   color: var(--ops-green);
@@ -3184,9 +3407,6 @@ button.is-active {
   border: 1px solid var(--ops-line-strong);
   color: var(--ops-orange);
 }
-.settings-personalization {
-  grid-column: span 2;
-}
 .settings-draft-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
@@ -3224,6 +3444,10 @@ button.is-active {
 }
 .settings-import-input {
   position: fixed;
+  /* Anchored explicitly: a fixed box with no offsets keeps its static
+     position, and this input's static position is the bottom of the settings
+     column -- which the screen then counts as scrollable overflow (R26). */
+  inset: 0 auto auto 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
@@ -3432,7 +3656,6 @@ button.is-active {
   }
   .overview-layout,
   .analytics-layout,
-  .settings-layout,
   .ui-gallery-layout {
     gap: 10px;
   }
@@ -3589,15 +3812,6 @@ button.is-active {
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-}
-
-.settings-layout {
-  min-height: 0;
-  height: auto !important;
-  overflow: auto;
-  align-content: start;
-  grid-auto-flow: row dense;
-  padding-right: 2px;
 }
 
 /* Safe settings-draft preview: values are schema-bound, never arbitrary CSS. */
@@ -4010,11 +4224,6 @@ button.is-active {
 }
 
 @media (max-width: 1240px) {
-  .settings-personalization,
-  .settings-data {
-    grid-column: span 1;
-  }
-
   .settings-draft-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4062,26 +4271,29 @@ button.is-active {
   font-size: calc(clamp(10px, 0.56vw, 15px) * var(--ops-type-scale, 1));
 }
 
+/* Edge to edge: the five shell rows span the window, the status line
+   included. The centring gutter this replaces left a visible gap between the
+   window border and the content on both sides. */
 .ops-titlebar,
 .ops-topbar,
 .ops-nav,
 .ops-workspace,
 .ops-statusline {
-  width: calc(100% - clamp(8px, 1vw, 24px));
+  width: 100%;
   max-width: none;
-  margin-inline: auto;
+  margin-inline: 0;
 }
 
 .ops-shell::before {
-  left: clamp(4px, 0.5vw, 12px);
+  left: 0;
 }
 
 .ops-shell::after {
-  right: clamp(4px, 0.5vw, 12px);
+  right: 0;
 }
 
 .ops-shell__frame {
-  inset-inline: clamp(4px, 0.5vw, 12px);
+  inset-inline: 0;
 }
 
 .ops-topbar {
@@ -4137,7 +4349,6 @@ button.is-active {
 
 .overview-layout,
 .analytics-layout,
-.settings-layout,
 .ui-gallery-layout,
 .map-layout,
 .video-layout,
@@ -4152,11 +4363,10 @@ button.is-active {
   height: auto;
   min-height: 0;
   flex: 1 1 auto;
-  gap: clamp(6px, 0.55vw, 14px);
+  gap: var(--ops-content-gap, 6px);
   align-content: stretch;
 }
 
-.settings-layout,
 .ui-gallery-layout {
   grid-auto-rows: minmax(230px, 1fr);
 }
@@ -4320,7 +4530,7 @@ button.is-active {
   grid-column: 1;
   grid-row: 1;
   grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
-  gap: clamp(6px, 0.55vw, 14px);
+  gap: var(--ops-content-gap, 6px);
 }
 
 .video-main-feed {
@@ -4524,7 +4734,7 @@ button.is-active {
   grid-column: 3;
   grid-row: 1;
   grid-auto-rows: max-content;
-  gap: clamp(6px, 0.55vw, 14px);
+  gap: var(--ops-content-gap, 6px);
   overflow: auto;
 }
 
@@ -4569,7 +4779,7 @@ button.is-active {
       230px,
       0.82fr
     );
-  gap: clamp(6px, 0.55vw, 14px);
+  gap: var(--ops-content-gap, 6px);
 }
 
 .video-lower-grid .video-intercepts,
@@ -4685,7 +4895,7 @@ button.is-active {
   .ops-nav,
   .ops-workspace,
   .ops-statusline {
-    width: calc(100% - 8px);
+    width: 100%;
   }
 }
 
@@ -4833,9 +5043,9 @@ button.is-active {
 .ops-nav,
 .ops-workspace,
 .ops-statusline {
-  width: calc(100% - clamp(48px, 5vw, 112px));
-  max-width: 2200px;
-  margin-inline: auto;
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
 }
 
 /* The title bar in Signal Mesh: the same row, in the surfaces this design
@@ -5415,7 +5625,6 @@ button.is-active {
 
 .overview-layout,
 .analytics-layout,
-.settings-layout,
 .ui-gallery-layout,
 .map-layout,
 .video-layout,
@@ -5584,7 +5793,7 @@ button.is-active {
   .ops-nav,
   .ops-workspace,
   .ops-statusline {
-    width: calc(100% - 20px);
+    width: 100%;
   }
 
   .ops-topbar {
@@ -5635,26 +5844,29 @@ button.is-active {
   font-size: calc(clamp(10px, 0.56vw, 15px) * var(--ops-type-scale, 1));
 }
 
+/* Edge to edge: the five shell rows span the window, the status line
+   included. The centring gutter this replaces left a visible gap between the
+   window border and the content on both sides. */
 .ops-titlebar,
 .ops-topbar,
 .ops-nav,
 .ops-workspace,
 .ops-statusline {
-  width: calc(100% - clamp(8px, 1vw, 24px));
+  width: 100%;
   max-width: none;
-  margin-inline: auto;
+  margin-inline: 0;
 }
 
 .ops-shell::before {
-  left: clamp(4px, 0.5vw, 12px);
+  left: 0;
 }
 
 .ops-shell::after {
-  right: clamp(4px, 0.5vw, 12px);
+  right: 0;
 }
 
 .ops-shell__frame {
-  inset-inline: clamp(4px, 0.5vw, 12px);
+  inset-inline: 0;
 }
 
 .ops-topbar {
@@ -5697,7 +5909,6 @@ button.is-active {
 
 .overview-layout,
 .analytics-layout,
-.settings-layout,
 .ui-gallery-layout,
 .map-layout,
 .video-layout,
@@ -5712,7 +5923,7 @@ button.is-active {
   height: auto;
   min-height: 0;
   flex: 1 1 auto;
-  gap: clamp(6px, 0.55vw, 14px);
+  gap: var(--ops-content-gap, 6px);
   align-content: stretch;
 }
 
@@ -5937,7 +6148,7 @@ button.is-active {
   .ops-nav,
   .ops-workspace,
   .ops-statusline {
-    width: calc(100% - 8px);
+    width: 100%;
   }
 }
 
@@ -6132,11 +6343,6 @@ button.is-active {
   }
 }
 
-/* Local settings history: its own dense viewport never creates document scroll. */
-.settings-history {
-  grid-column: span 2;
-}
-
 .settings-history-filters {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -6256,10 +6462,6 @@ button.is-active {
 }
 
 @container operations-workspace (max-width: 1240px) {
-  .settings-history {
-    grid-column: span 1;
-  }
-
   .settings-history-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6350,7 +6552,42 @@ button.is-active {
      `gridTemplateColumns` and `gridTemplateRows` inline, and the thirteen
      layout rules that declare a gap all sit earlier in this file, so this
      declaration was overriding every one of them. */
-  gap: var(--ops-tile-gap, 6px);
+  gap: var(--ops-tile-gap, 4px);
+}
+
+/*
+ * Navigation motion: a screen is remounted when the route changes, so a mount
+ * animation is a navigation animation. `--ops-motion-duration` already carries
+ * the operator's intensity and collapses to zero while edit mode is on (R17),
+ * so this glide obeys both without a second gate.
+ */
+.ops-workspace .ops-screen {
+  animation: ops-screen-in var(--ops-motion-duration, 220ms) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Opacity only: a transform here would extend the workspace's scrollable
+   overflow for the length of the animation, and R26 is asserted at exact
+   zero at any instant. */
+@keyframes ops-screen-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-workspace .ops-screen,
+  .ops-drawer,
+  .ops-drawer > header,
+  .ops-drawer .ops-drawer__body,
+  .production-panel,
+  .production-panel > header,
+  .production-panel .production-panel__grid {
+    animation: none;
+  }
 }
 
 .tile-grid__cell {

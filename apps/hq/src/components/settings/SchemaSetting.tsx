@@ -5,6 +5,7 @@ import {
   TerminalInput,
   TerminalNumberField,
   TerminalSelect,
+  TerminalSlider,
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 import { useEffect, type ReactNode } from 'react';
@@ -74,6 +75,24 @@ export function SchemaSetting({
           />
         );
       case 'number':
+        // The definition names the control: a slider where the operator tunes
+        // by eye, a typed field where the exact number is the point.
+        if (editor.control === 'slider') {
+          return (
+            <TerminalSlider
+              label={label}
+              value={typeof value === 'number' ? value : editor.minimum}
+              min={editor.minimum}
+              max={editor.maximum}
+              step={editor.step}
+              showValue
+              // The row already prints the name; a second copy above the track
+              // would put the same text on screen twice.
+              showLabel={false}
+              onValueChange={onValueChange}
+            />
+          );
+        }
         return (
           <TerminalNumberField
             label={label}
@@ -217,6 +236,7 @@ const categoryMessages: Readonly<Record<SettingCategory, MessageId>> = {
   groups: 'settingsCategory.groups',
   materials: 'settingsCategory.materials',
   titlebar: 'settingsCategory.titlebar',
+  statusline: 'settingsCategory.statusline',
   accessibility: 'settingsCategory.accessibility',
   performance: 'settingsCategory.performance',
   privacy: 'settingsCategory.privacy',

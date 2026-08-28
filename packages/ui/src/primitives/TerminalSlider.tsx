@@ -15,6 +15,13 @@ export interface TerminalSliderProps {
   readonly step?: number;
   readonly disabled?: boolean;
   readonly showValue?: boolean;
+  /**
+   * Whether the label is drawn above the track. Off where the caller already
+   * renders the name beside the control -- a settings row, for one -- so the
+   * same text is not on screen twice; the thumb keeps the accessible name
+   * either way.
+   */
+  readonly showLabel?: boolean;
 }
 
 export function TerminalSlider({
@@ -27,6 +34,7 @@ export function TerminalSlider({
   step = 1,
   disabled = false,
   showValue = true,
+  showLabel = true,
 }: TerminalSliderProps) {
   /*
    * R23 asks for a cursor of its own while a field is being changed, and this
@@ -59,10 +67,12 @@ export function TerminalSlider({
       }}
       onValueCommitted={() => setAdjusting(false)}
     >
-      <div className="terminal-slider__header">
-        <Slider.Label>{label}</Slider.Label>
-        {showValue ? <Slider.Value>{() => value}</Slider.Value> : null}
-      </div>
+      {showLabel || showValue ? (
+        <div className="terminal-slider__header">
+          {showLabel ? <Slider.Label>{label}</Slider.Label> : null}
+          {showValue ? <Slider.Value>{() => value}</Slider.Value> : null}
+        </div>
+      ) : null}
       <Slider.Control className="terminal-slider__control">
         <Slider.Track className="terminal-slider__track">
           <Slider.Indicator className="terminal-slider__indicator" />
