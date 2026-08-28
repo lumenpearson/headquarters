@@ -41,8 +41,8 @@ export function TileVisibility() {
   );
 
   return (
-    <section className="edit-tiles">
-      <header>
+    <section className="edit-tiles grid gap-hq-1 pb-hq-2">
+      <header className="flex gap-hq-2 items-baseline justify-between pt-hq-2 border-b border-b-hq-line-2 text-hq-accent text-hq-xs tracking-[0.12em]">
         <strong>{t('edit.tiles.heading')}</strong>
         <span>{tiles.length}</span>
       </header>
@@ -67,7 +67,7 @@ export function TileVisibility() {
           />
         );
       })}
-      <header>
+      <header className="flex gap-hq-2 items-baseline justify-between pt-hq-2 border-b border-b-hq-line-2 text-hq-accent text-hq-xs tracking-[0.12em]">
         <strong>{t('edit.tiles.groups')}</strong>
         <span>{present.length}</span>
       </header>

@@ -1,52 +1,32 @@
 /*
  * Edit-mode surfaces. Kept out of operations.css because they are an overlay
  * on the shell rather than part of it, and must not participate in its grid.
- */
-
-/*
- * R22: the edit-mode window frame -- an inward gradient from every edge with
- * an accent glow.
  *
- * Drawn as a fixed overlay with `pointer-events: none`, so it shifts nothing
- * beneath it and the whole shell stays clickable. Four edge gradients fade to
- * transparent within a fixed distance, and the glow itself is an inset shadow,
- * so no layer here can ever cover the workspace with a fill: the previous
- * construction clipped an opaque fill with `mask-composite: exclude`, and a
- * runtime that ignores that composite painted the fill over the entire window.
+ * Layout, colour, spacing and the docking/disclosure transitions moved onto
+ * the components in `components/edit/` as Tailwind utilities. What is left
+ * here is what does not move cleanly:
+ *
+ * - the frame's and the panel's animation-attachment rules, their keyframe
+ *   and the reduced-motion gate that overrides both -- an unlayered rule so
+ *   it keeps beating any Tailwind transition/animation utility regardless of
+ *   which state (dragging, expanded) put it there;
+ * - `[data-edit-mode='on'] .editable-tile` / `.tile-grid__cell` /
+ *   `.tile-grid__handle` -- these elements are also styled by
+ *   operations.css (the base grid, drag and motion rules), so the edit-mode
+ *   half of their declarations stays paired with it here rather than moving
+ *   to a third location;
+ * - `[data-edit-mode='on'] .terminal-button.editable-content` and its
+ *   hover/focus/data-attribute states -- this selector's whole job is to
+ *   outrank `packages/ui`'s unlayered `primitives.css` for a primitive edit
+ *   mode did not style itself into (see the comment on the rule below).
+ *   `edit.css` is imported after `primitives.css` and unlayered, same as it;
+ *   a Tailwind utility lives in the (weaker) utilities layer and would lose
+ *   that fight outright, so these declarations cannot move without breaking
+ *   the override they exist for.
  */
-.edit-mode-frame {
-  --edit-frame-reach: clamp(36px, 5vw, 96px);
 
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-devtools);
+.edit-mode-frame {
   animation: edit-frame-in var(--motion-standard, 240ms) ease-out both;
-  background:
-    linear-gradient(
-      to right,
-      color-mix(in srgb, var(--accent) 22%, transparent),
-      transparent var(--edit-frame-reach)
-    ),
-    linear-gradient(
-      to left,
-      color-mix(in srgb, var(--accent) 22%, transparent),
-      transparent var(--edit-frame-reach)
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--accent) 22%, transparent),
-      transparent var(--edit-frame-reach)
-    ),
-    linear-gradient(
-      to top,
-      color-mix(in srgb, var(--accent) 22%, transparent),
-      transparent var(--edit-frame-reach)
-    );
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent),
-    inset 0 0 28px color-mix(in srgb, var(--accent) 26%, transparent),
-    inset 0 0 96px color-mix(in srgb, var(--accent) 12%, transparent);
-  pointer-events: none;
 }
 
 @keyframes edit-frame-in {
@@ -63,165 +43,11 @@
   .edit-mode-frame {
     animation: none;
   }
-}
 
-/*
- * R7: the floating panel -- a devtools strip, magnetically aligned to an edge.
- *
- * One transform is the whole placement: the component computes the docked
- * position and writes `translate3d`, the drag writes the same property, and
- * the transition below is what turns a release into a glide to the chosen
- * edge. `data-dragging` switches the transition off so the panel tracks the
- * pointer without lag. Anchored at the top-left and moved by transform rather
- * than by insets, because two of the four inset keywords cannot animate from
- * `auto` and the snap would teleport on every second edge.
- */
-.edit-panel {
-  position: fixed;
-  inset: 0 auto auto 0;
-  z-index: var(--z-dialog);
-  display: grid;
-  grid-template-rows: auto auto;
-  /* Capped at 380px: the strip parks over the workspace, and the widest
-     right-column tiles keep their headers reachable beside it. */
-  width: clamp(300px, 22vw, 380px);
-  border: 1px solid var(--line-2);
-  background: var(--panel-raised);
-  box-shadow:
-    0 14px 44px rgb(0 0 0 / 42%),
-    0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
-  transition:
-    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow var(--motion-standard) ease;
-  will-change: transform;
-}
-
-.edit-panel[data-dragging='true'] {
-  box-shadow:
-    0 22px 64px rgb(0 0 0 / 55%),
-    0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
-  transition: none;
-}
-
-.edit-panel__header {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  padding: var(--space-2) var(--space-3);
-  color: var(--accent);
-  font-size: var(--font-xs);
-  letter-spacing: 0.12em;
-  cursor: grab;
-}
-
-.edit-panel[data-dragging='true'] .edit-panel__header {
-  cursor: grabbing;
-}
-
-.edit-panel__grip {
-  color: var(--text-2);
-  letter-spacing: 0;
-}
-
-.edit-panel__count {
-  margin-left: auto;
-  color: var(--text-2);
-}
-
-/*
- * The disclosure: the strip's body grows along Y with what it holds and
- * collapses to nothing, animated through the row track rather than a measured
- * height so the contents never need to know their own size. The inner wrapper
- * owns the overflow during the animation; the settings list below caps and
- * scrolls itself past `min(56vh, 540px)`.
- */
-.edit-panel__body {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition: grid-template-rows 300ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.edit-panel[data-expanded='false'] .edit-panel__body {
-  grid-template-rows: 0fr;
-}
-
-.edit-panel__body-inner {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  min-height: 0;
-  padding: 0 var(--space-3) var(--space-3);
-  overflow: hidden;
-}
-
-@media (prefers-reduced-motion: reduce) {
   .edit-panel,
   .edit-panel__body {
     transition: none;
   }
-}
-
-/*
- * R6: navigating seventy-one definitions from a panel this narrow.
- *
- * One row of navigation, not the settings screen's four: a section select, a
- * search field across the whole catalogue, and a filter line. The categories
- * are headings inside the list below rather than a second control, which is
- * what keeps this to one row.
- */
-.edit-panel__nav {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.edit-panel__filter {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  justify-content: space-between;
-  color: var(--text-2);
-  font-size: var(--font-xs);
-  letter-spacing: 0.08em;
-}
-
-/* R26: the panel scrolls internally; it never lengthens the document. */
-.edit-panel__settings {
-  min-height: 0;
-  max-height: min(56vh, 540px);
-}
-
-.edit-panel__category {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.edit-panel__category > h3 {
-  position: sticky;
-  top: 0;
-  /*
-   * Opaque because it is sticky: the rows scrolling under a transparent
-   * heading would read as one line of text over another.
-   */
-  z-index: 1;
-  padding: var(--space-2) 0 var(--space-1);
-  border-bottom: 1px solid var(--line-2);
-  background: var(--panel-raised);
-  color: var(--accent);
-  font-size: var(--font-xs);
-  letter-spacing: 0.12em;
-}
-
-.edit-panel__empty {
-  padding: var(--space-3) 0;
-  color: var(--text-2);
-  font-size: var(--font-xs);
-  letter-spacing: 0.08em;
-  text-align: center;
-}
-
-.edit-panel__actions {
-  display: flex;
-  gap: var(--space-2);
 }
 
 /*
@@ -327,25 +153,6 @@
   background: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
 }
 
-/* R3: switching tiles and groups off, on the screen in front of the operator. */
-.edit-tiles {
-  display: grid;
-  gap: var(--space-1);
-  padding-bottom: var(--space-2);
-}
-
-.edit-tiles > header {
-  display: flex;
-  gap: var(--space-2);
-  align-items: baseline;
-  justify-content: space-between;
-  padding-top: var(--space-2);
-  border-bottom: 1px solid var(--line-2);
-  color: var(--accent);
-  font-size: var(--font-xs);
-  letter-spacing: 0.12em;
-}
-
 /*
  * R4: the content an operator can change from edit mode.
  *
@@ -388,46 +195,4 @@
 [data-edit-mode='on'] .terminal-button.editable-content[data-changed='true']::after {
   color: var(--accent);
   content: ' *';
-}
-
-/* The content section of the panel: the selected field, then what changed. */
-.edit-content__field {
-  display: grid;
-  gap: var(--space-1);
-  padding-bottom: var(--space-2);
-}
-
-.edit-content__field > span,
-.edit-content__changed > li > span {
-  display: grid;
-  min-width: 0;
-  font-size: var(--font-xs);
-  letter-spacing: 0.06em;
-}
-
-.edit-content__field small,
-.edit-content__changed small {
-  color: var(--text-2);
-  overflow-wrap: anywhere;
-}
-
-.edit-content__error {
-  color: var(--critical);
-  font-size: var(--font-xs);
-  letter-spacing: 0.08em;
-}
-
-.edit-content__changed {
-  display: grid;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.edit-content__changed > li {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  justify-content: space-between;
 }

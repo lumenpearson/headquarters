@@ -303,7 +303,7 @@ export function EditPanel() {
   return (
     <div
       ref={rootRef}
-      className="edit-panel"
+      className="edit-panel group fixed top-0 left-0 z-[var(--z-dialog)] grid grid-rows-[auto_auto] w-[clamp(300px,22vw,380px)] border border-hq-line-2 bg-hq-panel-raised will-change-transform [transition:transform_320ms_cubic-bezier(0.22,1,0.36,1),box-shadow_var(--motion-standard)_ease] shadow-[0_14px_44px_rgb(0_0_0_/_42%),0_0_0_1px_color-mix(in_srgb,var(--accent)_10%,transparent)] data-[dragging=true]:shadow-[0_22px_64px_rgb(0_0_0_/_55%),0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)] data-[dragging=true]:transition-none"
       data-edge={dockEdge}
       data-dragging={dragging}
       data-expanded={expanded}
@@ -312,12 +312,12 @@ export function EditPanel() {
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
     >
-      <header className="edit-panel__header">
-        <span className="edit-panel__grip" aria-hidden="true">
+      <header className="edit-panel__header flex gap-hq-2 items-center py-hq-2 px-hq-3 text-hq-accent text-hq-xs tracking-[0.12em] cursor-grab group-data-[dragging=true]:cursor-grabbing">
+        <span className="edit-panel__grip text-hq-text-2 tracking-[0em]" aria-hidden="true">
           ⠿
         </span>
         <strong>РЕДАКТИРОВАНИЕ</strong>
-        <span className="edit-panel__count">{changeCount} ИЗМЕНЕНИЙ</span>
+        <span className="edit-panel__count ml-auto text-hq-text-2">{changeCount} ИЗМЕНЕНИЙ</span>
         <TerminalButton
           size="small"
           tone="quiet"
@@ -331,9 +331,9 @@ export function EditPanel() {
         </TerminalButton>
       </header>
 
-      <div className="edit-panel__body">
-        <div className="edit-panel__body-inner">
-          <div className="edit-panel__nav">
+      <div className="edit-panel__body grid grid-rows-[1fr] group-data-[expanded=false]:grid-rows-[0fr] [transition:grid-template-rows_300ms_cubic-bezier(0.22,1,0.36,1)]">
+        <div className="edit-panel__body-inner grid grid-rows-[auto_minmax(0,1fr)_auto] gap-hq-2 min-h-0 pt-0 px-hq-3 pb-hq-3 overflow-hidden">
+          <div className="edit-panel__nav grid gap-hq-1">
             <TerminalSelect
               label="Раздел"
               value={group}
@@ -346,7 +346,7 @@ export function EditPanel() {
               value={search}
               onValueChange={setSearch}
             />
-            <div className="edit-panel__filter">
+            <div className="edit-panel__filter flex gap-hq-2 items-center justify-between text-hq-text-2 text-hq-xs tracking-[0.08em]">
               <TerminalSwitch
                 label="Только изменённые"
                 checked={changedOnly}
@@ -358,7 +358,7 @@ export function EditPanel() {
             </div>
           </div>
 
-          <TerminalScrollArea className="edit-panel__settings">
+          <TerminalScrollArea className="edit-panel__settings min-h-0 max-h-[min(56vh,540px)]">
             {/*
              * Above the catalogue and outside the section and search, because the
              * operator reaches it by pointing at a value on screen, not by
@@ -367,13 +367,15 @@ export function EditPanel() {
              */}
             <ContentEditor />
             {runs.length === 0 ? (
-              <p className="edit-panel__empty">
+              <p className="edit-panel__empty py-hq-3 px-0 text-hq-text-2 text-hq-xs tracking-[0.08em] text-center">
                 {changedOnly ? 'НИЧЕГО НЕ ИЗМЕНЕНО ЗДЕСЬ' : 'НИЧЕГО НЕ НАЙДЕНО'}
               </p>
             ) : null}
             {runs.map((run) => (
-              <section key={run.category} className="edit-panel__category">
-                <h3>{categoryLabel(run.category)}</h3>
+              <section key={run.category} className="edit-panel__category grid gap-hq-1">
+                <h3 className="sticky top-0 z-[1] pt-hq-2 px-0 pb-hq-1 border-b border-b-hq-line-2 bg-hq-panel-raised text-hq-accent text-hq-xs tracking-[0.12em]">
+                  {categoryLabel(run.category)}
+                </h3>
                 {/*
                  * The tile and motion pickers belong to their category, so they
                  * appear under its heading rather than beside a select that no
@@ -399,7 +401,7 @@ export function EditPanel() {
             ))}
           </TerminalScrollArea>
 
-          <footer className="edit-panel__actions">
+          <footer className="edit-panel__actions flex gap-hq-2">
             <TerminalButton
               size="small"
               disabled={!canUndo}
