@@ -147,18 +147,22 @@ export const productionOverrideSchema = z.object({
    * the result is re-parsed by `projectConfigSchema`, which is what actually
    * decides whether a value belongs in the field it was written for.
    */
-  values: z.record(
-    z.string(),
-    z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.string())]),
-  ),
-  assetOverrides: z.record(
-    z.string(),
-    z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('static'), url: z.string().min(1) }),
-      z.object({ kind: z.literal('projected-file'), virtualPath: virtualPathSchema }),
-      z.object({ kind: z.literal('emulated'), renderer: z.string().min(1) }),
-    ]),
-  ),
+  values: z
+    .record(
+      z.string(),
+      z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.string())]),
+    )
+    .default({}),
+  assetOverrides: z
+    .record(
+      z.string(),
+      z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('static'), url: z.string().min(1) }),
+        z.object({ kind: z.literal('projected-file'), virtualPath: virtualPathSchema }),
+        z.object({ kind: z.literal('emulated'), renderer: z.string().min(1) }),
+      ]),
+    )
+    .default({}),
 });
 
 export const informationStatePresetSchema = z.object({

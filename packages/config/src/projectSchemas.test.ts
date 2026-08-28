@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { defaultScreenWindows, projectConfigSchema } from './projectSchemas.js';
+import {
+  defaultScreenWindows,
+  productionOverrideSchema,
+  projectConfigSchema,
+} from './projectSchemas.js';
 
 const project = {
   version: 1,
@@ -103,5 +107,48 @@ describe('project config schema', () => {
     expect(
       projectConfigSchema.safeParse({ ...project, bridgeUrl: 'http://192.168.10.5:4177' }).success,
     ).toBe(false);
+  });
+});
+
+describe('production override schema', () => {
+  it('parses the minimal documented override, with no assetOverrides written', () => {
+    // docs/release/self-hosting.md documents `{"version": 1, "values": {...}}`
+    // as the minimal override an operator writes to point at a control plane;
+    // that shape must parse without an explicit `assetOverrides` field.
+    const result = productionOverrideSchema.parse({
+      version: 1,
+      values: { controlPlaneUrl: nearPlane },
+    });
+    expect(result).toEqual({
+      version: 1,
+      values: { controlPlaneUrl: nearPlane },
+      assetOverrides: {},
+    });
+  });
+
+  it('parses a bare version with neither values nor assetOverrides written', () => {
+    const result = productionOverrideSchema.parse({ version: 1 });
+    expect(result).toEqual({ version: 1, values: {}, assetOverrides: {} });
+  });
+
+  it('still requires the version, the migration anchor', () => {
+    expect(productionOverrideSchema.safeParse({ values: {} }).success).toBe(false);
+  });
+
+  it('still parses the full shape, with both records written', () => {
+    const result = productionOverrideSchema.parse({
+      version: 1,
+      values: { controlPlaneUrl: nearPlane },
+      assetOverrides: {
+        'asset-1': { kind: 'static', url: 'https://cdn.example/asset-1.png' },
+      },
+    });
+    expect(result).toEqual({
+      version: 1,
+      values: { controlPlaneUrl: nearPlane },
+      assetOverrides: {
+        'asset-1': { kind: 'static', url: 'https://cdn.example/asset-1.png' },
+      },
+    });
   });
 });
