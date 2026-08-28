@@ -131,6 +131,7 @@ body.terminal-theme {
 
 .terminal-combobox__popup {
   min-width: var(--anchor-width);
+  max-width: min(360px, calc(100vw - 16px));
   max-height: min(320px, var(--available-height));
   overflow: hidden;
   border: 1px solid var(--line-2);
@@ -138,6 +139,16 @@ body.terminal-theme {
   outline: none;
   background: var(--bg-1);
   color: var(--text-1);
+  /*
+   * The popup is portalled past `.ops-shell`, so it cannot inherit the
+   * shell's fluid, viewport-scaled type. It reads the shell's computed
+   * values through custom properties set on `body` and falls back to the
+   * fixed tokens below when nothing sets them (standalone tests, the
+   * legacy shell).
+   */
+  font-size: var(--ops-font-size, var(--font-xs));
+  letter-spacing: var(--ops-letter-spacing, normal);
+  line-height: var(--ops-line-height, 1.4);
   transform-origin: var(--transform-origin);
   transition:
     opacity var(--motion-micro) linear,
@@ -165,8 +176,23 @@ body.terminal-theme {
   outline: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: var(--font-xs);
+  font-size: inherit;
   text-transform: uppercase;
+}
+
+/*
+ * `Combobox.ItemIndicator` only renders for the selected item (no
+ * `keepMounted`), so a non-selected item has a single child that would
+ * otherwise auto-place into the 24px indicator track. The label span is
+ * always the item's last child -- present alone or after the indicator --
+ * so pinning the last child to the second track keeps every item's text
+ * aligned regardless of whether the indicator is mounted.
+ */
+.terminal-combobox__item > :last-child {
+  grid-column: 2;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .terminal-combobox__item[data-highlighted] {
@@ -845,6 +871,7 @@ body.terminal-theme {
 
 .terminal-select__popup {
   min-width: var(--anchor-width);
+  max-width: min(360px, calc(100vw - 16px));
   max-height: min(320px, var(--available-height));
   overflow: hidden;
   border: 1px solid var(--line-2);
@@ -852,6 +879,16 @@ body.terminal-theme {
   outline: none;
   background: var(--bg-1);
   color: var(--text-1);
+  /*
+   * The popup is portalled past `.ops-shell`, so it cannot inherit the
+   * shell's fluid, viewport-scaled type. It reads the shell's computed
+   * values through custom properties set on `body` and falls back to the
+   * fixed tokens below when nothing sets them (standalone tests, the
+   * legacy shell).
+   */
+  font-size: var(--ops-font-size, var(--font-xs));
+  letter-spacing: var(--ops-letter-spacing, normal);
+  line-height: var(--ops-line-height, 1.4);
   transform-origin: var(--transform-origin);
   transition:
     opacity var(--motion-micro) linear,
@@ -879,8 +916,23 @@ body.terminal-theme {
   outline: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: var(--font-xs);
+  font-size: inherit;
   text-transform: uppercase;
+}
+
+/*
+ * `Select.ItemIndicator` only renders for the selected item (no
+ * `keepMounted`), so a non-selected item has a single child that would
+ * otherwise auto-place into the 24px indicator track. `ItemText` is always
+ * the item's last child -- present alone or after the indicator -- so
+ * pinning the last child to the second track keeps every item's text
+ * aligned regardless of whether the indicator is mounted.
+ */
+.terminal-select__item > :last-child {
+  grid-column: 2;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .terminal-select__item[data-highlighted] {

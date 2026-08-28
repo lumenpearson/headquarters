@@ -58,7 +58,12 @@ export function TerminalCombobox<Value extends string>({
         </Combobox.Trigger>
       </Combobox.InputGroup>
       <Combobox.Portal>
-        <Combobox.Positioner side="bottom" sideOffset={4} className="terminal-combobox__positioner">
+        <Combobox.Positioner
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          className="terminal-combobox__positioner"
+        >
           <Combobox.Popup className="terminal-combobox__popup">
             <Combobox.Empty className="terminal-combobox__empty">{emptyLabel}</Combobox.Empty>
             <Combobox.List className="terminal-combobox__list">

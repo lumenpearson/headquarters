@@ -49,6 +49,7 @@ export function TerminalSelect<Value extends string>({
       <Select.Portal>
         <Select.Positioner
           side="bottom"
+          align="start"
           sideOffset={4}
           alignItemWithTrigger={false}
           className="terminal-select__positioner"
