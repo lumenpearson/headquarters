@@ -225,6 +225,16 @@ export function ContextMenuRuntime() {
         return false;
       }
       /*
+       * A right click inside an active selection keeps the engine's menu too:
+       * copy lives there, and R12 deliberately opened preview text,
+       * transcripts and table cells for selection -- answering that click
+       * with the shell menu would take away the copy it was aimed at.
+       */
+      const selection = document.getSelection();
+      if (selection !== null && !selection.isCollapsed && selection.containsNode(target, true)) {
+        return false;
+      }
+      /*
        * The nearest declared surface wins, and `data-context-menu-own` is part
        * of the selector on purpose: an element carrying its own Base UI context
        * menu stops the walk without naming a surface, so nothing opens over it.

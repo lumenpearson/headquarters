@@ -128,6 +128,19 @@ export function SettingsScreen() {
     return () => observer.disconnect();
   }, []);
 
+  // The overlay covers the screen on a narrow window, so the keyboard needs
+  // its own way out; picking a section or the [≡] toggle are the pointer's.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [navOpen]);
+
   const goToSection = (section: (typeof settingsSections)[number]) => {
     setActiveSection(section.id);
     setNavOpen(false);

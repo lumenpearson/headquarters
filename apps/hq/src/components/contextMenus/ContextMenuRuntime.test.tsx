@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { TerminalMenuItem } from '@gremuchaya/ui/primitives';
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useEffect } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -150,5 +150,61 @@ describe('the shell menu and the locale', () => {
      * language until some unrelated claim moves.
      */
     expect(shellItems.find((item) => item.id === 'shell.search')?.label).toBe('Global search');
+  });
+});
+
+/*
+ * R12: the engine's menu is replaced everywhere, not only on declared
+ * surfaces -- with the two deliberate exceptions pinned below. `fireEvent`
+ * returns whether the default was left alone, which is exactly the question:
+ * a prevented default is the engine menu staying closed.
+ */
+describe('the right button on a surface no one declared', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('falls back to the shell menu instead of the engine menu', async () => {
+    render(<ContextMenuRuntime />);
+    const outsider = document.createElement('p');
+    outsider.textContent = 'НЕОБЪЯВЛЕННАЯ ПОВЕРХНОСТЬ';
+    document.body.append(outsider);
+
+    const keptDefault = fireEvent.contextMenu(outsider, { clientX: 40, clientY: 40 });
+
+    expect(keptDefault).toBe(false);
+    expect(await screen.findByRole('menu')).toBeTruthy();
+    outsider.remove();
+  });
+
+  it('keeps the engine menu for a click inside an active selection', () => {
+    render(<ContextMenuRuntime />);
+    const quoted = document.createElement('p');
+    quoted.textContent = 'ВЫДЕЛЕННАЯ СТРОКА ПРЕДПРОСМОТРА';
+    document.body.append(quoted);
+    const range = document.createRange();
+    range.selectNode(quoted);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    // Copy lives in the engine's menu, and that is what the click was aimed
+    // at: R12 opened preview text and table cells for selection, and the
+    // shell menu has no copy to offer in its place.
+    expect(fireEvent.contextMenu(quoted, { clientX: 40, clientY: 40 })).toBe(true);
+    quoted.remove();
+  });
+
+  it('yields to an element that owns a Base UI menu of its own', () => {
+    render(<ContextMenuRuntime />);
+    const owner = document.createElement('div');
+    owner.setAttribute('data-context-menu-own', '');
+    document.body.append(owner);
+
+    // The runtime opens nothing and prevents nothing: the element's own menu
+    // is the one that answers, and it prevents the default itself.
+    expect(fireEvent.contextMenu(owner, { clientX: 40, clientY: 40 })).toBe(true);
+    owner.remove();
   });
 });

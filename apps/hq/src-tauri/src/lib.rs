@@ -38,7 +38,10 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("control") {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                    if !window.is_visible().unwrap_or(true) {
+                    // An unreadable visibility errs toward showing: `show` on a
+                    // window that is already visible is a no-op, while skipping
+                    // it on a hidden one leaves the process without a window.
+                    if !window.is_visible().unwrap_or(false) {
                         let _ = window.show();
                     }
                 });

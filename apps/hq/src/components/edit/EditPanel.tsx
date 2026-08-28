@@ -262,11 +262,13 @@ export function EditPanel() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (!moved.current) return;
+    const travelled = moved.current;
     moved.current = false;
-    // Re-enabling the transition before the dock write makes the snap glide
-    // from wherever the drag left the panel to the edge the release chose.
+    // Cleared on both paths, not only after a real drag: a press that ends as
+    // a click must still leave the dragging state, or a drag whose cancel was
+    // missed would keep the panel without transitions until the next drag.
     setDragging(false);
+    if (!travelled) return;
     operationsStore
       .getState()
       .dockEditPanel(
@@ -276,6 +278,20 @@ export function EditPanel() {
           dockThresholdPx,
         ),
       );
+  }, []);
+
+  /*
+   * A cancelled pointer -- the window losing focus mid-drag, a touch stolen by
+   * the system -- never delivers a pointerup, and capture is released
+   * implicitly. Without this handler the origin stayed set, `data-dragging`
+   * stayed on, and the panel was left without transitions and with a grabbing
+   * cursor until the next completed drag. Dropping the dragging state also
+   * re-runs the placement effect, which glides the panel back to its edge.
+   */
+  const handlePointerCancel = useCallback(() => {
+    origin.current = null;
+    moved.current = false;
+    setDragging(false);
   }, []);
 
   if (!active) return null;
@@ -294,6 +310,7 @@ export function EditPanel() {
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
     >
       <header className="edit-panel__header">
         <span className="edit-panel__grip" aria-hidden="true">

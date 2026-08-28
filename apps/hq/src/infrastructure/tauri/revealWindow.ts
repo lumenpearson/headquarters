@@ -18,7 +18,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
  */
 export async function revealWindow(): Promise<void> {
   if (!isTauri()) return;
-  const window = getCurrentWindow();
-  await window.show();
-  await window.setFocus();
+  try {
+    const window = getCurrentWindow();
+    await window.show();
+    await window.setFocus();
+  } catch {
+    // Called fire-and-forget during boot, so a refusal here must not surface
+    // as an unhandled rejection; the ten-second fallback in `lib.rs` is what
+    // shows the window when this call cannot.
+  }
 }
