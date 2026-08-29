@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { getSettingDefinition } from '@gremuchaya/settings-schema';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  TerminalAlertDialog,
   TerminalButton,
   TerminalDialog,
   TerminalInput,
@@ -16,12 +16,18 @@ import { compareText, dateTimeFormat, foldCase } from '@/application/localizatio
 import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
 import { LocalMaterialPreview } from '@/components/operations/LocalMaterialPreview';
+import { MaterialLifecyclePanel } from '@/components/operations/MaterialLifecyclePanel';
 import type {
   MaterialEntry,
   MaterialImportProgress,
 } from '@/infrastructure/materials/BridgeMaterialClient';
-import { materialOriginLabel } from '@/infrastructure/materials/materialLibrary';
+import {
+  isMaterialLifecycleClient,
+  materialOriginLabel,
+} from '@/infrastructure/materials/materialLibrary';
 import { useMaterialLibrary } from '@/application/materials/useMaterialLibrary';
+import { useMaterialLibraryEvents } from '@/application/materials/useMaterialLibraryEvents';
+import { materialCategoryOptions } from '@/application/materials/materialCategories';
 import {
   formatBytes,
   importedMaterialToAttachment,
@@ -54,38 +60,6 @@ const fileSortOptions = [
   { value: 'kind', label: 'ТИП' },
   { value: 'sizeLabel', label: 'РАЗМЕР' },
 ] as const satisfies ReadonlyArray<{ readonly value: FileSort; readonly label: string }>;
-
-const materialCategoryLabels: Readonly<Record<string, string>> = {
-  video: 'ВИДЕО',
-  camera: 'КАМЕРА',
-  photo: 'ФОТО',
-  audio: 'АУДИО',
-  document: 'ДОКУМЕНТ',
-  map: 'КАРТА',
-  intercept: 'ПЕРЕХВАТ',
-  dossier: 'ДОСЬЕ',
-  report: 'РАПОРТ',
-  archive: 'АРХИВ',
-  technical: 'ТЕХНИЧЕСКОЕ',
-  other: 'ПРОЧЕЕ',
-};
-
-/*
- * The categories the picker offers are the ones the definition itself allows,
- * not a second list of the same twelve names. A category added to the schema
- * would otherwise be selectable in the settings catalogue and missing from the
- * dialog that is supposed to honour it; this way it appears at once, under its
- * identifier until someone gives it a Russian label.
- */
-const materialCategoryOptions: ReadonlyArray<{ readonly value: string; readonly label: string }> =
-  (() => {
-    const editor = getSettingDefinition('materials.defaultCategory')?.editor;
-    const values = editor?.kind === 'enum' ? editor.options : [];
-    return values.map((value) => ({
-      value,
-      label: materialCategoryLabels[value] ?? value.toUpperCase(),
-    }));
-  })();
 
 export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const state = useOperationsStore((value) => value);
@@ -138,6 +112,20 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const [importCategory, setImportCategory] = useState(defaultCategory);
   const abortImport = useRef<AbortController | null>(null);
   const materialClient = useMaterialLibrary();
+  const lifecycle = isMaterialLifecycleClient(materialClient) ? materialClient : null;
+  /*
+   * The dialog's own listing tab -- recent uploads or the group's trash.
+   * `lifecycle` gates whether the second even exists: the loopback bridge
+   * offers no `ListTrash`, so a screen on the mirror never sees the toggle.
+   */
+  const [dialogView, setDialogView] = useState<'recent' | 'trash'>('recent');
+  const [trashMaterials, setTrashMaterials] = useState<readonly MaterialEntry[]>([]);
+  const [nextTrashCursor, setNextTrashCursor] = useState('');
+  const [trashStatus, setTrashStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle');
+  const [trashMessage, setTrashMessage] = useState('');
+  // The library's own change feed (R1's "notification of another device's
+  // upload"), read only while the dialog is open and the library can offer it.
+  const libraryEvents = useMaterialLibraryEvents(materialClient, importOpen);
   const importedMaterials = useOperationsStore((value) => value.materials.imported);
   /*
    * The registry reads the store, not the dialog. An import used to reach the
@@ -185,6 +173,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const openImportDialog = () => {
     setBridgeStatus('loading');
     setBridgeMessage('');
+    setDialogView('recent');
     // `materials.rememberImportCategory` keeps the last choice instead. The
     // default stays "reset", so a category chosen for one batch does not
     // silently carry into the next unless the operator asked for that.
@@ -244,6 +233,104 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       setBridgeMessage(messageFromBridgeError(error));
     }
   };
+
+  useEffect(() => {
+    if (!importOpen || dialogView !== 'trash' || lifecycle === null) return;
+    let cancelled = false;
+    void lifecycle
+      .listTrash()
+      .then((page) => {
+        if (cancelled) return;
+        setTrashMaterials(page.materials);
+        setNextTrashCursor(page.nextCursor);
+        setTrashStatus('idle');
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setTrashStatus('unavailable');
+        setTrashMessage(messageFromBridgeError(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [importOpen, dialogView, lifecycle]);
+
+  const loadMoreTrash = async () => {
+    if (lifecycle === null || nextTrashCursor.length === 0 || trashStatus === 'loading') return;
+    setTrashStatus('loading');
+    try {
+      const page = await lifecycle.listTrash(nextTrashCursor);
+      setTrashMaterials((current) => [...current, ...page.materials]);
+      setNextTrashCursor(page.nextCursor);
+      setTrashStatus('idle');
+    } catch (error: unknown) {
+      setTrashStatus('unavailable');
+      setTrashMessage(messageFromBridgeError(error));
+    }
+  };
+
+  const restoreFromTrash = async (target: MaterialEntry) => {
+    if (lifecycle === null) return;
+    setTrashMessage('');
+    try {
+      await lifecycle.restoreMaterial(target.materialId);
+      setTrashMaterials((current) =>
+        current.filter((entry) => entry.materialId !== target.materialId),
+      );
+      setLibraryMaterials((current) => [
+        target,
+        ...current.filter((entry) => entry.materialId !== target.materialId),
+      ]);
+      setTrashMessage(`ВОССТАНОВЛЕНО: ${target.displayName}`);
+    } catch (error: unknown) {
+      setTrashStatus('unavailable');
+      setTrashMessage(messageFromBridgeError(error));
+    }
+  };
+
+  const purgeFromTrash = async (target: MaterialEntry) => {
+    if (lifecycle === null) return;
+    setTrashMessage('');
+    try {
+      await lifecycle.purgeMaterial(target.materialId, target.materialId);
+      setTrashMaterials((current) =>
+        current.filter((entry) => entry.materialId !== target.materialId),
+      );
+      state.forgetImportedMaterial(target.materialId);
+      setTrashMessage(`УДАЛЕНО НАВСЕГДА: ${target.displayName}`);
+    } catch (error: unknown) {
+      setTrashStatus('unavailable');
+      setTrashMessage(messageFromBridgeError(error));
+    }
+  };
+
+  /*
+   * What `MaterialLifecyclePanel` reports back after a rename or a new
+   * version: the store's record for this material moves with it, the same
+   * way `importSelectedFiles` writes the first version's record.
+   */
+  const applyLifecycleUpdate = useCallback(
+    (updated: MaterialEntry, category: string) => {
+      if (selectedImport === undefined) return;
+      state.recordImportedMaterial(
+        toImportedMaterial(updated, {
+          category,
+          origin: selectedImport.origin === 'group-library' ? 'group-library' : 'local-mirror',
+          importedAt: selectedImport.importedAt,
+        }),
+      );
+    },
+    [selectedImport, state],
+  );
+
+  const applyLifecycleTrash = useCallback(
+    (materialId: string) => {
+      state.forgetImportedMaterial(materialId);
+      setLibraryMaterials((current) => current.filter((entry) => entry.materialId !== materialId));
+      if (state.ui.selectedFileId === materialId) state.selectFile('');
+    },
+    [state],
+  );
 
   const importSelectedFiles = async (fileList: FileList | null) => {
     const filesToImport = Array.from(fileList ?? []);
@@ -532,6 +619,18 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                   <TerminalButton>[P] PRINT SIM</TerminalButton>
                   <TerminalButton>[D] DOWNLOAD SIM</TerminalButton>
                 </footer>
+                {lifecycle !== null &&
+                selectedMaterial !== undefined &&
+                selectedImport?.origin === 'group-library' ? (
+                  <MaterialLifecyclePanel
+                    key={selectedMaterial.materialId}
+                    lifecycle={lifecycle}
+                    material={selectedMaterial}
+                    category={selectedImport.category}
+                    onUpdated={applyLifecycleUpdate}
+                    onTrashed={applyLifecycleTrash}
+                  />
+                ) : null}
               </>
             )}
           </Panel>
@@ -540,13 +639,17 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     ],
     [
       allFiles,
+      applyLifecycleTrash,
+      applyLifecycleUpdate,
       archive,
       filePage,
       files,
       goToPage,
+      lifecycle,
       materialClient,
       query,
       selected,
+      selectedImport,
       selectedMaterial,
       sort,
       state,
@@ -652,38 +755,120 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 ? 'ЧТЕНИЕ ЛОКАЛЬНОГО MIRROR…'
                 : 'READY / SELECT FILES TO START A BOUNDED BINARY TRANSFER')}
           </p>
-          <div className="material-import-dialog__recent">
-            <header>
-              <span>
-                {materialOriginLabel(materialClient.origin)} / {libraryMaterials.length} RECORDS
-              </span>
-              {nextLibraryCursor ? (
-                <TerminalButton
-                  size="small"
-                  tone="quiet"
-                  onClick={() => void loadMoreLibraryMaterials()}
-                >
-                  NEXT PAGE
-                </TerminalButton>
+          {lifecycle !== null ? (
+            <div className="material-import-dialog__view-toggle" role="tablist">
+              <TerminalButton
+                size="small"
+                className={dialogView === 'recent' ? 'is-active' : ''}
+                onClick={() => setDialogView('recent')}
+              >
+                НЕДАВНИЕ
+              </TerminalButton>
+              <TerminalButton
+                size="small"
+                className={dialogView === 'trash' ? 'is-active' : ''}
+                onClick={() => {
+                  setTrashStatus('loading');
+                  setTrashMessage('');
+                  setDialogView('trash');
+                }}
+              >
+                КОРЗИНА
+              </TerminalButton>
+              {libraryEvents.length > 0 ? (
+                <span className="material-import-dialog__events" role="status">
+                  СОБЫТИЯ БИБЛИОТЕКИ: {libraryEvents.length} / ПОСЛЕДНЕЕ{' '}
+                  {libraryEvents[0]?.kind.toUpperCase()}
+                </span>
               ) : null}
-            </header>
-            {libraryMaterials.length === 0 ? (
-              <EmptyState>ИМПОРТИРОВАННЫЕ МАТЕРИАЛЫ ОТСУТСТВУЮТ</EmptyState>
-            ) : (
-              <ul>
-                {libraryMaterials.map((material) => (
-                  <li key={material.materialId}>
-                    <strong>{material.displayName}</strong>
-                    <span>
-                      {material.mimeType || 'application/octet-stream'} /{' '}
-                      {formatBytes(material.byteSize)}
-                    </span>
-                    <code>{material.contentHash.slice(0, 16)}</code>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+            </div>
+          ) : null}
+          {dialogView === 'trash' && lifecycle !== null ? (
+            <div className="material-import-dialog__recent">
+              <header>
+                <span>КОРЗИНА ГРУППЫ / {trashMaterials.length} RECORDS</span>
+                {nextTrashCursor ? (
+                  <TerminalButton size="small" tone="quiet" onClick={() => void loadMoreTrash()}>
+                    NEXT PAGE
+                  </TerminalButton>
+                ) : null}
+              </header>
+              {trashMaterials.length === 0 ? (
+                <EmptyState>КОРЗИНА ПУСТА</EmptyState>
+              ) : (
+                <ul>
+                  {trashMaterials.map((entry) => (
+                    <li key={entry.materialId}>
+                      <strong>{entry.displayName}</strong>
+                      <span>
+                        {entry.mimeType || 'application/octet-stream'} /{' '}
+                        {formatBytes(entry.byteSize)}
+                      </span>
+                      <code>{entry.contentHash.slice(0, 16)}</code>
+                      <div className="material-import-dialog__recent-actions">
+                        <TerminalButton size="small" onClick={() => void restoreFromTrash(entry)}>
+                          [R] ВОССТАНОВИТЬ
+                        </TerminalButton>
+                        <TerminalAlertDialog
+                          trigger={
+                            <TerminalButton size="small" tone="critical">
+                              [P] УДАЛИТЬ НАВСЕГДА
+                            </TerminalButton>
+                          }
+                          title="УДАЛИТЬ МАТЕРИАЛ НАВСЕГДА?"
+                          description="Объект будет удалён из хранилища группы без возможности восстановления."
+                          confirmLabel="[P] УДАЛИТЬ НАВСЕГДА"
+                          onConfirm={() => void purgeFromTrash(entry)}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {trashMessage.length > 0 ? (
+                <p
+                  className="material-import-dialog__status"
+                  data-state={trashStatus}
+                  role={trashStatus === 'unavailable' ? 'alert' : 'status'}
+                >
+                  {trashMessage}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="material-import-dialog__recent">
+              <header>
+                <span>
+                  {materialOriginLabel(materialClient.origin)} / {libraryMaterials.length} RECORDS
+                </span>
+                {nextLibraryCursor ? (
+                  <TerminalButton
+                    size="small"
+                    tone="quiet"
+                    onClick={() => void loadMoreLibraryMaterials()}
+                  >
+                    NEXT PAGE
+                  </TerminalButton>
+                ) : null}
+              </header>
+              {libraryMaterials.length === 0 ? (
+                <EmptyState>ИМПОРТИРОВАННЫЕ МАТЕРИАЛЫ ОТСУТСТВУЮТ</EmptyState>
+              ) : (
+                <ul>
+                  {libraryMaterials.map((material) => (
+                    <li key={material.materialId}>
+                      <strong>{material.displayName}</strong>
+                      <span>
+                        {material.mimeType || 'application/octet-stream'} /{' '}
+                        {formatBytes(material.byteSize)}
+                      </span>
+                      <code>{material.contentHash.slice(0, 16)}</code>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       </TerminalDialog>
     </>

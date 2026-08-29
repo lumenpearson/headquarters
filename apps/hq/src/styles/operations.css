@@ -3638,6 +3638,116 @@ button.is-active {
   }
 }
 
+.material-import-dialog__view-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.material-import-dialog__events {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.material-import-dialog__recent-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.material-lifecycle-panel {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--ops-line);
+}
+
+.material-lifecycle-panel > header {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.material-lifecycle-panel__field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.material-lifecycle-panel__field > span {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.material-lifecycle-panel__actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.material-lifecycle-panel__progress,
+.material-lifecycle-panel__status {
+  margin: 0;
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+}
+
+.material-lifecycle-panel__versions {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px dotted var(--ops-line);
+}
+
+.material-lifecycle-panel__versions > span {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.material-lifecycle-panel__versions ul {
+  display: grid;
+  min-width: 0;
+  max-height: 140px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.material-lifecycle-panel__versions li {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border-bottom: 1px dotted var(--ops-line);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+}
+
+.material-lifecycle-panel__versions li span,
+.material-lifecycle-panel__versions li small {
+  overflow: hidden;
+  color: var(--ops-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-screen {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

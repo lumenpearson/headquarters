@@ -16,9 +16,14 @@ import type {
 import {
   renditionsForMaterial,
   type MaterialLibraryClient,
+  type MaterialLifecycleClient,
+  type MaterialLibraryEvent,
+  type MaterialMetadataPatch,
   type MaterialOrigin,
   type MaterialRendition,
   type MaterialRenditionSource,
+  type MaterialVersionEntry,
+  type MaterialVersionPage,
 } from './materialLibrary';
 
 /*
@@ -84,6 +89,39 @@ interface WirePreviewGrant {
   readonly width: number;
   readonly height: number;
   readonly expiresAt?: WireTimestamp | undefined;
+}
+
+interface WireMaterialVersion {
+  readonly id?: WireResourceId | undefined;
+  readonly materialId?: WireResourceId | undefined;
+  readonly sequence: bigint;
+  readonly contentHash: string;
+  readonly mimeType: string;
+  readonly byteSize: bigint;
+  readonly originalFileName: string;
+  readonly createdAt?: WireTimestamp | undefined;
+}
+
+interface WireOperationResult {
+  readonly resourceId?: WireResourceId | undefined;
+}
+
+interface WireMaterialEvent {
+  readonly sequence: bigint;
+  readonly kind: materialV1.MaterialEventKind;
+  readonly materialId?: WireResourceId | undefined;
+  readonly occurredAt?: WireTimestamp | undefined;
+  readonly correlationId: string;
+}
+
+interface WirePage {
+  readonly pageSize: number;
+  readonly cursor: string;
+}
+
+interface WirePageInfo {
+  readonly nextCursor: string;
+  readonly hasMore: boolean;
 }
 
 interface CallOptions {
@@ -162,6 +200,65 @@ export interface MaterialRpcClient {
     },
     options?: CallOptions,
   ): Promise<{ readonly grant?: WirePreviewGrant | undefined }>;
+  createMaterialVersion(
+    request: {
+      readonly context: WireMutationContext;
+      readonly materialId: WireResourceId;
+      readonly originalFileName: string;
+      readonly mimeType: string;
+      readonly totalSize: bigint;
+      readonly contentHash: string;
+    },
+    options?: CallOptions,
+  ): Promise<{
+    readonly session?: WireUploadSession | undefined;
+    readonly parts: readonly WireUploadPartGrant[];
+  }>;
+  updateMaterialMetadata(
+    request: {
+      readonly context: WireMutationContext;
+      readonly materialId: WireResourceId;
+      readonly displayName: string;
+      readonly category: materialV1.MaterialCategory;
+      readonly metadata: Readonly<Record<string, string>>;
+      readonly tags: readonly string[];
+    },
+    options?: CallOptions,
+  ): Promise<{ readonly material?: WireMaterial | undefined }>;
+  moveToTrash(
+    request: { readonly context: WireMutationContext; readonly materialId: WireResourceId },
+    options?: CallOptions,
+  ): Promise<{ readonly material?: WireMaterial | undefined }>;
+  restoreMaterial(
+    request: { readonly context: WireMutationContext; readonly materialId: WireResourceId },
+    options?: CallOptions,
+  ): Promise<{ readonly material?: WireMaterial | undefined }>;
+  purgeMaterial(
+    request: {
+      readonly context: WireMutationContext;
+      readonly materialId: WireResourceId;
+      readonly confirmation: string;
+    },
+    options?: CallOptions,
+  ): Promise<{ readonly result?: WireOperationResult | undefined }>;
+  listVersions(
+    request: { readonly materialId: WireResourceId; readonly page: WirePage },
+    options?: CallOptions,
+  ): Promise<{
+    readonly versions: readonly WireMaterialVersion[];
+    readonly page?: WirePageInfo | undefined;
+  }>;
+  listTrash(
+    request: { readonly groupId: WireResourceId; readonly page: WirePage },
+    options?: CallOptions,
+  ): Promise<{
+    readonly materials: readonly WireMaterial[];
+    readonly page?: WirePageInfo | undefined;
+  }>;
+  watchMaterialEvents(
+    request: { readonly groupId: WireResourceId; readonly afterSequence: bigint },
+    options?: CallOptions,
+  ): AsyncIterable<{ readonly event?: WireMaterialEvent | undefined }>;
 }
 
 /**
@@ -228,7 +325,7 @@ export interface ControlPlaneMaterialClientOptions {
  * about what the bucket answers is a claim about the contract, proven against
  * fakes rather than against a wire.
  */
-export class ControlPlaneMaterialClient implements MaterialLibraryClient {
+export class ControlPlaneMaterialClient implements MaterialLibraryClient, MaterialLifecycleClient {
   readonly origin: MaterialOrigin = 'group-library';
   readonly #client: MaterialRpcClient;
   readonly #groupId: string;
@@ -329,6 +426,91 @@ export class ControlPlaneMaterialClient implements MaterialLibraryClient {
         options(signal),
       ),
     );
+    return this.#runUploadSession(
+      file,
+      requestId,
+      contentHash,
+      { session: begun.session, parts: begun.parts, deduplicated: begun.deduplicated },
+      onProgress,
+      signal,
+    );
+  }
+
+  /**
+   * Uploads a new version of an existing material's bytes (R1).
+   *
+   * `CreateMaterialVersion` opens a fresh `PENDING` session the same way
+   * `BeginUpload` does for a first version -- `material/store.ts` never
+   * deduplicates a version against the material's own history, only against
+   * the group's object table by content hash inside the same statement -- so
+   * this reuses the identical part-upload and completion path.
+   */
+  async createVersion(
+    materialId: string,
+    file: File,
+    onProgress?: (progress: MaterialImportProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<MaterialImportResult> {
+    assertSafeBrowserFile(file);
+    const requestId = this.#mintRequestId();
+    onProgress?.({
+      phase: 'starting',
+      fileName: file.name,
+      receivedBytes: 0,
+      totalBytes: file.size,
+    });
+    const contentHash = await this.#hasher.hash(
+      file,
+      ({ processedBytes, totalBytes }) =>
+        onProgress?.({
+          phase: 'hashing',
+          fileName: file.name,
+          receivedBytes: processedBytes,
+          totalBytes,
+        }),
+      signal,
+    );
+    const begun = await call(() =>
+      this.#client.createMaterialVersion(
+        {
+          context: { requestId, actorDeviceId: { value: this.#deviceId } },
+          materialId: { value: materialId },
+          originalFileName: file.name,
+          mimeType: file.type,
+          totalSize: BigInt(file.size),
+          contentHash,
+        },
+        options(signal),
+      ),
+    );
+    return this.#runUploadSession(
+      file,
+      requestId,
+      contentHash,
+      { session: begun.session, parts: begun.parts, deduplicated: false },
+      onProgress,
+      signal,
+    );
+  }
+
+  /**
+   * Writes the parts a reservation opened and completes or replays the
+   * session, shared by `importFile`'s first version and `createVersion`'s
+   * later ones -- the two RPCs that open a session disagree about nothing this
+   * needs to know once the reservation is in hand.
+   */
+  async #runUploadSession(
+    file: File,
+    requestId: string,
+    contentHash: string,
+    begun: {
+      readonly session?: WireUploadSession | undefined;
+      readonly parts: readonly WireUploadPartGrant[];
+      readonly deduplicated: boolean;
+    },
+    onProgress: ((progress: MaterialImportProgress) => void) | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<MaterialImportResult> {
     const session = required(begun.session, 'Control plane returned no upload session.');
     const uploadId = required(
       session.id?.value,
@@ -550,6 +732,138 @@ export class ControlPlaneMaterialClient implements MaterialLibraryClient {
       variant: rendition.variant,
       rendered,
     };
+  }
+
+  /** Renames, re-categorizes, or re-tags a material. Every field is sent, none merged. */
+  async updateMetadata(
+    materialId: string,
+    patch: MaterialMetadataPatch,
+    signal?: AbortSignal,
+  ): Promise<MaterialEntry> {
+    const response = await call(() =>
+      this.#client.updateMaterialMetadata(
+        {
+          context: { requestId: this.#mintRequestId(), actorDeviceId: { value: this.#deviceId } },
+          materialId: { value: materialId },
+          displayName: patch.displayName,
+          category: toCategoryEnum(patch.category),
+          metadata: patch.metadata,
+          tags: patch.tags,
+        },
+        options(signal),
+      ),
+    );
+    return toMaterialEntry(
+      required(response.material, 'Control plane updated metadata without a material record.'),
+    );
+  }
+
+  async moveToTrash(materialId: string, signal?: AbortSignal): Promise<MaterialEntry> {
+    const response = await call(() =>
+      this.#client.moveToTrash(
+        {
+          context: { requestId: this.#mintRequestId(), actorDeviceId: { value: this.#deviceId } },
+          materialId: { value: materialId },
+        },
+        options(signal),
+      ),
+    );
+    return toMaterialEntry(
+      required(response.material, 'Control plane moved a material to trash without a record.'),
+    );
+  }
+
+  async restoreMaterial(materialId: string, signal?: AbortSignal): Promise<MaterialEntry> {
+    const response = await call(() =>
+      this.#client.restoreMaterial(
+        {
+          context: { requestId: this.#mintRequestId(), actorDeviceId: { value: this.#deviceId } },
+          materialId: { value: materialId },
+        },
+        options(signal),
+      ),
+    );
+    return toMaterialEntry(
+      required(response.material, 'Control plane restored a material without a record.'),
+    );
+  }
+
+  /**
+   * Permanently deletes a trashed material and releases its object reference.
+   *
+   * `confirmation` must equal `materialId` -- `store.ts` refuses a purge whose
+   * confirmation does not name the material before any statement runs -- so a
+   * mistyped or generic "yes" fails here rather than deleting the wrong thing.
+   */
+  async purgeMaterial(
+    materialId: string,
+    confirmation: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await call(() =>
+      this.#client.purgeMaterial(
+        {
+          context: { requestId: this.#mintRequestId(), actorDeviceId: { value: this.#deviceId } },
+          materialId: { value: materialId },
+          confirmation,
+        },
+        options(signal),
+      ),
+    );
+  }
+
+  async listVersions(
+    materialId: string,
+    cursor = '',
+    pageSize = 50,
+    signal?: AbortSignal,
+  ): Promise<MaterialVersionPage> {
+    const response = await call(() =>
+      this.#client.listVersions(
+        { materialId: { value: materialId }, page: { pageSize, cursor } },
+        options(signal),
+      ),
+    );
+    return {
+      versions: response.versions.map(toMaterialVersionEntry),
+      nextCursor: response.page?.nextCursor ?? '',
+    };
+  }
+
+  async listTrash(cursor = '', pageSize = 50, signal?: AbortSignal): Promise<MaterialPage> {
+    const response = await call(() =>
+      this.#client.listTrash(
+        { groupId: { value: this.#groupId }, page: { pageSize, cursor } },
+        options(signal),
+      ),
+    );
+    return {
+      materials: response.materials.map(toMaterialEntry),
+      nextCursor: response.page?.nextCursor ?? '',
+    };
+  }
+
+  /**
+   * The library's own change feed (R1's "notification of another device's
+   * upload"). A long-lived server stream: this generator runs until `signal`
+   * aborts or the stream itself ends, translating each event as it arrives
+   * rather than buffering the connection's whole future.
+   */
+  async *watchEvents(
+    afterSequence: number,
+    signal?: AbortSignal,
+  ): AsyncGenerator<MaterialLibraryEvent> {
+    try {
+      for await (const response of this.#client.watchMaterialEvents(
+        { groupId: { value: this.#groupId }, afterSequence: BigInt(Math.max(0, afterSequence)) },
+        options(signal),
+      )) {
+        if (response.event === undefined) continue;
+        yield toMaterialLibraryEvent(response.event);
+      }
+    } catch (error: unknown) {
+      throw toControlPlaneError(error);
+    }
   }
 
   async #readMaterial(
@@ -774,6 +1088,42 @@ function toMaterialEntry(material: WireMaterial): MaterialEntry {
     byteSize: material.byteSize,
     contentHash: material.contentHash,
     createdAt: createdAt === 0 ? '' : new Date(createdAt).toISOString(),
+  };
+}
+
+function toMaterialVersionEntry(version: WireMaterialVersion): MaterialVersionEntry {
+  const createdAt = toEpochMs(version.createdAt);
+  return {
+    versionId: version.id?.value ?? '',
+    materialId: version.materialId?.value ?? '',
+    sequence: toSafeInteger(version.sequence, 'version sequence'),
+    contentHash: version.contentHash,
+    mimeType: version.mimeType,
+    byteSize: version.byteSize,
+    originalFileName: version.originalFileName,
+    createdAt: createdAt === 0 ? '' : new Date(createdAt).toISOString(),
+  };
+}
+
+const eventKinds: Readonly<Record<materialV1.MaterialEventKind, MaterialLibraryEvent['kind']>> = {
+  [materialV1.MaterialEventKind.UNSPECIFIED]: 'unspecified',
+  [materialV1.MaterialEventKind.CREATED]: 'created',
+  [materialV1.MaterialEventKind.UPDATED]: 'updated',
+  [materialV1.MaterialEventKind.VERSION_ADDED]: 'version-added',
+  [materialV1.MaterialEventKind.TRASHED]: 'trashed',
+  [materialV1.MaterialEventKind.RESTORED]: 'restored',
+  [materialV1.MaterialEventKind.PURGED]: 'purged',
+  [materialV1.MaterialEventKind.CONVERSION_UPDATED]: 'conversion-updated',
+};
+
+function toMaterialLibraryEvent(event: WireMaterialEvent): MaterialLibraryEvent {
+  const occurredAt = toEpochMs(event.occurredAt);
+  return {
+    sequence: toSafeInteger(event.sequence, 'event sequence'),
+    kind: eventKinds[event.kind] ?? 'unspecified',
+    materialId: event.materialId?.value ?? '',
+    occurredAt: occurredAt === 0 ? '' : new Date(occurredAt).toISOString(),
+    correlationId: event.correlationId,
   };
 }
 
