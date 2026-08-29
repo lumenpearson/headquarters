@@ -73,6 +73,15 @@ describe('project config schema', () => {
     ).toBe(false);
   });
 
+  it('fails, rather than throws, on a scheme-less address', () => {
+    // Zod does not turn an exception inside `.refine` into a validation issue,
+    // so a `new URL` throw would escape `safeParse` as a crash. An operator
+    // typing an address without http:// must get a refusal, not an exception.
+    expect(
+      projectConfigSchema.safeParse({ ...project, controlPlaneUrl: '192.168.10.5:4100' }).success,
+    ).toBe(false);
+  });
+
   it('applies the same refusal to every entry of a list, not only the first', () => {
     expect(
       projectConfigSchema.safeParse({

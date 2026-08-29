@@ -52,7 +52,15 @@ export const assetManifestSchema = z
  * credentials in the URL" to drift apart.
  */
 const controlPlaneAddressSchema = z.url().refine((value) => {
-  const url = new URL(value);
+  // `new URL` can still throw on strings `z.url()` accepts, and Zod does not
+  // turn an exception inside `.refine` into a validation issue -- it escapes
+  // `safeParse` as a crash. A throwing value is a failing value.
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
   return (
     (url.protocol === 'http:' || url.protocol === 'https:') &&
     url.username === '' &&
@@ -80,7 +88,13 @@ export const projectConfigSchema = z.object({
   defaultWallPreset: z.string().min(1),
   fixedClock: z.string().regex(/^\d{2}:\d{2}:\d{2}$/u),
   bridgeUrl: z.url().refine((value) => {
-    const url = new URL(value);
+    // Same contract as controlPlaneAddressSchema: a throwing value fails.
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return false;
+    }
     return url.hostname === '127.0.0.1' || url.hostname === 'localhost';
   }, 'Bridge URL must resolve to localhost'),
   bridgeTransport: z.literal('grpc-web').default('grpc-web'),
