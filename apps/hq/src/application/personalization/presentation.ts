@@ -537,6 +537,9 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
     'Read by OpsStatusLine, which draws exactly the elements it names, in order.',
   'layout.settingsNavSide':
     'Read by SettingsScreen, which puts its section navigation on that side.',
+  'layout.tileMinimumWidth':
+    'Read by TileGrid, which passes it to resolveGridLayout as the floor a ' +
+    "placed tile's rendered width should clear before the resolver moves it.",
 };
 
 /**
@@ -548,18 +551,14 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
  * next reader would believe it and stop looking. Every entry here is a
  * `SettingDefinition` an operator can already change, with no effect, and the
  * only honest thing to do is say so and name the address.
+ *
+ * Empty since `layout.tileMinimumWidth` left it: `resolveGridLayout` gained a
+ * `minimumTileWidth` input, and `TileGrid` now measures its container and
+ * passes both through (@gremuchaya/layout-engine, `TileGrid.tsx`). The type
+ * stays a `Record` rather than becoming `Record<never, string>` so the next
+ * setting that needs this list does not have to widen it back.
  */
-export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
-  // It was bound to `--ops-tile-min-width`, which no stylesheet and no module
-  // read. Wiring it is not a matter of finding the missing rule: a screen's
-  // `columns` is a coordinate system, not a pixel promise — `/cases` measures
-  // tiles in twelfths — so capping the count makes every tile wider than the cap
-  // unplaceable. Measured, not deduced: doing that emptied eleven routes and
-  // failed four R10 cases. `resolveGridLayout` has to take the minimum width
-  // itself and decide relocation against it.
-  'layout.tileMinimumWidth':
-    'Needs a minimum-width input in @gremuchaya/layout-engine; the resolver has none.',
-};
+export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {};
 
 /**
  * Definitions that reach the document, but through a value computed from more

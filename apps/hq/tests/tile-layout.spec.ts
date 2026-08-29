@@ -354,3 +354,59 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
   await expect(page.locator('.tile-grid__displaced')).toBeVisible();
   await expect(page.locator('.tile-grid__displaced', { hasText: 'ЦЕЛИ ОПЕРАЦИИ' })).toHaveCount(0);
 });
+
+test('R10: layout.tileMinimumWidth changes which tiles fit, without emptying the screen', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/overview');
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+
+  const placedBefore = await page
+    .locator('.tile-grid__cell')
+    .evaluateAll((cells) => cells.map((cell) => cell.dataset['tile']));
+  expect(placedBefore.length).toBeGreaterThan(0);
+
+  /*
+   * Measured, not guessed. `/overview` places its tiles in four columns
+   * (`OverviewScreen.tsx`), so this is the width one column actually renders
+   * at. A floor set to one and a half of it sits strictly between a
+   * one-column variant, which now falls under it, and a two-column one,
+   * which still clears it -- the setting has something to move without every
+   * tile losing its widest variant at once.
+   */
+  const columnWidth = await page
+    .locator('.tile-grid')
+    .evaluate((element) => element.getBoundingClientRect().width / 4);
+  const target = Math.round(Math.min(480, Math.max(160, columnWidth * 1.5)));
+
+  await page.goto('/settings');
+  await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
+  await page.getByRole('option', { name: 'МАКЕТ', exact: true }).click();
+  await page.getByRole('textbox', { name: 'LAYOUT / TILE MINIMUM WIDTH' }).fill(String(target));
+
+  await page.goto('/overview');
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+
+  const placedAfter = await page
+    .locator('.tile-grid__cell')
+    .evaluateAll((cells) => cells.map((cell) => cell.dataset['tile']));
+  // The screen the setting used to leave inert, still not empty: some tile
+  // clears the new floor and stays on the grid.
+  expect(placedAfter.length).toBeGreaterThan(0);
+  // The packing actually changed -- the claim `settingsAwaitingTheirFeature`
+  // used to record as unmet.
+  expect(placedAfter).not.toEqual(placedBefore);
+
+  const left = placedBefore.filter(
+    (id): id is string => id !== undefined && !placedAfter.includes(id),
+  );
+  expect(left.length).toBeGreaterThan(0);
+
+  // Whatever left the grid is named in the overflow notice rather than
+  // dropped -- R10's rule, regardless of why a tile stopped fitting.
+  const displacedCount = await page
+    .locator('.tile-grid__displaced > button, .tile-grid__displaced > b')
+    .count();
+  expect(displacedCount).toBeGreaterThanOrEqual(left.length);
+});
