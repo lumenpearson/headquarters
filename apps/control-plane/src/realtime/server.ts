@@ -196,7 +196,13 @@ export function attachRealtimeTransport(
 
   return {
     publish: (event) => hub.publish(event),
-    close: () => closeWebSocketServer(websocketServer),
+    // The sockets are closed before the hub is: a cross-process replay still in
+    // flight has nowhere to deliver once its connections are gone, and closing
+    // the carrier first would leave that replay running past shutdown.
+    close: async () => {
+      await closeWebSocketServer(websocketServer);
+      await hub.close();
+    },
   };
 }
 

@@ -115,10 +115,17 @@ services:
       timeout: 10s
       retries: 12
       start_period: 45s
-    # One, and not a knob. Realtime fan-out is single-process: two replicas both
-    # persist to `sync_events` and neither pushes the other's events to its own
-    # sockets, so a second replica silently splits the audience of every live
-    # publication (docs/release/known-limitations.md).
+    # One, and not a knob *in this tier*. Cross-process realtime fan-out now
+    # exists — a control plane announces every group publication on a Redis
+    # channel and answers a sibling's announcement out of `sync_events` — but it
+    # is carried by Redis, and this tier configures none. Without the carrier a
+    # second replica silently splits the audience of every live publication,
+    # because neither pushes the other's events to its own sockets.
+    #
+    # Raising this number is therefore an upgrade in two steps, not one: set the
+    # HQ_CONTROL_PLANE_REDIS_REST_URL/_TOKEN pair (or the KV_REST_API_* pair the
+    # Vercel Upstash integration writes) and then raise the count. Turning it up
+    # alone reinstates the split (docs/release/known-limitations.md).
     deploy:
       replicas: 1
     restart: unless-stopped
