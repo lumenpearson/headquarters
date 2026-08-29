@@ -36,6 +36,7 @@ describe('durable simulation profile adapter', () => {
       profileId,
       name: 'Ночная смена',
       presetKind: 'CUSTOM',
+      sources: [],
       profile: body('Ночная смена'),
     });
 
@@ -66,6 +67,11 @@ describe('durable simulation profile adapter', () => {
       'Ночная смена',
       'CUSTOM',
       JSON.stringify(body('Ночная смена')),
+      // A profile with no channels declares no data source, and the empty
+      // declaration is bound all the same: it is what retires whatever the
+      // profile named before, so omitting it would leave a registry describing
+      // a profile that no longer exists.
+      '[]',
     ]);
   });
 
@@ -79,6 +85,7 @@ describe('durable simulation profile adapter', () => {
         profileId,
         name: 'Ночная смена',
         presetKind: 'CUSTOM',
+        sources: [],
         profile: body('Ночная смена'),
       }),
     ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'PERMISSION_DENIED' });
@@ -94,6 +101,7 @@ describe('durable simulation profile adapter', () => {
         profileId,
         name: 'Ночная смена',
         presetKind: 'CUSTOM',
+        sources: [],
         profile: body('Ночная смена'),
       }),
     ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'ALREADY_EXISTS' });
@@ -117,6 +125,7 @@ describe('durable simulation profile adapter', () => {
       profileId,
       name: 'Ночная смена',
       presetKind: 'CUSTOM',
+      sources: [],
       profile: body('Ночная смена'),
       expectedRevision: 1n,
     });
@@ -141,6 +150,7 @@ describe('durable simulation profile adapter', () => {
         profileId,
         name: 'Ночная смена',
         presetKind: 'CUSTOM',
+        sources: [],
         profile: body('Ночная смена'),
       }),
     ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'NOT_FOUND' });
@@ -155,6 +165,7 @@ describe('durable simulation profile adapter', () => {
         profileId,
         name: 'Ночная смена',
         presetKind: 'CUSTOM',
+        sources: [],
         profile: body('Ночная смена'),
         expectedRevision: 1n,
       }),
@@ -172,6 +183,7 @@ describe('durable simulation profile adapter', () => {
       profileId,
       name: 'preset:NETWORK_ATTACK',
       presetKind: 'NETWORK_ATTACK',
+      sources: [],
       profile: body('preset:NETWORK_ATTACK'),
     });
 
@@ -241,6 +253,7 @@ describe('durable simulation profile adapter', () => {
       profileId,
       name: 'Ночная смена',
       presetKind: 'CUSTOM',
+      sources: [],
       profile: body('Ночная смена'),
       mutation: { requestId: 'req-create' },
     });
@@ -306,6 +319,7 @@ describe('durable simulation profile adapter', () => {
           profileId,
           name: 'Ночная смена',
           presetKind: 'CUSTOM',
+          sources: [],
           profile: body('Ночная смена'),
           mutation: { requestId: 'req-create' },
         }),
@@ -318,6 +332,7 @@ describe('durable simulation profile adapter', () => {
       profileId,
       name: 'Ночная смена',
       presetKind: 'CUSTOM',
+      sources: [],
       profile: body('Ночная смена'),
       mutation: { requestId: 'req-create' },
     });
@@ -359,6 +374,7 @@ describe('durable simulation profile adapter', () => {
         profileId,
         name: 'Ночная смена',
         presetKind: 'CUSTOM',
+        sources: [],
         profile: body('Ночная смена'),
         mutation: { requestId: 'req-delete' },
       }),

@@ -58,6 +58,7 @@ describe('control-plane migrations', () => {
         '0008_service_documents_and_receipt_scopes',
         '0009_upload_session_storage_upload_id',
         '0010_control_plane_installation',
+        '0011_telemetry_data_sources_and_samples',
       ],
       skipped: [],
     });
@@ -160,6 +161,7 @@ describe('control-plane migrations', () => {
       '0008_service_documents_and_receipt_scopes',
       '0009_upload_session_storage_upload_id',
       '0010_control_plane_installation',
+      '0011_telemetry_data_sources_and_samples',
     ]);
     const authenticationSql = requireAt(migrations, 1)
       .statements.map((statement) => statement.text)
@@ -194,6 +196,7 @@ describe('control-plane migrations', () => {
           { id: requireAt(migrations, 7).id, applied: true },
           { id: requireAt(migrations, 8).id, applied: true },
           { id: requireAt(migrations, 9).id, applied: true },
+          { id: requireAt(migrations, 10).id, applied: true },
         ]);
       },
     };
@@ -209,6 +212,7 @@ describe('control-plane migrations', () => {
         '0008_service_documents_and_receipt_scopes',
         '0009_upload_session_storage_upload_id',
         '0010_control_plane_installation',
+        '0011_telemetry_data_sources_and_samples',
       ],
       skipped: ['0001_control_plane_foundation'],
     });

@@ -860,6 +860,101 @@ const controlPlaneInstallation: Migration = {
   ],
 };
 
+/**
+ * The measurement half of `TelemetryService`: a registry of data sources and a
+ * store of the samples read from them.
+ *
+ * `ListDataSources`, `GetTelemetrySnapshot` and `StreamTelemetry` were left out
+ * of the returned service object because migrations 0001 to 0010 declare
+ * neither table, and guessing a shape inside a handler would have committed
+ * this repository to that guess with no way back. These four tables are that
+ * shape, written once and now immutable like every one before them.
+ *
+ * `telemetry_sources` is keyed by the profile that declares the source rather
+ * than by the group. A source is a `SimulationChannel.source_id` of a published
+ * `SimulationProfile`, so the profile is what brings it into existence and what
+ * takes it away: `ON DELETE CASCADE` on `profile_id` is the whole of the
+ * deregistration path, and there is no second one to forget. Keying by group
+ * instead would make two profiles that name one source collide, and would leave
+ * the row behind when the profile that owns it is deleted while another still
+ * names it -- a registry that reports sources nothing drives. `ListDataSources`
+ * therefore reads `DISTINCT ON (source_key)` over the group and picks the same
+ * declaration every time, ordered by `profile_id`.
+ *
+ * `telemetry_snapshots` and `telemetry_samples` are split rather than flattened
+ * because a snapshot is the unit the contract returns: one `captured_at` and
+ * one sequence over many samples. Flattening would repeat both on every sample
+ * and leave no row to hang a foreign key from, which is what makes pruning a
+ * single `DELETE` on the parent instead of a join.
+ *
+ * The sequence is group-scoped and allocated by `telemetry_sample_sequences`,
+ * the same allocator idiom `group_event_sequences` uses and for the same
+ * reason: `MAX(sequence) + 1` over the samples themselves lets two concurrent
+ * captures read one maximum and write it twice. One upsert both claims the next
+ * number and takes the row lock that serializes the claim, which keeps
+ * allocation inside a single statement -- the Neon HTTP driver offers no
+ * interactive transaction to hold a lock across two.
+ *
+ * A group scope rather than a device scope is a statement about what these
+ * readings are. Every source this schema can hold is declared by a group's
+ * simulation profile, so the reading is a property of the group's own
+ * configuration and not of any one machine's hardware; giving each device its
+ * own timeline would make two screens of one shoot disagree on the number they
+ * are both showing. `TelemetrySnapshot.device_id` is echoed from the request,
+ * and `simulated` is true, so nothing on the wire claims a measurement that was
+ * not taken.
+ *
+ * `severity` is checked against the five names of `TelemetrySeverity`. Adding a
+ * sixth would need a migration after this one, which is the correct cost: a
+ * severity the client cannot name is a severity no screen can draw.
+ */
+const telemetryDataSourcesAndSamples: Migration = {
+  id: '0011_telemetry_data_sources_and_samples',
+  statements: [
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_sources (
+      profile_id uuid NOT NULL REFERENCES simulation_profiles(id) ON DELETE CASCADE,
+      source_key text NOT NULL,
+      group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name text NOT NULL,
+      kind text NOT NULL,
+      unit text NOT NULL DEFAULT '',
+      simulated boolean NOT NULL DEFAULT true,
+      labels jsonb NOT NULL DEFAULT '{}'::jsonb,
+      channel_index integer NOT NULL CHECK (channel_index >= 0),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (profile_id, source_key)
+    )`),
+    sql(`CREATE INDEX IF NOT EXISTS telemetry_sources_group_key_idx
+      ON telemetry_sources (group_id, source_key, profile_id)`),
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_sample_sequences (
+      group_id uuid PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+      last_sequence bigint NOT NULL DEFAULT 0 CHECK (last_sequence >= 0),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`),
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_snapshots (
+      group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      sequence bigint NOT NULL CHECK (sequence > 0),
+      captured_at timestamptz NOT NULL,
+      PRIMARY KEY (group_id, sequence)
+    )`),
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_samples (
+      group_id uuid NOT NULL,
+      sequence bigint NOT NULL,
+      source_key text NOT NULL,
+      value double precision NOT NULL,
+      unit text NOT NULL DEFAULT '',
+      severity text NOT NULL CHECK (
+        severity IN ('UNSPECIFIED', 'NORMAL', 'ELEVATED', 'DEGRADED', 'CRITICAL')
+      ),
+      observed_at timestamptz NOT NULL,
+      labels jsonb NOT NULL DEFAULT '{}'::jsonb,
+      PRIMARY KEY (group_id, sequence, source_key),
+      FOREIGN KEY (group_id, sequence)
+        REFERENCES telemetry_snapshots (group_id, sequence) ON DELETE CASCADE
+    )`),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -871,6 +966,7 @@ export const migrations: readonly Migration[] = [
   serviceDocumentsAndReceiptScopes,
   uploadSessionStorageUploadId,
   controlPlaneInstallation,
+  telemetryDataSourcesAndSamples,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

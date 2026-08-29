@@ -24,37 +24,52 @@ import {
 import { isRecord } from '../sync/rows.js';
 import { PairedDeviceRuntimeError, type AuthenticatedDevice } from '../sync/runtime.js';
 
+import type {
+  DurableTelemetryMeasurementStore,
+  TelemetryCaptureSource,
+  TelemetrySampleRecord,
+  TelemetrySnapshotRecord,
+  TelemetrySourceRecord,
+} from './measurement-store.js';
+import { declaredSources, toDataSourceKind } from './sources.js';
+import type { TelemetrySourceDeclaration } from './sources.js';
 import type { DurableSimulationProfileStore, SimulationProfileRecord } from './store.js';
 
 /**
  * ConnectRPC adapter for `TelemetryService`.
  *
- * Seven of the contract's ten methods are here. Three are deliberately absent,
- * and they are absent for one reason: this schema has nowhere to put what they
- * return.
+ * Both halves of the contract are here now. The simulation half lists, creates,
+ * updates, deletes, presets, re-times and previews a group's profiles. The
+ * measurement half — `ListDataSources`, `GetTelemetrySnapshot` and
+ * `StreamTelemetry` — reads the registry and the sample store that migration
+ * 0011 declares, and it is wired to the same profiles rather than to a second
+ * source of truth: a data source exists because a published `SimulationChannel`
+ * names it, and a reading is that channel evaluated by the arithmetic the
+ * preview and the client's own simulation already share.
  *
- * - `ListDataSources` needs a registry of the sources a device exposes.
- * - `GetTelemetrySnapshot` needs a store of samples read from those sources.
- * - `StreamTelemetry` needs the same store, plus a reader that follows it.
+ * That is what makes the two halves one contract instead of two. An operator
+ * shapes a curve, sees it in `PreviewSimulationProfile`, publishes it, and the
+ * measured stream every screen of the group reads is that same curve at the
+ * same phase. A second implementation of the reading would agree with the
+ * preview until the day one of them was edited.
  *
- * Migrations 0001 to 0008 declare neither table, and a migration is immutable
- * once written, so guessing a shape for them here would commit this repository
- * to that guess permanently. The three stay out of the returned implementation
- * object instead, which makes ConnectRPC answer `unimplemented` for them. That
- * is an answer a client can act on: it asks `ControlPlaneService.getCapabilities`,
- * learns what this deployment actually serves, and reads live telemetry from
- * the machine it is running on rather than from here. An empty success would
- * have told it a shoot is healthy when nothing was measured.
- *
- * What remains is the simulation half of the contract, which is complete: a
- * group's profiles are listed, created, updated, deleted, driven from a preset,
- * re-timed, and previewed without being stored at all.
+ * The three measurement methods are still built only when a measurement store
+ * was supplied. Without one they stay out of the returned object, ConnectRPC
+ * answers `unimplemented`, and `GetCapabilities` reports
+ * `telemetry.measurement` off — an answer a client can act on, where an empty
+ * success would have told it a shoot is healthy when nothing was measured.
  */
 
 export interface TelemetryServiceOptions {
   /** Supplies `authenticateAccessToken`; the same lifecycle the sync service uses. */
   readonly runtime: PairedDeviceLifecycle;
   readonly profiles: DurableSimulationProfileStore;
+  /**
+   * The registry and sample store behind the measurement half. Absent in a
+   * deployment whose schema predates migration 0011, and in the deterministic
+   * tests that exercise the simulation half alone.
+   */
+  readonly measurements?: DurableTelemetryMeasurementStore;
   readonly now?: () => Date;
 }
 
@@ -76,13 +91,40 @@ const maxCurvePoints = 512;
 const maxPeriodSeconds = 86_400;
 const maxUpdateIntervalMs = 3_600_000;
 const maxTimeScale = 1_000;
+/** The uuid shape the device columns hold; a malformed one is refused before SQL casts it. */
+const deviceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+/**
+ * The bounds a measured stream runs between.
+ *
+ * The floor is a bound on how often one client can make this process evaluate a
+ * group's curves and write a row; the ceiling keeps a stream that names an
+ * absurd interval from looking indistinguishable from a stalled one. Both are
+ * refusals rather than clamps, for the reason `normalizePageSize` gives: a
+ * caller served a cadence it did not ask for cannot tell that from a quiet
+ * shoot.
+ */
+const minStreamIntervalMs = 200;
+const maxStreamIntervalMs = 60_000;
+/**
+ * How many stored snapshots one read of the stream drains. A client resuming
+ * from an old sequence has a backlog, and reading it whole in one statement
+ * would build a response out of every row the retention window holds.
+ */
+const maxStreamBatch = 64;
+/** How many sources one request may name; a filter is a selection, not a payload. */
+const maxRequestedSources = 256;
 
 export function createTelemetryService(
   options: TelemetryServiceOptions,
 ): Partial<ServiceImpl<typeof TelemetryService>> {
   const now = options.now ?? ((): Date => new Date());
+  const measurements = options.measurements;
 
   return {
+    ...(measurements === undefined
+      ? {}
+      : createMeasurementMethods({ ...options, measurements }, now)),
+
     async listSimulationProfiles(request, context) {
       return withRuntimeErrors(async () => {
         const authenticated = await authenticate(options, context);
@@ -120,6 +162,7 @@ export function createTelemetryService(
         const written = await options.profiles.create({
           groupId,
           deviceId: authenticated.device.id,
+          sources: authored.sources,
           // The identifier is allocated here rather than by the database so a
           // retry of this request carries the same fingerprint: a server-side
           // `gen_random_uuid()` would differ between attempts, and a client's
@@ -148,6 +191,7 @@ export function createTelemetryService(
         const written = await options.profiles.update({
           groupId,
           deviceId: authenticated.device.id,
+          sources: authored.sources,
           profileId,
           name: authored.name,
           presetKind: authored.presetKindName,
@@ -207,6 +251,7 @@ export function createTelemetryService(
         const written = await options.profiles.applyPreset({
           groupId,
           deviceId: authenticated.device.id,
+          sources: authored.sources,
           profileId: randomUUID(),
           name: authored.name,
           presetKind: authored.presetKindName,
@@ -265,6 +310,498 @@ export function createTelemetryService(
       });
     },
   };
+}
+
+interface MeasurementOptions extends TelemetryServiceOptions {
+  readonly measurements: DurableTelemetryMeasurementStore;
+}
+
+/** What a measurement request resolves to once it is authenticated and validated. */
+interface MeasurementReader {
+  readonly groupId: string;
+  readonly deviceId: string;
+  /** The device the request named, when it named one; validated as a member of the group. */
+  readonly targetDeviceId?: string;
+  /** The sources the request named, when it named any; absent means all of the group's. */
+  readonly sourceKeys?: readonly string[];
+}
+
+/**
+ * The measurement half.
+ *
+ * It is built as a separate object so the three methods exist exactly when the
+ * store behind them does. A deployment whose schema predates migration 0011 has
+ * no registry to read, and a method that answered such a deployment with an
+ * empty list would be reporting a shoot with no instruments as a shoot with
+ * nothing to report.
+ */
+function createMeasurementMethods(
+  options: MeasurementOptions,
+  now: () => Date,
+): Partial<ServiceImpl<typeof TelemetryService>> {
+  return {
+    async listDataSources(request, context) {
+      return withRuntimeErrors(async () => {
+        const reader = await readMeasurementReader(options, context, request.deviceId?.value, []);
+        const page = await options.measurements.listSources({
+          groupId: reader.groupId,
+          deviceId: reader.deviceId,
+          ...(reader.targetDeviceId === undefined ? {} : { targetDeviceId: reader.targetDeviceId }),
+          pageSize: request.page?.pageSize ?? 0,
+          cursor: request.page?.cursor ?? '',
+        });
+        return {
+          sources: page.items.map(toDataSourceMessage),
+          page: {
+            nextCursor: page.nextCursor,
+            previousCursor: page.previousCursor,
+            hasMore: page.hasMore,
+            approximateTotal: page.approximateTotal,
+          },
+        };
+      });
+    },
+
+    /**
+     * One reading of every source the request names.
+     *
+     * A stored snapshot younger than the group's own capture interval is
+     * returned as it stands rather than recomputed. That is not a cache: the
+     * interval comes from the published profiles' `update_interval_ms` and
+     * `time_scale`, so it is the cadence the operator asked those curves to be
+     * read at, and two screens asking within one interval must see one reading
+     * or they are drawing different shoots.
+     */
+    async getTelemetrySnapshot(request, context) {
+      return withRuntimeErrors(async () => {
+        const reader = await readMeasurementReader(
+          options,
+          context,
+          request.deviceId?.value,
+          request.sourceIds,
+        );
+        const captured = await captureOrRead(options, reader, now());
+        return { snapshot: toSnapshotMessage(captured.snapshot, reader) };
+      });
+    },
+
+    /**
+     * Follows the group's snapshots.
+     *
+     * Like `WatchSettings` this is a poll rather than a subscription, and for
+     * the same reason: the realtime hub carries group events and knows nothing
+     * about telemetry, and there is no broker in this deployment to invent one
+     * around. What the durable store buys instead is the guarantee a broker
+     * would not have given: `after_sequence` is a row in a table, so a client
+     * that reconnects resumes exactly where it stopped and a restarted control
+     * plane answers the same as the process it replaced.
+     *
+     * Backpressure is the generator's own. Each `yield` suspends until the
+     * consumer has taken the snapshot, so a slow client slows the reads rather
+     * than filling a queue behind it; `maxStreamBatch` bounds how much of a
+     * backlog one statement returns; and a full batch loops again immediately,
+     * so catching up costs no sleeps while staying paced by the consumer.
+     */
+    async *streamTelemetry(request, context) {
+      const prepared = await withRuntimeErrors(async () => {
+        // Validated before anything is read, so a request naming an impossible
+        // cadence is refused without making this process evaluate a curve for
+        // it.
+        const requestedIntervalMs = requireStreamInterval(request.intervalMs);
+        const reader = await readMeasurementReader(
+          options,
+          context,
+          request.deviceId?.value,
+          request.sourceIds,
+        );
+        // Read once before the loop so a stream against a group that declares
+        // none of the requested sources is refused now, rather than becoming a
+        // connection that yields nothing and looks like a quiet shoot.
+        const captured = await captureOrRead(options, reader, now());
+        return {
+          reader,
+          captured,
+          // A client that named no interval is paced by the profiles' own
+          // cadence rather than by a constant this module chose.
+          intervalMs: requestedIntervalMs ?? captured.intervalMs,
+        };
+      });
+      // The capture the preparation took is not yielded here. It is the newest
+      // snapshot the group holds, and yielding it first would deliver it ahead
+      // of everything a resuming client has not seen yet; the loop below reads
+      // it in sequence order along with the rest of the backlog.
+      let after = request.afterSequence;
+
+      while (!context.signal.aborted) {
+        const backlog = await withRuntimeErrors(() =>
+          options.measurements.readAfter({
+            ...toReadInput(prepared.reader),
+            afterSequence: after,
+            limit: maxStreamBatch,
+          }),
+        );
+        for (const snapshot of backlog) {
+          if (context.signal.aborted) return;
+          after = snapshot.sequence;
+          yield { snapshot: toSnapshotMessage(snapshot, prepared.reader) };
+        }
+        // A full batch means there is more behind it. Looping without sleeping
+        // is what lets a client that reconnected an hour late catch up at the
+        // rate it can consume rather than at one batch per interval.
+        if (backlog.length === maxStreamBatch) continue;
+
+        const captured = await withRuntimeErrors(() =>
+          captureOrRead(options, prepared.reader, now()),
+        );
+        if (captured.snapshot.sequence > after) {
+          if (context.signal.aborted) return;
+          after = captured.snapshot.sequence;
+          yield { snapshot: toSnapshotMessage(captured.snapshot, prepared.reader) };
+        }
+        await waitForNextPoll(prepared.intervalMs, context.signal);
+      }
+    },
+  };
+}
+
+/**
+ * Authenticates a measurement request and validates what it names.
+ *
+ * The group is never taken from the request: a device's session names exactly
+ * one group, and every measurement RPC in this contract addresses a device
+ * rather than a group, so the group can only be the session's. The named device
+ * is checked against that group inside the store's own statement, because a
+ * check performed here would be a read whose result the following statement
+ * would have to trust.
+ */
+async function readMeasurementReader(
+  options: MeasurementOptions,
+  context: HandlerContext,
+  deviceId: string | undefined,
+  sourceIds: readonly { readonly value: string }[],
+): Promise<MeasurementReader> {
+  const authenticated = await authenticate(options, context);
+  const targetDeviceId = requireOptionalDeviceId(deviceId);
+  const sourceKeys = requireSourceKeys(sourceIds);
+  return {
+    groupId: authenticated.group.id,
+    deviceId: authenticated.device.id,
+    ...(targetDeviceId === undefined ? {} : { targetDeviceId }),
+    ...(sourceKeys === undefined ? {} : { sourceKeys }),
+  };
+}
+
+function toReadInput(reader: MeasurementReader): {
+  readonly groupId: string;
+  readonly deviceId: string;
+  readonly targetDeviceId?: string;
+  readonly sourceKeys?: readonly string[];
+} {
+  return {
+    groupId: reader.groupId,
+    deviceId: reader.deviceId,
+    ...(reader.targetDeviceId === undefined ? {} : { targetDeviceId: reader.targetDeviceId }),
+    ...(reader.sourceKeys === undefined ? {} : { sourceKeys: reader.sourceKeys }),
+  };
+}
+
+/**
+ * Returns the group's current reading, taking one if the last is stale.
+ *
+ * A group that has published no profile declares no source, and that is refused
+ * rather than answered with an empty snapshot: an empty success is exactly the
+ * answer that would let a client draw a healthy wall for a shoot nothing is
+ * measuring.
+ */
+/** A reading and the cadence the group's own profiles ask it to be taken at. */
+interface CapturedTelemetry {
+  readonly snapshot: TelemetrySnapshotRecord;
+  readonly intervalMs: number;
+}
+
+async function captureOrRead(
+  options: MeasurementOptions,
+  reader: MeasurementReader,
+  capturedAt: Date,
+): Promise<CapturedTelemetry> {
+  const context = await options.measurements.readCaptureContext(toReadInput(reader));
+  if (context.sources.length === 0) {
+    throw new PairedDeviceRuntimeError(
+      'FAILED_PRECONDITION',
+      reader.sourceKeys === undefined
+        ? 'The group declares no telemetry data sources. Publish a simulation profile with channels first.'
+        : 'The group declares none of the requested telemetry data sources.',
+    );
+  }
+  const intervalMs = captureIntervalMs(context.sources);
+  const latest = context.latest;
+  if (latest !== undefined && capturedAt.getTime() - latest.capturedAt.getTime() < intervalMs) {
+    const stored = await options.measurements.readAfter({
+      ...toReadInput(reader),
+      // One before the sequence wanted, because the read is exclusive; a
+      // separate "read this exact sequence" would be a second statement that
+      // could disagree with this one about who may see it.
+      afterSequence: latest.sequence - 1n,
+      limit: 1,
+    });
+    const snapshot = stored[0];
+    if (snapshot !== undefined) return { snapshot, intervalMs };
+  }
+  const snapshot = await options.measurements.record({
+    groupId: reader.groupId,
+    deviceId: reader.deviceId,
+    capturedAt,
+    samples: context.sources.map((source) => readSource(source, capturedAt)),
+  });
+  return { snapshot, intervalMs };
+}
+
+/**
+ * What one source reads at an instant.
+ *
+ * The timeline's origin is the declaring profile's `updated_at`, so the phase
+ * is a function of the profile and the wall clock alone. Two devices reading at
+ * one instant therefore compute one number, which is the property that makes a
+ * server-side reading worth having at all — a per-client simulation gives every
+ * screen of a shoot its own curve.
+ *
+ * The elapsed time is quantized onto the profile's own sample grid before the
+ * phase is taken, so a reading is stable for the whole of one update interval
+ * rather than drifting with whenever a request happened to arrive.
+ */
+function readSource(
+  source: TelemetryCaptureSource,
+  capturedAt: Date,
+): Omit<TelemetrySampleRecord, 'observedAt'> {
+  const profile = readStoredProfile(source.profile);
+  const channel = channelFor(profile, source);
+  if (channel === undefined) {
+    // The registry names a channel the stored body no longer carries. It cannot
+    // be evaluated and must not be reported as a reading of zero, so it reads
+    // as the proto3 default with an unspecified severity: a client sees a
+    // source it cannot draw rather than a flat line it can.
+    return {
+      sourceKey: source.sourceKey,
+      value: 0,
+      unit: source.unit,
+      severity: 'UNSPECIFIED',
+      labels: source.labels,
+    };
+  }
+  const intervalMs =
+    profile.updateIntervalMs > 0 ? profile.updateIntervalMs : defaultUpdateIntervalMs;
+  const periodSeconds = profile.periodSeconds > 0 ? profile.periodSeconds : defaultPeriodSeconds;
+  const timeScale = profile.timeScale > 0 ? profile.timeScale : 1;
+  const elapsedMs = Math.max(0, capturedAt.getTime() - source.profileUpdatedAt.getTime());
+  const index = Math.trunc(elapsedMs / intervalMs);
+  const phase = curvePhaseAt({ periodSeconds, timeScale }, index * intervalMs);
+  const simulated = toSimulationChannel(channel);
+  return {
+    sourceKey: source.sourceKey,
+    value: channelValue(simulated, phase, index, source.previousValue),
+    unit: source.unit,
+    severity: severityName(channelSeverity(simulated, phase)),
+    labels: source.labels,
+  };
+}
+
+/**
+ * The channel the registry row points at.
+ *
+ * The stored index is tried first and its source identifier re-checked, because
+ * the index is a fact about the profile as it stood when the source was
+ * declared. `SetSimulationClock` rewrites the body without re-declaring, so the
+ * fallback search by identifier is what keeps a re-timed profile readable.
+ */
+function channelFor(
+  profile: telemetryV1.SimulationProfile,
+  source: TelemetryCaptureSource,
+): telemetryV1.SimulationChannel | undefined {
+  const indexed = profile.channels[source.channelIndex];
+  if (indexed !== undefined && indexed.sourceId?.value === source.sourceKey) return indexed;
+  return profile.channels.find((channel) => channel.sourceId?.value === source.sourceKey);
+}
+
+function readStoredProfile(body: Record<string, unknown>): telemetryV1.SimulationProfile {
+  try {
+    return fromJson(telemetryV1.SimulationProfileSchema, body as JsonValue);
+  } catch {
+    throw new Error('The database returned an invalid simulation profile body.');
+  }
+}
+
+/**
+ * How often the group's curves are worth re-reading.
+ *
+ * It is the shortest cadence any declaring profile asks for, divided by that
+ * profile's time scale because a doubled scale means the curve moves through
+ * its period twice as fast. The floor is the same one a stream may not go
+ * below: a profile that named a millisecond would otherwise make every read a
+ * write.
+ */
+function captureIntervalMs(sources: readonly TelemetryCaptureSource[]): number {
+  let shortest = maxStreamIntervalMs;
+  for (const source of sources) {
+    const profile = readStoredProfile(source.profile);
+    const intervalMs =
+      profile.updateIntervalMs > 0 ? profile.updateIntervalMs : defaultUpdateIntervalMs;
+    const timeScale = profile.timeScale > 0 ? profile.timeScale : 1;
+    shortest = Math.min(shortest, intervalMs / timeScale);
+  }
+  return Math.min(maxStreamIntervalMs, Math.max(minStreamIntervalMs, shortest));
+}
+
+/**
+ * The interval a stream runs at.
+ *
+ * Zero is the proto3 default for a client that expressed no preference, and it
+ * resolves to the group's own capture interval rather than to a constant: the
+ * cadence the profiles ask to be read at is the cadence a client that said
+ * nothing should get.
+ */
+function requireStreamInterval(requested: number): number | undefined {
+  if (requested === 0) return undefined;
+  if (
+    !Number.isInteger(requested) ||
+    requested < minStreamIntervalMs ||
+    requested > maxStreamIntervalMs
+  ) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      `interval_ms must lie between ${minStreamIntervalMs.toString()} and ${maxStreamIntervalMs.toString()}.`,
+    );
+  }
+  return requested;
+}
+
+function requireOptionalDeviceId(value: string | undefined): string | undefined {
+  const deviceId = value?.trim() ?? '';
+  if (deviceId.length === 0) return undefined;
+  if (!deviceIdPattern.test(deviceId)) {
+    throw new PairedDeviceRuntimeError('INVALID_ARGUMENT', 'device_id must be a UUID.');
+  }
+  return deviceId;
+}
+
+/**
+ * The sources a request names, or `undefined` for all of them.
+ *
+ * An empty list and a list whose entries were all blank are different mistakes
+ * and both resolve to "all of them", because an empty `source_ids` is the
+ * proto3 default of a client that wants the whole snapshot. A list that names
+ * real keys is kept verbatim, so a key the group does not declare narrows the
+ * answer instead of widening it.
+ */
+function requireSourceKeys(
+  sourceIds: readonly { readonly value: string }[],
+): readonly string[] | undefined {
+  if (sourceIds.length > maxRequestedSources) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      `source_ids must not name more than ${maxRequestedSources.toString()} sources.`,
+    );
+  }
+  const keys = sourceIds.map((sourceId) => sourceId.value.trim()).filter((key) => key.length > 0);
+  return keys.length === 0 ? undefined : keys;
+}
+
+function toDataSourceMessage(source: TelemetrySourceRecord): telemetryV1.DataSource {
+  return create(telemetryV1.DataSourceSchema, {
+    id: { value: source.sourceKey },
+    name: source.name,
+    kind: toDataSourceKind(source.kind),
+    unit: source.unit,
+    simulated: source.simulated,
+    // `SimulationChannel` declares no thresholds, so neither does the registry.
+    // Zero is the proto3 default for an unset double, which is the honest
+    // answer; a threshold derived from a channel's range would be this
+    // process's opinion presented as the operator's.
+    warningThreshold: 0,
+    criticalThreshold: 0,
+    labels: { ...source.labels },
+  });
+}
+
+function toSnapshotMessage(
+  snapshot: TelemetrySnapshotRecord,
+  reader: MeasurementReader,
+): telemetryV1.TelemetrySnapshot {
+  return create(telemetryV1.TelemetrySnapshotSchema, {
+    // The device the request named, or the one that asked. The reading itself
+    // belongs to the group, so this identifies whose view it is answering and
+    // never where the number came from.
+    deviceId: { value: reader.targetDeviceId ?? reader.deviceId },
+    sequence: snapshot.sequence,
+    samples: snapshot.samples.map((sample) =>
+      create(telemetryV1.TelemetrySampleSchema, {
+        sourceId: { value: sample.sourceKey },
+        value: sample.value,
+        unit: sample.unit,
+        severity: toSeverityEnum(sample.severity),
+        observedAt: timestampFromDate(sample.observedAt),
+        labels: { ...sample.labels },
+      }),
+    ),
+    capturedAt: timestampFromDate(snapshot.capturedAt),
+    // Every source this schema can hold is declared by a simulation profile, so
+    // every reading it can return is simulated. Reporting otherwise would be
+    // the one lie a telemetry wall cannot survive.
+    simulated: true,
+  });
+}
+
+function severityName(severity: TelemetrySeverityKind): string {
+  switch (severity) {
+    case 'normal':
+      return 'NORMAL';
+    case 'elevated':
+      return 'ELEVATED';
+    case 'degraded':
+      return 'DEGRADED';
+    case 'critical':
+      return 'CRITICAL';
+  }
+}
+
+/**
+ * Mapped exhaustively rather than by reverse enum lookup, for the reason
+ * `presetKindName` gives: a name this process does not know reads as
+ * `UNSPECIFIED`, which a client can draw, and never as a severity it is not.
+ */
+function toSeverityEnum(name: string): telemetryV1.TelemetrySeverity {
+  switch (name) {
+    case 'NORMAL':
+      return telemetryV1.TelemetrySeverity.NORMAL;
+    case 'ELEVATED':
+      return telemetryV1.TelemetrySeverity.ELEVATED;
+    case 'DEGRADED':
+      return telemetryV1.TelemetrySeverity.DEGRADED;
+    case 'CRITICAL':
+      return telemetryV1.TelemetrySeverity.CRITICAL;
+    default:
+      return telemetryV1.TelemetrySeverity.UNSPECIFIED;
+  }
+}
+
+/**
+ * The same sleep `WatchSettings` uses: it resolves on the timer or on the
+ * abort, and the timer is unreferenced so a stream nobody is reading cannot
+ * keep the process alive.
+ */
+function waitForNextPoll(intervalMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, intervalMs);
+    timer.unref?.();
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**
@@ -377,6 +914,13 @@ interface AuthoredProfile {
   readonly presetKindName: string;
   /** The whole authored profile, minus the three fields the server owns. */
   readonly body: Record<string, unknown>;
+  /**
+   * The data sources this profile declares, derived from its own channels. They
+   * travel to the store beside the body so the statement that writes the
+   * profile writes the registry too, and a registry that disagreed with the
+   * profiles could not arise from a half-applied write.
+   */
+  readonly sources: readonly TelemetrySourceDeclaration[];
 }
 
 /**
@@ -437,7 +981,16 @@ function readAuthoredProfile(
   });
   const body = toJson(telemetryV1.SimulationProfileSchema, authored);
   if (!isRecord(body)) throw new Error('A simulation profile must encode as a JSON object.');
-  return { name, presetKindName: presetKindName(profile.presetKind), body };
+  const kindName = presetKindName(profile.presetKind);
+  return {
+    name,
+    presetKindName: kindName,
+    body,
+    // Derived from `authored` rather than from the caller's message: the
+    // registry must describe what was stored, and the two differ whenever a
+    // field was dropped on the way in.
+    sources: declaredSources(authored, kindName),
+  };
 }
 
 /**
