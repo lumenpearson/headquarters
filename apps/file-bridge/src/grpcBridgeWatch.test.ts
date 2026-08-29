@@ -33,6 +33,7 @@ import { startBridge } from './server.js';
  * deadline to expire and name the event that never arrived.
  */
 const eventDeadlineMs = 10_000;
+const shutdownDeadlineMs = 2_500;
 const testTimeoutMs = 30_000;
 const pollOptions = { timeout: eventDeadlineMs, interval: 10 } as const;
 
@@ -319,6 +320,134 @@ describe('gRPC-Web file bridge watch stream', () => {
         process.off('unhandledRejection', recordUnhandled);
       }
       expect(unhandled).toEqual([]);
+    },
+    testTimeoutMs,
+  );
+
+  it(
+    'opens its port only once every mount is armed, so a write right after startup is reported',
+    async () => {
+      root = await mkdtemp(join(tmpdir(), 'gremuchaya-watch-arming-'));
+      const mountRoot = join(root, 'archive');
+      // A scan the bridge could plausibly outrun. With a single empty directory
+      // the initial scan finishes within the same handful of ticks as the
+      // listen call, so an unarmed startup would pass by luck; several hundred
+      // entries make the window wide enough that a write issued immediately
+      // after startup lands inside it, which is exactly the loss this test is
+      // about. The tree is small enough to create in well under a second.
+      await mkdir(mountRoot, { recursive: true });
+      for (let index = 0; index < 120; index += 1) {
+        const directory = join(mountRoot, `reel-${String(index).padStart(3, '0')}`);
+        await mkdir(directory);
+        for (let file = 0; file < 3; file += 1) {
+          await writeFile(join(directory, `take-${file}.txt`), `дубль ${file}`, 'utf8');
+        }
+      }
+      const canonicalMountRoot = await realpath(mountRoot);
+
+      const running = await startBridge(
+        watchBridgeConfig([
+          {
+            id: 'archive',
+            label: 'АРХИВ',
+            root: mountRoot,
+            virtualPath: createVirtualPath('/АРХИВ'),
+          },
+        ]),
+      );
+      bridge = running;
+      // No `whenArmed()` here, deliberately: the point of the test is that a
+      // client which knows nothing about arming cannot open a stream too early,
+      // because the port did not exist until the watcher was listening.
+      expect(running.watcher.isArmed()).toBe(true);
+
+      const client = connectToBridge(running.server.address() as AddressInfo);
+      const stream = openWatchStream(client, ['archive']);
+      await expect.poll(() => running.activeWatchSubscriberCount(), pollOptions).toBe(1);
+      await writeFile(join(canonicalMountRoot, 'sentinel.txt'), 'первый после старта', 'utf8');
+
+      const received = await readWatchEventsUntil(
+        stream.events,
+        (event) => event.path === '/sentinel.txt',
+        'the event for the first file written after startup',
+      );
+      expect(received.at(-1)).toMatchObject({
+        kind: FileEventKind.ADDED,
+        mountId: 'archive',
+        path: '/sentinel.txt',
+      });
+      // The initial scan stays silent: arming is a wait, not a replay, so the
+      // 360 files that existed before startup are the explorer's business
+      // through `List` and never arrive as events.
+      expect(received.filter((event) => event.path !== '/sentinel.txt')).toEqual([]);
+    },
+    testTimeoutMs,
+  );
+
+  it(
+    'shuts down while a Watch stream is still open, without the client disconnecting first',
+    async () => {
+      root = await mkdtemp(join(tmpdir(), 'gremuchaya-watch-close-'));
+      const mountRoot = join(root, 'incoming');
+      await mkdir(mountRoot);
+      const canonicalMountRoot = await realpath(mountRoot);
+      const running = await startBridge(
+        watchBridgeConfig([
+          {
+            id: 'incoming',
+            label: 'ВХОДЯЩИЕ',
+            root: mountRoot,
+            virtualPath: createVirtualPath('/ВХОДЯЩИЕ'),
+          },
+        ]),
+      );
+      bridge = running;
+      const client = connectToBridge(running.server.address() as AddressInfo);
+      const stream = openWatchStream(client, ['incoming']);
+      await expect.poll(() => running.activeWatchSubscriberCount(), pollOptions).toBe(1);
+      // A stream that has carried traffic, so the handler is parked inside the
+      // hub generator rather than sitting in its first pull — that is the state
+      // an operator's open screen leaves behind at shutdown.
+      await writeFile(join(canonicalMountRoot, 'first.txt'), 'первый', 'utf8');
+      expect(await nextWatchEvent(stream.events, 'the first event', eventDeadlineMs)).toMatchObject(
+        {
+          kind: FileEventKind.ADDED,
+          mountId: 'incoming',
+          path: '/first.txt',
+        },
+      );
+
+      // This test owns the shutdown, so the hook must not try to close the
+      // bridge a second time: a `close()` that never resolved would take the
+      // teardown down with it and turn a clear failure into a hung worker.
+      bridge = undefined;
+      // Production semantics only: no `closeAllConnections()`, no client-side
+      // abort. `server.close()` waits for every unfinished response, so if the
+      // hub did not end its subscriptions this would hang until the deadline.
+      // The deadline is the tighter one on purpose. Ending the streams and
+      // letting their sockets fall idle takes one macro task, while a shutdown
+      // that skips that turn waits out the client's keep-alive timeout — three
+      // seconds on this runtime — so merely not hanging is not enough to pass.
+      const shutdown = running.close();
+      try {
+        await withDeadline(
+          shutdown,
+          'the bridge to shut down with a Watch stream still open',
+          shutdownDeadlineMs,
+        );
+      } catch (error: unknown) {
+        // Only on the failure path, and only to keep the failure readable: a
+        // shutdown that never resolves leaves a listening server and a live
+        // socket behind, which would hold the worker open long after this
+        // assertion has already said what went wrong.
+        running.server.closeAllConnections();
+        void shutdown.catch(() => undefined);
+        throw error;
+      }
+      expect(running.activeWatchSubscriberCount()).toBe(0);
+      // The client sees an ordinary end of stream, not a severed socket.
+      expect(['ended', 'cancelled']).toContain(await settleAbortedStream(stream.events));
+      expect(running.server.listening).toBe(false);
     },
     testTimeoutMs,
   );

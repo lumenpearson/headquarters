@@ -68,6 +68,17 @@ export async function startBridge(config: BridgeConfig) {
 
   if (normalizedConfig.materialImport.enabled) await materials.initialize();
   await watcher.start();
+  // The arming wait belongs to bridge startup, and this is where it is paid.
+  // The watcher ignores its initial scan, so between `start()` and readiness it
+  // announces nothing while `Watch` reports a healthy stream — a client cannot
+  // tell that window from a mount where nothing happened, and a file created in
+  // it is lost for good. Opening the port only once every mount is armed makes
+  // "the bridge answered" mean "the bridge is reporting changes". The price is
+  // the one the alternative avoided: a large media mount delays the listening
+  // socket for the length of its scan, during which the client sees a bridge
+  // that is not up yet — an honest state it already handles, unlike silence
+  // that looks like a quiet disk.
+  await watcher.whenArmed();
   await new Promise<void>((resolveListening, rejectListening) => {
     server.once('error', rejectListening);
     server.listen(normalizedConfig.port, '127.0.0.1', () => {
@@ -84,7 +95,21 @@ export async function startBridge(config: BridgeConfig) {
     activeWatchSubscriberCount: () => events.subscriberCount(),
     close: async () => {
       playback.clear();
+      // Order matters. `server.close()` below resolves only once every response
+      // has finished, and an open `Watch` response never finishes on its own, so
+      // the hub is closed first: each subscription's `for await` unwinds, the
+      // streaming handler returns, and those responses complete normally. The
+      // watcher is stopped next so nothing is published into a hub nobody reads.
+      events.close();
       await watcher.close();
+      // One macro task, and it is load-bearing. The subscriptions end on the
+      // turn after `events.close()`, and only then does their response finish
+      // and its keep-alive socket fall idle. `server.close()` reaps a connection
+      // that is already idle but leaves an active one to time out on its own,
+      // which cost three seconds of shutdown when it was called on the same turn
+      // as the hub. Yielding here costs nothing and asks the runtime for no
+      // special treatment of a socket with a request still in flight.
+      await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
       await new Promise<void>((resolveClose, rejectClose) =>
         server.close((error) => (error === undefined ? resolveClose() : rejectClose(error))),
       );
