@@ -31,10 +31,19 @@ import { DurablePresenceStore } from './presence-store.js';
 import type { PresenceStore } from './presence-store.js';
 import { createPairedDeviceRealtimeAdmission } from './realtime-admission.js';
 import { createPairedDeviceSyncService } from './service.js';
+import { DurableLayoutStore } from '../settings/layout-store.js';
 import { DurableSettingsStore } from '../settings/store.js';
 import { controlPlaneSettingsSchema } from '../settings/schema.js';
 import { createSettingsService } from '../settings/service.js';
+import { createFfmpegRenditionRenderer } from '../conversion/renderer.js';
+import { DurableConversionStore } from '../conversion/store.js';
+import { MaterialConversionWorker } from '../conversion/worker.js';
 import { createS3GrantIssuer, type StorageGrantIssuerFactory } from '../storage/s3-grant-issuer.js';
+import {
+  createVercelBlobGrantIssuer,
+  type VercelBlobGrantIssuerFactory,
+} from '../storage/vercel-blob-grant-issuer.js';
+import { createS3ObjectStore } from '../storage/s3-object-store.js';
 import { DurableTelemetryMeasurementStore } from '../telemetry/measurement-store.js';
 import { DurableSimulationProfileStore } from '../telemetry/store.js';
 import { createTelemetryService } from '../telemetry/service.js';
@@ -68,6 +77,8 @@ export interface ConfiguredPairedDeviceLifecycleOptions {
    * grant-minting RPCs keep refusing.
    */
   readonly storageFactory?: StorageGrantIssuerFactory;
+  /** The same seam for the second issuer, used only when `config.blobStorage` is present. */
+  readonly blobStorageFactory?: VercelBlobGrantIssuerFactory;
   /**
    * Optional GitHub-egress seam, so a test can drive the outbound calls against
    * a scripted GitHub instead of the real API. It is consulted only when
@@ -93,6 +104,14 @@ export interface ConfiguredPairedDeviceLifecycle {
   readonly storageConfigured: boolean;
   /** Whether a GitHub gateway was built, which is what `Health` and `GetCapabilities` report. */
   readonly githubConfigured: boolean;
+  /**
+   * The rendition worker, when this process runs one.
+   *
+   * Returned rather than started here, so whoever owns the process lifetime
+   * decides when a background loop begins and stops; `server.ts` starts it once
+   * the server is listening and stops it on shutdown.
+   */
+  readonly conversionWorker?: MaterialConversionWorker;
   readonly hub: RealtimeHub;
   readonly syncService: ReturnType<typeof createPairedDeviceSyncService>;
   readonly settingsService: ReturnType<typeof createSettingsService>;
@@ -187,6 +206,10 @@ export async function createConfiguredPairedDeviceLifecycle(
   // received it, and two guards with two hashers would not agree.
   const receipts = runtime.receiptGuard;
   const settingsStore = new DurableSettingsStore({ database, receipts });
+  // The layout half of `SettingsService`, built on the same terms as the
+  // settings half: reaching this point means the migration gate ran, so
+  // `layout_documents` and `layout_versions` are there to be written.
+  const layoutStore = new DurableLayoutStore({ database, receipts });
   const materialStore = new DurableMaterialStore({ database, receipts });
   const simulationProfiles = new DurableSimulationProfileStore({ database, receipts });
   // The measurement half needs no receipt guard: none of its three RPCs is a
@@ -198,10 +221,18 @@ export async function createConfiguredPairedDeviceLifecycle(
   // The issuer is a pure signer over the configured bucket: building it opens no
   // connection, and the first network call is the CreateMultipartUpload of the
   // first real upload. The credentials stay inside `config.storage`'s closures.
+  // A deployment configures one store or the other -- `parseBlobStorage`
+  // refuses both -- so this is a choice between two issuers, never a merge of
+  // them. The Blob issuer is built on the same terms: constructing it opens no
+  // connection, and the read-write token stays inside `config.blobStorage`'s
+  // closures rather than being copied onto the issuer.
+  const blobStorageConfig = config.blobStorage;
   const storage =
-    config.storage === undefined
-      ? undefined
-      : (options.storageFactory ?? createS3GrantIssuer)(config.storage);
+    config.storage !== undefined
+      ? (options.storageFactory ?? createS3GrantIssuer)(config.storage)
+      : blobStorageConfig === undefined
+        ? undefined
+        : (options.blobStorageFactory ?? createVercelBlobGrantIssuer)(blobStorageConfig);
   // Built for the same reason and on the same terms as the storage issuer:
   // constructing it opens no connection, the first request is the first
   // outbound call a client asks for, and the deployment token stays inside
@@ -211,6 +242,35 @@ export async function createConfiguredPairedDeviceLifecycle(
     githubConfig === undefined
       ? undefined
       : (options.githubFactory ?? createGitHubRestGateway)(githubConfig);
+  // The queue and its results. Built whenever the migration gate ran, because
+  // the producers live on the material service and must record what a library
+  // will need converted even in a deployment that runs no worker of its own --
+  // a second process, or a later one, is what consumes the rows.
+  const conversionStore = new DurableConversionStore({
+    database,
+    ...(config.conversion === undefined
+      ? {}
+      : { leaseMs: config.conversion.leaseMs, maxAttempts: config.conversion.maxAttempts }),
+  });
+  // The worker needs three things at once: a queue, a bucket it can read and
+  // write with the server's own credential, and a renderer. Without object
+  // storage there are no bytes to convert, so the worker exists exactly when
+  // both `HQ_CONTROL_PLANE_CONVERSION_WORKER` and the storage group are set.
+  const conversionConfig = config.conversion;
+  const conversionWorker =
+    conversionConfig === undefined || config.storage === undefined
+      ? undefined
+      : new MaterialConversionWorker({
+          store: conversionStore,
+          objects: createS3ObjectStore(config.storage),
+          renderer: createFfmpegRenditionRenderer({
+            ffmpegPath: conversionConfig.ffmpegPath,
+            ffprobePath: conversionConfig.ffprobePath,
+            timeoutMs: conversionConfig.renderTimeoutMs,
+          }),
+          maxSourceBytes: conversionConfig.maxSourceBytes,
+          pollIntervalMs: conversionConfig.pollIntervalMs,
+        });
 
   return {
     runtime,
@@ -221,6 +281,7 @@ export async function createConfiguredPairedDeviceLifecycle(
     coordination,
     storageConfigured: storage !== undefined,
     githubConfigured: github !== undefined,
+    ...(conversionWorker === undefined ? {} : { conversionWorker }),
     hub,
     syncService: createPairedDeviceSyncService({
       runtime,
@@ -244,11 +305,18 @@ export async function createConfiguredPairedDeviceLifecycle(
     settingsService: createSettingsService({
       runtime,
       store: settingsStore,
+      layouts: layoutStore,
       schema: controlPlaneSettingsSchema(),
     }),
+    // The rendition port is supplied unconditionally: reading a rendition and
+    // queueing one need only the database, so a deployment whose worker runs
+    // elsewhere still fills the queue and still serves whatever that worker
+    // built. With no rendition row the preview path is byte-for-byte what it
+    // was -- the original object, reported as the original.
     materialService: createMaterialService({
       runtime,
       store: materialStore,
+      renditions: conversionStore,
       ...(storage === undefined ? {} : { storage }),
     }),
     // The measurement store is always supplied here, because reaching this

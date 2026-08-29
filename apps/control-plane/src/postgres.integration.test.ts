@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 
 import { createClient } from '@connectrpc/connect';
@@ -6,6 +6,7 @@ import { createGrpcWebTransport } from '@connectrpc/connect-web';
 import { ControlPlaneService } from '@gremuchaya/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { DurableConversionStore } from './conversion/store.js';
 import type { SqlClient } from './db/database.js';
 import { readInstallationId } from './db/installation.js';
 import { DisposableDatabasePool, liveTestDatabaseUrl } from './db/liveDatabase.js';
@@ -717,6 +718,160 @@ describeIntegration('durable paired-device lifecycle against real PostgreSQL', (
     },
     networkTimeoutMs,
   );
+
+  /*
+   * The conversion queue's one irreducibly concurrent claim.
+   *
+   * `conversion/store.test.ts` asserts that `FOR UPDATE ... SKIP LOCKED` is in
+   * the statement, which proves nothing about what several workers do at the
+   * same instant.
+   *
+   * Eight claims and eight queued jobs, not two and one, and the difference is
+   * the whole test. Every claim orders by `created_at` and takes `LIMIT 1`, so
+   * without `SKIP LOCKED` all eight select the same first row, serialize on its
+   * lock, and each in turn re-checks a qual that still matches -- eight claims
+   * of one job at attempts one through eight, seven of them rendering work
+   * another worker owns. With it, each takes the next unlocked row. Two
+   * concurrent claims against one row could not tell the two apart: they only
+   * overlap if the second statement reaches the server before the first
+   * commits, and that is a race the test would sometimes lose in the direction
+   * of passing.
+   */
+  it(
+    'hands eight queued conversion jobs to eight concurrent workers, one each',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const kinds = ['1080p', '720p', '480p', 'thumbnail', 'k5', 'k6', 'k7', 'k8'];
+      const queued = await queueConversionJobs(owner.groupId, kinds);
+      const store = new DurableConversionStore({ database });
+
+      const claims = await Promise.all(kinds.map(() => store.claimNextJob()));
+
+      const claimed = claims.filter((claim) => claim !== undefined);
+      expect(claimed).toHaveLength(kinds.length);
+      // Distinct rows: the property `SKIP LOCKED` exists to provide.
+      expect(new Set(claimed.map((claim) => claim.jobId)).size).toBe(kinds.length);
+      expect(new Set(claimed.map((claim) => claim.variant))).toEqual(new Set(kinds));
+      // One increment each. A row claimed twice would come back at attempt two
+      // and would have broken the fence for whichever worker holds attempt one.
+      expect(claimed.every((claim) => claim.attempt === 1)).toBe(true);
+      const rows = await database.query<{ state: string; attempt: number }>({
+        text: 'SELECT state, attempt FROM conversion_jobs WHERE version_id = $1',
+        values: [queued.versionId],
+      });
+      expect(rows.map((row) => row.state)).toEqual(kinds.map(() => 'RUNNING'));
+      expect(rows.every((row) => row.attempt === 1)).toBe(true);
+    },
+    networkTimeoutMs,
+  );
+
+  /*
+   * The other half of the same argument, on the write side. Two workers that
+   * both believe they hold the job -- the stale one and the one that took it
+   * over -- must not both record a rendition. The attempt fence decides.
+   */
+  it(
+    'lets only the current attempt record a rendition for one job',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const queued = await queueOneConversionJob(owner.groupId);
+      const store = new DurableConversionStore({ database, leaseMs: 1 });
+
+      const stale = await store.claimNextJob();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const live = await store.claimNextJob();
+      expect(live?.jobId).toBe(stale?.jobId);
+      expect(live?.attempt).toBe(2);
+
+      const [liveRecorded, staleRecorded] = await Promise.all([
+        store.completeJob(live ?? unclaimed(), {
+          storageKey: `renditions/${owner.groupId}/${queued.contentHash}/720p.mp4`,
+          mimeType: 'video/mp4',
+          byteSize: 4_096n,
+          width: 1280,
+          height: 720,
+        }),
+        store.completeJob(stale ?? unclaimed(), {
+          storageKey: `renditions/${owner.groupId}/${queued.contentHash}/720p.mp4`,
+          mimeType: 'video/mp4',
+          byteSize: 8n,
+          width: 4,
+          height: 4,
+        }),
+      ]);
+
+      expect(liveRecorded).toBe(true);
+      expect(staleRecorded).toBe(false);
+      const renditions = await database.query<{ width: number; byte_size: string }>({
+        text: 'SELECT width, byte_size::text AS byte_size FROM material_renditions WHERE version_id = $1',
+        values: [queued.versionId],
+      });
+      expect(renditions).toHaveLength(1);
+      expect(renditions[0]?.width).toBe(1280);
+    },
+    networkTimeoutMs,
+  );
+
+  /**
+   * The smallest library a conversion job can point at: one object, one
+   * material, one version and one PENDING job per named kind. Written with raw
+   * statements rather than through `MaterialService`, because what is under
+   * test is the claim, not the upload lifecycle that produced the row.
+   */
+  async function queueConversionJobs(
+    groupId: string,
+    kinds: readonly string[],
+  ): Promise<{
+    readonly jobIds: readonly string[];
+    readonly versionId: string;
+    readonly contentHash: string;
+  }> {
+    const contentHash = `${uniqueSuffix()}${uniqueSuffix()}${uniqueSuffix()}${uniqueSuffix()}`;
+    const materialId = randomUUID();
+    const versionId = randomUUID();
+    const jobIds = kinds.map(() => randomUUID());
+    await database.query({
+      text: `INSERT INTO material_objects (group_id, content_hash, byte_size, storage_key, reference_count)
+             VALUES ($1, $2, 1048576, $3, 1)`,
+      values: [groupId, contentHash, `materials/${groupId}/${contentHash}`],
+    });
+    await database.query({
+      text: `INSERT INTO materials (
+               id, group_id, display_name, category, mime_type, byte_size,
+               content_hash, status, current_version_id
+             ) VALUES ($1, $2, 'Съёмка', 'VIDEO', 'video/mp4', 1048576, $3, 'READY', $4)`,
+      values: [materialId, groupId, contentHash, versionId],
+    });
+    await database.query({
+      text: `INSERT INTO material_versions (
+               id, material_id, sequence, content_hash, mime_type, byte_size, original_file_name
+             ) VALUES ($1, $2, 1, $3, 'video/mp4', 1048576, 'take.mov')`,
+      values: [versionId, materialId, contentHash],
+    });
+    for (const [index, kind] of kinds.entries()) {
+      await database.query({
+        text: `INSERT INTO conversion_jobs (id, group_id, material_id, version_id, kind, state)
+               VALUES ($1, $2, $3, $4, $5, 'PENDING')`,
+        values: [jobIds[index] ?? '', groupId, materialId, versionId, kind],
+      });
+    }
+    return { jobIds, versionId, contentHash };
+  }
+
+  async function queueOneConversionJob(groupId: string): Promise<{
+    readonly jobId: string;
+    readonly versionId: string;
+    readonly contentHash: string;
+  }> {
+    const queued = await queueConversionJobs(groupId, ['720p']);
+    return { jobId: queued.jobIds[0] ?? '', ...queued };
+  }
+
+  function unclaimed(): never {
+    throw new Error('expected a claimed conversion job');
+  }
 
   function createRuntime(): DurablePairedDeviceRuntime {
     return new DurablePairedDeviceRuntime({ database, tokenPepper });

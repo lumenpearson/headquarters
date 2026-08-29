@@ -46,11 +46,20 @@ export async function startControlPlane(
     server.once('error', rejectListening);
     server.listen(config.port, config.host, resolveListening);
   });
+  // Started after the server is listening, not during composition: a
+  // deployment whose port is already taken must fail without having spawned an
+  // ffmpeg process, and a startup error must not leave a polling loop behind.
+  const conversionWorker = collaborators.conversionWorker;
+  conversionWorker?.start();
 
   return {
     server,
     publishGroupEvent: (event: GroupEventPublication) => realtime.publish(event),
     close: async () => {
+      // Before the sockets: `stop` awaits the pass in flight, which is holding
+      // a temporary directory and possibly an ffmpeg process, and a shutdown
+      // that raced it would leave both behind.
+      await conversionWorker?.stop();
       await realtime.close();
       const closed = new Promise<void>((resolveClose, rejectClose) =>
         server.close((error) => (error === undefined ? resolveClose() : rejectClose(error))),

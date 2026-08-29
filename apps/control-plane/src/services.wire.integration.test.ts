@@ -113,10 +113,20 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
         'redis',
         'storage',
         'github',
+        'conversion',
       ]);
       expect(capabilities.capabilities).toContainEqual({
         $typeName: 'gremuchaya.control.v1.Capability',
         name: 'materials.storage-grants',
+        version: 'v1',
+        enabled: false,
+      });
+      // This deployment configures no bucket and no worker, so no variant can
+      // ever be built and the quality menu is told so rather than offering
+      // four entries that all resolve to the original.
+      expect(capabilities.capabilities).toContainEqual({
+        $typeName: 'gremuchaya.control.v1.Capability',
+        name: 'materials.rendition-pipeline',
         version: 'v1',
         enabled: false,
       });

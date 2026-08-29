@@ -684,3 +684,85 @@ describe('GitHub egress configuration', () => {
     expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_GITHUB_TOKEN: '  ' }).github).toBeUndefined();
   });
 });
+
+describe('conversion pipeline configuration', () => {
+  it('leaves conversion absent unless the worker is explicitly switched on', () => {
+    // The default is what every deployment before this pipeline behaved as: the
+    // ladder is queued, nothing consumes it, and every preview is the original.
+    expect(loadControlPlaneConfig({}).conversion).toBeUndefined();
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_FFMPEG_PATH: '/opt/ffmpeg' }).conversion,
+    ).toBeUndefined();
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_WORKER: 'false' }).conversion,
+    ).toBeUndefined();
+  });
+
+  it('carries the executables and the bounds the worker spends', () => {
+    const conversion = loadControlPlaneConfig({
+      HQ_CONTROL_PLANE_CONVERSION_WORKER: 'true',
+      HQ_CONTROL_PLANE_FFMPEG_PATH: 'C:\\ffmpeg\\bin\\ffmpeg.exe',
+      HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS: '600',
+      HQ_CONTROL_PLANE_CONVERSION_TIMEOUT_SECONDS: '300',
+      HQ_CONTROL_PLANE_CONVERSION_POLL_SECONDS: '2',
+      HQ_CONTROL_PLANE_CONVERSION_MAX_ATTEMPTS: '5',
+      HQ_CONTROL_PLANE_CONVERSION_MAX_SOURCE_MEGABYTES: '2048',
+    }).conversion;
+
+    expect(conversion).toEqual({
+      ffmpegPath: 'C:\\ffmpeg\\bin\\ffmpeg.exe',
+      ffprobePath: 'ffprobe',
+      leaseMs: 600_000,
+      maxAttempts: 5,
+      pollIntervalMs: 2_000,
+      renderTimeoutMs: 300_000,
+      maxSourceBytes: 2_147_483_648n,
+    });
+  });
+
+  it('defaults to whatever is on PATH and to bounds a shoot can live with', () => {
+    const conversion = loadControlPlaneConfig({
+      HQ_CONTROL_PLANE_CONVERSION_WORKER: 'true',
+    }).conversion;
+
+    expect(conversion?.ffmpegPath).toBe('ffmpeg');
+    expect(conversion?.ffprobePath).toBe('ffprobe');
+    expect(conversion?.leaseMs).toBe(300_000);
+    // The render budget fits inside the lease, so a healthy slow transcode is
+    // never taken over while it is still running.
+    expect(conversion?.renderTimeoutMs).toBeLessThan(conversion?.leaseMs ?? 0);
+  });
+
+  it('refuses a render budget that would outlive its own lease', () => {
+    expect(() =>
+      loadControlPlaneConfig({
+        HQ_CONTROL_PLANE_CONVERSION_WORKER: 'true',
+        HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS: '60',
+        HQ_CONTROL_PLANE_CONVERSION_TIMEOUT_SECONDS: '120',
+      }),
+    ).toThrow('must not exceed HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS');
+  });
+
+  it('bounds every value, and says so before the worker is ever switched on', () => {
+    // Parsed even with the worker off, so a nonsense bound is refused at
+    // startup rather than at the moment an operator turns the worker on.
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS: '5' }),
+    ).toThrow('HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS must be an integer between 30 and 14400');
+    expect(() => loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_MAX_ATTEMPTS: '0' })).toThrow(
+      'must be an integer between 1 and 10',
+    );
+    expect(() => loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_POLL_SECONDS: '0' })).toThrow(
+      'must be an integer between 1 and 600',
+    );
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_MAX_SOURCE_MEGABYTES: '0' }),
+    ).toThrow('must be an integer between 1 and 524288');
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_FFMPEG_PATH: 'ffmpeg\n-rm -rf' }),
+    ).toThrow('must be an executable name or path on one line');
+    expect(() => loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_WORKER: 'yes' })).toThrow(
+      'must be true or false',
+    );
+  });
+});

@@ -163,6 +163,32 @@ export interface MaterialEventRecord {
   readonly sequence: bigint;
 }
 
+/**
+ * How the configured object store wants an upload split, decided *before* the
+ * store plans anything.
+ *
+ * The plan used to be fixed here from the declared size alone, and the issuer
+ * was consulted afterwards. That order is safe only while every issuer can
+ * address a part: an issuer that signs one address for the whole object would
+ * be handed five parts and five callers would PUT five slices to one URL, each
+ * overwriting the last, and the finished object would be the final slice with
+ * the declared hash of the whole file. Nothing would report an error until the
+ * read-back, and in a deployment without one, never. Correction C48 measured
+ * that trap and mandated this order: the issuer declares first, the store plans
+ * second.
+ *
+ * `whole-object` carries its own ceiling because a single request has one, and
+ * a platform that does not publish it leaves the deployment to state what it
+ * will accept. Refusing above it is the honest answer: the alternative is an
+ * upload that begins, reserves a material, and fails at the last byte.
+ */
+export type UploadPartPlan =
+  | { readonly mode: 'multipart' }
+  | { readonly mode: 'whole-object'; readonly maxObjectBytes: bigint };
+
+/** What every S3-compatible issuer wants, and what an unset plan means. */
+export const multipartUploadPlan: UploadPartPlan = { mode: 'multipart' };
+
 export interface BeginUploadInput {
   readonly groupId: string;
   /** A client-proposed identity, so a lost response does not orphan a material. */
@@ -174,6 +200,8 @@ export interface BeginUploadInput {
   readonly totalSize: bigint;
   readonly contentHash: string;
   readonly metadata?: Readonly<Record<string, string>>;
+  /** The configured issuer's part plan; absent means multipart, as it always was. */
+  readonly partPlan?: UploadPartPlan;
 }
 
 export interface BeginUploadOutcome {
@@ -192,6 +220,8 @@ export interface CreateMaterialVersionInput {
   readonly mimeType: string;
   readonly totalSize: bigint;
   readonly contentHash: string;
+  /** The configured issuer's part plan; absent means multipart, as it always was. */
+  readonly partPlan?: UploadPartPlan;
 }
 
 export interface CreateMaterialVersionOutcome {
@@ -894,7 +924,7 @@ export class DurableMaterialStore {
     const uploadId = this.#newId();
     const versionId = this.#newId();
     const chunkSize = chunkSizeFor(totalSize, this.#uploadChunkSize);
-    const parts = planUploadParts(totalSize, chunkSize);
+    const parts = planUploadParts(totalSize, chunkSize, input.partPlan ?? multipartUploadPlan);
     const storageKey = storageKeyFor(groupId, contentHash);
 
     const receipt = await this.claim('BEGIN_MATERIAL_UPLOAD', mutation, now, [
@@ -1404,7 +1434,7 @@ export class DurableMaterialStore {
     const uploadId = this.#newId();
     const versionId = this.#newId();
     const chunkSize = chunkSizeFor(totalSize, this.#uploadChunkSize);
-    const parts = planUploadParts(totalSize, chunkSize);
+    const parts = planUploadParts(totalSize, chunkSize, input.partPlan ?? multipartUploadPlan);
     const storageKey = storageKeyFor(groupId, contentHash);
 
     const receipt = await this.claim('CREATE_MATERIAL_VERSION', mutation, now, [
@@ -2401,8 +2431,32 @@ export function storageKeyFor(groupId: string, contentHash: string): string {
  * The chunk size grows rather than the part count when a file is large, because
  * every object store bounds the number of parts in a multipart upload and none
  * of them bounds the size of one.
+ *
+ * The plan comes from the configured issuer and defaults to multipart, which is
+ * what every S3-compatible store wants and what this function always did. An
+ * issuer that declines part descriptors gets exactly one part: see
+ * {@link UploadPartPlan} for why planning more would corrupt the object rather
+ * than fail.
  */
-export function planUploadParts(totalSize: bigint, chunkSize: number): readonly UploadPartRecord[] {
+export function planUploadParts(
+  totalSize: bigint,
+  chunkSize: number,
+  plan: UploadPartPlan = multipartUploadPlan,
+): readonly UploadPartRecord[] {
+  if (plan.mode === 'whole-object') {
+    // One part, covering the whole object, because the issuer signs one address
+    // for it. The ceiling is checked here rather than at the grant, so a file
+    // this deployment cannot store in one request is refused before a material
+    // row exists for it.
+    if (totalSize > plan.maxObjectBytes) {
+      throw new PairedDeviceRuntimeError(
+        'INVALID_ARGUMENT',
+        `total_size exceeds the ${plan.maxObjectBytes.toString()} bytes this object store ` +
+          'accepts in a single upload request.',
+      );
+    }
+    return [{ partNumber: 1, offset: 0n, length: totalSize }];
+  }
   const parts: UploadPartRecord[] = [];
   const chunk = BigInt(chunkSize);
   let offset = 0n;

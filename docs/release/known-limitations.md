@@ -236,21 +236,50 @@ the code that makes it true, so the next reader can check rather than trust.
   in memory, and with no IndexedDB in the project a `FileSystemDirectoryHandle` cannot survive a
   reload. The directory must be picked again every browser session. Tauri and the localhost
   bridge are the persistent alternatives.
-- The desktop build does not start `apps/file-bridge` itself: no line in `apps/hq/src-tauri`
-  mentions it, so an operator who wants the bridge starts it separately.
+- The desktop shell can now supervise `apps/file-bridge` itself
+  (`apps/hq/src-tauri/src/file_bridge_supervisor.rs`), in the idiom
+  `media_gateway.rs` already uses for its `ffmpeg` workers: spawn, watch for
+  exit, restart with exponential backoff and jitter. It is opt-in and unset
+  by default — `HQ_FILE_BRIDGE_AUTOSTART_COMMAND` is the one gate, and with
+  it absent (every machine today) the module spawns nothing at all, so an
+  operator who wants the bridge still starts it separately unless that
+  variable is set. `HQ_FILE_BRIDGE_AUTOSTART_ARGS`, `_CWD` and `_ENV` (each a
+  JSON value) fill in arguments, a working directory and extra environment
+  variables such as `HQ_BRIDGE_CONFIG`. A malformed value disables autostart
+  rather than failing the shell, logged to stderr, because the bridge itself
+  is optional by ADR-0003 and a typo in an optional variable should not take
+  the rest of the app down with it.
 - Local production mount paths are intentionally uncommitted and configured per shoot machine.
 - `FREEZE` and `BLACKOUT` are one-way in the interface. `resetScene` is the only exit, which is
   what the runbook prescribes — but an operator reaching for a toggle will not find one.
-- **The desktop CSP cannot name an arbitrary LAN control plane.** `tauri.conf.json`'s
-  `connect-src` now admits loopback, `https://*.vercel.app` and `wss://*.vercel.app`, which
-  covers the deployed control plane and the socket. It cannot cover a control plane at an
-  address like `http://192.168.10.5:4100`: CSP wildcards only the leftmost label of a hostname
-  and cannot wildcard an IP address at all, so "any private range" is not expressible. The
-  address is blocked in the webview **before a request is made**, which reads as a network
-  failure rather than a policy one. Three ways out, in the order they cost: build the desktop
-  bundle with that address baked in (`tauri build --config`), put the LAN control plane behind
-  a name under a domain the CSP already admits, or route the traffic through a Tauri command so
-  the webview only ever talks to `ipc:` — the last is the R18-aligned answer and is not built.
+- **The desktop CSP cannot name an arbitrary LAN control plane, so the R18-aligned answer routes
+  that traffic through a Tauri command instead.** `tauri.conf.json`'s `connect-src` admits
+  loopback, `https://*.vercel.app` and `wss://*.vercel.app`, which covers the deployed control
+  plane and the socket, but cannot cover a control plane at an address like
+  `http://192.168.10.5:4100`: CSP wildcards only the leftmost label of a hostname and cannot
+  wildcard an IP address at all. `control_plane_http_request`
+  (`apps/hq/src-tauri/src/control_plane_proxy.rs`) is now registered for exactly that case: the
+  webview never addresses a LAN control plane directly, it calls this command over `ipc:` — which
+  the CSP already admits — and the native process makes the real request outside the CSP
+  entirely. `apps/hq/src/infrastructure/tauri/controlPlaneLanProxy.ts` is the client half,
+  handed to `createGrpcWebTransport` as its `fetch` override
+  (`apps/hq/src/infrastructure/controlPlane/transport.ts`): it steps aside to the real `fetch` for
+  every address the CSP already admits, and only routes through the command for a literal
+  private-use, loopback or link-local IPv4/IPv6 `http://` address, which is also everything the
+  Rust command itself will carry (no DNS name, no `https://`, no method beyond `GET`/`POST`) —
+  the client-side check is routing, not the security boundary, which is enforced again on the
+  Rust side independently. **What this does not cover:** a long-lived server-streaming RPC
+  (`WatchGroup`, `TimeSync`) is buffered start to finish before crossing back over `ipc:`, so it
+  only completes through this path once the peer closes the response on its own, not while it is
+  still streaming; and the realtime WebSocket channel does not use this command at all and is
+  still blocked by the same CSP gap for a LAN address, unaddressed by this change. The two
+  cheaper alternatives the previous text named still apply where they fit better: build the
+  desktop bundle with the address baked in (`tauri build --config`), or put the LAN control plane
+  behind a name under a domain the CSP already admits. **Not verified against the real WebView2
+  runtime** — this container has no Windows target; the Rust half is proven against a loopback
+  HTTP fixture (`cargo test --manifest-path apps/hq/src-tauri/Cargo.toml control_plane_proxy`) and
+  the TypeScript half against a mocked Tauri IPC bridge
+  (`controlPlaneLanProxy.test.ts`), not against a shipped installer.
 
 ## Verification that cannot be done here
 

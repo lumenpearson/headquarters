@@ -74,6 +74,19 @@ export interface ResolvedControlPlaneCollaborators {
    */
   readonly githubEgressEnabled?: boolean;
   /**
+   * Whether this process renders quality-ladder variants. Reported by
+   * `getCapabilities` as `materials.rendition-pipeline`, because a client that
+   * knows no variant will ever be built can say so in the quality menu instead
+   * of offering four entries that all resolve to the original.
+   */
+  readonly renditionPipelineEnabled?: boolean;
+  /**
+   * The rendition worker this process runs, so the transport that owns the
+   * process lifetime can start its polling loop once it is listening and stop
+   * it on shutdown. Absent whenever no worker was built.
+   */
+  readonly conversionWorker?: { start(): void; stop(): Promise<void> };
+  /**
    * What the health endpoint reports. It is captured at startup and never
    * probed: a health check that opened a network connection to Upstash would
    * make this endpoint fail for a reason that has nothing to do with whether
@@ -190,6 +203,16 @@ export function registerControlPlaneRoutes(
             version: 'v1',
             enabled: collaborators.githubEgressEnabled === true,
           },
+          // Read off the built worker for the same reason the two above are
+          // read off their collaborators: `GetPreviewGrant` answers on every
+          // plane, and on a plane with no worker every answer is the original
+          // object. A client told otherwise would offer a ladder nothing
+          // climbs.
+          {
+            name: 'materials.rendition-pipeline',
+            version: 'v1',
+            enabled: collaborators.renditionPipelineEnabled === true,
+          },
         ],
       };
     },
@@ -250,6 +273,10 @@ export async function resolveControlPlaneCollaborators(
     eventStore: lifecycle.eventStore,
     storageGrantsEnabled: lifecycle.storageConfigured,
     githubEgressEnabled: lifecycle.githubConfigured,
+    renditionPipelineEnabled: lifecycle.conversionWorker !== undefined,
+    ...(lifecycle.conversionWorker === undefined
+      ? {}
+      : { conversionWorker: lifecycle.conversionWorker }),
     dependencies: [
       {
         name: 'database',
@@ -296,6 +323,17 @@ export async function resolveControlPlaneCollaborators(
         detail: lifecycle.githubConfigured
           ? 'GitHub REST egress for issues, translation pull requests and pull-request status'
           : 'not configured; CreateIssue, CreateTranslationPullRequest and GetPullRequestStatus answer FAILED_PRECONDITION',
+      },
+      {
+        // Health is unauthenticated, so the detail names no path and no
+        // executable: what an operator needs from here is whether a preview
+        // variant can ever be anything other than the original object.
+        name: 'conversion',
+        configured: lifecycle.conversionWorker !== undefined,
+        detail:
+          lifecycle.conversionWorker === undefined
+            ? 'not configured; GetPreviewGrant serves the original object for every variant'
+            : 'rendition worker running; queued quality-ladder variants are rendered and served by GetPreviewGrant',
       },
     ],
     realtime: {

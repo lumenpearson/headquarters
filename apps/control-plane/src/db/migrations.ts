@@ -955,6 +955,124 @@ const telemetryDataSourcesAndSamples: Migration = {
   ],
 };
 
+/**
+ * What a finished conversion produced, and what stops two workers producing it
+ * twice.
+ *
+ * `conversion_jobs` has existed since 0001 and described the *work*: which
+ * version, which kind, which state, which lease. It has no place to record the
+ * *result*, so until this migration a completed transcode had nowhere to leave
+ * the key, the type and the measured dimensions of the object it wrote, and
+ * `GetPreviewGrant` had nothing to sign but the original. `material_renditions`
+ * is that place.
+ *
+ * Two constraints carry the concurrency argument rather than the application
+ * code:
+ *
+ * - `UNIQUE (version_id, variant)` makes a rendition the single fact it is.
+ *   Two workers that both finished the same variant converge on one row through
+ *   `ON CONFLICT`, instead of leaving the preview path to choose between two
+ *   keys with no rule for which is current.
+ * - `UNIQUE (version_id, kind)` on `conversion_jobs` makes enqueueing
+ *   idempotent. The producer runs on `CompleteUpload` and again on any
+ *   `GetPreviewGrant` that finds no rendition, so without it a menu opened
+ *   twice would queue the same transcode twice and two workers would spend two
+ *   ffmpeg processes on one output. The index is created here rather than in
+ *   0001 because no row has ever been written to the table -- nothing reached
+ *   it until the worker did -- so there is no existing duplicate for the unique
+ *   index to fail on.
+ *
+ * `byte_size > 0` rather than `>= 0`: a zero-byte rendition is a failed render
+ * that produced a file, and admitting one would let the preview path serve an
+ * empty object under a variant name. The failure belongs in the job's `detail`.
+ */
+const materialRenditions: Migration = {
+  id: '0012_material_renditions',
+  statements: [
+    sql(`CREATE TABLE IF NOT EXISTS material_renditions (
+      id uuid PRIMARY KEY,
+      group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      material_id uuid NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+      version_id uuid NOT NULL REFERENCES material_versions(id) ON DELETE CASCADE,
+      variant text NOT NULL,
+      storage_key text NOT NULL,
+      mime_type text NOT NULL,
+      byte_size bigint NOT NULL CHECK (byte_size > 0),
+      width integer NOT NULL DEFAULT 0 CHECK (width >= 0),
+      height integer NOT NULL DEFAULT 0 CHECK (height >= 0),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (version_id, variant)
+    )`),
+    sql(`CREATE INDEX IF NOT EXISTS material_renditions_material_idx
+      ON material_renditions (group_id, material_id)`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS conversion_jobs_version_kind_idx
+      ON conversion_jobs (version_id, kind)`),
+  ],
+};
+
+/**
+ * The receipt scope of the one mutation that fills `layout_documents` and
+ * `layout_versions`.
+ *
+ * Both tables have existed since migration 0001 and were reached by no code
+ * until `SettingsService.PutLayoutDocument`, because no method of the contract
+ * could fill them -- correction C32. Adding that method needs a receipt scope,
+ * and `mutation_receipts_scope_check` is a closed list, so the constraint is
+ * replaced with the same list plus one name. The outcome constraint is left
+ * exactly as migration 0008 wrote it: its `ELSE` branch already requires the
+ * `group_id` and `resource_id` a layout put records, which is the whole of what
+ * a replay of one needs.
+ *
+ * Replacing a CHECK rather than editing 0008 is the append-only rule this
+ * sequence runs on: a shipped migration is immutable, so the correction is the
+ * next number rather than a rewrite of an old one.
+ */
+const layoutDocumentReceiptScope: Migration = {
+  id: '0013_layout_document_receipt_scope',
+  statements: [
+    sql('ALTER TABLE mutation_receipts DROP CONSTRAINT IF EXISTS mutation_receipts_scope_check'),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_scope_check
+      CHECK (scope IN (
+        'CREATE_GROUP',
+        'CREATE_PAIRING_CODE',
+        'PAIR_DEVICE',
+        'REFRESH_DEVICE_SESSION',
+        'REVOKE_DEVICE',
+        'UPDATE_GROUP',
+        'JOIN_GROUP',
+        'LEAVE_GROUP',
+        'SET_DEVICE_ROLE',
+        'SET_AUTHORITY_MODE',
+        'SET_LEADER',
+        'PUBLISH_DOCUMENT_DELTA',
+        'PUBLISH_SESSION_COMMAND',
+        'APPLY_SETTINGS_PATCH',
+        'PUBLISH_SETTINGS_DRAFT',
+        'DISCARD_SETTINGS_DRAFT',
+        'RESET_SETTINGS',
+        'IMPORT_SETTINGS',
+        'REVERT_SETTINGS_VERSION',
+        'PUT_LAYOUT_DOCUMENT',
+        'BEGIN_MATERIAL_UPLOAD',
+        'COMPLETE_MATERIAL_UPLOAD',
+        'CANCEL_MATERIAL_UPLOAD',
+        'CREATE_MATERIAL_VERSION',
+        'UPDATE_MATERIAL_METADATA',
+        'TRASH_MATERIAL',
+        'RESTORE_MATERIAL',
+        'PURGE_MATERIAL',
+        'PUT_SIMULATION_PROFILE',
+        'DELETE_SIMULATION_PROFILE',
+        'ENQUEUE_INTEGRATION_JOB',
+        'PUT_GITHUB_INSTALLATION',
+        'PROPOSE_TRANSLATION',
+        'UPDATE_TRANSLATION_PROPOSAL'
+      ))`),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -967,6 +1085,8 @@ export const migrations: readonly Migration[] = [
   uploadSessionStorageUploadId,
   controlPlaneInstallation,
   telemetryDataSourcesAndSamples,
+  materialRenditions,
+  layoutDocumentReceiptScope,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

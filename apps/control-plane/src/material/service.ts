@@ -3,6 +3,8 @@ import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@conn
 import { materialV1 } from '@gremuchaya/protocol';
 import type { MaterialService } from '@gremuchaya/protocol';
 
+import { renditionLadderFor, renditionSpecFor } from '../conversion/ladder.js';
+import type { ConversionQueueOutcome, RenditionRecord } from '../conversion/store.js';
 import type { Awaitable, PairedDeviceLifecycle } from '../sync/lifecycle.js';
 import {
   MutationRequestIdError,
@@ -11,7 +13,7 @@ import {
 } from '../sync/receipts.js';
 import { PairedDeviceRuntimeError, type AuthenticatedDevice } from '../sync/runtime.js';
 
-import { storageKeyFor } from './store.js';
+import { multipartUploadPlan, storageKeyFor } from './store.js';
 import type {
   CompletedUploadPartInput,
   DurableMaterialStore,
@@ -22,6 +24,7 @@ import type {
   MaterialStatusName,
   MaterialVersionRecord,
   StoredObjectLocation,
+  UploadPartPlan,
   UploadPartRecord,
   UploadSessionRecord,
   UploadStateName,
@@ -153,6 +156,25 @@ export interface StoragePreviewGrant extends StorageGrant {
  * browser.
  */
 export interface StorageGrantIssuer {
+  /**
+   * How this issuer wants an upload split, read before the store plans a single
+   * part.
+   *
+   * It is declarative rather than a capability the service infers, because the
+   * failure it prevents is silent: an issuer that signs one address for the
+   * whole object, handed a five-part plan, would receive five PUTs to one URL
+   * and assemble an object equal to the last slice under the declared hash of
+   * the whole file. Correction C48 measured that trap; `UploadPartPlan`
+   * documents the order that closes it.
+   *
+   * Optional, and absent means `multipart`. Every issuer that existed before
+   * this field was added is S3-compatible and multipart is what it wants, so an
+   * absent value is the historically correct answer rather than a guess. An
+   * issuer that cannot address a part must both declare `whole-object` here and
+   * refuse a part it was not asked to sign -- declaring alone would leave the
+   * corruption one forgotten line away.
+   */
+  readonly uploadPartPlan?: UploadPartPlan;
   createMultipartUpload(target: StorageMultipartTarget): Awaitable<StorageMultipartHandle>;
   issueUploadPart(request: StorageUploadPartRequest): Awaitable<StorageGrant>;
   completeMultipartUpload(completion: StorageMultipartCompletion): Awaitable<void>;
@@ -168,12 +190,43 @@ export interface StorageGrantIssuer {
   issuePreview(request: StoragePreviewRequest): Awaitable<StoragePreviewGrant>;
 }
 
+/**
+ * The rendition half of the library, as this service needs it.
+ *
+ * Two operations and no more: read what has been built for a variant, and queue
+ * what has not. It is a narrow port rather than the conversion store itself so
+ * that a deployment with no worker -- and every deployment before this pipeline
+ * existed -- simply omits it, and `GetPreviewGrant` goes on signing the original
+ * for every variant exactly as it did.
+ */
+export interface MaterialRenditionPort {
+  readRendition(
+    authenticated: AuthenticatedDevice,
+    materialId: string,
+    versionId: string,
+    variant: string,
+  ): Awaitable<RenditionRecord | undefined>;
+  enqueueRenditions(
+    authenticated: AuthenticatedDevice,
+    materialId: string,
+    versionId: string,
+    variants: readonly string[],
+  ): Awaitable<ConversionQueueOutcome>;
+}
+
 export interface MaterialServiceOptions {
   /** Authentication only: every material authorization decision is made in SQL. */
   readonly runtime: PairedDeviceLifecycle;
   readonly store: DurableMaterialStore;
   /** Absent until a bucket is configured; see the note on this module. */
   readonly storage?: StorageGrantIssuer;
+  /**
+   * Absent until the conversion pipeline is configured. Without it the quality
+   * ladder is what it has always been: a menu whose every entry resolves to the
+   * stored object, which the grant reports honestly by carrying the original's
+   * own MIME type and no dimensions.
+   */
+  readonly renditions?: MaterialRenditionPort;
   /** How often `WatchMaterialEvents` re-reads `materials.updated_at`. */
   readonly watchPollIntervalMs?: number;
   readonly watchBatchSize?: number;
@@ -265,6 +318,10 @@ export function createMaterialService(
                 totalSize: request.totalSize,
                 contentHash: request.contentHash,
                 metadata: request.metadata,
+                // The issuer is asked before a single part is planned. See
+                // `UploadPartPlan`: the reverse order silently corrupts an
+                // object whenever the issuer cannot address a part.
+                partPlan: storage.uploadPartPlan ?? multipartUploadPlan,
               },
               ...mutation,
             ),
@@ -320,6 +377,19 @@ export function createMaterialService(
               completedParts,
               ...mutation,
             ),
+        );
+        // The ladder is queued after the version exists, never before: a job
+        // pointing at a version no statement has recorded would be claimed,
+        // find nothing to convert, and burn an attempt. It is best-effort for
+        // the opposite reason -- the bytes are stored and the version is
+        // recorded, so an unreachable queue must not turn a finished upload
+        // into a failed RPC. Nothing is lost: `GetPreviewGrant` queues the
+        // same rung the first time anyone opens the menu.
+        await queueRenditionLadder(
+          options,
+          authenticated,
+          completed.material.id,
+          completed.version,
         );
         return {
           material: toProtocolMaterial(completed.material),
@@ -377,6 +447,7 @@ export function createMaterialService(
                 mimeType: request.mimeType,
                 totalSize: request.totalSize,
                 contentHash: request.contentHash,
+                partPlan: storage.uploadPartPlan ?? multipartUploadPlan,
               },
               ...mutation,
             ),
@@ -501,19 +572,47 @@ export function createMaterialService(
       });
     },
 
+    /**
+     * Signs the rendition a variant names, or the original when none is built.
+     *
+     * The variant used to be carried into `issuePreview` and dropped there,
+     * because there was nothing on the server it could select. Now it selects a
+     * `material_renditions` row, and the key, type and measured dimensions of
+     * that row are what the grant reports; a client tells a built variant from
+     * the original by exactly those fields.
+     *
+     * When nothing is built and the variant is a rung of the ladder, this queues
+     * it. Reading a menu is the moment a deployment learns which variants anyone
+     * actually wants, and queueing here means a library uploaded before the
+     * pipeline existed fills in as it is used rather than needing a backfill.
+     */
     async getPreviewGrant(request, context) {
       return withRuntimeErrors(async () => {
         const storage = requireStorage(options.storage, 'preview');
         const authenticated = await authenticate(options.runtime, context);
         const location = await resolveLocation(options.store, authenticated, request);
-        const grant = await storage.issuePreview({ ...location, variant: request.variant });
+        const rendition = await resolveRendition(options, authenticated, location, request.variant);
+        // The issuer signs whichever key it is handed; the decision of which
+        // key that is belongs here, where membership and the variant are both
+        // already known.
+        const grant = await storage.issuePreview(
+          rendition === undefined
+            ? { ...location, variant: request.variant }
+            : {
+                ...location,
+                storageKey: rendition.storageKey,
+                mimeType: rendition.mimeType,
+                byteSize: rendition.byteSize,
+                variant: request.variant,
+              },
+        );
         return {
           grant: {
             url: requireGrantUrl(grant.url),
             expiresAt: timestampFromDate(grant.expiresAt),
-            mimeType: grant.mimeType ?? location.mimeType,
-            width: grant.width ?? 0,
-            height: grant.height ?? 0,
+            mimeType: grant.mimeType ?? rendition?.mimeType ?? location.mimeType,
+            width: grant.width ?? rendition?.width ?? 0,
+            height: grant.height ?? rendition?.height ?? 0,
           },
         };
       });
@@ -792,6 +891,62 @@ async function resolveMaterialObject(
     storageKey: storageKeyFor(found.material.groupId, found.material.contentHash),
     contentHash: found.material.contentHash,
   };
+}
+
+/**
+ * The rendition for a variant, queueing it when the ladder declares one and
+ * nothing has been built.
+ *
+ * The empty variant is the original by definition and never reaches the queue.
+ * A variant that is not a rung is never queued either, which is what keeps this
+ * read RPC from being a way to create unbounded rows: the only strings that can
+ * produce a job are the four in {@link renditionLadderFor}'s own table, and the
+ * unique index makes a second request for the same one insert nothing.
+ *
+ * The queueing is best-effort and deliberately does not change the answer. A
+ * grant must be issued for the original whether or not the job was accepted;
+ * making a preview fail because a queue insert failed would trade a working
+ * fallback for an error.
+ */
+async function resolveRendition(
+  options: MaterialServiceOptions,
+  authenticated: AuthenticatedDevice,
+  location: StoredObjectLocation,
+  variant: string,
+): Promise<RenditionRecord | undefined> {
+  const renditions = options.renditions;
+  const requested = variant.trim();
+  if (renditions === undefined || requested.length === 0) return undefined;
+  const existing = await renditions.readRendition(
+    authenticated,
+    location.materialId,
+    location.versionId,
+    requested,
+  );
+  if (existing !== undefined) return existing;
+  if (renditionSpecFor(location.mimeType, requested) === undefined) return undefined;
+  await Promise.resolve(
+    renditions.enqueueRenditions(authenticated, location.materialId, location.versionId, [
+      requested,
+    ]),
+  ).catch(() => undefined);
+  return undefined;
+}
+
+/** Queues every rung the version's own type declares; see the call site. */
+async function queueRenditionLadder(
+  options: MaterialServiceOptions,
+  authenticated: AuthenticatedDevice,
+  materialId: string,
+  version: MaterialVersionRecord,
+): Promise<void> {
+  const renditions = options.renditions;
+  if (renditions === undefined) return;
+  const variants = renditionLadderFor(version.mimeType).map((spec) => spec.variant);
+  if (variants.length === 0) return;
+  await Promise.resolve(
+    renditions.enqueueRenditions(authenticated, materialId, version.id, variants),
+  ).catch(() => undefined);
 }
 
 function resolveLocation(

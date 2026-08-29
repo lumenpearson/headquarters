@@ -77,8 +77,15 @@ assuming that an incomplete backend is ready.
 - The typed bootstrap surface has no client. `@gremuchaya/protocol` is imported
   by exactly two files in `apps/hq`, both for `FileBridgeService`; nothing in
   the application calls `Health`, `GetCapabilities` or any control-plane RPC.
-- `layout_documents`, `layout_versions` and `conversion_jobs` are created by
-  the migrations and reached by no method in the current contract.
+- `conversion_jobs` is created by the migrations and reached by no method in the
+  current contract. `layout_documents` and `layout_versions` are reached by
+  `SettingsService.PutLayoutDocument`, `GetLayoutDocument` and
+  `ListLayoutHistory`, added to `settings.proto` because no other method could
+  fill them: a `PublishDocumentDelta` carrying
+  `SYNCHRONIZED_DOCUMENT_TYPE_LAYOUT` is a CRDT delta, and merging one needs an
+  engine this control plane does not depend on, so it lands in `sync_snapshots`
+  instead. The layout methods are a whole-document put with an expected
+  revision, its read, and its version log.
 
 ## Verification
 

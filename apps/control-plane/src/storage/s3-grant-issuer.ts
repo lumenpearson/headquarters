@@ -1,7 +1,3 @@
-import { createHash } from 'node:crypto';
-
-import { blake3 } from '@noble/hashes/blake3.js';
-
 import type { ControlPlaneStorageConfig } from '../config.js';
 import type {
   StorageGrant,
@@ -19,6 +15,7 @@ import type {
 } from '../material/service.js';
 import type { Awaitable } from '../sync/lifecycle.js';
 
+import { digestStream, parseDeclaredDigest } from './object-digest.js';
 import { emptyPayloadHash, sha256Hex } from './sigv4.js';
 
 /**
@@ -261,15 +258,11 @@ export const createS3GrantIssuer: StorageGrantIssuerFactory = (config, options =
         );
       }
 
-      const digest = createDigest(declared.algorithm);
-      let byteSize = 0n;
-      for await (const chunk of chunks) {
-        digest.update(chunk);
-        byteSize += BigInt(chunk.byteLength);
+      const digest = await digestStream(declared.algorithm, chunks);
+      if (digest.byteSize !== request.byteSize) {
+        return { outcome: 'size-mismatch', actualByteSize: digest.byteSize };
       }
-      if (byteSize !== request.byteSize)
-        return { outcome: 'size-mismatch', actualByteSize: byteSize };
-      if (digest.hex() !== declared.hex) return { outcome: 'hash-mismatch' };
+      if (digest.hex !== declared.hex) return { outcome: 'hash-mismatch' };
       return { outcome: 'verified' };
     },
 
@@ -284,10 +277,13 @@ export const createS3GrantIssuer: StorageGrantIssuerFactory = (config, options =
 
     issuePreview(request: StoragePreviewRequest): StoragePreviewGrant {
       const url = objectUrl(config, request.storageKey);
-      // Inline, so the preview renders where it is shown. No rendered variant
-      // exists on the server — `conversion_jobs` is reached by no code — so
-      // every variant is the original object, and the grant says so by
-      // reporting the original's MIME type.
+      // Inline, so the preview renders where it is shown. The issuer signs
+      // whichever key it is handed and decides nothing about which that is:
+      // `getPreviewGrant` resolves the variant to a `material_renditions` row
+      // and passes the rendition's key and type when one has been built, or the
+      // original's when none has. Reporting `request.mimeType` back is what
+      // lets the client tell the two apart -- a grant whose type is the stored
+      // object's own type is the original served under another name.
       url.searchParams.set('response-content-disposition', 'inline');
       url.searchParams.set('response-content-type', request.mimeType);
       return { ...presignGrant('GET', url), mimeType: request.mimeType };
@@ -300,8 +296,12 @@ export const createS3GrantIssuer: StorageGrantIssuerFactory = (config, options =
  * split on `/` and each segment percent-encoded, so a content hash's `:` is a
  * path character and nothing else. The signer re-derives the canonical path
  * from the decoded form, so the encoding here only has to be a valid one.
+ *
+ * Exported so the conversion object store addresses the bucket by this function
+ * rather than by a second copy of the rule: two addressing implementations that
+ * disagree about encoding would sign one path and fetch another.
  */
-function objectUrl(config: ControlPlaneStorageConfig, storageKey: string): URL {
+export function objectUrl(config: ControlPlaneStorageConfig, storageKey: string): URL {
   const endpoint = new URL(config.endpoint);
   const encodedKey = storageKey
     .split('/')
@@ -338,66 +338,6 @@ function escapeXml(value: string): string {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
-}
-
-/** The digest algorithms a declared `content_hash` may name. */
-type DeclaredDigestAlgorithm = 'blake3' | 'sha256';
-
-interface DeclaredDigest {
-  readonly algorithm: DeclaredDigestAlgorithm;
-  readonly hex: string;
-}
-
-/**
- * Reads the algorithm and the value out of a declared `content_hash`.
- *
- * Every client this repository ships computes a bare lowercase hexadecimal
- * BLAKE3 digest — `BrowserBlake3Hasher` in `apps/hq` and `MaterialMirror` in
- * `apps/file-bridge`, which validates `^[a-f0-9]{64}$` before it accepts one —
- * so an unprefixed 64-character digest is BLAKE3 and nothing else. The two
- * explicit prefixes exist so a future client can name what it computed instead
- * of relying on that convention.
- *
- * Anything else returns `undefined`, which the caller turns into a refusal.
- * `material_objects.content_hash` accepts a wider alphabet than this — it is a
- * storage-key-safe string, not a digest grammar — and the difference is the
- * point: a value the store will happily persist but nobody can recompute must
- * not reach a READY material.
- */
-function parseDeclaredDigest(contentHash: string): DeclaredDigest | undefined {
-  const normalized = contentHash.trim();
-  if (/^[0-9a-f]{64}$/u.test(normalized)) return { algorithm: 'blake3', hex: normalized };
-  const prefixed = /^(blake3|sha256):([0-9a-f]{64})$/u.exec(normalized);
-  const algorithm = prefixed?.[1];
-  const hex = prefixed?.[2];
-  if (algorithm === undefined || hex === undefined) return undefined;
-  return { algorithm: algorithm === 'sha256' ? 'sha256' : 'blake3', hex };
-}
-
-interface IncrementalDigest {
-  update(chunk: Uint8Array): void;
-  hex(): string;
-}
-
-/**
- * SHA-256 comes from `node:crypto`, which streams it natively; BLAKE3 has no
- * OpenSSL implementation to borrow, so it comes from `@noble/hashes`, the same
- * package both upload clients hash with. Using the clients' own implementation
- * is what makes agreement here mean agreement there.
- */
-function createDigest(algorithm: DeclaredDigestAlgorithm): IncrementalDigest {
-  if (algorithm === 'sha256') {
-    const hash = createHash('sha256');
-    return {
-      update: (chunk) => void hash.update(chunk),
-      hex: () => hash.digest('hex'),
-    };
-  }
-  const hash = blake3.create();
-  return {
-    update: (chunk) => void hash.update(chunk),
-    hex: () => Buffer.from(hash.digest()).toString('hex'),
-  };
 }
 
 /** Bucket error bodies can be large; a bounded slice is enough to diagnose. */
