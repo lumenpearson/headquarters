@@ -92,7 +92,7 @@ describeIntegration('durable group administration against real PostgreSQL', () =
       // announcement reads.
       const [first, second] = await Promise.all([rename(), rename()]);
 
-      expect([first.replayed, second.replayed].toSorted()).toEqual([false, true]);
+      expect([first.replayed, second.replayed].sort()).toEqual([false, true]);
       expect(second.group.revision).toBe(first.group.revision);
       const stored = await database.query<{ revision: string }>({
         text: 'SELECT revision::text AS revision FROM groups WHERE id = $1',

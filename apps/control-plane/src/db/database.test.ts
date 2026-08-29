@@ -11,7 +11,11 @@ import {
 describe('lazy database handle', () => {
   it('does not create a driver client until a database operation is requested', async () => {
     const client: SqlClient = {
-      query: async () => [{ ok: 1 }],
+      // The port's `query` is generic in its row type, so a double answering one fixed
+      // shape satisfies it only through an explicit cast. The cast lives on the double,
+      // never on the port: widening `SqlClient` to please a test would weaken every caller.
+      query: async <Row extends Record<string, unknown>>() =>
+        [{ ok: 1 }] as unknown as readonly Row[],
       transaction: async () => undefined,
     };
     const factory = vi.fn<SqlClientFactory>(() => client);

@@ -27,6 +27,7 @@ import type { PresenceStore } from './presence-store.js';
 import { createPairedDeviceRealtimeAdmission } from './realtime-admission.js';
 import { createPairedDeviceSyncService } from './service.js';
 import { DurableSettingsStore } from '../settings/store.js';
+import { controlPlaneSettingsSchema } from '../settings/schema.js';
 import { createSettingsService } from '../settings/service.js';
 import { createS3GrantIssuer, type StorageGrantIssuerFactory } from '../storage/s3-grant-issuer.js';
 import { DurableSimulationProfileStore } from '../telemetry/store.js';
@@ -198,7 +199,15 @@ export async function createConfiguredPairedDeviceLifecycle(
     // No GitHub gateway is configured here for the same reason: it needs a
     // deployment secret this composition root does not hold. That is the honest
     // reduced mode, not a stub.
-    settingsService: createSettingsService({ runtime, store: settingsStore }),
+    // The schema is injected here rather than left absent: `GetSettingsSchema`
+    // needs no database, only the shared registry, so a deployment that reaches
+    // this point can always answer it. Leaving it out made a declared method
+    // answer `unimplemented` in every deployment there has ever been.
+    settingsService: createSettingsService({
+      runtime,
+      store: settingsStore,
+      schema: controlPlaneSettingsSchema(),
+    }),
     materialService: createMaterialService({
       runtime,
       store: materialStore,

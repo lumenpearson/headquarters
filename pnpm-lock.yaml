@@ -62,9 +62,15 @@ importers:
       '@gremuchaya/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@gremuchaya/settings-schema':
+        specifier: workspace:*
+        version: link:../../packages/settings-schema
       '@neondatabase/serverless':
         specifier: 1.1.0
         version: 1.1.0
+      '@noble/hashes':
+        specifier: 2.3.0
+        version: 2.3.0
       '@upstash/ratelimit':
         specifier: 2.0.8
         version: 2.0.8(@upstash/redis@1.38.2)

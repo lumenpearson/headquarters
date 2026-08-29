@@ -230,6 +230,7 @@ describe('configured paired-device lifecycle', () => {
       issueUploadPart: () => ({ url: 'https://materials.s3.example.test/x', expiresAt: fixedNow }),
       completeMultipartUpload: () => undefined,
       abortMultipartUpload: () => undefined,
+      verifyObject: () => ({ outcome: 'verified' as const }),
       issueDownload: () => ({ url: 'https://materials.s3.example.test/x', expiresAt: fixedNow }),
       issuePreview: () => ({ url: 'https://materials.s3.example.test/x', expiresAt: fixedNow }),
     }));

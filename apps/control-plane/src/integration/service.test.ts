@@ -39,7 +39,7 @@ describe('IntegrationService and the group credential', () => {
     await expect(
       service.createIssue?.(
         create(integrationV1.CreateIssueRequestSchema, {
-          draft: { repository: 'someone-else/private', title: 'Report', body: 'x' },
+          draft: { repository: 'someone-else/private', title: 'Report', bodyMarkdown: 'x' },
           confirmed: true,
         }),
         headers,
@@ -60,15 +60,17 @@ describe('IntegrationService and the group credential', () => {
       }),
     });
 
-    const failure = await service
-      .createIssue?.(
+    // The handler may answer synchronously, so the call is wrapped rather than
+    // assumed to be a promise before its rejection is captured.
+    const failure = await Promise.resolve(
+      service.createIssue?.(
         create(integrationV1.CreateIssueRequestSchema, {
-          draft: { repository: installedRepository, title: 'Report', body: 'x' },
+          draft: { repository: installedRepository, title: 'Report', bodyMarkdown: 'x' },
           confirmed: true,
         }),
         headers,
-      )
-      .catch((error: unknown) => error);
+      ),
+    ).catch((error: unknown) => error);
 
     expect(String(failure)).not.toContain('ghp_secret_value');
     expect(String(failure)).toContain('The GitHub request did not complete');
@@ -164,6 +166,7 @@ function scriptedStore(
     kind: 'CREATE_ISSUE',
     state: 'QUEUED',
     payload: {},
+    result: undefined,
     correlationId: '',
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -175,7 +178,10 @@ function scriptedStore(
     translationKey: 'overview.title',
     sourceValue: 'Сводка',
     proposedValue: 'Overview',
+    englishReference: 'Overview',
     placeholders: [],
+    transliteration: 'Svodka',
+    pullRequestUrl: '',
     revision: 1n,
     status: proposalStatus,
     createdAt: new Date(0),
@@ -194,10 +200,12 @@ function scriptedStore(
     readStatus: () =>
       Promise.resolve({
         provider: 'GITHUB',
-        connected: true,
+        configured: true,
         accountLabel: '',
-        repository: installedRepository,
-      } as IntegrationStatusRecord),
+        latestJobKind: 'CREATE_ISSUE',
+        latestJobState: 'QUEUED',
+        checkedAt: new Date(0),
+      } satisfies IntegrationStatusRecord),
   };
 }
 

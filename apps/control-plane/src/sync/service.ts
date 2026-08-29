@@ -6,6 +6,7 @@ import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@conn
 import { syncV1 } from '@gremuchaya/protocol';
 import type { SyncService } from '@gremuchaya/protocol';
 
+import { maxDocumentBodyBytes } from '../http-policy.js';
 import {
   defaultRealtimeReplayLimit,
   type DurableRealtimeEventStore,
@@ -62,6 +63,13 @@ export interface PairedDeviceServiceOptions {
    * to an unbounded log; every other mutation is bounded by the row it changes.
    */
   readonly coordination?: UpstashCoordination;
+  /**
+   * The document-payload ceiling `PublishDocumentDelta` and
+   * `GetDocumentSnapshot` refuse to cross, defaulting to
+   * {@link maxDocumentBodyBytes}. A Node deployment behind its own socket may
+   * raise it; a serverless one must not.
+   */
+  readonly maxDocumentBodyBytes?: number;
 }
 
 /**
@@ -78,6 +86,10 @@ export function createPairedDeviceSyncService(
   options: PairedDeviceServiceOptions,
 ): Partial<ServiceImpl<typeof SyncService>> {
   const verifyBootstrapSecret = requireBootstrapVerifier(options.verifyBootstrapSecret);
+  const documentBodyCeiling = positiveInteger(
+    options.maxDocumentBodyBytes ?? maxDocumentBodyBytes,
+    'maxDocumentBodyBytes',
+  );
 
   return {
     async createGroup(request, context) {
@@ -408,6 +420,13 @@ export function createPairedDeviceSyncService(
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
         assertEditor(authenticated);
+        // Before the rate-limit spend and before the append: an oversized
+        // delta must not consume a publication allowance it can never use.
+        assertDocumentBodyWithinCeiling(
+          request.delta.byteLength + request.stateVector.byteLength,
+          documentBodyCeiling,
+          'request',
+        );
         await assertPublicationAllowed(options, groupId, authenticated.device.id, 'document');
         const mutation = toMutationReceiptContext(request.context?.requestId);
         const appended = await events.appendAuthorized(
@@ -504,6 +523,16 @@ export function createPairedDeviceSyncService(
             'No snapshot has been recorded for this document.',
           );
         }
+        // A snapshot too large for the transport is refused with a
+        // control-plane error naming the size, rather than handed to a
+        // platform that answers `FUNCTION_PAYLOAD_TOO_LARGE` with nothing in
+        // it. The resync path stays stuck either way; only one of the two
+        // tells the operator why.
+        assertDocumentBodyWithinCeiling(
+          snapshot.snapshot.byteLength + snapshot.stateVector.byteLength,
+          documentBodyCeiling,
+          'reply',
+        );
         return {
           snapshot: snapshot.snapshot,
           stateVector: snapshot.stateVector,
@@ -805,6 +834,43 @@ async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
     }
     throw error;
   }
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive safe integer`);
+  }
+  return value;
+}
+
+/**
+ * Refuses a document payload the transport under this router may not be able
+ * to carry.
+ *
+ * Both directions are measured, and each is measured as the sum of the two
+ * byte fields the message actually spends: the update or snapshot and the
+ * state vector travel in the same body, so checking only the larger one would
+ * let their sum cross the ceiling unremarked.
+ *
+ * The codes are `INVALID_ARGUMENT` for a request the caller can shrink and
+ * `FAILED_PRECONDITION` for a reply this deployment cannot deliver. Neither is
+ * `RESOURCE_EXHAUSTED`, which would fit better: `PairedDeviceErrorCode` is
+ * translated by a `toConnectCode` written once per service, each ending in a
+ * fallback to `Code.Unauthenticated`, so a code added to the union here would
+ * silently surface elsewhere as an authentication failure.
+ */
+function assertDocumentBodyWithinCeiling(
+  byteLength: number,
+  ceiling: number,
+  subject: 'request' | 'reply',
+): void {
+  if (byteLength <= ceiling) return;
+  throw new PairedDeviceRuntimeError(
+    subject === 'request' ? 'INVALID_ARGUMENT' : 'FAILED_PRECONDITION',
+    `This document ${subject} is ${byteLength.toString()} bytes, above the ${ceiling.toString()}-byte ` +
+      'ceiling this control plane serves. Mounted behind a serverless function the platform refuses a ' +
+      'body over 4.5 MB before any handler runs, so the limit is enforced here to name the cause.',
+  );
 }
 
 function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {

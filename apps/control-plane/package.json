@@ -26,7 +26,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.test.json --pretty false",
     "lint": "eslint src",
     "test": "vitest run",
     "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
@@ -39,7 +39,9 @@
     "@connectrpc/connect-node": "2.1.2",
     "@gremuchaya/domain": "workspace:*",
     "@gremuchaya/protocol": "workspace:*",
+    "@gremuchaya/settings-schema": "workspace:*",
     "@neondatabase/serverless": "1.1.0",
+    "@noble/hashes": "2.3.0",
     "@upstash/ratelimit": "2.0.8",
     "@upstash/redis": "1.38.2",
     "pg": "8.23.0",

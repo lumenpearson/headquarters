@@ -38,9 +38,15 @@ export interface SettingsServiceOptions {
    */
   readonly store?: SettingsStore;
   /**
-   * The descriptor set `GetSettingsSchema` serves. The control plane owns no
-   * schema of its own — the shipped schema lives with the client that renders
-   * it — so a deployment injects one or the RPC stays unimplemented.
+   * The descriptor set `GetSettingsSchema` serves.
+   *
+   * The control plane authors no schema of its own: the configured composition
+   * root injects `controlPlaneSettingsSchema()`, which is the shared
+   * `@gremuchaya/settings-schema` registry mapped onto the wire messages, so
+   * this process and the client that renders the controls read one registry.
+   * It stays optional because a service assembled without it -- a test double,
+   * or a future reduced assembly -- must answer `unimplemented` rather than an
+   * empty schema a client could not tell from a real one.
    */
   readonly schema?: settingsV1.SettingsSchema;
   /** How often `WatchSettings` re-reads the scope's revision. */

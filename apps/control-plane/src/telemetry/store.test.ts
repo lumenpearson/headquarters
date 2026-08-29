@@ -46,7 +46,7 @@ describe('durable simulation profile adapter', () => {
     expect(database.transactions).toHaveLength(0);
     expect(database.queries).toHaveLength(1);
 
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     expect(statement.text).toContain('authorized_writer AS MATERIALIZED');
     expect(statement.text).toContain("membership.role IN ('EDITOR', 'ADMIN')");
     expect(statement.text).toContain('FOR UPDATE OF membership');
@@ -122,12 +122,12 @@ describe('durable simulation profile adapter', () => {
     });
 
     expect(updated.revision).toBe(2n);
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     expect(statement.text).toContain('target AS MATERIALIZED');
     expect(statement.text).toContain('FOR UPDATE OF stored');
     expect(statement.text).toContain('revision = stored.revision + 1');
     expect(statement.text).toContain('($10::bigint IS NULL OR target.revision = $10::bigint)');
-    expect(statement.values[9]).toBe('1');
+    expect(requireValues(statement)[9]).toBe('1');
   });
 
   it('tells a missing profile apart from one that moved past the expected revision', async () => {
@@ -176,7 +176,7 @@ describe('durable simulation profile adapter', () => {
     });
 
     expect(applied.revision).toBe(3n);
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     // Applying one preset twice is one profile at two revisions, so here the
     // same index that refuses a duplicate name drives an update instead.
     expect(statement.text).toContain('ON CONFLICT (group_id, name) DO UPDATE');
@@ -198,13 +198,13 @@ describe('durable simulation profile adapter', () => {
 
     await createStore(database).setTimeScale({ groupId, deviceId, profileId, timeScale: 2.5 });
 
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     // Reading the body out to edit it and writing it back would discard a
     // concurrent update, so the scale is written by the statement itself.
     expect(statement.text).toContain(
       "jsonb_set(stored.profile, '{timeScale}', to_jsonb($7::double precision))",
     );
-    expect(statement.values[6]).toBe(2.5);
+    expect(requireValues(statement)[6]).toBe(2.5);
   });
 
   it('deletes a profile without writing a version for the row it removed', async () => {
@@ -221,7 +221,7 @@ describe('durable simulation profile adapter', () => {
     const removed = await createStore(database).delete({ groupId, deviceId, profileId });
 
     expect(removed).toEqual({ profileId, revision: 4n });
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     expect(statement.text).toContain('DELETE FROM simulation_profiles AS stored');
     // `simulation_versions.profile_id` cascades, so a version written here
     // would be deleted by the same statement that wrote it.
@@ -245,13 +245,13 @@ describe('durable simulation profile adapter', () => {
       mutation: { requestId: 'req-create' },
     });
 
-    expect(written.queries[0].text).toContain('INSERT INTO mutation_receipts');
-    expect(written.queries[0].values).toContain('PUT_SIMULATION_PROFILE');
-    const mutation = written.queries[1];
+    expect(requireStatement(written.queries, 0).text).toContain('INSERT INTO mutation_receipts');
+    expect(requireStatement(written.queries, 0).values).toContain('PUT_SIMULATION_PROFILE');
+    const mutation = requireStatement(written.queries, 1);
     expect(mutation.text).toContain('locked_receipt AS MATERIALIZED');
     expect(mutation.text).toContain('CROSS JOIN mutation_gate');
     expect(mutation.text).toContain('resource_id = written.id');
-    expect(mutation.values[3]).toBe('PUT_SIMULATION_PROFILE');
+    expect(requireValues(mutation)[3]).toBe('PUT_SIMULATION_PROFILE');
 
     const removal = new ScriptedSqlClient([
       [{ receipt_claimed: 'req' }],
@@ -270,7 +270,7 @@ describe('durable simulation profile adapter', () => {
       profileId,
       mutation: { requestId: 'req-delete' },
     });
-    expect(removal.queries[0].values).toContain('DELETE_SIMULATION_PROFILE');
+    expect(requireStatement(removal.queries, 0).values).toContain('DELETE_SIMULATION_PROFILE');
   });
 
   it('answers a refused claim with the version the original write produced', async () => {
@@ -326,7 +326,9 @@ describe('durable simulation profile adapter', () => {
     // read back out of the version table instead.
     expect(database.queries).toHaveLength(3);
     expect(database.queries.some((query) => query.text.includes('written AS'))).toBe(false);
-    expect(database.queries[2].text).toContain('FROM simulation_versions AS version');
+    expect(requireStatement(database.queries, 2).text).toContain(
+      'FROM simulation_versions AS version',
+    );
     expect(replayed).toMatchObject({ id: profileId, revision: 7n });
     expect(replayed.profile).toEqual(body('Ночная смена'));
   });
@@ -384,13 +386,13 @@ describe('durable simulation profile adapter', () => {
     expect(page.approximateTotal).toBe(2n);
     // One row beyond the page is fetched so `has_more` is a fact rather than a
     // second count that could disagree with the page it describes.
-    expect(database.queries[0].values[4]).toBe(2);
+    expect(requireValues(requireStatement(database.queries, 0))[4]).toBe(2);
     const decoded = JSON.parse(Buffer.from(page.nextCursor, 'base64url').toString('utf8')) as {
       name: string;
       id: string;
     };
     expect(decoded).toEqual({ name: 'Ночная смена', id: profileId });
-    expect(database.queries[0].text).toContain('ORDER BY name ASC, id ASC');
+    expect(requireStatement(database.queries, 0).text).toContain('ORDER BY name ASC, id ASC');
   });
 
   it('refuses to list or read history for a device that is no longer a member', async () => {
@@ -438,7 +440,7 @@ describe('durable simulation profile adapter', () => {
       createdAt: now,
     });
     expect(database.queries).toHaveLength(1);
-    expect(database.queries[0].values).toContain('3');
+    expect(requireStatement(database.queries, 0).values).toContain('3');
   });
 
   it('rejects a page cursor it did not issue', async () => {
@@ -462,7 +464,29 @@ async function fingerprintFor(
 ): Promise<unknown> {
   const probe = new ScriptedSqlClient([[]]);
   await call(createStore(probe)).catch(() => undefined);
-  return probe.queries[0]?.values[3];
+  return requireStatement(probe.queries, 0).values?.[3];
+}
+
+/**
+ * Indexing a recorded statement list is unchecked under `noUncheckedIndexedAccess`, and a
+ * silently `undefined` statement would turn a missing query into a vacuously passing
+ * assertion. Failing loudly here keeps "the store issued this statement" a real claim.
+ */
+function requireStatement(statements: readonly SqlStatement[], index: number): SqlStatement {
+  const statement = statements[index];
+  if (statement === undefined) {
+    throw new Error(`No statement was issued at index ${String(index)}`);
+  }
+  return statement;
+}
+
+/** Positional assertions need the bound-parameter list itself, not an optional view of it. */
+function requireValues(statement: SqlStatement): readonly unknown[] {
+  const values = statement.values;
+  if (values === undefined) {
+    throw new Error('Expected the statement to bind parameters');
+  }
+  return values;
 }
 
 function createStore(database: SqlClient): DurableSimulationProfileStore {

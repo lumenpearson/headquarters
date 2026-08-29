@@ -8,9 +8,11 @@ function database(
   recorded: SqlStatement[] = [],
 ): SqlClient {
   return {
-    query: async (statement) => {
+    // The port's `query` is generic in its row type; a double answering one fixed shape
+    // satisfies it only through an explicit cast on the double, never by widening the port.
+    query: async <Row extends Record<string, unknown>>(statement: SqlStatement) => {
       recorded.push(statement);
-      return answer(statement);
+      return answer(statement) as unknown as readonly Row[];
     },
     transaction: async () => undefined,
   };

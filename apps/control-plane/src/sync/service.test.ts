@@ -3,7 +3,9 @@ import { Code, type HandlerContext, type ServiceImpl } from '@connectrpc/connect
 import { syncV1, type SyncService } from '@gremuchaya/protocol';
 import { describe, expect, it } from 'vitest';
 
-import { InMemoryRealtimeEventStore } from '../realtime/eventStore.js';
+import type { SqlClient, SqlStatement } from '../db/database.js';
+import { maxDocumentBodyBytes } from '../http-policy.js';
+import { DurableRealtimeEventStore, InMemoryRealtimeEventStore } from '../realtime/eventStore.js';
 import { RealtimeHub } from '../realtime/hub.js';
 
 import {
@@ -203,7 +205,7 @@ describe('SyncService device revocation', () => {
       create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
       handlerContext(`Bearer ${ownerToken}`),
     );
-    expect(listed?.devices.map((entry) => entry.deviceId?.value)).toEqual([ownerDeviceId]);
+    expect(listed?.devices?.map((entry) => entry.deviceId?.value)).toEqual([ownerDeviceId]);
   });
 
   it('publishes nothing and withdraws nothing when the revoke is refused', async () => {
@@ -342,6 +344,192 @@ describe('SyncService group event stream', () => {
     await hub.publish({ groupId, kind: syncV1.GroupEventKind.DEVICE_UPDATED });
   });
 });
+
+/**
+ * The document-payload ceiling.
+ *
+ * Mounted in the web build the router runs as a Vercel Function, which refuses
+ * a body over 4.5 MB before any handler is reached; the failure then carries no
+ * method, no group and no document. These scenarios show the control plane
+ * refusing first, and — the part that matters — refusing before it writes:
+ * the recording `SqlClient` is what proves no append was attempted.
+ */
+describe('SyncService document body ceiling', () => {
+  it('refuses an oversized delta before the log is touched, and lets a delta at the ceiling through', async () => {
+    const overSized = await documentService(64);
+    const context = handlerContext(`Bearer ${overSized.editorToken}`);
+
+    await expect(
+      Promise.resolve(
+        overSized.service.publishDocumentDelta?.(
+          deltaRequest(overSized.groupId, new Uint8Array(65), new Uint8Array(0)),
+          context,
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: Code.InvalidArgument,
+      message: expect.stringContaining('65 bytes, above the 64-byte ceiling'),
+    });
+    // Not one statement: the refusal precedes the append, so an oversized
+    // publication consumes neither a sequence number nor a receipt.
+    expect(overSized.statements).toHaveLength(0);
+
+    // The delta and the state vector are summed, because they travel in the
+    // same body: 40 + 24 is over a 64-byte ceiling even though neither is.
+    await expect(
+      Promise.resolve(
+        overSized.service.publishDocumentDelta?.(
+          deltaRequest(overSized.groupId, new Uint8Array(40), new Uint8Array(25)),
+          context,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    expect(overSized.statements).toHaveLength(0);
+
+    // Exactly at the ceiling is allowed: the store is reached, and what it
+    // does with an empty scripted answer is not this test's subject.
+    const atCeiling = await documentService(64);
+    await Promise.resolve(
+      atCeiling.service.publishDocumentDelta?.(
+        deltaRequest(atCeiling.groupId, new Uint8Array(40), new Uint8Array(24)),
+        handlerContext(`Bearer ${atCeiling.editorToken}`),
+      ),
+    ).catch(() => undefined);
+    expect(atCeiling.statements.length).toBeGreaterThan(0);
+  });
+
+  it('refuses a snapshot reply above the ceiling and serves one below it', async () => {
+    const snapshot = new Uint8Array(4096);
+    const large = await documentService(1024, snapshot);
+
+    await expect(
+      Promise.resolve(
+        large.service.getDocumentSnapshot?.(
+          create(syncV1.GetDocumentSnapshotRequestSchema, {
+            groupId: { value: large.groupId },
+            documentId: { value: '018b2a02-0000-7000-8000-0000000000f1' },
+          }),
+          handlerContext(`Bearer ${large.editorToken}`),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      // A reply this deployment cannot deliver, not a request the caller got
+      // wrong: the caller asked for exactly the right document.
+      code: Code.FailedPrecondition,
+      message: expect.stringContaining('above the 1024-byte ceiling'),
+    });
+
+    const small = await documentService(8192, snapshot);
+    const answered = await small.service.getDocumentSnapshot?.(
+      create(syncV1.GetDocumentSnapshotRequestSchema, {
+        groupId: { value: small.groupId },
+        documentId: { value: '018b2a02-0000-7000-8000-0000000000f1' },
+      }),
+      handlerContext(`Bearer ${small.editorToken}`),
+    );
+    expect(answered?.snapshot?.byteLength).toBe(4096);
+  });
+
+  it('defaults to a ceiling below the platform’s and refuses a ceiling that is not one', async () => {
+    const service = await documentService();
+    await expect(
+      Promise.resolve(
+        service.service.publishDocumentDelta?.(
+          deltaRequest(
+            service.groupId,
+            new Uint8Array(maxDocumentBodyBytes + 1),
+            new Uint8Array(0),
+          ),
+          handlerContext(`Bearer ${service.editorToken}`),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    expect(service.statements).toHaveLength(0);
+    // 4.5 MB is the platform's number; the ceiling has to leave room for the
+    // gRPC-Web envelope, the identifiers and the trailers around the payload.
+    expect(maxDocumentBodyBytes).toBeLessThan(4_500_000);
+
+    expect(() =>
+      createPairedDeviceSyncService({
+        runtime: new PairedDeviceRuntime({ tokenPepper }),
+        verifyBootstrapSecret: () => true,
+        maxDocumentBodyBytes: 0,
+      }),
+    ).toThrow('maxDocumentBodyBytes must be a positive safe integer');
+  });
+});
+
+function deltaRequest(groupId: string, delta: Uint8Array, stateVector: Uint8Array) {
+  return create(syncV1.PublishDocumentDeltaRequestSchema, {
+    groupId: { value: groupId },
+    documentId: { value: '018b2a02-0000-7000-8000-0000000000f1' },
+    documentType: syncV1.SynchronizedDocumentType.LAYOUT,
+    delta,
+    stateVector,
+    hybridLogicalClock: 1n,
+  });
+}
+
+/**
+ * A service whose event store is real and whose database is a recorder.
+ *
+ * `DurableRealtimeEventStore` is the only shape `SyncService` accepts, so the
+ * store is the real class over a scripted `SqlClient`; that client answers a
+ * snapshot read with whatever the scenario planted and everything else with no
+ * rows. Nothing here is about SQL — it is about what the handler does before
+ * and after it reaches the store, which is exactly what a recorded statement
+ * list can show.
+ */
+async function documentService(
+  ceiling?: number,
+  snapshot?: Uint8Array,
+): Promise<{
+  readonly service: Partial<ServiceImpl<typeof SyncService>>;
+  readonly statements: readonly SqlStatement[];
+  readonly groupId: string;
+  readonly editorToken: string;
+}> {
+  const statements: SqlStatement[] = [];
+  const database: SqlClient = {
+    query: (statement) => {
+      statements.push(statement);
+      if (snapshot !== undefined && statement.text.includes('FROM sync_snapshots')) {
+        return Promise.resolve([
+          {
+            snapshot,
+            state_vector: new Uint8Array(0),
+            sequence: '7',
+            document_type: 'LAYOUT',
+          },
+        ] as never);
+      }
+      return Promise.resolve([]);
+    },
+    transaction: () => Promise.resolve(),
+  };
+  const runtime = new PairedDeviceRuntime({ tokenPepper });
+  const created = runtime.createGroup({
+    name: 'Document group',
+    initialDevice: {
+      name: 'Primary',
+      publicKey: 'ed25519:document',
+      platform: 'windows',
+      applicationVersion: '0.1.0',
+    },
+  });
+  const service = createPairedDeviceSyncService({
+    runtime,
+    verifyBootstrapSecret: () => true,
+    eventStore: new DurableRealtimeEventStore({ database }),
+    ...(ceiling === undefined ? {} : { maxDocumentBodyBytes: ceiling }),
+  });
+  return {
+    service,
+    statements,
+    groupId: created.group.id,
+    editorToken: created.session.accessToken,
+  };
+}
 
 async function authenticatedService(options: { readonly presence?: boolean } = {}) {
   const runtime = new PairedDeviceRuntime({ tokenPepper });

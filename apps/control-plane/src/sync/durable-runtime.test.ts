@@ -29,7 +29,7 @@ describe('durable paired-device lifecycle adapter', () => {
     expect(database.transactions).toHaveLength(0);
     expect(database.queries).toHaveLength(1);
 
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     expect(statement.text).toContain('inserted_group AS');
     expect(statement.text).toContain('INSERT INTO device_sessions');
     expect(statement.text).toContain('INSERT INTO device_access_tokens');
@@ -69,8 +69,8 @@ describe('durable paired-device lifecycle adapter', () => {
     expect(paired.group.revision).toBe(2n);
     expect(database.transactions).toHaveLength(0);
     expect(database.queries).toHaveLength(2);
-    const issueStatement = database.queries[0];
-    const redeemStatement = database.queries[1];
+    const issueStatement = requireStatement(database.queries, 0);
+    const redeemStatement = requireStatement(database.queries, 1);
     expect(issueStatement.text).toContain('locked_group AS MATERIALIZED');
     expect(issueStatement.text).toContain('authorized_actor AS MATERIALIZED');
     // Issuance locks and re-validates the exact live session/access-token
@@ -119,7 +119,9 @@ describe('durable paired-device lifecycle adapter', () => {
     });
 
     expect(database.queries).toHaveLength(1);
-    expect(database.queries[0].text).toContain('WHERE EXISTS (SELECT 1 FROM authorized_actor)');
+    expect(requireStatement(database.queries, 0).text).toContain(
+      'WHERE EXISTS (SELECT 1 FROM authorized_actor)',
+    );
   });
 
   it('rejects redemption when the pairing code exists but its issuer session/access-token binding is absent', async () => {
@@ -156,7 +158,7 @@ describe('durable paired-device lifecycle adapter', () => {
 
     const refreshed = await runtime.refreshDeviceSession(rawRefreshToken);
 
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     expect(refreshed.accessToken).toMatch(/^hq_access_/u);
     expect(refreshed.refreshToken).toMatch(/^hq_refresh_/u);
     expect(statement.text).toContain('active_session AS MATERIALIZED');
@@ -192,8 +194,10 @@ describe('durable paired-device lifecycle adapter', () => {
     ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'UNAUTHENTICATED' });
 
     expect(database.queries).toHaveLength(1);
-    expect(database.queries[0].text).toContain('replayed_previous_token AS');
-    expect(database.queries[0].text).toContain('NOT EXISTS (SELECT 1 FROM active_session)');
+    expect(requireStatement(database.queries, 0).text).toContain('replayed_previous_token AS');
+    expect(requireStatement(database.queries, 0).text).toContain(
+      'NOT EXISTS (SELECT 1 FROM active_session)',
+    );
   });
 
   it('authenticates, lists, and revokes through parameterized CTEs with no raw bearer credential', async () => {
@@ -248,7 +252,9 @@ describe('durable paired-device lifecycle adapter', () => {
       device: { id: analystDeviceId, status: 'REVOKED' },
     });
 
-    const [authenticateStatement, listStatement, revokeStatement] = database.queries;
+    const authenticateStatement = requireStatement(database.queries, 0);
+    const listStatement = requireStatement(database.queries, 1);
+    const revokeStatement = requireStatement(database.queries, 2);
     expect(authenticateStatement.text).toContain('UPDATE device_access_tokens AS access_token');
     expect(authenticateStatement.text).not.toContain('touched_device');
     expect(listStatement.text).toContain('all_active_members AS MATERIALIZED');
@@ -274,7 +280,7 @@ describe('durable paired-device lifecycle adapter', () => {
 
     await runtime.authenticateAccessToken('cross-group-session-regression-token');
 
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     expect(statement).toBeDefined();
     if (statement === undefined) throw new Error('Expected an access-token authentication query.');
 
@@ -330,7 +336,7 @@ describe('durable paired-device lifecycle adapter', () => {
       initialDevice: deviceInput('HQ primary', 'ed25519:primary'),
     });
 
-    const values = database.queries[0].values ?? [];
+    const values = requireStatement(database.queries, 0).values ?? [];
     expect(receivedKinds).toEqual(['access:true', 'refresh:true']);
     expect(values).toContain('v2');
     expect(values).toContain('configured-hash-for-access');
@@ -347,8 +353,8 @@ describe('durable paired-device lifecycle adapter', () => {
     const expectedHash = createHmac('sha256', pepper)
       .update(`v1\u0000access\u0000${rawAccessToken}`, 'utf8')
       .digest('base64url');
-    expect(database.queries[0].values?.[0]).toBe(expectedHash);
-    expectCredentialIsNeverPersisted(database.queries[0], rawAccessToken);
+    expect(requireStatement(database.queries, 0).values?.[0]).toBe(expectedHash);
+    expectCredentialIsNeverPersisted(requireStatement(database.queries, 0), rawAccessToken);
   });
 });
 
@@ -538,8 +544,8 @@ describe('durable mutation idempotency receipts', () => {
       mutation: { requestId: 'req-pair-1' },
     });
 
-    const claim = database.queries[2];
-    const redeem = database.queries[3];
+    const claim = requireStatement(database.queries, 2);
+    const redeem = requireStatement(database.queries, 3);
     // The claim must not travel inside the mutation. PostgreSQL runs every
     // data-modifying CTE against one pre-statement snapshot, so a receipt
     // inserted by a CTE is invisible to the CTE that has to complete it, and
@@ -573,7 +579,7 @@ describe('durable mutation idempotency receipts', () => {
     await runtime.refreshDeviceSession('hq_refresh_token');
 
     expect(database.queries).toHaveLength(1);
-    const statement = database.queries[0];
+    const statement = requireStatement(database.queries, 0);
     expect(statement.text).not.toContain('INSERT INTO mutation_receipts');
     expect(statement.values?.slice(8)).toEqual([null, null]);
     // A NULL identifier keeps the gate open, so pre-receipt behaviour is intact.
@@ -617,8 +623,10 @@ describe('durable mutation idempotency receipts', () => {
     expect(database.queries.some((statement) => statement.text.includes('pairing_candidate'))).toBe(
       false,
     );
-    expect(database.queries[1].text).toContain('FROM mutation_receipts AS receipt');
-    expect(database.queries[2].text).toContain('rotated_session AS');
+    expect(requireStatement(database.queries, 1).text).toContain(
+      'FROM mutation_receipts AS receipt',
+    );
+    expect(requireStatement(database.queries, 2).text).toContain('rotated_session AS');
     expect(replayed.device.id).toBe(analystDeviceId);
     expect(replayed.session.accessToken).toMatch(/^hq_access_/u);
   });
@@ -678,13 +686,13 @@ describe('durable receipts for the remaining mutations', () => {
       mutation: { requestId: 'req-bootstrap' },
     });
 
-    const statement = database.queries[1];
+    const statement = requireStatement(database.queries, 1);
     // The group insert selects from the gate, so a refused claim cannot create
     // a second group.
     expect(statement.text).toContain("SELECT $1, $2, 'LEADER', $3, 1, $4, $4 FROM mutation_gate");
     expect(statement.text).toContain('completed_receipt AS');
-    expect(database.queries[0].values).toContain('CREATE_GROUP');
-    expect(database.queries[0].values).not.toContain('req-bootstrap');
+    expect(requireStatement(database.queries, 0).values).toContain('CREATE_GROUP');
+    expect(requireStatement(database.queries, 0).values).not.toContain('req-bootstrap');
   });
 
   it('records the code hash so a retry can retire what it already minted', async () => {
@@ -704,10 +712,10 @@ describe('durable receipts for the remaining mutations', () => {
       requestId: 'req-code',
     });
 
-    const statement = database.queries[1];
+    const statement = requireStatement(database.queries, 1);
     expect(statement.text).toContain('resource_hash = issued_pairing_code.code_hash');
     expect(statement.text).toContain('CROSS JOIN mutation_gate');
-    expect(database.queries[0].values).toContain('CREATE_PAIRING_CODE');
+    expect(requireStatement(database.queries, 0).values).toContain('CREATE_PAIRING_CODE');
     // Only the hash is persisted; the code itself never becomes a parameter.
     expectCredentialIsNeverPersisted(statement, grant.code);
   });
@@ -746,7 +754,7 @@ describe('durable receipts for the remaining mutations', () => {
     );
 
     expect(grant.code).toMatch(/^hq_pair_/u);
-    const replacement = replaced.queries[2];
+    const replacement = requireStatement(replaced.queries, 2);
     // The retirement and the replacement are one statement, so a retry can
     // never leave two live capabilities.
     expect(replacement.text).toContain('retired_code AS');
@@ -819,12 +827,12 @@ describe('durable receipts for the remaining mutations', () => {
     expect(database.queries.some((statement) => statement.text.includes('eligible_target'))).toBe(
       false,
     );
-    expect(database.queries[2].text).toContain('$3::bigint AS group_revision');
-    expect(database.queries[2].values).toContain('7');
+    expect(requireStatement(database.queries, 2).text).toContain('$3::bigint AS group_revision');
+    expect(requireStatement(database.queries, 2).values).toContain('7');
     expect(replayed.group.revision).toBe(7n);
     // Membership-scoped, like the mutation itself: the device may still be
     // online in another group, so the status is a literal in the projection.
-    expect(database.queries[2].text).toContain("'REVOKED' AS device_status");
+    expect(requireStatement(database.queries, 2).text).toContain("'REVOKED' AS device_status");
     expect(replayed.device.status).toBe('REVOKED');
   });
 });
@@ -844,6 +852,19 @@ async function fingerprintFor(
   await call(createRuntime(probe)).catch(() => undefined);
   const values = probe.queries[0]?.values ?? [];
   return values[3];
+}
+
+/**
+ * Indexing a recorded statement list is unchecked under `noUncheckedIndexedAccess`, and a
+ * silently `undefined` statement would turn a missing query into a vacuously passing
+ * assertion. Failing loudly here keeps "the store issued this statement" a real claim.
+ */
+function requireStatement(statements: readonly SqlStatement[], index: number): SqlStatement {
+  const statement = statements[index];
+  if (statement === undefined) {
+    throw new Error(`No statement was issued at index ${String(index)}`);
+  }
+  return statement;
 }
 
 function expectCredentialIsNeverPersisted(statement: SqlStatement, rawCredential: string): void {
