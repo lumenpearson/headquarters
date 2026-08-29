@@ -3,6 +3,7 @@ import {
   createVirtualPath,
   type Disposable,
   type ExplorerNode,
+  type FileSourceEvent,
   type ModulePreset,
   type SceneDefinition,
   type SceneId,
@@ -44,6 +45,35 @@ import { applyCueAction } from './sceneState';
  * one operator action.
  */
 const explorerRefreshDebounceMs = 180;
+
+/** Matches `BridgeFileSource#id`; kept as a constant so `connections.bridgeStatus`
+ * reads the one source that name identifies rather than a string repeated by hand. */
+const bridgeSourceId = 'file-bridge';
+
+/**
+ * `connections.bridgeStatus`'s display contract: reachable (`'online'`, even
+ * with an empty listing) or not, decided from `ExplorerService.list`'s own
+ * per-source verdict for {@link bridgeSourceId} rather than a second probe.
+ * `'connecting'` and `'incompatible'` are declared on the slice for a richer
+ * signal (health/version negotiation) nothing produces yet; this never writes
+ * either.
+ */
+function bridgeStatusFromSourceStatus(
+  status: 'online' | 'offline' | 'empty' | undefined,
+): 'online' | 'offline' {
+  return status === 'offline' || status === undefined ? 'offline' : 'online';
+}
+
+/**
+ * `connections.lastFilesystemEvent`'s display contract: the kind and path a
+ * `FileSourceEvent` carries, in the vocabulary the domain already uses for
+ * it -- the same choice `VirtualExplorer` makes for `sourceStatuses`, which
+ * prints `online`/`offline`/`empty` untranslated rather than inventing a
+ * second, Russian vocabulary for the same three words.
+ */
+function formatFilesystemEvent(event: FileSourceEvent): string {
+  return `${event.type} ${event.sourceId} ${event.path}`;
+}
 
 export class RuntimeController {
   readonly bus: ScreenBusPort;
@@ -171,6 +201,10 @@ export class RuntimeController {
           loading: false,
           errorCode: null,
         },
+        connections: {
+          ...current.connections,
+          bridgeStatus: bridgeStatusFromSourceStatus(view.sourceStatuses[bridgeSourceId]),
+        },
       });
     } catch (error: unknown) {
       const current = appStore.getState();
@@ -202,7 +236,15 @@ export class RuntimeController {
    */
   async #watchActivePath(path: VirtualPath): Promise<void> {
     this.#explorerWatch?.dispose();
-    this.#explorerWatch = await this.explorerService.watch(path, () => {
+    this.#explorerWatch = await this.explorerService.watch(path, (event) => {
+      const current = appStore.getState();
+      current.replaceRuntimeState({
+        ...current,
+        connections: {
+          ...current.connections,
+          lastFilesystemEvent: formatFilesystemEvent(event),
+        },
+      });
       this.#scheduleExplorerRefresh(path);
     });
   }
@@ -234,6 +276,10 @@ export class RuntimeController {
           nodes: view.nodes,
           collisions: view.collisions,
           sourceStatuses: view.sourceStatuses,
+        },
+        connections: {
+          ...current.connections,
+          bridgeStatus: bridgeStatusFromSourceStatus(view.sourceStatuses[bridgeSourceId]),
         },
       });
     } catch {

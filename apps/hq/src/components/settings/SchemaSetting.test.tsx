@@ -39,3 +39,60 @@ describe('SchemaSetting number editors', () => {
     expect(screen.queryByRole('slider')).toBeNull();
   });
 });
+
+/**
+ * `settingsAwaitingTheirFeature` names two settings an operator can already
+ * change with no effect. Before this, the catalogue said nothing: the row
+ * looked exactly like every wired one.
+ */
+describe('SchemaSetting warns about settings nothing reads yet', () => {
+  it('prints the awaiting-feature notice beside layout.tileMinimumWidth', () => {
+    const definition = getSettingDefinition('layout.tileMinimumWidth');
+    if (definition === undefined) throw new Error('layout.tileMinimumWidth is not declared');
+
+    render(
+      <SchemaSetting
+        definition={definition}
+        value={definition.defaultValue}
+        changed={false}
+        onValueChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('ПОКА НЕ ДЕЙСТВУЕТ — изменение ни на что не влияет')).toBeTruthy();
+  });
+
+  /*
+   * `simulation.preset` left `settingsAwaitingTheirFeature` once
+   * `simulateChannelReading` started falling back to
+   * `simulationPresetCriticality` for a channel with no drawn curve (F12,
+   * R31). The notice would otherwise tell an operator a working control does
+   * nothing.
+   */
+  it('prints no notice beside simulation.preset, which now has a reader', () => {
+    const definition = getSettingDefinition('simulation.preset');
+    if (definition === undefined) throw new Error('simulation.preset is not declared');
+
+    render(
+      <SchemaSetting
+        definition={definition}
+        value={definition.defaultValue}
+        changed={false}
+        onValueChange={() => {}}
+      />,
+    );
+
+    expect(screen.queryByText('ПОКА НЕ ДЕЙСТВУЕТ — изменение ни на что не влияет')).toBeNull();
+  });
+
+  it('prints no notice beside a setting with a real reader', () => {
+    const definition = getSettingDefinition('sizes.tileGap');
+    if (definition === undefined) throw new Error('sizes.tileGap is not declared');
+
+    render(
+      <SchemaSetting definition={definition} value={4} changed={false} onValueChange={() => {}} />,
+    );
+
+    expect(screen.queryByText('ПОКА НЕ ДЕЙСТВУЕТ — изменение ни на что не влияет')).toBeNull();
+  });
+});

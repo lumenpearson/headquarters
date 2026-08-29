@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from 'react';
 import { t } from '@/application/localization/locale';
 import type { MessageId } from '@/application/localization/messages';
 import type { SettingGroup } from '@/application/personalization/catalog';
+import { settingsAwaitingTheirFeature } from '@/application/personalization/presentation';
 
 import { CurveSetting } from './CurveSetting';
 import { useMaterialCatalog } from './MaterialCatalog';
@@ -140,10 +141,13 @@ export function SchemaSetting({
     }
   })();
 
+  const awaitingFeature = settingsAwaitingTheirFeature[definition.id];
+
   return (
     <Setting
       label={`${label}${changed ? ' *' : ''}`}
       detail={`${definition.scope.toUpperCase()} · ${definition.description}`}
+      notice={awaitingFeature === undefined ? undefined : t('settings.awaitingFeature')}
     >
       {control}
     </Setting>
@@ -153,10 +157,12 @@ export function SchemaSetting({
 export function Setting({
   label,
   detail,
+  notice,
   children,
 }: {
   readonly label: string;
   readonly detail: string;
+  readonly notice?: string | undefined;
   readonly children: ReactNode;
 }) {
   return (
@@ -164,6 +170,7 @@ export function Setting({
       <span>
         <strong>{label}</strong>
         <small>{detail}</small>
+        {notice === undefined ? null : <small className="settings-row__notice">{notice}</small>}
       </span>
       {children}
     </div>

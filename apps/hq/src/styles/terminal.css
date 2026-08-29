@@ -272,6 +272,16 @@ body.terminal-theme .danger-button:hover {
   background: var(--critical);
 }
 
+body.terminal-theme .quiet-button.is-active {
+  background: var(--accent-strong);
+  color: var(--text-inverse);
+}
+
+body.terminal-theme .danger-button.is-active {
+  background: var(--critical);
+  color: var(--text-inverse);
+}
+
 body.terminal-theme .system-state--ready {
   background: var(--accent-strong);
   color: var(--text-inverse);

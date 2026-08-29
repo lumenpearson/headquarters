@@ -41,6 +41,8 @@ export function VirtualExplorer() {
   useAppLocale();
   const { controller } = useRuntime();
   const explorer = useAppStore((state) => state.explorer);
+  const bridgeStatus = useAppStore((state) => state.connections.bridgeStatus);
+  const lastFilesystemEvent = useAppStore((state) => state.connections.lastFilesystemEvent);
   const [targetScreen, setTargetScreen] = useState<ScreenId>('wall-center');
   const selected = explorer.nodes.find((node) => node.id === explorer.selectedNodeId) ?? null;
   const visibleNodes = useMemo(
@@ -128,6 +130,15 @@ export function VirtualExplorer() {
               <small>{status}</small>
             </div>
           ))}
+          <div className="source-state source-state--bridge">
+            <i className={`source-state--${bridgeStatus}`} />
+            МОСТ ФАЙЛОВ
+            <small>{bridgeStatus}</small>
+          </div>
+          <span>ПОСЛЕДНЕЕ СОБЫТИЕ</span>
+          <div className="source-state source-state--last-event">
+            <small>{lastFilesystemEvent ?? 'НЕТ СОБЫТИЙ'}</small>
+          </div>
         </aside>
         <main className="explorer-main">
           <div className="explorer-controls">
