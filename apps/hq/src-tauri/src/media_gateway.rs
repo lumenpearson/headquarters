@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    env, fs, io,
+    env, fs, io, mem,
     net::{Ipv4Addr, SocketAddr, TcpListener as StdTcpListener},
     path::{Path, PathBuf},
     process::Stdio,
@@ -42,6 +42,17 @@ const DEGRADED_FAILURE_THRESHOLD: u32 = 5;
 const HLS_SEGMENT_SECONDS: &str = "2";
 const HLS_LIST_SIZE: &str = "6";
 const HLS_DELETE_THRESHOLD: &str = "2";
+/// How long one HLS access grant stays the one handed to new consumers
+/// before the supervisor mints a fresh one for the same worker. Overridable
+/// with `HQ_MEDIA_GATEWAY_GRANT_ROTATE_SECS` for a shorter interval in a
+/// deployment that wants it; the floor below keeps a misconfigured value
+/// from rotating faster than a manifest poll cycle can keep up with.
+const DEFAULT_GRANT_ROTATE_INTERVAL: Duration = Duration::from_secs(900);
+const MIN_GRANT_ROTATE_INTERVAL: Duration = Duration::from_secs(30);
+/// How long a rotated-out grant keeps authorizing requests after rotation,
+/// so a consumer's already-open HLS session does not fail the instant a
+/// worker mints a new one.
+const GRANT_GRACE_PERIOD: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Error)]
 pub enum MediaGatewayError {
@@ -274,6 +285,7 @@ struct GatewayConfiguration {
     sources: HashMap<String, NativeCameraSource>,
     max_workers: usize,
     ffmpeg_path: PathBuf,
+    grant_rotate_interval: Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,7 +309,21 @@ impl MediaWorkerState {
 struct MediaWorker {
     child: Option<Child>,
     stream_id: String,
+    /// The grant a *new* consumer is handed (`descriptor`) and the one the
+    /// asset route checks first. Rotates on `GRANT_ROTATE_INTERVAL` --
+    /// before this field existed, a worker's one grant was valid,
+    /// unrotated, for as long as at least one consumer kept the worker
+    /// alive, which for a live monitoring wall is the length of the shoot.
     grant: String,
+    grant_issued_at: Instant,
+    /// The grant this worker served before the last rotation, and the
+    /// instant it stops authorizing anything. A consumer's already-open HLS
+    /// session has this URL baked into its manifest and every segment
+    /// request until it refreshes, so the previous grant keeps working for
+    /// one grace window rather than failing the instant a new grant is
+    /// minted; after the deadline it authorizes nothing, same as a grant
+    /// that was never issued.
+    previous_grant: Option<(String, Instant)>,
     output_dir: PathBuf,
     consumers: HashSet<String>,
     generation: u64,
@@ -506,6 +532,8 @@ impl MediaGatewayState {
                         child: Some(child),
                         stream_id,
                         grant,
+                        grant_issued_at: Instant::now(),
+                        previous_grant: None,
                         output_dir,
                         consumers: HashSet::from([consumer_id.to_owned()]),
                         generation,
@@ -575,6 +603,36 @@ impl MediaGatewayState {
         Ok(false)
     }
 
+    /// Hands an already-registered consumer the worker's current descriptor,
+    /// which carries whatever grant is live at the moment of the call --
+    /// freshly rotated or not. This is the half of "rotating grants" a
+    /// player calls: `supervisor_tick` rotates the grant on its own schedule
+    /// regardless of whether anything ever calls this, but nothing in this
+    /// crate calls it *for* a consumer, so a session that never refreshes
+    /// keeps degrading gracefully into the grace window and then failing,
+    /// same as it would if a grant were never rotated for it at all. Calling
+    /// this periodically, before that grace window closes, is the player's
+    /// responsibility and is not implemented by this crate.
+    ///
+    /// `consumer_id` must already be registered against the worker --
+    /// refreshing is not a way to join a stream, only to keep one going --
+    /// so both an unconfigured camera and an unregistered consumer answer
+    /// `CameraNotConfigured`.
+    async fn refresh_grant(
+        &self,
+        camera_id: &str,
+        consumer_id: &str,
+    ) -> Result<NativeCameraStream, MediaGatewayError> {
+        validate_identifier(camera_id)?;
+        validate_identifier(consumer_id)?;
+        let workers = self.inner.workers.lock().await;
+        let worker = workers
+            .get(camera_id)
+            .filter(|worker| worker.consumers.contains(consumer_id))
+            .ok_or(MediaGatewayError::CameraNotConfigured)?;
+        Ok(self.descriptor(camera_id, worker))
+    }
+
     async fn supervisor_tick(&self) {
         if self.inner.shutting_down.load(Ordering::SeqCst) {
             return;
@@ -634,6 +692,21 @@ impl MediaGatewayState {
                         }
                         Err(_) => schedule_worker_restart(camera_id, worker, now),
                     }
+                }
+
+                if now.duration_since(worker.grant_issued_at)
+                    >= self.inner.configuration.grant_rotate_interval
+                {
+                    if let Ok(fresh_grant) = create_grant() {
+                        let rotated_out = mem::replace(&mut worker.grant, fresh_grant);
+                        worker.previous_grant = Some((rotated_out, now + GRANT_GRACE_PERIOD));
+                        worker.grant_issued_at = now;
+                    }
+                    // `create_grant` failing is `getrandom` failing, which this
+                    // module already treats as transient elsewhere (`start_stream`
+                    // simply propagates it); here the worse outcome is a skipped
+                    // rotation, not a stopped stream, so a failure this tick is
+                    // retried next tick rather than torn down.
                 }
 
                 if matches!(
@@ -741,10 +814,22 @@ impl MediaGatewayState {
         if !valid_stream_id(stream_id) || !valid_grant(grant) || !valid_asset_name(asset_name) {
             return None;
         }
+        let now = Instant::now();
         let workers = self.inner.workers.lock().await;
         workers
             .values()
-            .find(|worker| worker.stream_id == stream_id && worker.grant == grant)
+            .find(|worker| {
+                if worker.stream_id != stream_id {
+                    return false;
+                }
+                worker.grant == grant
+                    || worker
+                        .previous_grant
+                        .as_ref()
+                        .is_some_and(|(previous, expires_at)| {
+                            previous == grant && now < *expires_at
+                        })
+            })
             .map(|worker| worker.output_dir.join(asset_name))
     }
 
@@ -779,6 +864,20 @@ pub async fn stop_camera_stream(
     consumer_id: String,
 ) -> Result<bool, MediaGatewayError> {
     state.stop_stream(&camera_id, &consumer_id).await
+}
+
+/// Returns the worker's current descriptor without starting or restarting
+/// anything, so a long-lived player can pick up a rotated grant before its
+/// previous one leaves the `GRANT_GRACE_PERIOD` window. See
+/// `MediaGatewayState::refresh_grant` for what calling this periodically
+/// still requires on the caller's side, which nothing in this crate does.
+#[tauri::command]
+pub async fn refresh_camera_stream_grant(
+    state: State<'_, MediaGatewayState>,
+    camera_id: String,
+    consumer_id: String,
+) -> Result<NativeCameraStream, MediaGatewayError> {
+    state.refresh_grant(&camera_id, &consumer_id).await
 }
 
 #[tauri::command]
@@ -882,11 +981,22 @@ fn load_configuration() -> Result<GatewayConfiguration, MediaGatewayError> {
     if ffmpeg_path.as_os_str().is_empty() {
         return Err(MediaGatewayError::InvalidConfiguration);
     }
+    let grant_rotate_interval = env::var("HQ_MEDIA_GATEWAY_GRANT_ROTATE_SECS")
+        .ok()
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| MediaGatewayError::InvalidConfiguration)?
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_GRANT_ROTATE_INTERVAL);
+    if grant_rotate_interval < MIN_GRANT_ROTATE_INTERVAL {
+        return Err(MediaGatewayError::InvalidConfiguration);
+    }
 
     Ok(GatewayConfiguration {
         sources: native_camera_sources(raw.cameras)?,
         max_workers,
         ffmpeg_path,
+        grant_rotate_interval,
     })
 }
 
@@ -1512,6 +1622,7 @@ mod tests {
                         )]),
                         max_workers: 4,
                         ffmpeg_path: PathBuf::from("ffmpeg"),
+                        grant_rotate_interval: DEFAULT_GRANT_ROTATE_INTERVAL,
                     },
                     workers: Mutex::new(HashMap::from([(
                         "K-17".to_owned(),
@@ -1519,6 +1630,8 @@ mod tests {
                             child: Some(child),
                             stream_id: "camera-k-17".to_owned(),
                             grant: grant.clone(),
+                            grant_issued_at: Instant::now(),
+                            previous_grant: None,
                             output_dir: output_dir.clone(),
                             consumers: HashSet::from(["test-consumer".to_owned()]),
                             generation: 1,
@@ -1557,6 +1670,229 @@ mod tests {
         });
     }
 
+    #[tokio::test]
+    async fn supervisor_rotates_the_grant_after_the_interval_and_keeps_the_previous_one_valid_during_grace(
+    ) {
+        let listener =
+            StdTcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("test listener must bind");
+        listener
+            .set_nonblocking(true)
+            .expect("test listener must become nonblocking");
+        let local_addr = listener.local_addr().expect("test address must resolve");
+        let output_root = env::temp_dir().join(format!(
+            "gremuchaya-hq-media-grant-rotation-test-{}",
+            create_grant().expect("test suffix must be generated")
+        ));
+        let output_dir = output_root.join("camera-k-17-1");
+        fs::create_dir_all(&output_dir).expect("test output directory must exist");
+        let original_grant = create_grant().expect("test grant must be generated");
+        let state = MediaGatewayState {
+            inner: Arc::new(MediaGatewayInner {
+                configuration: GatewayConfiguration {
+                    sources: HashMap::new(),
+                    max_workers: 4,
+                    ffmpeg_path: PathBuf::from("ffmpeg"),
+                    // Short enough that this test does not have to sleep for
+                    // the production default to observe a rotation.
+                    grant_rotate_interval: Duration::from_millis(10),
+                },
+                workers: Mutex::new(HashMap::from([(
+                    "K-17".to_owned(),
+                    MediaWorker {
+                        child: None,
+                        stream_id: "camera-k-17".to_owned(),
+                        grant: original_grant.clone(),
+                        grant_issued_at: Instant::now() - Duration::from_secs(1),
+                        previous_grant: None,
+                        output_dir: output_dir.clone(),
+                        consumers: HashSet::from(["test-consumer".to_owned()]),
+                        generation: 1,
+                        state: MediaWorkerState::Ready,
+                        consecutive_failures: 0,
+                        total_restarts: 0,
+                        next_restart_at: None,
+                        last_manifest_modified_at: None,
+                        started_at: Instant::now(),
+                    },
+                )])),
+                listener: StdMutex::new(Some(listener)),
+                origin: format!("http://{local_addr}"),
+                output_root,
+                generation: AtomicU64::new(2),
+                shutting_down: AtomicBool::new(false),
+                shutdown_notify: Notify::new(),
+            }),
+        };
+
+        state.supervisor_tick().await;
+
+        let rotated_grant = {
+            let workers = state.inner.workers.lock().await;
+            let worker = workers.get("K-17").expect("worker must remain registered");
+            assert_ne!(
+                worker.grant, original_grant,
+                "the grant must rotate once the interval elapses"
+            );
+            assert!(worker
+                .previous_grant
+                .as_ref()
+                .is_some_and(|(previous, _)| previous == &original_grant));
+            worker.grant.clone()
+        };
+
+        assert!(state
+            .authorize_asset("camera-k-17", &rotated_grant, "index.m3u8")
+            .await
+            .is_some());
+        // The rotated-out grant still authorizes during its grace window --
+        // a consumer's already-open HLS session does not fail the instant a
+        // new grant is minted.
+        assert!(state
+            .authorize_asset("camera-k-17", &original_grant, "index.m3u8")
+            .await
+            .is_some());
+
+        state.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn authorize_asset_refuses_a_previous_grant_once_its_grace_window_has_passed() {
+        let listener =
+            StdTcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("test listener must bind");
+        listener
+            .set_nonblocking(true)
+            .expect("test listener must become nonblocking");
+        let local_addr = listener.local_addr().expect("test address must resolve");
+        let output_root = env::temp_dir().join(format!(
+            "gremuchaya-hq-media-grant-grace-test-{}",
+            create_grant().expect("test suffix must be generated")
+        ));
+        let output_dir = output_root.join("camera-k-17-1");
+        fs::create_dir_all(&output_dir).expect("test output directory must exist");
+        let current_grant = create_grant().expect("test grant must be generated");
+        let expired_grant = create_grant().expect("test grant must be generated");
+        let state = MediaGatewayState {
+            inner: Arc::new(MediaGatewayInner {
+                configuration: GatewayConfiguration {
+                    sources: HashMap::new(),
+                    max_workers: 4,
+                    ffmpeg_path: PathBuf::from("ffmpeg"),
+                    grant_rotate_interval: DEFAULT_GRANT_ROTATE_INTERVAL,
+                },
+                workers: Mutex::new(HashMap::from([(
+                    "K-17".to_owned(),
+                    MediaWorker {
+                        child: None,
+                        stream_id: "camera-k-17".to_owned(),
+                        grant: current_grant.clone(),
+                        grant_issued_at: Instant::now(),
+                        // Already past its deadline: rotation happened one
+                        // grace window ago, not this tick.
+                        previous_grant: Some((
+                            expired_grant.clone(),
+                            Instant::now() - Duration::from_secs(1),
+                        )),
+                        output_dir,
+                        consumers: HashSet::from(["test-consumer".to_owned()]),
+                        generation: 1,
+                        state: MediaWorkerState::Ready,
+                        consecutive_failures: 0,
+                        total_restarts: 0,
+                        next_restart_at: None,
+                        last_manifest_modified_at: None,
+                        started_at: Instant::now(),
+                    },
+                )])),
+                listener: StdMutex::new(Some(listener)),
+                origin: format!("http://{local_addr}"),
+                output_root,
+                generation: AtomicU64::new(2),
+                shutting_down: AtomicBool::new(false),
+                shutdown_notify: Notify::new(),
+            }),
+        };
+
+        assert!(state
+            .authorize_asset("camera-k-17", &current_grant, "index.m3u8")
+            .await
+            .is_some());
+        assert!(state
+            .authorize_asset("camera-k-17", &expired_grant, "index.m3u8")
+            .await
+            .is_none());
+
+        state.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn refresh_grant_returns_the_live_descriptor_and_refuses_an_unregistered_consumer() {
+        let listener =
+            StdTcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("test listener must bind");
+        listener
+            .set_nonblocking(true)
+            .expect("test listener must become nonblocking");
+        let local_addr = listener.local_addr().expect("test address must resolve");
+        let output_root = env::temp_dir().join(format!(
+            "gremuchaya-hq-media-refresh-grant-test-{}",
+            create_grant().expect("test suffix must be generated")
+        ));
+        let output_dir = output_root.join("camera-k-17-1");
+        fs::create_dir_all(&output_dir).expect("test output directory must exist");
+        let grant = create_grant().expect("test grant must be generated");
+        let state = MediaGatewayState {
+            inner: Arc::new(MediaGatewayInner {
+                configuration: GatewayConfiguration {
+                    sources: HashMap::new(),
+                    max_workers: 4,
+                    ffmpeg_path: PathBuf::from("ffmpeg"),
+                    grant_rotate_interval: DEFAULT_GRANT_ROTATE_INTERVAL,
+                },
+                workers: Mutex::new(HashMap::from([(
+                    "K-17".to_owned(),
+                    MediaWorker {
+                        child: None,
+                        stream_id: "camera-k-17".to_owned(),
+                        grant: grant.clone(),
+                        grant_issued_at: Instant::now(),
+                        previous_grant: None,
+                        output_dir,
+                        consumers: HashSet::from(["consumer-a".to_owned()]),
+                        generation: 1,
+                        state: MediaWorkerState::Ready,
+                        consecutive_failures: 0,
+                        total_restarts: 0,
+                        next_restart_at: None,
+                        last_manifest_modified_at: None,
+                        started_at: Instant::now(),
+                    },
+                )])),
+                listener: StdMutex::new(Some(listener)),
+                origin: format!("http://{local_addr}"),
+                output_root,
+                generation: AtomicU64::new(2),
+                shutting_down: AtomicBool::new(false),
+                shutdown_notify: Notify::new(),
+            }),
+        };
+
+        let descriptor = state
+            .refresh_grant("K-17", "consumer-a")
+            .await
+            .expect("a registered consumer must be able to refresh");
+        assert!(descriptor.manifest_url.contains(&grant));
+
+        assert!(matches!(
+            state.refresh_grant("K-17", "consumer-b").await,
+            Err(MediaGatewayError::CameraNotConfigured)
+        ));
+        assert!(matches!(
+            state.refresh_grant("K-99", "consumer-a").await,
+            Err(MediaGatewayError::CameraNotConfigured)
+        ));
+
+        state.shutdown().await;
+    }
+
     #[test]
     fn failed_initial_spawn_does_not_leave_an_untracked_output_directory() {
         tauri::async_runtime::block_on(async {
@@ -1580,6 +1916,7 @@ mod tests {
                         )]),
                         max_workers: 4,
                         ffmpeg_path: output_root.join("missing-ffmpeg-binary.exe"),
+                        grant_rotate_interval: DEFAULT_GRANT_ROTATE_INTERVAL,
                     },
                     workers: Mutex::new(HashMap::new()),
                     listener: StdMutex::new(Some(listener)),
@@ -1640,6 +1977,7 @@ mod tests {
                         sources: HashMap::new(),
                         max_workers: 4,
                         ffmpeg_path: PathBuf::from("ffmpeg"),
+                        grant_rotate_interval: DEFAULT_GRANT_ROTATE_INTERVAL,
                     },
                     workers: Mutex::new(HashMap::from([(
                         "K-17".to_owned(),
@@ -1647,6 +1985,8 @@ mod tests {
                             child: Some(child),
                             stream_id: "camera-k-17".to_owned(),
                             grant: grant.clone(),
+                            grant_issued_at: Instant::now(),
+                            previous_grant: None,
                             output_dir,
                             consumers: HashSet::from(["test-consumer".to_owned()]),
                             generation: 1,

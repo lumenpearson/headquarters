@@ -1238,8 +1238,12 @@ name = "gremuchaya-hq"
 version = "0.5.0"
 dependencies = [
  "axum",
+ "bytes",
  "getrandom 0.4.3",
  "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "notify",
  "prost",
  "prost-build",

@@ -17,8 +17,17 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+bytes = "=1.12.1"
 getrandom = "=0.4.3"
 hex = "=0.4.3"
+http-body-util = "=0.1.5"
+# `hyper` and `hyper-util` are already in the dependency graph (Tauri itself
+# pulls a client through them); pinning them as direct dependencies here just
+# names what `control_plane_proxy` already relies on transitively, rather
+# than introducing a new crate. `client-legacy` + `http1` is the same client
+# shape `axum`'s own HTTP1 server side already uses elsewhere in this crate.
+hyper = { version = "=1.11.0", features = ["client", "http1"] }
+hyper-util = { version = "=0.1.20", features = ["client-legacy", "http1", "tokio"] }
 notify = "8.2.0"
 prost = "0.14.4"
 prost-types = "0.14.4"
