@@ -2521,7 +2521,14 @@ button.is-active {
 }
 .local-material-player__controls {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(72px, auto);
+  /*
+   * Column count is a custom property, not a literal 5: the [CC] toggle is a
+   * sixth button that only renders when the material has subtitle tracks, and
+   * a fixed `repeat(5, ...)` would either overflow it onto a second row or
+   * leave the trailing wide column empty when it is absent. `LocalMaterialPlayer`
+   * sets `--local-player-buttons` to match how many button-columns it rendered.
+   */
+  grid-template-columns: repeat(var(--local-player-buttons, 5), minmax(0, 1fr)) minmax(72px, auto);
   gap: 3px;
   padding: 4px;
   border-top: 1px solid var(--ops-line);
@@ -7026,4 +7033,79 @@ body {
 .local-material-preview--image .material-rendition-menu {
   padding: 4px;
   border-top: 1px solid var(--ops-line);
+}
+
+.local-material-preview--media {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 4px;
+}
+
+.material-annotations-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--ops-line);
+  background: #050705;
+}
+
+.material-annotations-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ops-muted);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
+.material-annotations-panel__empty {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 8px;
+}
+
+.material-annotations-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.material-annotations-panel__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.material-annotations-panel__timestamp {
+  min-height: 20px;
+  padding-inline: 3px;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.material-annotations-panel__text {
+  min-width: 0;
+  overflow-wrap: break-word;
+  color: var(--ops-text-strong);
+  font-size: 8px;
+}
+
+.material-annotations-panel__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+}
+
+.material-annotations-panel__form textarea {
+  min-height: 24px;
+  font-size: 8px;
 }

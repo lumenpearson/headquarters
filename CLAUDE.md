@@ -73,13 +73,15 @@ State ownership:
   named regions, not per-domain slice files; a plan that assumes separate slice modules
   describes a target, not the code.
 - Scene definitions (52 Zod-validated scenes) are immutable configuration, not runtime state.
-- `localStorage` owns everything the browser persists, under nine keys:
+- `localStorage` owns everything the browser persists, under ten keys:
   `gremuchaya-hq:operations:v3`, `…:production-snapshots:v3`, `…:snapshots:v1`,
   `…:device-session:v3` (the paired session, refresh token included; scoped by database, not by
   address, so every configured plane of the group takes it), `…:group-mirror:v1` (the group's
   cloud state, staged under `…:draft` first), `…:control-plane-address:v1` (the operator's
   in-app control-plane address list, scoped to the device), `hq.camera-material-assignments.v1`,
-  `hq.keybinds-intro-seen.v1`, and the Yandex Maps key. No IndexedDB, no Tauri store plugin.
+  `hq.keybinds-intro-seen.v1`, `hq.material-annotations.v1` (timestamped notes on a material in
+  the local player surface, local to this browser -- there is no `MaterialAnnotation` RPC), and
+  the Yandex Maps key. No IndexedDB, no Tauri store plugin.
 - Application services perform all IO and cross-region transitions; components dispatch use
   cases and select narrow state.
 

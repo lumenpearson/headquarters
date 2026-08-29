@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MaterialEntry } from '@/infrastructure/materials/BridgeMaterialClient';
 import type { MaterialLibraryClient } from '@/infrastructure/materials/materialLibrary';
@@ -11,8 +11,14 @@ import {
 } from '@/infrastructure/materials/MaterialPreviewReader';
 import { useNumberSetting } from '@/application/personalization/useSetting';
 
-import { LocalMaterialPlayer } from './LocalMaterialPlayer';
+import { LocalMaterialPlayer, type LocalMaterialPlayerHandle } from './LocalMaterialPlayer';
+import { MaterialAnnotationsPanel } from './MaterialAnnotationsPanel';
 import { MaterialRenditionMenu, type RenditionOutcome } from './MaterialRenditionMenu';
+import {
+  findMaterialSubtitleTracks,
+  releaseMaterialSubtitleTracks,
+  type MaterialSubtitleTrack,
+} from './materialSubtitleTracks';
 
 type PreviewState =
   | { readonly type: 'loading' }
@@ -51,6 +57,43 @@ export function LocalMaterialPreview({
     setVariantFor(material.materialId);
     setVariant('');
   }
+
+  const playerHandleRef = useRef<LocalMaterialPlayerHandle>(null);
+  const [playerTime, setPlayerTime] = useState(0);
+  const [subtitleTracks, setSubtitleTracks] = useState<readonly MaterialSubtitleTrack[]>([]);
+
+  /*
+   * Companion `.vtt` tracks, resolved once per material through the same
+   * bounded read the text preview uses (`materialSubtitleTracks.ts`) --
+   * separate from the source-loading effect below because a subtitle-lookup
+   * failure must never block or retry the video itself.
+   */
+  useEffect(() => {
+    if (mode !== 'media' && mode !== 'media-stream') {
+      // Deferred, not called synchronously in the effect body -- the same
+      // idiom the source-loading effect below already uses for its own
+      // `setState({ type: 'loading' })`.
+      void Promise.resolve().then(() => setSubtitleTracks([]));
+      return;
+    }
+    const controller = new AbortController();
+    let released = false;
+    let resolvedTracks: readonly MaterialSubtitleTrack[] = [];
+    void findMaterialSubtitleTracks(client, material, controller.signal, limits).then((found) => {
+      if (released) {
+        releaseMaterialSubtitleTracks(found);
+        return;
+      }
+      resolvedTracks = found;
+      setSubtitleTracks(found);
+    });
+    return () => {
+      released = true;
+      controller.abort();
+      releaseMaterialSubtitleTracks(resolvedTracks);
+      void Promise.resolve().then(() => setSubtitleTracks([]));
+    };
+  }, [client, limits, material, mode]);
 
   useEffect(() => {
     if (
@@ -180,18 +223,28 @@ export function LocalMaterialPreview({
   }
   if (mode === 'media' || mode === 'media-stream') {
     return (
-      <LocalMaterialPlayer
-        sourceUrl={state.url}
-        title={material.displayName}
-        quality={
-          <MaterialRenditionMenu
-            renditions={renditions}
-            variant={variant}
-            onVariantChange={setVariant}
-            outcome={outcome}
-          />
-        }
-      />
+      <div className="local-material-preview local-material-preview--media">
+        <LocalMaterialPlayer
+          ref={playerHandleRef}
+          sourceUrl={state.url}
+          title={material.displayName}
+          tracks={subtitleTracks}
+          onTimeUpdate={setPlayerTime}
+          quality={
+            <MaterialRenditionMenu
+              renditions={renditions}
+              variant={variant}
+              onVariantChange={setVariant}
+              outcome={outcome}
+            />
+          }
+        />
+        <MaterialAnnotationsPanel
+          materialId={material.materialId}
+          currentTime={playerTime}
+          onSeek={(seconds) => playerHandleRef.current?.seekTo(seconds)}
+        />
+      </div>
     );
   }
   return mode === 'image' ? (
