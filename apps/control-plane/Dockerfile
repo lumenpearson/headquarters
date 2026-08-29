@@ -53,8 +53,9 @@ COPY packages/settings-schema/package.json packages/settings-schema/
 COPY packages/test-fixtures/package.json packages/test-fixtures/
 COPY packages/ui/package.json packages/ui/
 
-# `@gremuchaya/control-plane...` selects the package and its two workspace
-# dependencies -- `@gremuchaya/domain` and `@gremuchaya/protocol` -- and nothing
+# `@gremuchaya/control-plane...` selects the package and its three workspace
+# dependencies -- `@gremuchaya/domain`, `@gremuchaya/protocol` and
+# `@gremuchaya/settings-schema` (which itself depends on domain) -- and nothing
 # else. `--ignore-scripts` is deliberate: pnpm 10 already refuses dependency
 # lifecycle scripts unless `onlyBuiltDependencies` names them, and none of these
 # three projects has an install script of its own. What it does suppress is the
@@ -63,7 +64,7 @@ COPY packages/ui/package.json packages/ui/
 FROM manifests AS deps
 RUN pnpm install --frozen-lockfile --ignore-scripts --filter "@gremuchaya/control-plane..."
 
-# The same three projects with development dependencies left out, installed
+# The same four projects with development dependencies left out, installed
 # fresh rather than pruned from the tree above, so the runtime layer is the
 # result of one documented pnpm operation instead of a diff between two.
 FROM manifests AS prod-deps
@@ -71,7 +72,7 @@ RUN pnpm install --frozen-lockfile --prod --ignore-scripts --filter "@gremuchaya
 
 # `buf` is not needed and not installed: the generated Protobuf bindings under
 # `packages/protocol/src/gen` are committed, and `scripts/check-protocol-generation.mjs`
-# in CI is what keeps them current. The build here is `tsc -b` three times, in
+# in CI is what keeps them current. The build here is `tsc -b` four times, in
 # dependency order, which is the order pnpm's filtered run already imposes.
 FROM deps AS build
 COPY tsconfig.base.json ./
@@ -79,6 +80,8 @@ COPY packages/domain/tsconfig.json packages/domain/
 COPY packages/domain/src packages/domain/src
 COPY packages/protocol/tsconfig.json packages/protocol/
 COPY packages/protocol/src packages/protocol/src
+COPY packages/settings-schema/tsconfig.json packages/settings-schema/
+COPY packages/settings-schema/src packages/settings-schema/src
 COPY apps/control-plane/tsconfig.json apps/control-plane/
 COPY apps/control-plane/src apps/control-plane/src
 RUN pnpm --filter "@gremuchaya/control-plane..." build
@@ -109,9 +112,10 @@ COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=prod-deps --chown=node:node /app/packages ./packages
 COPY --from=prod-deps --chown=node:node /app/apps ./apps
 
-# The three compiled trees, over the top of the manifests just copied.
+# The four compiled trees, over the top of the manifests just copied.
 COPY --from=build --chown=node:node /app/packages/domain/dist ./packages/domain/dist
 COPY --from=build --chown=node:node /app/packages/protocol/dist ./packages/protocol/dist
+COPY --from=build --chown=node:node /app/packages/settings-schema/dist ./packages/settings-schema/dist
 COPY --from=build --chown=node:node /app/apps/control-plane/dist ./apps/control-plane/dist
 
 USER node

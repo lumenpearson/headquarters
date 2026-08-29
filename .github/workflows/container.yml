@@ -67,7 +67,7 @@ jobs:
       - name: Build the image
         uses: docker/build-push-action@v6
         with:
-          # The repository root: the image needs three workspace projects and
+          # The repository root: the image needs four workspace projects and
           # the lockfile that pins them.
           context: .
           file: apps/control-plane/Dockerfile
@@ -159,7 +159,11 @@ jobs:
         env:
           HQ_CONTROL_PLANE_IMAGE: ${{ env.CI_IMAGE_NAME }}
           HQ_IMAGE_TAG: ${{ env.CI_IMAGE_TAG }}
-        run: docker compose logs --no-color
+        # A build failure lands here before `.env` exists, and compose then
+        # fails interpolation instead of printing logs; the guard keeps this
+        # step a diagnostic rather than a second error.
+        run: |
+          if [ -f .env ]; then docker compose logs --no-color; else echo "no .env: the stack never started"; fi
 
       # `-v` as well as `down`, so the PostgreSQL volume goes with the stack. A
       # runner is discarded anyway; what this protects is a maintainer running
@@ -170,7 +174,8 @@ jobs:
         env:
           HQ_CONTROL_PLANE_IMAGE: ${{ env.CI_IMAGE_NAME }}
           HQ_IMAGE_TAG: ${{ env.CI_IMAGE_TAG }}
-        run: docker compose down -v
+        run: |
+          if [ -f .env ]; then docker compose down -v; else echo "no .env: nothing to stop"; fi
 
   publish:
     name: Publish to GHCR
