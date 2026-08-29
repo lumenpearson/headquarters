@@ -110,11 +110,13 @@ Desktop-сборка — статический экспорт Next.js плюс 
   `derivedPresentationOutputs` — то, что вычисляется из двух настроек сразу и потому
   привязкой быть не может. Тест падает на определении, которое не привязано и не отнесено
   к названному потребителю, и на выходе, который ничем не читается.
-- `localStorage` владеет всем, что сохраняет браузер, — восемь ключей:
+- `localStorage` владеет всем, что сохраняет браузер, — девять ключей:
   `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
   `gremuchaya-hq:snapshots:v1`, `gremuchaya-hq:device-session:v3` (сопряжённая сессия,
   областью ей служит база, а не адрес), `gremuchaya-hq:group-mirror:v1` (локальная копия
   облачного состояния, выкладывается через черновой ключ `…:draft`),
+  `gremuchaya-hq:control-plane-address:v1` (ручной список адресов control plane, введённый
+  в приложении; областью ему служит устройство),
   `hq.camera-material-assignments.v1`,
   `hq.keybinds-intro-seen.v1` и ключ Яндекс Карт
   `gremuchaya-hq:yandex-maps-v3-api-key` (устаревший `gremuchaya-hq:yandex-maps-api-key`

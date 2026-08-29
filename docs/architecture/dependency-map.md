@@ -81,12 +81,13 @@ State ownership:
   `apps/hq/src/application/personalization/presentation.ts`. A setting is bound there to a
   `data-*` attribute or an `--ops-*` custom property, or it is listed as read by a named consumer;
   a test fails on a definition that is neither.
-- `localStorage` owns everything the browser persists, under eight keys:
+- `localStorage` owns everything the browser persists, under nine keys:
   `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
   `gremuchaya-hq:snapshots:v1`, `gremuchaya-hq:device-session:v3` (the paired control-plane session,
   refresh token included, with the installation id it was minted against),
   `gremuchaya-hq:group-mirror:v1` (the last group state the device downloaded, plus a draft
-  companion that lives for one download), `hq.camera-material-assignments.v1`,
+  companion that lives for one download), `gremuchaya-hq:control-plane-address:v1` (the operator's
+  in-app control-plane address list, scoped to the device), `hq.camera-material-assignments.v1`,
   `hq.keybinds-intro-seen.v1`, and the Yandex Maps key. There is no IndexedDB and no Tauri store
   plugin in this repository. Media and timer handles are never persisted.
 - Application services perform cross-slice transitions and all IO. React components dispatch use

@@ -25,14 +25,24 @@ the code that makes it true, so the next reader can check rather than trust.
   committed. Without a key the tactical screen keeps every operational panel and shows a local
   key-configuration state beside `[ MAP DATA / LOCAL FALLBACK ]` rather than a fake map.
 
-## The control plane is built and not reachable from the application
+## The control plane is built, wired to a client, and local-only by default
 
-This is the largest gap in the build and the one most likely to be planned around wrongly.
-
-- `apps/control-plane` implements the whole `SyncService` contract plus four services, proved
-  against live PostgreSQL. **`apps/hq` holds no client for any of it.** Whatever the server can
-  do, no shipped screen can ask it to. Session synchronization in the application still runs over
-  the browser screen bus (ADR 0001).
+- **Both halves exist.** `apps/control-plane` implements the whole `SyncService` contract plus
+  four services, proved against live PostgreSQL, and since F10 `apps/hq` holds the client half:
+  `ControlPlaneClient`, `RealtimeClient`, `GroupEventPoller` and `GroupSettingsClient` under
+  `apps/hq/src/infrastructure/controlPlane/`, mounted by `ControlPlaneRuntime` in the root
+  layout. An earlier version of this chapter said `apps/hq` holds no client, which stopped being
+  true on 2026-08-26; corrections C43 and C49 in `docs/plans/actual_plan.md` record the same
+  claim's life inside the plan, and C59 records this one.
+- **Out of the box the application is local-only, by configuration rather than by gap.**
+  `general.localOnly` defaults to `true` (`packages/settings-schema`), and `controlPlaneUrl`
+  defaults to an empty list (`packages/config/src/projectSchemas.ts`), so no client is built
+  until an operator names an address. Three ways exist, in the order the client checks them:
+  the АДРЕС CONTROL PLANE field in the group pairing dialog (device-scoped, stored under
+  `gremuchaya-hq:control-plane-address:v1`), `apps/hq/public/runtime/project.override.json`,
+  and the `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL` build variable. With no address, or with
+  `general.localOnly` on, session synchronization runs over the browser screen bus alone
+  (ADR 0001).
 - **Object storage is implemented and unproven against a live bucket.** `BeginUpload`,
   `CreateMaterialVersion`, `GetDownloadGrant` and `GetPreviewGrant` mint AWS Signature Version 4
   presigned URLs once the `HQ_CONTROL_PLANE_STORAGE_*` group in `apps/control-plane/.env.example`
@@ -144,14 +154,17 @@ This is the largest gap in the build and the one most likely to be planned aroun
 
 ## Personalization
 
-- **Four settings are declared and do nothing, and the settings screen does not say so.**
-  `localization.locale` (no locale runtime exists; every label is a Russian literal),
-  `simulation.preset` (the simulation formula reads no setting), `groups.authority` (needs the
-  absent sync client) and `titlebar.alignment` (no custom titlebar exists in Rust or in
-  TypeScript). They are listed by name in
-  `apps/hq/src/application/personalization/presentation.ts`, where a test refuses to let a fifth
-  join them silently — but an operator moving one of the four gets no warning.
-- There is no custom window titlebar. `tauri.conf.json` sets `decorations` and nothing else.
+- **Two settings are declared and read by nothing, and the settings screen does not say so.**
+  `simulation.preset` (nothing maps a preset name onto the set of values it stands for) and
+  `layout.tileMinimumWidth` (the layout resolver takes no minimum-width input, and capping the
+  column count instead emptied eleven routes). Both are listed by name in
+  `apps/hq/src/application/personalization/presentation.ts` (`settingsAwaitingTheirFeature`),
+  where a test refuses to let a third join them silently — but an operator moving either gets no
+  warning. An earlier version of this entry named four; `localization.locale`,
+  `groups.authority` and `titlebar.alignment` have since gained readers — the locale runtime in
+  `apps/hq/src/application/localization/locale.ts`, the authority reconciliation in
+  `ControlPlaneRuntime` over `SetAuthorityMode`, and the `TitleBar` component with its
+  `data-titlebar-alignment` attribute.
 
 ## Local access and the shoot machine
 
