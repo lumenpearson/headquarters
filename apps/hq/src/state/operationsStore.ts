@@ -1318,14 +1318,25 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
 
       const nodes = Object.values(state.systemNodes);
       const links = Object.values(state.channels);
+      const sensors = Object.values(state.sensors);
+      const cameras = Object.values(state.cameras);
       /*
        * How far apart two consecutive samples of one series sit in the noise
        * generator's index space. Every series scatters from the one seed, so
        * without an ordinal of its own each would take the same offset at the
-       * same step and the whole world would move in lockstep. The two spare
-       * ordinals at the end belong to the tracked object's two axes.
+       * same step and the whole world would move in lockstep. A link now
+       * takes four ordinals (load, latency, signal, packet loss) rather than
+       * three, and a sensor and a camera each take the one their own signal
+       * channel reads. The two spare ordinals at the end belong to the
+       * tracked object's two axes.
        */
-      const stride = sessionMetricNames.length + nodes.length * 2 + links.length * 3 + 2;
+      const stride =
+        sessionMetricNames.length +
+        nodes.length * 2 +
+        links.length * 4 +
+        sensors.length +
+        cameras.length +
+        2;
       let ordinal = 0;
       /*
        * One reading, and the next ordinal. Rounded to whole units because every
@@ -1373,7 +1384,20 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
             load: read('link-load', channel.load).value,
             latency: read('link-latency', channel.latency).value,
             signal: read('link-signal', channel.signal).value,
+            packetLoss: read('packet-loss', channel.packetLoss).value,
           },
+        ]),
+      );
+      const sensorReadings = Object.fromEntries(
+        sensors.map((sensor) => [
+          sensor.id,
+          { ...sensor, signal: read('sensor-signal', sensor.signal).value },
+        ]),
+      );
+      const cameraReadings = Object.fromEntries(
+        cameras.map((camera) => [
+          camera.id,
+          { ...camera, signal: read('camera-signal', camera.signal).value },
         ]),
       );
 
@@ -1433,6 +1457,8 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       return {
         systemNodes,
         channels,
+        sensors: sensorReadings,
+        cameras: cameraReadings,
         objects,
         events:
           generatedEvent === null ? state.events : [generatedEvent, ...state.events].slice(0, 160),

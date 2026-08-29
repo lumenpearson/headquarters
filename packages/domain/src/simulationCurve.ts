@@ -230,6 +230,24 @@ export function channelValue(
 }
 
 /**
+ * Where a criticality level in `[0, 1]` sits on the four-band scale the
+ * telemetry contract declares, at quarter steps.
+ *
+ * Exported on its own, apart from {@link channelSeverity}, because a
+ * criticality level does not have to come from a curve. A simulation preset
+ * that has drawn no curve for a channel still has to classify a reading, and
+ * it has to classify it on the same bands a hand-drawn curve would — a
+ * second copy of the thresholds would let the two drift apart.
+ */
+export function severityForCriticality(level: number): TelemetrySeverityKind {
+  const clamped = clampNumber(level, 0, 1);
+  if (clamped < 0.25) return 'normal';
+  if (clamped < 0.5) return 'elevated';
+  if (clamped < 0.75) return 'degraded';
+  return 'critical';
+}
+
+/**
  * Where a channel sits on the four-band scale the telemetry contract declares,
  * read from its criticality curve at quarter steps.
  *
@@ -243,11 +261,7 @@ export function channelSeverity(
 ): TelemetrySeverityKind {
   const criticality = evaluateCurve(channel.criticalityCurve, phase);
   if (criticality === undefined) return 'normal';
-  const level = clampNumber(criticality, 0, 1);
-  if (level < 0.25) return 'normal';
-  if (level < 0.5) return 'elevated';
-  if (level < 0.75) return 'degraded';
-  return 'critical';
+  return severityForCriticality(criticality);
 }
 
 /**

@@ -429,6 +429,10 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'tiles.hiddenCategories': 'Read by TileGrid, which drops whole groups before layout.',
   'tiles.animations': 'Read by TileGrid, which gives a cell the motion its own entry names.',
   'tiles.categoryAnimations': 'Read by TileGrid, when no per-tile entry names a motion.',
+  'tiles.presentationOverrides':
+    'Read by TileGrid, which caps a tile’s presentation before the category or the application ceiling.',
+  'tiles.categoryPresentation':
+    'Read by TileGrid, when no per-tile entry names a presentation cap.',
   'backgrounds.imageSource': 'Resolved to a material URL by OperationsShell, not to a token.',
   'backgrounds.videoSource': 'Resolved to a material URL by OperationsShell, not to a token.',
   'animations.enabled': 'Combined with production and accessibility state into one motion gate.',
@@ -519,6 +523,9 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
     'Read by simulationChannelFor, so a reading is carried from the one before it.',
   'simulation.seed':
     'Read by simulationChannelFor and by the tracked object’s walk, both seeded from it.',
+  'simulation.preset':
+    'Read by readSimulationSettings; simulateChannelReading falls back to ' +
+    'simulationPresetCriticality for a channel with no drawn criticality curve.',
   'localization.locale':
     'Read by locale.ts, which every label, date and collation in the application goes through.',
   'localization.elementOverrides':
@@ -552,11 +559,6 @@ export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
   // itself and decide relocation against it.
   'layout.tileMinimumWidth':
     'Needs a minimum-width input in @gremuchaya/layout-engine; the resolver has none.',
-  // The last of the twelve `simulation` definitions without a reader. The five
-  // that stood beside it moved to `settingsReadElsewhere` when `simulationTick`
-  // started reading the curves; a preset is a named set of values, and nothing
-  // in the schema or the store maps a name onto one yet.
-  'simulation.preset': 'F12 — no reader maps a preset name onto the values it stands for.',
 };
 
 /**

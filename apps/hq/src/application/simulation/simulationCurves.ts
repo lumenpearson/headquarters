@@ -1,10 +1,10 @@
 import {
-  channelSeverity,
   channelValue,
   clampNumber,
   deterministicUnit,
   evaluateCurve,
   normalizeCurvePoints,
+  severityForCriticality,
   type CurveInterpolationKind,
   type CurvePointLike,
   type SimulationChannelLike,
@@ -15,8 +15,10 @@ import {
   curveInterpolations,
   getSettingDefinition,
   simulationChannels,
+  simulationPresets,
   type SettingValues,
   type SimulationChannelName,
+  type SimulationPresetName,
 } from '@gremuchaya/settings-schema';
 
 /**
@@ -85,10 +87,15 @@ export interface ChannelReading {
  *
  * The numbers are the ones `simulationTick` clamped to before it read any of
  * this, moved here unchanged, so the world keeps the shape it already had.
- * `storage` is the one addition: the roster declared the channel and the metric
- * never moved, which is a channel with nothing on the other end of it.
+ * `storage` was the first addition: the roster declared the channel and the
+ * metric never moved, which is a channel with nothing on the other end of it.
+ * `camera-signal`, `packet-loss` and `sensor-signal` are the second: a comms
+ * channel's packet loss and a sensor's or a camera's signal strength read
+ * straight off the entity before this, which is the same defect one level
+ * down from `storage` — a field the seed drew and nothing ever moved again.
  */
 export const simulationChannelRanges: Readonly<Record<SimulationChannelName, ChannelRange>> = {
+  'camera-signal': { minimum: 5, maximum: 100 },
   cpu: { minimum: 12, maximum: 94 },
   gpu: { minimum: 8, maximum: 89 },
   'link-latency': { minimum: 5, maximum: 210 },
@@ -98,8 +105,10 @@ export const simulationChannelRanges: Readonly<Record<SimulationChannelName, Cha
   'network-out': { minimum: 40, maximum: 410 },
   'node-load': { minimum: 8, maximum: 96 },
   'node-temperature': { minimum: 30, maximum: 78 },
+  'packet-loss': { minimum: 0, maximum: 35 },
   ram: { minimum: 24, maximum: 92 },
   readiness: { minimum: 71, maximum: 96 },
+  'sensor-signal': { minimum: 40, maximum: 100 },
   storage: { minimum: 55, maximum: 95 },
 };
 
@@ -170,6 +179,7 @@ export function deterministicOffset(seed: bigint, index: number): number {
  */
 export interface SimulationSettings {
   readonly channel: SimulationChannelName;
+  readonly preset: SimulationPresetName;
   readonly valueCurve: readonly string[];
   readonly criticalityCurve: readonly string[];
   readonly interpolation: CurveInterpolationKind;
@@ -186,15 +196,21 @@ export function isSimulationChannelName(value: string): value is SimulationChann
   return (simulationChannels as readonly string[]).includes(value);
 }
 
+export function isSimulationPresetName(value: string): value is SimulationPresetName {
+  return (simulationPresets as readonly string[]).includes(value);
+}
+
 function isCurveInterpolation(value: string): value is CurveInterpolationKind {
   return (curveInterpolations as readonly string[]).includes(value);
 }
 
 export function readSimulationSettings(values: SettingValues): SimulationSettings {
   const channel = settingString(values, 'simulation.channel');
+  const preset = settingString(values, 'simulation.preset');
   const interpolation = settingString(values, 'simulation.interpolation');
   return {
     channel: isSimulationChannelName(channel) ? channel : 'cpu',
+    preset: isSimulationPresetName(preset) ? preset : 'normal',
     valueCurve: settingList(values, 'simulation.valueCurve'),
     criticalityCurve: settingList(values, 'simulation.criticalityCurve'),
     interpolation: isCurveInterpolation(interpolation) ? interpolation : 'linear',
@@ -206,6 +222,71 @@ export function readSimulationSettings(values: SettingValues): SimulationSetting
     smoothing: settingNumber(values, 'simulation.smoothing'),
     seed: BigInt(Math.trunc(settingNumber(values, 'simulation.seed'))),
   };
+}
+
+/**
+ * The per-channel criticality baseline each named preset stands for, read
+ * when a channel has no operator-drawn criticality curve of its own.
+ *
+ * A hand-drawn curve always wins — a preset marks the world, an operator's own
+ * curve overrides one channel of it — so this is a floor under
+ * {@link simulateChannelReading}, not a second curve stacked on top of the
+ * first. `normal` supplies none: it is the world exactly as an unmarked
+ * simulation already reads it, criticality curve absent, severity `normal`.
+ *
+ * `elevated`, `degraded` and `critical` are uniform across the whole roster,
+ * at a level inside the matching band of {@link severityForCriticality} — the
+ * preset's name is the severity every channel reports while it is marked.
+ * `incident` sits at the top of the `critical` band rather than merely inside
+ * it, for a reading worse than the `critical` preset's own. `recovery` sits at
+ * the bottom of `normal`, low but not zero, so a recovering world still reads
+ * as having just come down from something.
+ *
+ * `network-attack`, `storage-exhaustion` and `cpu-overload` name the channels
+ * their own scenario touches and leave every other channel unmarked, which is
+ * what makes them read differently from the four uniform presets and from one
+ * another.
+ */
+export const simulationPresetCriticality: Readonly<
+  Record<SimulationPresetName, Readonly<Partial<Record<SimulationChannelName, number>>>>
+> = {
+  normal: {},
+  elevated: uniformCriticality(0.35),
+  degraded: uniformCriticality(0.55),
+  critical: uniformCriticality(0.85),
+  incident: uniformCriticality(0.97),
+  recovery: uniformCriticality(0.1),
+  'network-attack': {
+    'link-latency': 0.9,
+    'link-load': 0.85,
+    'link-signal': 0.8,
+    'network-in': 0.75,
+    'network-out': 0.75,
+    'packet-loss': 0.9,
+  },
+  'storage-exhaustion': {
+    storage: 0.92,
+    'node-load': 0.4,
+  },
+  'cpu-overload': {
+    cpu: 0.92,
+    'node-load': 0.7,
+    'node-temperature': 0.55,
+  },
+};
+
+function uniformCriticality(
+  level: number,
+): Readonly<Partial<Record<SimulationChannelName, number>>> {
+  return Object.fromEntries(simulationChannels.map((channel) => [channel, level]));
+}
+
+/** The preset's own baseline for one channel, or `undefined` where it names none. */
+export function presetCriticalityFor(
+  preset: SimulationPresetName,
+  channel: SimulationChannelName,
+): number | undefined {
+  return simulationPresetCriticality[preset][channel];
 }
 
 /** The shape both curves are read with; they share one timeline and one mode. */
@@ -403,9 +484,18 @@ export function simulationChannelFor(
  * of its range and reports `normal` while it does. A channel with no
  * criticality curve is not capped at all — a missing ceiling is not a low one.
  *
+ * An operator-drawn curve is read first; where it says nothing for this
+ * channel, the marked `simulation.preset` supplies a criticality of its own —
+ * see {@link simulationPresetCriticality} — so a preset with no curve drawn
+ * still moves the world, and a curve the operator did draw is never
+ * overridden by the preset that happens to be marked alongside it.
+ *
  * The ceiling narrows the channel rather than trimming the result afterwards,
  * because `channelValue` clamps before it smooths and a value smoothed from
- * outside the range would drift the whole series out of it.
+ * outside the range would drift the whole series out of it. The severity is
+ * read off the same resolved criticality as the ceiling, through
+ * {@link severityForCriticality}, so the two can never disagree about which
+ * band a reading is in.
  */
 export function simulateChannelReading(
   settings: SimulationSettings,
@@ -416,14 +506,15 @@ export function simulateChannelReading(
   previous: number | undefined,
 ): ChannelReading {
   const assembled = simulationChannelFor(settings, channel, range);
-  const criticality = evaluateCurve(assembled.criticalityCurve, phase);
+  const drawn = evaluateCurve(assembled.criticalityCurve, phase);
+  const criticality = drawn ?? presetCriticalityFor(settings.preset, channel);
   const ceiling =
     criticality === undefined
       ? range.maximum
       : range.minimum + clampNumber(criticality, 0, 1) * (range.maximum - range.minimum);
   return {
     value: channelValue({ ...assembled, maximum: ceiling }, phase, index, previous),
-    severity: channelSeverity(assembled, phase),
+    severity: criticality === undefined ? 'normal' : severityForCriticality(criticality),
   };
 }
 

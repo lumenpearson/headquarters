@@ -126,6 +126,74 @@ describe('the tick reads the curves rather than its own counter', () => {
       expect(link.latency).toBe(simulationChannelRanges['link-latency'].maximum);
     }
   });
+
+  it('reads a comms link’s packet loss through its own channel, not the seed alone', () => {
+    settleRun([{ id: 'simulation.valueCurve', value: ramp('packet-loss', 100, 100) }]);
+    const before = Object.values(operationsStore.getState().channels).map(
+      (channel) => channel.packetLoss,
+    );
+
+    tickAt(start);
+
+    const links = Object.values(operationsStore.getState().channels);
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link.packetLoss).toBe(simulationChannelRanges['packet-loss'].maximum);
+    }
+    // The seed drew scattered packet loss per channel; a curve overrides all
+    // of it identically, which the seed's own scatter could not have produced.
+    expect(before.some((value) => value !== simulationChannelRanges['packet-loss'].maximum)).toBe(
+      true,
+    );
+  });
+
+  it('reads a sensor’s and a camera’s signal through their own channels', () => {
+    settleRun([
+      {
+        // Channels are written in ascending name order, as the schema requires:
+        // `camera-signal` sorts before `sensor-signal`.
+        id: 'simulation.valueCurve',
+        value: [...ramp('camera-signal', 100, 100), ...ramp('sensor-signal', 0, 0)],
+      },
+    ]);
+
+    tickAt(start);
+
+    const state = operationsStore.getState();
+    const sensors = Object.values(state.sensors);
+    const cameras = Object.values(state.cameras);
+    expect(sensors.length).toBeGreaterThan(0);
+    expect(cameras.length).toBeGreaterThan(0);
+    for (const sensor of sensors) {
+      expect(sensor.signal).toBe(simulationChannelRanges['sensor-signal'].minimum);
+    }
+    for (const camera of cameras) {
+      expect(camera.signal).toBe(simulationChannelRanges['camera-signal'].maximum);
+    }
+  });
+
+  it('scatters two sensors’ and two cameras’ readings differently from one seed', () => {
+    // The same argument as the system nodes above: without a sample ordinal of
+    // its own, every sensor and every camera would move in lockstep.
+    settleRun([
+      {
+        id: 'simulation.valueCurve',
+        value: [...ramp('camera-signal', 50, 50), ...ramp('sensor-signal', 50, 50)],
+      },
+      { id: 'simulation.noise', value: 0.5 },
+    ]);
+
+    tickAt(start);
+
+    const sensorSignals = Object.values(operationsStore.getState().sensors).map(
+      (sensor) => sensor.signal,
+    );
+    const cameraSignals = Object.values(operationsStore.getState().cameras).map(
+      (camera) => camera.signal,
+    );
+    expect(new Set(sensorSignals).size).toBeGreaterThan(1);
+    expect(new Set(cameraSignals).size).toBeGreaterThan(1);
+  });
 });
 
 describe('smoothing carries the previous reading forward', () => {
@@ -413,6 +481,19 @@ describe('the criticality curve decides how high a reading may climb', () => {
     tickAt(start, start + 16_000);
 
     expect(operationsStore.getState().events[0]?.severity).toBe('normal');
+  });
+
+  it('reports the band a marked preset stands for when no curve is drawn either', () => {
+    // R31's remaining gap: before `simulation.preset` had a reader, every
+    // generated event read `normal` regardless of which preset was marked.
+    settleRun([
+      { id: 'simulation.updateIntervalMs', value: 5_000 },
+      { id: 'simulation.preset', value: 'critical' },
+    ]);
+
+    tickAt(start, start + 16_000);
+
+    expect(operationsStore.getState().events[0]?.severity).toBe('critical');
   });
 
   it('generates one event per interval of run time rather than per tick', () => {
