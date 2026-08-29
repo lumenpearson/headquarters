@@ -87,17 +87,12 @@ impl Serialize for MediaGatewayError {
     }
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum RtspTransport {
+    #[default]
     Tcp,
     Udp,
-}
-
-impl Default for RtspTransport {
-    fn default() -> Self {
-        Self::Tcp
-    }
 }
 
 impl RtspTransport {

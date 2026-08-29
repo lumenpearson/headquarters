@@ -110,6 +110,14 @@ pub(crate) fn apply_corners(window: &WebviewWindow, rounded: bool) -> Result<(),
         // DWMWA_WINDOW_CORNER_PREFERENCE exists from build 22000. Earlier DWM
         // builds reject it with E_INVALIDARG and draw square corners anyway, so
         // there is nothing to apply and nothing to report.
+        //
+        // This early return means DwmSetWindowAttribute (and therefore
+        // DWMWCP_DONOTROUND) is never sent on Windows 10 or legacy hosts. The
+        // frontend comments in `hostWindowProfile.ts` and `TitleBar.tsx` should
+        // describe the corner treatment those hosts get as "left square by DWM's
+        // own default, not requested through this call" rather than "the same
+        // call sends DWMWCP_DONOTROUND" -- reconciling the wording does not need
+        // a second machine, only reading this branch.
         return Ok(());
     }
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
