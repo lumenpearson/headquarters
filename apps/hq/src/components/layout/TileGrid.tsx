@@ -253,7 +253,7 @@ export function TileGrid({
   const tileMinimumWidth = useOperationsStore((state) => {
     const value = state.personalization.draft.values['layout.tileMinimumWidth'];
     if (typeof value === 'number' && Number.isFinite(value)) return value;
-    return typeof tileMinimumWidthDefault === 'number' ? tileMinimumWidthDefault : 240;
+    return typeof tileMinimumWidthDefault === 'number' ? tileMinimumWidthDefault : 160;
   });
 
   /*

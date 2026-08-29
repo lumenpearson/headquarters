@@ -1881,7 +1881,11 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
   definition(
     'layout.tileMinimumWidth',
     'layout',
-    240,
+    // The range floor on purpose: the default must not move a single stock
+    // tile at any supported viewport, and 240 displaced the reports-kinds
+    // and map-layers tiles at 1440x900 the day the resolver gained this
+    // reader. Raising the floor is the operator's call for their monitor.
+    160,
     'device',
     'Narrowest a tile may be before the layout moves it, in pixels.',
     numberWithin(160, 480),

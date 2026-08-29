@@ -597,9 +597,10 @@ test('applies schema-backed visual preview tokens without introducing arbitrary 
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
   await page.getByRole('option', { name: 'ЦВЕТА', exact: true }).click();
-  const accent = page.getByRole('combobox', { name: 'COLORS / ACCENT' });
-  await accent.click();
-  await page.getByRole('option', { name: 'CYAN', exact: true }).click();
+  // `colors.accent` is a swatch picker now, not a select: a radiogroup of
+  // five fixed swatches, each labelled with its accent name.
+  const accent = page.getByRole('radiogroup', { name: 'COLORS / ACCENT' });
+  await accent.getByRole('radio', { name: 'CYAN', exact: true }).click();
   await expect(page.locator('.ops-shell')).toHaveAttribute('data-accent', 'cyan');
 
   await category.click();
