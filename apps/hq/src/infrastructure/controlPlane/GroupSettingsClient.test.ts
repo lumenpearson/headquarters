@@ -10,6 +10,7 @@ function timestamp(epochMs: number) {
 interface Recorded {
   readonly scopes: { readonly type: number; readonly resourceId: string }[];
   readonly cursors: { readonly cursor: string; readonly pageSize: number }[];
+  readonly watches: { readonly afterRevision: bigint }[];
 }
 
 /**
@@ -19,7 +20,10 @@ interface Recorded {
  * carries the server's cursor forward rather than counting rows itself: a fake
  * that answered one page could not tell a keyset read from an offset one.
  */
-function settingsClient(recorded: Recorded): SettingsRpcClient {
+function settingsClient(
+  recorded: Recorded,
+  watchEvents: readonly (bigint | undefined)[] = [],
+): SettingsRpcClient {
   const pages = [
     {
       entries: [historyEntry('11111111-1111-4111-8111-111111111111', 'APPLY_DRAFT_PATCH', 3)],
@@ -76,6 +80,12 @@ function settingsClient(recorded: Recorded): SettingsRpcClient {
       const page = request.page.cursor === '' ? pages[0] : pages[1];
       return page ?? { entries: [], page: { nextCursor: '', hasMore: false } };
     },
+    async *watchSettings(request) {
+      recorded.watches.push({ afterRevision: request.afterRevision });
+      for (const sequence of watchEvents) {
+        yield sequence === undefined ? {} : { event: { sequence } };
+      }
+    },
   };
 }
 
@@ -102,11 +112,14 @@ function historyEntry(id: string, operation: string, revision: number) {
   };
 }
 
-function client(recorded: Recorded = { scopes: [], cursors: [] }) {
+function client(
+  recorded: Recorded = { scopes: [], cursors: [], watches: [] },
+  watchEvents: readonly (bigint | undefined)[] = [],
+) {
   return new GroupSettingsClient({
     groupId: 'group-a',
     deviceId: 'device-a',
-    client: settingsClient(recorded),
+    client: settingsClient(recorded, watchEvents),
     mintRequestId: () => 'request-1',
   });
 }
@@ -129,7 +142,7 @@ describe('GroupSettingsClient', () => {
   });
 
   it('names the group scope and this session own group on every write', async () => {
-    const recorded: Recorded = { scopes: [], cursors: [] };
+    const recorded: Recorded = { scopes: [], cursors: [], watches: [] };
     const settings = client(recorded);
 
     await settings.applyGroupDraftPatch([{ path: 'telemetry.source', value: 'native' }]);
@@ -142,7 +155,7 @@ describe('GroupSettingsClient', () => {
   });
 
   it('pages the history by carrying the server cursor forward', async () => {
-    const recorded: Recorded = { scopes: [], cursors: [] };
+    const recorded: Recorded = { scopes: [], cursors: [], watches: [] };
     const settings = client(recorded);
 
     const first = await settings.listGroupHistory({ cursor: '', pageSize: 10 });
@@ -172,5 +185,16 @@ describe('GroupSettingsClient', () => {
     // The page carries exactly what the server reports: rows, a cursor and a
     // flag. There is no `total` and no `pageCount` to read.
     expect(Object.keys(page).sort()).toEqual(['entries', 'hasMore', 'nextCursor']);
+  });
+
+  it('streams the group scope and carries the revision forward, dropping an unset event', async () => {
+    const recorded: Recorded = { scopes: [], cursors: [], watches: [] };
+    const settings = client(recorded, [11n, undefined, 12n]);
+
+    const events = [];
+    for await (const event of settings.watchSettings(5)) events.push(event);
+
+    expect(recorded.watches).toEqual([{ afterRevision: 5n }]);
+    expect(events).toEqual([{ revision: 11 }, { revision: 12 }]);
   });
 });

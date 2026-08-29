@@ -224,6 +224,10 @@ export function GroupChannelRuntime({ links, session }: GroupChannelRuntimeProps
       disconnectSettings = connectGroupSettings(sync);
       // The group wins on join; see `GroupSettingsSync`'s precedence note.
       void sync.adoptGroupSettings(controller.signal);
+      // R6: a value another device publishes afterwards must not wait for
+      // this session's next login to arrive. Runs until `controller.abort()`
+      // below, which is the same signal the join above already carries.
+      void sync.watchGroupSettings(controller.signal);
     }
 
     /*

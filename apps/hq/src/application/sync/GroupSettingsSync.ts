@@ -57,7 +57,23 @@ export interface GroupSettingsSyncOptions {
    * message about it.
    */
   readonly onMirrorChanged?: () => void;
+  /**
+   * How `watchGroupSettings` waits between reconnects, injected for tests the
+   * way `RealtimeClient` injects its own timer. Defaults to `setTimeout`.
+   */
+  readonly schedule?: (callback: () => void, delayMs: number) => () => void;
+  /** Overrides {@link watchReconnectBackoffMs} for a test that cannot wait 15 s. */
+  readonly watchBackoffMs?: readonly number[];
 }
+
+/**
+ * Bounded backoff for `watchGroupSettings`'s reconnect, in the idiom
+ * `RealtimeClient`'s socket uses. `WatchSettings` is a poll under the server's
+ * own hood (`settings/service.ts`), so there is nothing urgent to recover --
+ * a control plane down for a minute gains nothing from being asked every
+ * second, and `adoptGroupSettings` still runs once the stream reopens.
+ */
+export const watchReconnectBackoffMs: readonly number[] = [1_000, 2_000, 5_000, 15_000];
 
 /**
  * The group half of the settings (R6).
@@ -128,6 +144,60 @@ export class GroupSettingsSync {
   }
 
   /**
+   * Follows the group's published document live (R6).
+   *
+   * `WatchSettings` is server-streaming and, server-side, restricted to the
+   * *effective* document (`GroupSettingsWatchEvent`'s own doc comment), so
+   * there is nothing to branch on here: any frame at all means the group
+   * moved, and `adoptGroupSettings` is what applies that -- through the same
+   * precedence and the same mirror offer a join uses, run again rather than
+   * duplicated. Without this a value another device published only reached
+   * this session at the next login; `ControlPlaneRuntime`'s comment on
+   * mounting "the sockets, the event channel and the group's settings" is
+   * what this method is for.
+   *
+   * Runs until `signal` aborts. A stream that ends or fails is reopened after
+   * {@link watchReconnectBackoffMs}, resuming from the highest revision seen
+   * so far -- `0` on the first attempt, which asks for everything the scope
+   * still holds a version row for.
+   */
+  async watchGroupSettings(signal?: AbortSignal): Promise<void> {
+    const schedule =
+      this.#options.schedule ??
+      ((callback: () => void, delayMs: number) => {
+        const timeoutId = setTimeout(callback, delayMs);
+        return () => clearTimeout(timeoutId);
+      });
+    const backoffMs = this.#options.watchBackoffMs ?? watchReconnectBackoffMs;
+    // A function rather than a narrowed boolean: `signal.aborted` moves after
+    // this method has already read it once, and TypeScript's control-flow
+    // narrowing does not know that -- it would otherwise treat every read
+    // after the loop guard as the same (`false`) value for ever.
+    const aborted = () => signal?.aborted === true;
+    let afterRevision = 0;
+    let attempt = 0;
+    while (!aborted()) {
+      let sawEvent = false;
+      try {
+        for await (const event of this.#options.port.watchSettings(afterRevision, signal)) {
+          if (aborted()) return;
+          sawEvent = true;
+          attempt = 0;
+          afterRevision = Math.max(afterRevision, event.revision);
+          await this.adoptGroupSettings(signal);
+        }
+      } catch {
+        // A dropped stream is not a failure worth the status line: it is
+        // retried below, and `adoptGroupSettings` already reported its own
+        // read failures through `#record` while the stream was open.
+      }
+      if (aborted()) return;
+      if (!sawEvent) attempt = Math.min(attempt + 1, backoffMs.length - 1);
+      await waitFor(backoffMs[attempt] ?? 0, signal, schedule);
+    }
+  }
+
+  /**
    * What the group says, from the cloud if it answers and from the local copy
    * if it does not.
    *
@@ -178,6 +248,37 @@ export class GroupSettingsSync {
       return true;
     } catch (error: unknown) {
       this.#record(error, 'НАСТРОЙКА ГРУППЫ НЕ ПРИНЯТА');
+      return false;
+    }
+  }
+
+  /**
+   * Carries a local reset to the group, one `ResetElement` call per id (R6).
+   *
+   * `resetSettingsCategory` and `resetAllSettings` reset the *local* draft to
+   * `defaultValue`, which is the right answer for a machine that has no group.
+   * For the ids a group is in charge of, writing that default back as an
+   * override through `applyGroupDraftPatch` would be the wrong RPC: a reset is
+   * a request to *forget* the group's own value, not to publish a copy of the
+   * factory one, and a theme layer supplying a non-factory default would make
+   * the two answers differ. `resetGroupElement` is the RPC that forgets, so
+   * resetting several ids at once is several calls to it rather than one to
+   * `publishGroupSettings`. Ids the local catalogue does not say `scope:
+   * 'group'` for are dropped, for the reason `publishGroupSettings` gives: a
+   * category or a full reset touches both kinds of setting in one gesture, and
+   * only the group's share of it is the group's business.
+   */
+  async publishGroupResets(ids: readonly string[], signal?: AbortSignal): Promise<boolean> {
+    if (this.#applyingRemote) return false;
+    const targets = ids.filter(isGroupScopedSetting);
+    if (targets.length === 0) return false;
+    try {
+      for (const id of targets) {
+        await this.#options.port.resetGroupElement(id, signal);
+      }
+      return true;
+    } catch (error: unknown) {
+      this.#record(error, 'СБРОС ГРУППЫ НЕ ПРИНЯТ');
       return false;
     }
   }
@@ -260,4 +361,29 @@ function sameValue(left: SettingValue | undefined, right: SettingValue): boolean
     return left.length === right.length && left.every((item, index) => item === right[index]);
   }
   return left === right;
+}
+
+/**
+ * Resolves after `delayMs`, or as soon as `signal` aborts -- whichever is
+ * first. `watchGroupSettings`'s reconnect loop is the only caller: an abort
+ * mid-wait must not hold the loop open for the rest of the backoff.
+ */
+function waitFor(
+  delayMs: number,
+  signal: AbortSignal | undefined,
+  schedule: (callback: () => void, delayMs: number) => () => void,
+): Promise<void> {
+  if (delayMs <= 0 || signal?.aborted === true) return Promise.resolve();
+  return new Promise((resolve) => {
+    const cancel = schedule(resolve, delayMs);
+    if (signal === undefined) return;
+    signal.addEventListener(
+      'abort',
+      () => {
+        cancel();
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }

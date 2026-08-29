@@ -68,6 +68,9 @@ function fakeSettings(pages: readonly GroupSettingsHistoryPage[]): GroupSettings
       );
       return pages[index] ?? { entries: [], nextCursor: '', hasMore: false };
     },
+    async *watchSettings() {
+      // Unused by this hook.
+    },
   };
 }
 

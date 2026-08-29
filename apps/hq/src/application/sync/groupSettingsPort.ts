@@ -77,6 +77,22 @@ export interface GroupSettingsHistoryQuery {
   readonly pageSize: number;
 }
 
+/**
+ * One tick of `WatchSettings` (R6).
+ *
+ * The RPC is restricted server-side to the *effective* document --
+ * `settings/service.ts`'s own comment on `watchSettings`, enforced by
+ * `settings/store.ts`'s `pollChanges` reading only `effectiveScopeType` --
+ * so every event it yields is a change to what the group actually agreed,
+ * never to somebody's open draft. That is why only the revision is carried
+ * here: `GroupSettingsSync.watchGroupSettings` re-reads the document through
+ * `GetEffectiveSettings` rather than trying to reconstruct it from the event,
+ * which keeps one path responsible for applying a group answer instead of two.
+ */
+export interface GroupSettingsWatchEvent {
+  readonly revision: number;
+}
+
 export interface GroupSettingsPort {
   /**
    * The values that reach this device, merged factory → theme → group →
@@ -94,4 +110,13 @@ export interface GroupSettingsPort {
     query: GroupSettingsHistoryQuery,
     signal?: AbortSignal,
   ): Promise<GroupSettingsHistoryPage>;
+  /**
+   * Streams the group's published document as it moves. `afterRevision`
+   * resumes a reconnect where the last one left off; `0` asks for every
+   * version row the scope still holds.
+   */
+  watchSettings(
+    afterRevision: number,
+    signal?: AbortSignal,
+  ): AsyncIterable<GroupSettingsWatchEvent>;
 }

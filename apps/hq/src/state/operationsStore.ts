@@ -68,7 +68,10 @@ import {
   type ControlPlaneLinkState,
 } from '../application/sync/connection';
 import { withLinkPatch, withLinksIdle } from '../application/sync/controlPlaneLinks';
-import { publishGroupSettings } from '../application/sync/groupSettingsBus';
+import {
+  publishGroupSettings,
+  publishGroupSettingsReset,
+} from '../application/sync/groupSettingsBus';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
@@ -1017,7 +1020,8 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     // client makes no call.
     publishGroupSettings(patches);
   },
-  resetSettingsCategory: (category) =>
+  resetSettingsCategory: (category) => {
+    let resetIds: readonly string[] = [];
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
       const draft = resetDraftCategory(
@@ -1025,13 +1029,14 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         category,
         settingsMetadata('SET-CATEGORY-RESET'),
       );
+      resetIds = draft.history.at(-1)?.changedIds ?? [];
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
           ...settingsMetadata('SET-HISTORY'),
           operation: 'reset-category',
           category,
-          changedIds: draft.history.at(-1)?.changedIds ?? [],
+          changedIds: resetIds,
           before,
           after: createSettingsDraftCheckpoint(draft),
         },
@@ -1041,17 +1046,25 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         personalization,
         audit: [auditEntry('СБРОШЕНА КАТЕГОРИЯ НАСТРОЕК', category), ...state.audit].slice(0, 100),
       };
-    }),
-  resetAllSettings: () =>
+    });
+    // R6, the group half: mirrors `applySettingsPatch`, outside `set` for the
+    // same reason. `publishGroupSettingsReset` -- not `publishGroupSettings`
+    // -- because this is a reset and not a patch; see
+    // `GroupSettingsSync.publishGroupResets` for why the two RPCs differ.
+    publishGroupSettingsReset(resetIds);
+  },
+  resetAllSettings: () => {
+    let resetIds: readonly string[] = [];
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
       const draft = resetDraftAll(state.personalization.draft, settingsMetadata('SET-ALL-RESET'));
+      resetIds = draft.history.at(-1)?.changedIds ?? [];
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
           ...settingsMetadata('SET-HISTORY'),
           operation: 'reset-all',
-          changedIds: draft.history.at(-1)?.changedIds ?? [],
+          changedIds: resetIds,
           before,
           after: createSettingsDraftCheckpoint(draft),
         },
@@ -1061,7 +1074,10 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         personalization,
         audit: [auditEntry('СБРОШЕН ВЕСЬ ЧЕРНОВИК НАСТРОЕК', 'ALL'), ...state.audit].slice(0, 100),
       };
-    }),
+    });
+    // R6, the group half: see `resetSettingsCategory` above.
+    publishGroupSettingsReset(resetIds);
+  },
   discardSettingsDraft: () =>
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
