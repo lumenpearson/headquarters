@@ -215,30 +215,18 @@ body.terminal-theme textarea:focus {
 
 /*
  * The group dialog (R27). It reuses `.ops-definition-list` for the summary,
- * so only the parts that list is not -- the pairing form, the two rosters and
+ * so only the parts that list is not -- the two rosters, the pairing code and
  * the failure line -- are described here. Every colour is a token: the dialog
  * renders inside `.terminal-dialog`, which every theme and density already
  * dresses.
+ *
+ * The pairing form, the action row, the local-only note and the closed-command
+ * hint moved onto Tailwind utilities on `GroupPairingDialog.tsx` and
+ * `ControlPlaneAddressForm`'s own elements -- `.group-pairing__form`,
+ * `.group-pairing__actions`, `.group-pairing__note` and `.group-pairing__hint`
+ * are still the class names every locator resolves by, but the layout, colour
+ * and spacing they used to carry now live on the elements themselves.
  */
-.group-pairing__form {
-  display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.group-pairing__actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.group-pairing__note {
-  margin: var(--space-3) 0 0;
-  color: var(--text-2);
-  font-size: var(--font-xs);
-  letter-spacing: 0.08em;
-}
-
 .group-pairing__admin,
 .group-pairing__devices,
 .group-pairing__links,
@@ -302,16 +290,6 @@ body.terminal-theme textarea:focus {
 .group-pairing__presence small {
   color: var(--text-2);
   font-size: var(--font-xs);
-}
-
-/* Why a command is closed, beside the command. Quieter than a failure, which
-   reports something the control plane refused; this reports something that was
-   never sent. */
-.group-pairing__hint {
-  margin: 0;
-  color: var(--text-2);
-  font-size: var(--font-xs);
-  letter-spacing: 0.06em;
 }
 
 /*

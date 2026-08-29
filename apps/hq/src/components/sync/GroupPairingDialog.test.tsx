@@ -10,6 +10,10 @@ import {
 } from '@/application/sync/connection';
 import type { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
 import type { PairingCodeGrant } from '@/application/sync/controlPlanePort';
+import {
+  readManualControlPlaneAddress,
+  writeManualControlPlaneAddress,
+} from '@/application/sync/manualControlPlaneAddress';
 import { operationsStore } from '@/state/operationsStore';
 
 import { GroupPairingDialog, openGroupPairing } from './GroupPairingDialog';
@@ -445,3 +449,111 @@ describe('GroupPairingDialog over the group administration commands', () => {
     expect(within(dialog).getByText(/ЗАПРОС К CONTROL PLANE ОТКЛОНЁН/)).not.toBeNull();
   });
 });
+
+describe('GroupPairingDialog while local-only, over the manual address and the toggle', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    operationsStore.getState().resetWorld();
+    operationsStore.getState().patchConnection({
+      ...disconnectedConnection('local-only'),
+      links: [],
+      mirror: initialGroupMirrorSummary,
+    });
+    held.session = null;
+    expect(document.body.textContent).toBe('');
+  });
+
+  /*
+   * `open()` above asserts `.group-pairing__note` is absent, which is exactly
+   * what this describe block is testing the presence of -- `session === null`
+   * is the one state that block never exercises. This is the same open, minus
+   * that one assertion.
+   */
+  async function openLocalOnly(): Promise<HTMLElement> {
+    render(<GroupPairingDialog />);
+    act(() => {
+      openGroupPairing();
+    });
+    return screen.findByRole('dialog');
+  }
+
+  it('saves a typed address to the manual store and reports it', async () => {
+    const dialog = await openLocalOnly();
+
+    act(() => {
+      fireEvent.change(within(dialog).getByLabelText('Адрес control plane'), {
+        target: { value: nearPlane },
+      });
+    });
+    act(() => {
+      fireEvent.click(within(dialog).getByRole('button', { name: /\[S\] сохранить/i }));
+    });
+
+    expect(readManualControlPlaneAddress()).toEqual([nearPlane]);
+    expect(within(dialog).getByText('АДРЕС СОХРАНЁН')).not.toBeNull();
+  });
+
+  it('refuses a malformed address rather than saving it', async () => {
+    const dialog = await openLocalOnly();
+
+    act(() => {
+      fireEvent.change(within(dialog).getByLabelText('Адрес control plane'), {
+        target: { value: 'not-a-url' },
+      });
+    });
+    act(() => {
+      fireEvent.click(within(dialog).getByRole('button', { name: /\[S\] сохранить/i }));
+    });
+
+    expect(readManualControlPlaneAddress()).toEqual([]);
+    expect(within(dialog).getByText(/АДРЕС ДОЛЖЕН БЫТЬ HTTP\(S\) URL/)).not.toBeNull();
+  });
+
+  it('shows the saved address on open and forgets it when cleared', async () => {
+    writeManualControlPlaneAddress(nearPlane);
+    const dialog = await openLocalOnly();
+
+    expect((within(dialog).getByLabelText('Адрес control plane') as HTMLInputElement).value).toBe(
+      nearPlane,
+    );
+
+    act(() => {
+      fireEvent.click(within(dialog).getByRole('button', { name: /\[O\] очистить/i }));
+    });
+
+    expect(readManualControlPlaneAddress()).toEqual([]);
+    expect((within(dialog).getByLabelText('Адрес control plane') as HTMLInputElement).value).toBe(
+      '',
+    );
+  });
+
+  it.each([
+    ['manual', 'РУЧНОЙ АДРЕС'],
+    ['project-file', 'ФАЙЛ ПРОЕКТА'],
+    ['build-variable', 'ПЕРЕМЕННАЯ СБОРКИ'],
+    ['none', 'НЕ ЗАДАН'],
+  ] as const)('names %s as %s', async (source, label) => {
+    act(() => {
+      operationsStore.getState().patchConnection({ addressSource: source });
+    });
+    const dialog = await openLocalOnly();
+
+    expect(within(dialog).getByText(`ИСТОЧНИК АДРЕСА: ${label}`)).not.toBeNull();
+  });
+
+  it('flips general.localOnly immediately through the same path the settings catalogue uses', async () => {
+    const dialog = await openLocalOnly();
+    expect(operationsStore.getState().personalization.draft.values['general.localOnly']).toBe(true);
+
+    act(() => {
+      fireEvent.click(within(dialog).getByLabelText('Локальный режим'));
+    });
+
+    expect(operationsStore.getState().personalization.draft.values['general.localOnly']).toBe(
+      false,
+    );
+  });
+});
+
+/* A placeholder address, the plane on the set's LAN. */
+const nearPlane = 'http://192.168.10.5:4100';
