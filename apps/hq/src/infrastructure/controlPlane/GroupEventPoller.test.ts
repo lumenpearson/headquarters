@@ -567,7 +567,13 @@ describe('one order, two transports', () => {
      */
     const channel = groupChannel();
     const liveEdit = createGroupLiveEditTransport({ channel });
-    liveEdit.subscribe((patches) => operationsStore.getState().applySettingsPatch(patches));
+    liveEdit.subscribe((patchSet) => {
+      // This suite's deltas are all settings patches (`liveEditDelta`); the
+      // content half of `LiveEditPatchSet` is `GroupLiveEditTransport`'s own
+      // concern, not this cursor's.
+      if (patchSet.kind === 'settings')
+        operationsStore.getState().applySettingsPatch(patchSet.patches);
+    });
 
     const event = envelope(1n, { documentDelta: liveEditDelta(false) });
     const log = new FakeGroupLog();
@@ -617,7 +623,13 @@ describe('one order, two transports', () => {
      */
     const channel = groupChannel();
     const liveEdit = createGroupLiveEditTransport({ channel });
-    liveEdit.subscribe((patches) => operationsStore.getState().applySettingsPatch(patches));
+    liveEdit.subscribe((patchSet) => {
+      // This suite's deltas are all settings patches (`liveEditDelta`); the
+      // content half of `LiveEditPatchSet` is `GroupLiveEditTransport`'s own
+      // concern, not this cursor's.
+      if (patchSet.kind === 'settings')
+        operationsStore.getState().applySettingsPatch(patchSet.patches);
+    });
 
     const event = envelope(1n, { documentDelta: liveEditDelta(false) });
     const nearLog = new FakeGroupLog();
@@ -805,7 +817,13 @@ describe('the group own state follows the same log', () => {
     const channel = groupChannel();
     const disconnect = subscribe(channel);
     const liveEdit = createGroupLiveEditTransport({ channel });
-    liveEdit.subscribe((patches) => operationsStore.getState().applySettingsPatch(patches));
+    liveEdit.subscribe((patchSet) => {
+      // This suite's deltas are all settings patches (`liveEditDelta`); the
+      // content half of `LiveEditPatchSet` is `GroupLiveEditTransport`'s own
+      // concern, not this cursor's.
+      if (patchSet.kind === 'settings')
+        operationsStore.getState().applySettingsPatch(patchSet.patches);
+    });
 
     const delta = envelope(1n, { documentDelta: liveEditDelta(false) });
     const moved = envelope(2n, {

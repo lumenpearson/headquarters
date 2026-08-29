@@ -101,8 +101,14 @@ export function EditModeRuntime({ transport }: EditModeRuntimeProps) {
                 .getState()
                 .patchConnection({ failure: 'ЖИВОЕ РЕДАКТИРОВАНИЕ НЕ ПРИНЯТО ГРУППОЙ' }),
           }));
-    const disconnect = connectLiveEdit(bus, (patches) => {
-      operationsStore.getState().applySettingsPatch(patches);
+    const disconnect = connectLiveEdit(bus, (patchSet) => {
+      // R4: a content patch lands through the same action a local edit takes,
+      // so the receiving session's undo stack gets its own entry for a
+      // neighbor's edit instead of the content-overrides record being
+      // replaced wholesale underneath the ledger.
+      if (patchSet.kind === 'content')
+        operationsStore.getState().applyContentPatch(patchSet.patches);
+      else operationsStore.getState().applySettingsPatch(patchSet.patches);
     });
     return () => {
       disconnect();

@@ -227,6 +227,47 @@ describe('initializeOperationsClient', () => {
     expect(operationsStore.getState().cases['CASE-03']?.title).toBe('МАРШРУТ / СОСЕД');
   });
 
+  /*
+   * R4 tail (corrections register): undo, redo and restore replay the whole
+   * content-overrides record out of this session's own ledger, and a peer's
+   * edit used to reach the world through `advanced.worldSync` without ever
+   * entering that ledger -- so a local undo right after had nothing of the
+   * neighbor's edit to pop and reached past it into this session's own
+   * history, discarding the neighbor's edit outright. The peer's move is now
+   * its own reversible entry, so undo reverts specifically it.
+   */
+  it('records a peer world-sync content edit in the local ledger, so undo reverts specifically it', () => {
+    const channel = installChannel();
+    const seedTitle = operationsStore.getState().cases['CASE-03']?.title;
+    try {
+      dispose = initializeOperationsClient();
+      operationsStore
+        .getState()
+        .applyContentPatch([{ id: 'case.title', entityId: 'CASE-04', value: 'МЕСТНОЕ ИЗМЕНЕНИЕ' }]);
+      const world = channel.posted.at(-1) ?? {};
+
+      channel.deliver({
+        ...world,
+        content: {
+          overrides: {
+            'case.title@CASE-04': 'МЕСТНОЕ ИЗМЕНЕНИЕ',
+            'case.title@CASE-03': 'МАРШРУТ / СОСЕД',
+          },
+        },
+      });
+      expect(operationsStore.getState().cases['CASE-03']?.title).toBe('МАРШРУТ / СОСЕД');
+
+      operationsStore.getState().undoSettingsDraft();
+    } finally {
+      channel.restore();
+    }
+
+    // The neighbor's edit is undone -- it landed last -- and the local edit
+    // that preceded it survives untouched.
+    expect(operationsStore.getState().cases['CASE-03']?.title).toBe(seedTitle);
+    expect(operationsStore.getState().cases['CASE-04']?.title).toBe('МЕСТНОЕ ИЗМЕНЕНИЕ');
+  });
+
   it('drops a stored content override it cannot validate and keeps the rest', () => {
     const state = operationsStore.getState();
     const { snapshots: _snapshots, ...production } = state.production;

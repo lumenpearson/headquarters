@@ -2,6 +2,12 @@ import { screenBusProtocolVersion } from '@gremuchaya/domain';
 import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import type { SettingsPatch } from '@gremuchaya/settings-schema';
 
+import {
+  getContentFieldDefinition,
+  seedContentValue,
+  type ContentPatch,
+} from '@/application/edit/contentFields';
+
 /**
  * Carrying an edit-mode change to the rest of the synchronization group.
  *
@@ -24,12 +30,23 @@ import type { SettingsPatch } from '@gremuchaya/settings-schema';
  * replaces the transport underneath it with the authenticated one. F10 does
  * not replace the gate: which sessions may be reached stays a settings
  * decision on either transport.
+ *
+ * A patch set carries either kind, never both: a settings patch and a content
+ * patch are validated against two different registries
+ * (`getSettingDefinition` against a seeded entity's field), and a listener
+ * that had to guess which applied to a mixed array would be guessing at a
+ * trust boundary. `kind` is what a receiver reads before it reads anything
+ * else in `patches`.
  */
 
 /** All a session needs of a transport to take part in live edit. */
+export type LiveEditPatchSet =
+  | { readonly kind: 'settings'; readonly patches: readonly SettingsPatch[] }
+  | { readonly kind: 'content'; readonly patches: readonly ContentPatch[] };
+
 export interface LiveEditTransport {
-  publish(patches: readonly SettingsPatch[]): void;
-  subscribe(listener: (patches: readonly SettingsPatch[]) => void): () => void;
+  publish(patchSet: LiveEditPatchSet): void;
+  subscribe(listener: (patchSet: LiveEditPatchSet) => void): () => void;
   close(): void;
 }
 
@@ -41,12 +58,18 @@ interface LiveEditMessage {
   readonly id: string;
   readonly issuedAt: number;
   readonly senderId: string;
-  readonly patches: readonly SettingsPatch[];
+  /**
+   * Absent means `'settings'`: every session before content rode this bus
+   * sent no such field, and a message from one of them is not a message with
+   * an empty content patch set, it is a settings patch as it always was.
+   */
+  readonly kind?: 'settings' | 'content';
+  readonly patches: readonly SettingsPatch[] | readonly ContentPatch[];
 }
 
 export function createBrowserLiveEditTransport(): LiveEditTransport {
   const senderId = crypto.randomUUID();
-  const listeners = new Set<(patches: readonly SettingsPatch[]) => void>();
+  const listeners = new Set<(patchSet: LiveEditPatchSet) => void>();
   const channel =
     typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(channelName);
 
@@ -57,9 +80,9 @@ export function createBrowserLiveEditTransport(): LiveEditTransport {
     // session running an older or newer catalogue would otherwise take this one
     // down rather than simply disagree with it. Unusable entries are dropped
     // and the rest of the patch still lands.
-    const patches = value.patches.filter(isApplicablePatch);
-    if (patches.length === 0) return;
-    for (const listener of listeners) listener(patches);
+    const patchSet = toPatchSet(value);
+    if (patchSet === null) return;
+    for (const listener of listeners) listener(patchSet);
   };
 
   const handleChannelMessage = (event: MessageEvent<unknown>): void => {
@@ -79,13 +102,18 @@ export function createBrowserLiveEditTransport(): LiveEditTransport {
   window.addEventListener('storage', handleStorageMessage);
 
   return {
-    publish(patches) {
+    publish(patchSet) {
       const message: LiveEditMessage = {
         protocol: screenBusProtocolVersion,
         id: crypto.randomUUID(),
         issuedAt: Date.now(),
         senderId,
-        patches,
+        // `'settings'` is written explicitly rather than left implicit, so a
+        // message this build wrote and one an older build wrote stay tellable
+        // apart by presence of the field alone -- `isLiveEditMessage` reads
+        // absence as `'settings'` too, but only for what it did not write.
+        kind: patchSet.kind,
+        patches: patchSet.patches,
       };
       channel?.postMessage(message);
       try {
@@ -133,13 +161,13 @@ let applyingRemote = false;
  */
 export function connectLiveEdit(
   transport: LiveEditTransport,
-  apply: (patches: readonly SettingsPatch[]) => void,
+  apply: (patchSet: LiveEditPatchSet) => void,
 ): () => void {
   connected = transport;
-  const unsubscribe = transport.subscribe((patches) => {
+  const unsubscribe = transport.subscribe((patchSet) => {
     applyingRemote = true;
     try {
-      apply(patches);
+      apply(patchSet);
     } finally {
       applyingRemote = false;
     }
@@ -152,15 +180,38 @@ export function connectLiveEdit(
   };
 }
 
-/** Sends a patch to the group, or does nothing at all when it has not opted in. */
-export function publishLiveEdit(patches: readonly SettingsPatch[]): void {
-  if (connected === null || applyingRemote || patches.length === 0) return;
-  connected.publish(patches);
+/** Sends a patch set to the group, or does nothing at all when it has not opted in. */
+export function publishLiveEdit(patchSet: LiveEditPatchSet): void {
+  if (connected === null || applyingRemote || patchSet.patches.length === 0) return;
+  connected.publish(patchSet);
 }
 
 function isApplicablePatch(patch: SettingsPatch): boolean {
   const definition = getSettingDefinition(patch.id);
   return definition !== undefined && definition.validate(patch.value);
+}
+
+/**
+ * A content patch is applicable under the same reading `isApplicablePatch`
+ * gives a settings one: a field this build still declares, an entity the
+ * seed still holds -- `seedContentValue` is undefined for anything else --
+ * and a value that field's own validator accepts.
+ */
+function isApplicableContentPatch(patch: ContentPatch): boolean {
+  const definition = getContentFieldDefinition(patch.id);
+  if (definition === undefined) return false;
+  if (seedContentValue(patch.id, patch.entityId) === undefined) return false;
+  return definition.validate(patch.value);
+}
+
+/** The typed, filtered patch set a decoded message carries, or none of it usable. */
+function toPatchSet(message: LiveEditMessage): LiveEditPatchSet | null {
+  if (message.kind === 'content') {
+    const patches = (message.patches as readonly ContentPatch[]).filter(isApplicableContentPatch);
+    return patches.length === 0 ? null : { kind: 'content', patches };
+  }
+  const patches = (message.patches as readonly SettingsPatch[]).filter(isApplicablePatch);
+  return patches.length === 0 ? null : { kind: 'settings', patches };
 }
 
 function isLiveEditMessage(value: unknown): value is LiveEditMessage {
@@ -169,18 +220,29 @@ function isLiveEditMessage(value: unknown): value is LiveEditMessage {
     protocol?: unknown;
     id?: unknown;
     senderId?: unknown;
+    kind?: unknown;
     patches?: unknown;
   };
   return (
     candidate.protocol === screenBusProtocolVersion &&
     typeof candidate.id === 'string' &&
     typeof candidate.senderId === 'string' &&
+    (candidate.kind === undefined ||
+      candidate.kind === 'settings' ||
+      candidate.kind === 'content') &&
     Array.isArray(candidate.patches) &&
     candidate.patches.every(isPatchShape)
   );
 }
 
-function isPatchShape(value: unknown): value is SettingsPatch {
+/**
+ * Loose on purpose, for both patch kinds: a settings patch needs only `id`
+ * to reach `isApplicablePatch`, and a content patch's `entityId`/`value` are
+ * validated there too, by `isApplicableContentPatch`. Neither field is
+ * required here, so a shape check that passed a settings patch keeps passing
+ * a content one.
+ */
+function isPatchShape(value: unknown): value is SettingsPatch | ContentPatch {
   return (
     typeof value === 'object' &&
     value !== null &&

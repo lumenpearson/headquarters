@@ -1,12 +1,14 @@
 import type { SettingsPatch } from '@gremuchaya/settings-schema';
 import { describe, expect, it } from 'vitest';
 
+import type { ContentPatch } from '@/application/edit/contentFields';
 import type {
   DocumentDeltaPublication,
   GroupChannel,
   GroupEventEnvelope,
   GroupSessionCommand,
 } from '@/application/sync/groupChannel';
+import type { LiveEditPatchSet } from '@/infrastructure/browser/LiveEditBus';
 
 import { createGroupLiveEditTransport, liveEditDocumentId } from './GroupLiveEditTransport';
 
@@ -64,9 +66,14 @@ function fakeChannel(deviceId = 'device-a'): FakeChannel {
   };
 }
 
-/** The bytes another session's publication would carry. */
+/** The bytes another session's settings publication would carry. */
 function delta(patches: readonly SettingsPatch[]): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({ protocol: 1, patches }));
+}
+
+/** The bytes another session's content publication would carry. */
+function contentDelta(patches: readonly ContentPatch[]): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({ protocol: 1, kind: 'content', patches }));
 }
 
 describe('createGroupLiveEditTransport', () => {
@@ -74,7 +81,10 @@ describe('createGroupLiveEditTransport', () => {
     const channel = fakeChannel();
     const transport = createGroupLiveEditTransport({ channel });
 
-    transport.publish([{ id: 'layout.density', value: 'comfortable' }]);
+    transport.publish({
+      kind: 'settings',
+      patches: [{ id: 'layout.density', value: 'comfortable' }],
+    });
 
     expect(channel.published).toHaveLength(1);
     const publication = channel.published[0];
@@ -89,19 +99,21 @@ describe('createGroupLiveEditTransport', () => {
   it('applies a delta another device appended', () => {
     const channel = fakeChannel();
     const transport = createGroupLiveEditTransport({ channel });
-    const received: (readonly SettingsPatch[])[] = [];
-    transport.subscribe((patches) => received.push(patches));
+    const received: LiveEditPatchSet[] = [];
+    transport.subscribe((patchSet) => received.push(patchSet));
 
     channel.deliver({ documentDelta: delta([{ id: 'layout.density', value: 'comfortable' }]) });
 
-    expect(received).toEqual([[{ id: 'layout.density', value: 'comfortable' }]]);
+    expect(received).toEqual([
+      { kind: 'settings', patches: [{ id: 'layout.density', value: 'comfortable' }] },
+    ]);
   });
 
   it('ignores the echo of its own append', () => {
     const channel = fakeChannel('device-a');
     const transport = createGroupLiveEditTransport({ channel });
-    const received: (readonly SettingsPatch[])[] = [];
-    transport.subscribe((patches) => received.push(patches));
+    const received: LiveEditPatchSet[] = [];
+    transport.subscribe((patchSet) => received.push(patchSet));
 
     channel.deliver({
       actorDeviceId: 'device-a',
@@ -114,8 +126,8 @@ describe('createGroupLiveEditTransport', () => {
   it('ignores a delta appended under another document', () => {
     const channel = fakeChannel();
     const transport = createGroupLiveEditTransport({ channel });
-    const received: (readonly SettingsPatch[])[] = [];
-    transport.subscribe((patches) => received.push(patches));
+    const received: LiveEditPatchSet[] = [];
+    transport.subscribe((patchSet) => received.push(patchSet));
 
     channel.deliver({
       documentId: 'layout.tiles',
@@ -128,8 +140,8 @@ describe('createGroupLiveEditTransport', () => {
   it('drops an inbound value its own definition rejects and keeps the rest', () => {
     const channel = fakeChannel();
     const transport = createGroupLiveEditTransport({ channel });
-    const received: (readonly SettingsPatch[])[] = [];
-    transport.subscribe((patches) => received.push(patches));
+    const received: LiveEditPatchSet[] = [];
+    transport.subscribe((patchSet) => received.push(patchSet));
 
     channel.deliver({
       documentDelta: delta([
@@ -139,7 +151,9 @@ describe('createGroupLiveEditTransport', () => {
       ]),
     });
 
-    expect(received).toEqual([[{ id: 'layout.density', value: 'comfortable' }]]);
+    expect(received).toEqual([
+      { kind: 'settings', patches: [{ id: 'layout.density', value: 'comfortable' }] },
+    ]);
   });
 
   it('reports a refused publication instead of losing it', async () => {
@@ -151,7 +165,10 @@ describe('createGroupLiveEditTransport', () => {
     });
     channel.fail(new Error('A viewer cannot publish to the group.'));
 
-    transport.publish([{ id: 'layout.density', value: 'comfortable' }]);
+    transport.publish({
+      kind: 'settings',
+      patches: [{ id: 'layout.density', value: 'comfortable' }],
+    });
     await Promise.resolve();
     await Promise.resolve();
 
@@ -161,14 +178,81 @@ describe('createGroupLiveEditTransport', () => {
   it('stops publishing and listening once closed', () => {
     const channel = fakeChannel();
     const transport = createGroupLiveEditTransport({ channel });
-    const received: (readonly SettingsPatch[])[] = [];
-    transport.subscribe((patches) => received.push(patches));
+    const received: LiveEditPatchSet[] = [];
+    transport.subscribe((patchSet) => received.push(patchSet));
 
     transport.close();
-    transport.publish([{ id: 'layout.density', value: 'comfortable' }]);
+    transport.publish({
+      kind: 'settings',
+      patches: [{ id: 'layout.density', value: 'comfortable' }],
+    });
     channel.deliver({ documentDelta: delta([{ id: 'layout.density', value: 'comfortable' }]) });
 
     expect(channel.published).toEqual([]);
     expect(received).toEqual([]);
+  });
+
+  // R4: domain-content edits (F10, remainder of R27).
+
+  it('appends a content patch under the live-edit document, kinded and documentType content', () => {
+    const channel = fakeChannel();
+    const transport = createGroupLiveEditTransport({ channel });
+
+    transport.publish({
+      kind: 'content',
+      patches: [{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' }],
+    });
+
+    expect(channel.published).toHaveLength(1);
+    const publication = channel.published[0];
+    expect(publication?.documentId).toBe(liveEditDocumentId);
+    expect(publication?.documentType).toBe('content');
+    expect(JSON.parse(new TextDecoder().decode(publication?.delta ?? new Uint8Array(0)))).toEqual({
+      protocol: 1,
+      kind: 'content',
+      patches: [{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' }],
+    });
+  });
+
+  it('applies a content delta another device appended', () => {
+    const channel = fakeChannel();
+    const transport = createGroupLiveEditTransport({ channel });
+    const received: LiveEditPatchSet[] = [];
+    transport.subscribe((patchSet) => received.push(patchSet));
+
+    channel.deliver({
+      documentDelta: contentDelta([
+        { id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' },
+      ]),
+    });
+
+    expect(received).toEqual([
+      {
+        kind: 'content',
+        patches: [{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' }],
+      },
+    ]);
+  });
+
+  it('drops a content patch naming an unknown field or an unseeded entity', () => {
+    const channel = fakeChannel();
+    const transport = createGroupLiveEditTransport({ channel });
+    const received: LiveEditPatchSet[] = [];
+    transport.subscribe((patchSet) => received.push(patchSet));
+
+    channel.deliver({
+      documentDelta: contentDelta([
+        { id: 'content.no-such-field', entityId: 'CASE-01', value: 'x' },
+        { id: 'case.title', entityId: 'CASE-NO-SUCH', value: 'x' },
+        { id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' },
+      ]),
+    });
+
+    expect(received).toEqual([
+      {
+        kind: 'content',
+        patches: [{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' }],
+      },
+    ]);
   });
 });

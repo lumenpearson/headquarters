@@ -735,6 +735,51 @@ function contentTransition(
   };
 }
 
+/** Every key one side of a content checkpoint holds and the other disagrees about. */
+function contentOverrideChangedIds(record: ContentHistoryCheckpoint): readonly string[] {
+  const keys = new Set([...Object.keys(record.before), ...Object.keys(record.after)]);
+  return [...keys].filter((key) => record.before[key] !== record.after[key]);
+}
+
+/**
+ * Moves the content overrides to `candidate` the way `contentTransition` does,
+ * and -- unlike it -- records the move in the local ledger as its own
+ * reversible entry when it actually changed something.
+ *
+ * This is what `advanced.worldSync`'s receiver calls instead of
+ * `contentTransition` directly (R4 tail). A peer's content snapshot used to
+ * replace this session's `content.overrides` outright with no ledger entry at
+ * all, so a local undo afterward popped whatever this session's own history
+ * held -- silently discarding the neighbor's edit, which was never in that
+ * history to begin with. Landing the move through the ledger, the way
+ * `applyContentPatch` already does for a local edit, makes the neighbor's edit
+ * the most recent entry: undo reverts it specifically, rather than reaching
+ * past it for an entry that predates it.
+ */
+function remoteContentTransition(
+  state: OperationsState,
+  candidate: unknown,
+): Partial<OperationsState> {
+  const content = contentTransition(state, candidate);
+  const changedIds = contentOverrideChangedIds(content.record);
+  if (changedIds.length === 0) return content.patch;
+  const checkpoint = createSettingsDraftCheckpoint(state.personalization.draft);
+  const personalization = appendSettingsHistory(
+    state.personalization,
+    {
+      ...settingsMetadata('SET-HISTORY'),
+      operation: 'patch',
+      category: 'information',
+      changedIds,
+      before: checkpoint,
+      after: checkpoint,
+      content: content.record,
+    },
+    { reversible: true },
+  );
+  return { ...content.patch, personalization };
+}
+
 export const operationsStore = createStore<OperationsState>()((set, get) => ({
   ...createBaseState(),
   setRoute: (route) => set((state) => ({ ui: { ...state.ui, route } })),
@@ -917,7 +962,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
 
   dockEditPanel: (edge) => set((state) => ({ edit: { ...state.edit, dockEdge: edge } })),
 
-  applyContentPatch: (patches) =>
+  applyContentPatch: (patches) => {
     set((state) => {
       // Throws for an unknown field, an unseeded entity or a refused value,
       // as applyDraftPatch does for a setting; the updater then never returns
@@ -951,7 +996,16 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           100,
         ),
       };
-    }),
+    });
+    // R4/R27: the same door a setting patch leaves by. Outside `set` for the
+    // same reason `applySettingsPatch` publishes outside its own -- sending is
+    // an effect, and a patch `patchContentOverrides` refused (thrown, above)
+    // is never announced as applied. `publishLiveEdit` itself no-ops without
+    // a connected transport, so a local-only session makes no call, and the
+    // `applyingRemote` bracket in `connectLiveEdit` keeps a patch just
+    // received from being echoed straight back onto the wire it arrived on.
+    publishLiveEdit({ kind: 'content', patches });
+  },
 
   resetContentEdits: () =>
     set((state) => {
@@ -1010,7 +1064,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     // decides whether anything travels is `advanced.liveEdit`, read by
     // `EditModeRuntime`, which connects a transport only while the group has
     // enabled it; with nothing connected this call does nothing at all.
-    publishLiveEdit(patches);
+    publishLiveEdit({ kind: 'settings', patches });
     // R6, the group half: a group-scoped change is also what the group agreed,
     // and `SettingsService` is where that is recorded. `publishGroupSettings`
     // filters to the definitions whose `scope` says `group` -- derived from
@@ -1779,9 +1833,17 @@ export function initializeOperationsClient(): () => void {
         // build -- and the erasure was then written to storage by the
         // subscriber below. An explicit `{ overrides: {} }` still clears: a
         // peer that reset its content said so, where an omission says nothing.
+        //
+        // `remoteContentTransition` rather than `contentTransition` directly
+        // (R4 tail, corrections register): the plain transition replaced the
+        // whole overrides record with no trace in this session's own ledger,
+        // so a local undo right after had nothing of the neighbor's edit to
+        // pop and reached past it into this session's own history instead.
+        // The remote move is now its own reversible entry, landed the same
+        // way a local content patch already is.
         ...(event.data.content === undefined
           ? {}
-          : contentTransition(state, event.data.content.overrides).patch),
+          : remoteContentTransition(state, event.data.content.overrides)),
         // Personalization is deliberately not taken from the world snapshot.
         // `advanced.liveEdit` is the opt-in that decides whether a settings
         // change reaches the other sessions, and it defaults to off — but this
