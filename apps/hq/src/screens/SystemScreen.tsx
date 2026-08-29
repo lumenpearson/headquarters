@@ -9,7 +9,8 @@ import {
   useNumberSetting,
   useStringSetting,
 } from '@/application/personalization/useSetting';
-import { channelDomain } from '@/application/simulation/simulationCurves';
+import { channelDomain, scatteredAreaReading } from '@/application/simulation/simulationCurves';
+import { useTelemetryMeasurement } from '@/application/telemetry/useTelemetryMeasurement';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Metric, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import {
@@ -19,7 +20,35 @@ import {
 import { useOperationsStore, type OperationsState } from '@/state/operationsStore';
 
 const storageAreas = ['CORE', 'EVENTS', 'VIDEO', 'EVIDENCE', 'ARCHIVE', 'SNAPSHOTS'] as const;
-const storageUse = [48, 63, 82, 57, 74, 12] as const;
+
+/**
+ * How far a storage area's reading may scatter from the contour's own
+ * `storage` channel, in display percentage points either side of it.
+ */
+const storageAreaSpread = 18;
+
+/** How often the measured telemetry panel re-reads the registered client. */
+const telemetryMeasurementPollMs = 5_000;
+
+/**
+ * `gremuchaya.telemetry.v1.TelemetrySeverity`'s four bands, read into the
+ * tones `Metric` draws — the same fold `apps/control-plane` applies to its
+ * own operational log (`operationsStore.ts`, `eventSeverities`): `elevated`
+ * reads calmly, alongside `normal`, because a four-band severity and a
+ * three-tone metric cannot both keep their own vocabulary. `unspecified` — a
+ * source the registry names but no sample reached, or a channel a stored
+ * profile no longer carries (`apps/control-plane/src/telemetry/service.ts`,
+ * `readSource`) — reads as the metric's own `normal` tone, never as `ok`: it
+ * is not a measurement of a calm reading, it is the absence of one.
+ */
+function metricToneFor(
+  severity: 'normal' | 'elevated' | 'degraded' | 'critical' | 'unspecified',
+): 'normal' | 'ok' | 'warning' | 'critical' {
+  if (severity === 'critical') return 'critical';
+  if (severity === 'degraded') return 'warning';
+  if (severity === 'normal' || severity === 'elevated') return 'ok';
+  return 'normal';
+}
 
 /**
  * How often the native media gateway is re-read.
@@ -251,9 +280,50 @@ export function SystemScreen() {
   const signalFloorPercent = useNumberSetting('telemetry.signalFloorPercent');
   const showCharts = useBooleanSetting('telemetry.showCharts');
   const auditRows = useNumberSetting('diagnostics.auditRows');
+  const simulationSeed = useNumberSetting('simulation.seed');
   const telemetry = readTelemetry(telemetrySource, state.metrics);
   const sample = telemetry.sample;
   const nativeMedia = useNativeMediaGateway();
+  const measurement = useTelemetryMeasurement(telemetryMeasurementPollMs);
+  const measuredTelemetryTile: ScreenTile | null = useMemo(
+    () =>
+      measurement !== null && measurement.available
+        ? {
+            title: 'ИЗМЕРЕННАЯ ТЕЛЕМЕТРИЯ',
+            category: 'telemetry',
+            descriptor: {
+              id: 'measured-telemetry',
+              priority: 65,
+              variants: [
+                { presentation: 'full', columns: 2, rows: 1 },
+                { presentation: 'minimal', columns: 1, rows: 1 },
+              ],
+              canStretchHorizontally: true,
+              hideWhenOverflow: true,
+            },
+            render: () => (
+              <Panel
+                title="ИЗМЕРЕННАЯ ТЕЛЕМЕТРИЯ"
+                eyebrow="CONTROL PLANE / MEASURED"
+                className="system-measured-telemetry"
+              >
+                <div className="metric-grid metric-grid--four">
+                  {measurement.sources.map((source) => (
+                    <Metric
+                      key={source.sourceKey}
+                      label={source.name}
+                      value={source.value === undefined ? '—' : `${source.value}${source.unit}`}
+                      detail={source.simulated ? 'SIMULATED SOURCE' : 'HOST SOURCE'}
+                      tone={metricToneFor(source.severity)}
+                    />
+                  ))}
+                </div>
+              </Panel>
+            ),
+          }
+        : null,
+    [measurement],
+  );
 
   /*
    * `systemNodes` and `audit` are read by this screen and no other, so both
@@ -342,6 +412,23 @@ export function SystemScreen() {
                     values={state.metricsHistory.networkIn}
                     domain={channelDomain('network-in')}
                     label={`Входящий трафик / ${telemetry.seriesTag}`}
+                  />
+                </div>
+                {/*
+                 * The outbound half. Before this the panel drew only
+                 * `network-in`, so an operator reading `/system` saw one side
+                 * of the graph and had no way to tell a quiet uplink from one
+                 * this screen never showed.
+                 */}
+                <div>
+                  <span>
+                    NETWORK OUT / {state.metricsHistory.networkOut.length} SMP /{' '}
+                    {telemetry.seriesTag}
+                  </span>
+                  <Sparkline
+                    values={state.metricsHistory.networkOut}
+                    domain={channelDomain('network-out')}
+                    label={`Исходящий трафик / ${telemetry.seriesTag}`}
                   />
                 </div>
               </div>
@@ -492,7 +579,15 @@ export function SystemScreen() {
                 <div key={item}>
                   <i>[{String(index + 1).padStart(2, '0')}]</i>
                   <span>{item}</span>
-                  <b>{storageUse[index]}%</b>
+                  <b>
+                    {scatteredAreaReading(
+                      state.metrics.storage,
+                      BigInt(Math.trunc(simulationSeed)),
+                      state.metrics.simulationStep * storageAreas.length + index,
+                      storageAreaSpread,
+                    )}
+                    %
+                  </b>
                 </div>
               ))}
             </div>
@@ -523,17 +618,28 @@ export function SystemScreen() {
           </Panel>
         ),
       },
+      /*
+       * The measured half beside the simulated readings above (R31). Present
+       * only once a `TelemetryClient` is registered
+       * (`application/telemetry/telemetryMeasurementClient.ts`) and answers
+       * with real sources: no deployment does yet, so this screen degrades to
+       * exactly what it drew before the measurement half existed, tile
+       * absent rather than a panel reporting "not built" on every session.
+       */
+      ...(measuredTelemetryTile === null ? [] : [measuredTelemetryTile]),
     ],
     [
       auditRows,
       channels,
       loadWarningPercent,
+      measuredTelemetryTile,
       nativeMedia,
       nodeTemperatureLimit,
       nodes,
       sample,
       showCharts,
       signalFloorPercent,
+      simulationSeed,
       state,
       telemetry,
     ],

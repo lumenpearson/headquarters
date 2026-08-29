@@ -170,6 +170,29 @@ export function deterministicOffset(seed: bigint, index: number): number {
 }
 
 /**
+ * One reading scattered deterministically around another, for a value that is
+ * a part of a channel's own contour rather than a channel of its own.
+ *
+ * `/system`'s storage contour is the shape worth naming: `storage` is on the
+ * roster as one aggregate reading, and the six areas the panel lists were six
+ * literals frozen at whatever the seed drew once, moving with nothing the
+ * operator's curve or preset ever touched. A second channel per area would
+ * say each shelf has its own physical meaning the way `node-temperature` and
+ * `link-latency` do; it does not, it is a division of the one number the
+ * roster already reads. So each area's reading is `storage`'s own reading,
+ * offset by {@link deterministicOffset} at an ordinal built from the area's
+ * own index and the tick, and clamped back into a display percentage.
+ */
+export function scatteredAreaReading(
+  overall: number,
+  seed: bigint,
+  ordinal: number,
+  spread: number,
+): number {
+  return clampNumber(Math.round(overall + deterministicOffset(seed, ordinal) * spread), 0, 100);
+}
+
+/**
  * Every simulation setting, resolved once.
  *
  * Each identifier is written out here rather than assembled from a prefix, so
@@ -473,6 +496,34 @@ export function simulationChannelFor(
     smoothing: settings.smoothing,
     seed: settings.seed,
   };
+}
+
+/**
+ * The inverse of the percent-to-units conversion `simulationChannelFor`
+ * applies to `valueCurve`: a curve already in the channel's own units, read
+ * back as the percentage of its range `simulation.valueCurve` stores.
+ *
+ * Written for the telemetry client (`application/telemetry`), which reads a
+ * `SimulationChannel` off the wire in absolute units — the same units
+ * `TelemetryService`'s own arithmetic uses, because the server evaluates the
+ * identical curve the client would (`apps/control-plane/src/telemetry/service.ts`,
+ * `readSource`) — and has to fold it back into this build's percentage-of-range
+ * storage before an operator's local curve editor can show it. The
+ * criticality curve needs no such inverse: it is stored and sent as the same
+ * `[0, 1]` fraction on both sides, `simulationChannelFor` passes it through
+ * unscaled, and a caller that inverted it here would double-convert.
+ */
+export function absoluteToPercentPoints(
+  points: readonly CurvePointLike[],
+  range: ChannelRange,
+): readonly CurvePointLike[] {
+  const span = range.maximum - range.minimum;
+  return points.map((point) => ({
+    time: point.time,
+    value: span === 0 ? 0 : ((point.value - range.minimum) / span) * percentScale,
+    inTangent: span === 0 ? 0 : (point.inTangent / span) * percentScale,
+    outTangent: span === 0 ? 0 : (point.outTangent / span) * percentScale,
+  }));
 }
 
 /**

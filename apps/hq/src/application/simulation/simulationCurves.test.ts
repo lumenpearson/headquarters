@@ -11,6 +11,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  absoluteToPercentPoints,
   channelDomain,
   deterministicOffset,
   formatCurveNumber,
@@ -19,6 +20,7 @@ import {
   readCurvePoints,
   readSimulationSettings,
   restingCurvePoints,
+  scatteredAreaReading,
   sessionMetricChannels,
   sessionMetricNames,
   simulateChannelReading,
@@ -474,6 +476,58 @@ describe('the offset the parts of the world with no channel take', () => {
     expect(deterministicOffset(8n, 3)).not.toBe(first);
     expect(deterministicOffset(7n, 4)).not.toBe(first);
     expect(deterministicOffset(7n, 3)).toBe(first);
+  });
+});
+
+describe('a reading scattered around a channel’s own aggregate', () => {
+  it('stays close to the overall reading rather than wandering off it', () => {
+    const reading = scatteredAreaReading(60, 7n, 3, 15);
+    expect(reading).toBeGreaterThanOrEqual(45);
+    expect(reading).toBeLessThanOrEqual(75);
+  });
+
+  it('gives two ordinals of one overall reading two different areas', () => {
+    expect(scatteredAreaReading(60, 7n, 0, 15)).not.toBe(scatteredAreaReading(60, 7n, 1, 15));
+  });
+
+  it('is the same reading again for the same inputs', () => {
+    expect(scatteredAreaReading(60, 7n, 2, 15)).toBe(scatteredAreaReading(60, 7n, 2, 15));
+  });
+
+  it('never reports outside the display percentage the panel prints', () => {
+    expect(scatteredAreaReading(98, 7n, 5, 40)).toBeLessThanOrEqual(100);
+    expect(scatteredAreaReading(2, 7n, 5, 40)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('a curve read back in the channel’s own units, folded to percent', () => {
+  it('inverts the percent-to-units conversion simulationChannelFor applies', () => {
+    const range = { minimum: 12, maximum: 94 };
+    const percentPoints = [
+      { time: 0, value: 0, inTangent: 0, outTangent: 0 },
+      { time: 1, value: 100, inTangent: 0, outTangent: 0 },
+    ];
+    const settings = readSimulationSettings({
+      'simulation.valueCurve': withChannelCurve([], 'cpu', percentPoints),
+      'simulation.interpolation': 'linear',
+      'simulation.loop': false,
+      'simulation.noise': 0,
+      'simulation.smoothing': 0,
+    } as Parameters<typeof readSimulationSettings>[0]);
+    const assembled = simulationChannelFor(settings, 'cpu', range);
+
+    const back = absoluteToPercentPoints(assembled.valueCurve?.points ?? [], range);
+
+    expect(back[0]?.value).toBe(0);
+    expect(back[1]?.value).toBe(100);
+  });
+
+  it('answers zero on a degenerate range rather than dividing by zero', () => {
+    const back = absoluteToPercentPoints([{ time: 0, value: 5, inTangent: 1, outTangent: 1 }], {
+      minimum: 5,
+      maximum: 5,
+    });
+    expect(back[0]).toEqual({ time: 0, value: 0, inTangent: 0, outTangent: 0 });
   });
 });
 
