@@ -69,6 +69,33 @@ export interface ControlPlaneStorageConfig {
   sign(request: StorageSignRequest): Readonly<Record<string, string>>;
 }
 
+/**
+ * Safe-to-pass GitHub egress policy, built the way {@link ControlPlaneAuthConfig}
+ * and {@link ControlPlaneStorageConfig} are: the deployment credential lives
+ * inside a closure and is not a property, so nothing that receives this object
+ * can enumerate, serialize or log it.
+ *
+ * Unlike SigV4 there is no signature to hand out in the credential's place — a
+ * GitHub API call authenticates with the token itself in an `Authorization`
+ * header — so the closure cannot hide the value from its one caller. What it
+ * does instead is what `DurableIntegrationStore.openInstallationCredentials`
+ * does with the group's own credential: the plaintext is obtained only by
+ * asking for it by name, in the function that is about to spend it, so a
+ * response, a log line or an error that serialized this object cannot carry it.
+ */
+export interface ControlPlaneGitHubConfig {
+  /** The API origin, `https://api.github.com` or a GitHub Enterprise `/api/v3` base. */
+  readonly apiBaseUrl: string;
+  /** The one repository this deployment's own credential may be spent against. */
+  readonly repository: string;
+  /** Labels every issue this control plane opens carries. */
+  readonly issueLabels: readonly string[];
+  /** Where a translation proposal is committed; carries `{locale}` and `{key}`. */
+  readonly translationPathTemplate: string;
+  /** The deployment credential, for the one call about to spend it. */
+  openToken(): string;
+}
+
 export interface ControlPlaneConfig {
   readonly port: number;
   /**
@@ -114,6 +141,7 @@ export interface ControlPlaneConfig {
   };
   readonly auth?: ControlPlaneAuthConfig;
   readonly storage?: ControlPlaneStorageConfig;
+  readonly github?: ControlPlaneGitHubConfig;
 }
 
 const defaultPort = 4100;
@@ -155,6 +183,31 @@ const minimumStorageGrantTtlSeconds = 60;
 const maximumStorageGrantTtlSeconds = 15 * 60;
 const minimumStorageSecretLength = 8;
 const storageService = 's3';
+/**
+ * The GitHub API's own default host. A GitHub Enterprise Server deployment
+ * answers under `https://<host>/api/v3`, which is why the value is a base URL
+ * with an optional path rather than an origin.
+ */
+const defaultGitHubApiBaseUrl = 'https://api.github.com';
+/**
+ * Where a translation proposal is committed on the branch its pull request
+ * opens from. It is a template rather than a fixed path because only the
+ * deployment knows its repository's layout, and it defaults to a directory of
+ * proposal records rather than to a catalogue file: this control plane cannot
+ * parse an arbitrary repository's message catalogue, and a pull request that
+ * rewrote one it had guessed at would be a worse answer than a reviewable
+ * record of what was proposed.
+ */
+const defaultGitHubTranslationPath = 'translations/proposals/{locale}/{key}.json';
+/**
+ * Short enough to admit every token format GitHub has issued -- a 40-character
+ * classic token, a `ghp_`/`ghs_` fine-grained one, an App installation token --
+ * and long enough that a placeholder left in a deployment file is refused at
+ * startup rather than at the first outbound call.
+ */
+const minimumGitHubTokenLength = 20;
+/** `owner/name`, and nothing that could steer an API path somewhere else. */
+const gitHubRepositoryPattern = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u;
 
 const authEnvironmentVariableNames = [
   'HQ_CONTROL_PLANE_AUTH_TOKEN_PEPPER',
@@ -181,6 +234,25 @@ const requiredStorageEnvironmentVariableNames = [
   'HQ_CONTROL_PLANE_STORAGE_BUCKET',
   'HQ_CONTROL_PLANE_STORAGE_ACCESS_KEY_ID',
   'HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY',
+] as const;
+
+const githubEnvironmentVariableNames = [
+  'HQ_CONTROL_PLANE_GITHUB_TOKEN',
+  'HQ_CONTROL_PLANE_GITHUB_REPOSITORY',
+  'HQ_CONTROL_PLANE_GITHUB_API_BASE_URL',
+  'HQ_CONTROL_PLANE_GITHUB_ISSUE_LABELS',
+  'HQ_CONTROL_PLANE_GITHUB_TRANSLATION_PATH',
+] as const;
+
+/**
+ * Both, or neither. A token with no repository is a credential with nowhere it
+ * may be spent, and a repository with no token is a name nothing can reach; a
+ * deployment that wrote one and forgot the other must be told which, rather
+ * than start into a GitHub surface that refuses every call it is given.
+ */
+const requiredGithubEnvironmentVariableNames = [
+  'HQ_CONTROL_PLANE_GITHUB_TOKEN',
+  'HQ_CONTROL_PLANE_GITHUB_REPOSITORY',
 ] as const;
 
 /**
@@ -217,6 +289,7 @@ export function loadControlPlaneConfig(
   const redis = parseRedis(environment);
   const auth = parseAuth(environment, databaseUrl);
   const storage = parseStorage(environment);
+  const github = parseGitHub(environment);
   const runMigrationsOnStart = parseRunMigrationsOnStart(
     environment.HQ_CONTROL_PLANE_RUN_MIGRATIONS_ON_START,
   );
@@ -230,6 +303,7 @@ export function loadControlPlaneConfig(
     ...(redis === undefined ? {} : { redis }),
     ...(auth === undefined ? {} : { auth }),
     ...(storage === undefined ? {} : { storage }),
+    ...(github === undefined ? {} : { github }),
   };
 }
 
@@ -642,6 +716,158 @@ function requireStorageKey(value: string | undefined, name: string, minimumLengt
     );
   }
   return key;
+}
+
+/**
+ * GitHub egress is all-or-nothing like Redis and object storage: one variable
+ * of the group set means the whole group is meant, and a missing member is
+ * named rather than defaulted. Absent, this returns `undefined`, no gateway is
+ * built, and `CreateIssue`, `CreateTranslationPullRequest` and
+ * `GetPullRequestStatus` refuse with `FAILED_PRECONDITION` naming these
+ * variables — the same shape the four grant-minting material RPCs take without
+ * a bucket. It is not tied to the database URL, so the reduced health-only mode
+ * stays reachable with any subset of the other groups.
+ */
+function parseGitHub(
+  environment: Readonly<Record<string, string | undefined>>,
+): ControlPlaneGitHubConfig | undefined {
+  if (!githubEnvironmentVariableNames.some((name) => isPresent(environment[name]))) {
+    return undefined;
+  }
+  const missing = requiredGithubEnvironmentVariableNames.filter(
+    (name) => !isPresent(environment[name]),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.join(', ')} must be set when GitHub egress is configured: ` +
+        'HQ_CONTROL_PLANE_GITHUB_TOKEN and HQ_CONTROL_PLANE_GITHUB_REPOSITORY are set together',
+    );
+  }
+
+  const token = requireGitHubToken(environment.HQ_CONTROL_PLANE_GITHUB_TOKEN);
+  const repository = parseGitHubRepository(environment.HQ_CONTROL_PLANE_GITHUB_REPOSITORY ?? '');
+  const apiBaseUrl = parseGitHubApiBaseUrl(environment.HQ_CONTROL_PLANE_GITHUB_API_BASE_URL);
+  const issueLabels = parseGitHubIssueLabels(environment.HQ_CONTROL_PLANE_GITHUB_ISSUE_LABELS);
+  const translationPathTemplate = parseGitHubTranslationPath(
+    environment.HQ_CONTROL_PLANE_GITHUB_TRANSLATION_PATH,
+  );
+
+  // The token is captured here and nowhere else: it is a parameter of this
+  // function's closure, never a property of the returned object, so freezing
+  // and serializing that object cannot disclose it.
+  return Object.freeze({
+    apiBaseUrl,
+    repository,
+    issueLabels,
+    translationPathTemplate,
+    openToken(): string {
+      return token;
+    },
+  });
+}
+
+/**
+ * A bearer credential, so it is refused for whitespace as well as for length:
+ * a token copied out of a wrapped deployment file arrives with a newline in it
+ * and authenticates nowhere, and GitHub's answer to that is a flat 401 that
+ * names nothing.
+ */
+function requireGitHubToken(value: string | undefined): string {
+  const token = value?.trim() ?? '';
+  if (token.length < minimumGitHubTokenLength || /\s/u.test(token)) {
+    throw new Error(
+      `HQ_CONTROL_PLANE_GITHUB_TOKEN must contain at least ${minimumGitHubTokenLength.toString()} characters and no whitespace`,
+    );
+  }
+  return token;
+}
+
+/**
+ * `owner/name` and nothing else. The value is interpolated into an API path, so
+ * a repository of `a/b/../../elsewhere` would send this deployment's credential
+ * to an endpoint the operator did not name.
+ */
+function parseGitHubRepository(value: string): string {
+  const repository = value.trim();
+  if (!gitHubRepositoryPattern.test(repository)) {
+    throw new Error('HQ_CONTROL_PLANE_GITHUB_REPOSITORY must be owner/name');
+  }
+  return repository;
+}
+
+/**
+ * HTTPS, or plain HTTP to the loopback interface only — the same rule the
+ * storage endpoint takes, and for a stronger reason: every request to this base
+ * carries the deployment token in an `Authorization` header, and a cleartext
+ * request over a network anyone can observe discloses the credential itself
+ * rather than a signature over one. The trailing slash is stripped so a path is
+ * appended exactly once.
+ */
+function parseGitHubApiBaseUrl(value: string | undefined): string {
+  if (!isPresent(value)) return defaultGitHubApiBaseUrl;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error('HQ_CONTROL_PLANE_GITHUB_API_BASE_URL must be an absolute URL');
+  }
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_GITHUB_API_BASE_URL must be an HTTPS URL; http is accepted only for 127.0.0.1, localhost or [::1]',
+    );
+  }
+  if (url.hostname.length === 0 || url.username.length > 0 || url.password.length > 0) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_GITHUB_API_BASE_URL must name a host and carry no credentials',
+    );
+  }
+  if (url.search.length > 0 || url.hash.length > 0) {
+    throw new Error('HQ_CONTROL_PLANE_GITHUB_API_BASE_URL must carry no query string or fragment');
+  }
+  return `${url.origin}${url.pathname}`.replace(/\/+$/u, '');
+}
+
+/** Comma-separated, in the order written, with duplicates and blanks dropped. */
+function parseGitHubIssueLabels(value: string | undefined): readonly string[] {
+  if (!isPresent(value)) return Object.freeze([]);
+  const labels = value
+    .split(',')
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0);
+  for (const label of labels) {
+    if (label.length > 50) {
+      throw new Error('HQ_CONTROL_PLANE_GITHUB_ISSUE_LABELS entries must be at most 50 characters');
+    }
+  }
+  return Object.freeze([...new Set(labels)]);
+}
+
+/**
+ * A repository-relative path template. Both placeholders are required: without
+ * `{key}` every proposal in a locale would commit to one path, so the second
+ * pull request would silently overwrite the first one's proposal on its own
+ * branch. Traversal and absolute paths are refused for the same reason the
+ * repository is validated — the value becomes part of an API path.
+ */
+function parseGitHubTranslationPath(value: string | undefined): string {
+  if (!isPresent(value)) return defaultGitHubTranslationPath;
+  const template = value.trim();
+  if (!template.includes('{locale}') || !template.includes('{key}')) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_GITHUB_TRANSLATION_PATH must contain both {locale} and {key}',
+    );
+  }
+  if (
+    template.startsWith('/') ||
+    template.includes('..') ||
+    !/^[A-Za-z0-9._/{}-]+$/u.test(template)
+  ) {
+    throw new Error(
+      'HQ_CONTROL_PLANE_GITHUB_TRANSLATION_PATH must be a relative path of letters, digits, dots, dashes, slashes and the two placeholders',
+    );
+  }
+  return template;
 }
 
 function parseBoolean(value: string | undefined, name: string): boolean {

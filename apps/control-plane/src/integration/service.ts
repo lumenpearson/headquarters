@@ -85,6 +85,18 @@ export interface IntegrationServiceOptions {
    */
   readonly store?: IntegrationStore;
   readonly github?: GitHubIntegrationGateway;
+  /**
+   * This deployment's own GitHub credential, opened by the call about to spend
+   * it — never held here as a value.
+   *
+   * It is what a group with no `github_installations` row of its own spends,
+   * and only against {@link issueRepository}, which the operator wrote into the
+   * deployment's environment and no request can steer. A group that registered
+   * an installation is never redirected to it: its own credential and its own
+   * repository win, so a deployment token cannot quietly take over a group that
+   * arranged its own GitHub access.
+   */
+  readonly githubCredentials?: () => string;
   /** The repository a draft falls back to when the client names none. */
   readonly issueRepository?: string;
   /** Labels every issue this control plane opens carries. */
@@ -186,11 +198,13 @@ export function createIntegrationService(
         assertAttachmentBudget(draft.attachments);
         const store = requireStore(options);
         const gateway = requireGateway(options);
-        const repository = await requireInstalledRepository(
+        const target = await resolveGitHubTarget(
+          options,
           store,
           authenticated.group.id,
           draft.repository,
         );
+        const repository = target.repository;
 
         const job = await store.enqueueJob({
           groupId: authenticated.group.id,
@@ -207,7 +221,7 @@ export function createIntegrationService(
         const replayed = replayedIssue(job);
         if (replayed !== undefined) return replayed;
 
-        const credentials = await store.openInstallationCredentials(authenticated.group.id);
+        const credentials = await target.openCredentials();
         await store.transitionJob({
           groupId: job.groupId,
           jobId: job.id,
@@ -267,7 +281,8 @@ export function createIntegrationService(
         assertConfirmed(request.confirmed, 'opening a translation pull request');
         const store = requireStore(options);
         const gateway = requireGateway(options);
-        const repository = await requireInstalledRepository(store, authenticated.group.id, '');
+        const target = await resolveGitHubTarget(options, store, authenticated.group.id, '');
+        const repository = target.repository;
         const proposalId = requireResourceId(request.proposalId?.value, 'proposal_id');
         const proposal = await store.readProposal(authenticated.group.id, proposalId);
         if (proposal === undefined) {
@@ -305,7 +320,7 @@ export function createIntegrationService(
         const replayed = replayedPullRequest(job);
         if (replayed !== undefined) return replayed;
 
-        const credentials = await store.openInstallationCredentials(authenticated.group.id);
+        const credentials = await target.openCredentials();
         await store.transitionJob({
           groupId: job.groupId,
           jobId: job.id,
@@ -384,18 +399,20 @@ export function createIntegrationService(
         const authenticated = await authenticate(options, context);
         const store = requireStore(options);
         const gateway = requireGateway(options);
-        const repository = await requireInstalledRepository(
+        const target = await resolveGitHubTarget(
+          options,
           store,
           authenticated.group.id,
           request.repository,
         );
+        const repository = target.repository;
         if (request.pullRequestNumber <= 0n) {
           throw new PairedDeviceRuntimeError(
             'INVALID_ARGUMENT',
             'pull_request_number must be a positive number.',
           );
         }
-        const credentials = await store.openInstallationCredentials(authenticated.group.id);
+        const credentials = await target.openCredentials();
         // Through the same seam as every other outbound call: this one used to
         // reach the gateway directly, so its errors arrived at the client
         // exactly as the transport wrote them.
@@ -464,33 +481,76 @@ async function callGateway<T>(call: () => Awaitable<T>): Promise<T> {
 }
 
 /**
- * The repository a group's credential may be spent against.
+ * What an outbound GitHub call is made against: one repository, and the one
+ * credential that may be spent on it.
  *
- * The installation names exactly one repository, and the credential is scoped
- * to it. Taking the target from the request let any editor point the group's
- * GitHub credential at a repository the group never registered — a request the
- * client composes, spent with authority the client does not hold.
+ * The two travel together because separating them is what would allow a
+ * mismatch — a repository read from one authority and a credential opened from
+ * another. `openCredentials` is a function rather than a value so the plaintext
+ * is obtained by the call that is about to spend it and not a step earlier,
+ * which is what lets `createIssue` open it only after the retry receipt has
+ * said this is not a replay.
  */
-async function requireInstalledRepository(
+interface GitHubTarget {
+  readonly repository: string;
+  openCredentials(): Awaitable<string>;
+}
+
+/**
+ * Resolves the repository a request may reach and the credential it spends.
+ *
+ * Two authorities, in a fixed order. The group's own `github_installations`
+ * row wins whenever it exists: the installation names exactly one repository
+ * and its credential is scoped to it, so a group that arranged its own GitHub
+ * access is never redirected onto the deployment's. Only a group with no
+ * installation of its own falls back to this deployment's configured token and
+ * repository — the pair an operator wrote into `HQ_CONTROL_PLANE_GITHUB_TOKEN`
+ * and `HQ_CONTROL_PLANE_GITHUB_REPOSITORY`, which is what makes the three
+ * outbound RPCs answerable at all on a self-hosted plane that registers no
+ * per-group installation.
+ *
+ * Under either authority the repository comes from the server and the request
+ * may only agree with it. Taking the target from the request let any editor
+ * point a credential at a repository nobody registered — a request the client
+ * composes, spent with authority the client does not hold.
+ */
+async function resolveGitHubTarget(
+  options: IntegrationServiceOptions,
   store: IntegrationStore,
   groupId: string,
   requested: string,
-): Promise<string> {
+): Promise<GitHubTarget> {
   const installation = await store.readInstallation(groupId);
-  if (installation === undefined) {
-    throw new PairedDeviceRuntimeError(
-      'FAILED_PRECONDITION',
-      'This group has no GitHub installation, so no repository can be reached on its behalf.',
-    );
+  if (installation !== undefined) {
+    assertRequestedRepository(requested, installation.repository);
+    return {
+      repository: installation.repository,
+      openCredentials: () => store.openInstallationCredentials(groupId),
+    };
   }
+  const deploymentCredentials = options.githubCredentials;
+  const deploymentRepository = declaredRepository(options);
+  if (deploymentCredentials !== undefined && deploymentRepository.length > 0) {
+    assertRequestedRepository(requested, deploymentRepository);
+    return {
+      repository: deploymentRepository,
+      openCredentials: () => deploymentCredentials(),
+    };
+  }
+  throw new PairedDeviceRuntimeError(
+    'FAILED_PRECONDITION',
+    'This group has no GitHub installation, so no repository can be reached on its behalf.',
+  );
+}
+
+function assertRequestedRepository(requested: string, allowed: string): void {
   const asked = requested.trim();
-  if (asked.length > 0 && asked !== installation.repository) {
+  if (asked.length > 0 && asked !== allowed) {
     throw new PairedDeviceRuntimeError(
       'PERMISSION_DENIED',
-      "A request cannot name a repository other than the group's own installation.",
+      "A request cannot name a repository other than the one this control plane may reach on the group's behalf.",
     );
   }
-  return installation.repository;
 }
 
 function replayedIssue(job: IntegrationJob): { url: string; issueNumber: bigint } | undefined {
@@ -784,11 +844,19 @@ function requireStore(options: IntegrationServiceOptions): IntegrationStore {
   return options.store;
 }
 
+/**
+ * The refusal a deployment without GitHub egress gives, in the shape the four
+ * grant-minting material RPCs give without a bucket: `FAILED_PRECONDITION`
+ * naming the configuration, not `unimplemented`. The distinction is one a
+ * client can act on — `unimplemented` says this control plane will never
+ * answer, and that stopped being true once a gateway existed to configure.
+ */
 function requireGateway(options: IntegrationServiceOptions): GitHubIntegrationGateway {
   if (options.github === undefined) {
-    throw new ConnectError(
-      'This control plane was started without GitHub egress.',
-      Code.Unimplemented,
+    throw new PairedDeviceRuntimeError(
+      'FAILED_PRECONDITION',
+      'This control plane has no GitHub egress configured, so it cannot reach GitHub. ' +
+        'Set HQ_CONTROL_PLANE_GITHUB_TOKEN and HQ_CONTROL_PLANE_GITHUB_REPOSITORY before using this RPC.',
     );
   }
   return options.github;
