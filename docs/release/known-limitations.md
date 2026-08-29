@@ -134,12 +134,18 @@ the code that makes it true, so the next reader can check rather than trust.
   processes, so an operator reads it from the Redis capability instead.
   `docs/release/self-hosting.md` holds the full table of what each tier has; it is not repeated
   here.
-- **The container image has never been built.** `apps/control-plane/Dockerfile`, `compose.yaml` and
-  `.github/workflows/container.yml` were written on a machine with no Docker installed, and the
-  workflow's first pull-request run is the first time any of it is executed. What was proved
-  without Docker: the three compiled entry points exist, and `node dist/server.js` and
-  `node dist/healthcheck.js` work against a hand-assembled copy of the layout the runtime stage
-  produces — production dependencies and the three `dist` trees, nothing else.
+- **The container image builds, and no registry has ever held it.**
+  `apps/control-plane/Dockerfile`, `compose.yaml` and `.github/workflows/container.yml` were
+  written on a machine with no Docker installed. They have since been executed: the four-stage
+  build completes unchanged from the repository root, and the resulting image was run against a
+  live PostgreSQL 18. All three entry points answer inside the image — `node dist/server.js`
+  binds and serves, `node dist/migrate.js` applies every migration and then re-runs applying
+  none, and `node dist/healthcheck.js` reports `SERVING`. `docker compose up -d --wait` brings
+  both services to healthy, and the capability assertion `container.yml` makes — ten required
+  capabilities and `materials.storage-grants` refused — passes against the compose stack. What
+  is still unproved is everything downstream of the build: no image has been pushed to GHCR, so
+  the publish job, the tag rules and the by-hand package-visibility step in that workflow's
+  header remain unexecuted, and no deployment has run this image for longer than a smoke test.
 - **On a group fed by polling, a playback command executes six seconds after it is
   pressed — on every screen, including the one that issued it.** The lead has to
   exceed the poll interval or the screens diverge by however long the page took to
@@ -184,8 +190,12 @@ the code that makes it true, so the next reader can check rather than trust.
   another address.
 - **Without Upstash, presence cannot report a device gone** and publications are unbounded. The
   service still runs; `Health` says which of the two modes is in force.
-- `layout_documents`, `layout_versions` and `conversion_jobs` are created by migrations and
-  reached by no code. No RPC in the current contract can fill them.
+- `conversion_jobs` is created by migrations and reached by no code. No RPC in the current
+  contract can fill it. `layout_documents` and `layout_versions` were in the same position
+  until `SettingsService.PutLayoutDocument`, `GetLayoutDocument` and `ListLayoutHistory`
+  filled them: a screen's whole arrangement, written with an expected revision, and the
+  version log that put appends to. The client does not call them yet, so no surface in
+  `apps/hq` stores a layout on the control plane.
 - **A document body above 4 MB is refused, and above 4.5 MB the platform would refuse it first.**
   The Fetch adapter (`apps/control-plane/src/fetch-adapter.ts`) is mounted at
   `apps/hq/app/api/[[...rpc]]/route.web.ts` in the web target, and Vercel caps a Function's request
@@ -247,6 +257,12 @@ the code that makes it true, so the next reader can check rather than trust.
 - Camera-based moire and readability approval and the two-hour long-run test require the actual
   production monitors and cannot be truthfully completed on a development workstation. Nothing in
   `apps/hq/tests/` measures cover latency or runs a soak, so there is no automated substitute.
-- The opt-in PostgreSQL suites never run in CI: the workflow sets no
-  `HQ_CONTROL_PLANE_TEST_DATABASE_URL`. They are run locally and their results are recorded in
-  `docs/plans/actual_plan.md`; CI proves the offline half only.
+- The opt-in PostgreSQL suites now run in CI. `.github/workflows/ci.yml` gives the `verify` job a
+  `postgres:18` service container and points `HQ_CONTROL_PLANE_TEST_DATABASE_URL` and
+  `HQ_CONTROL_PLANE_TEST_DATABASE_DRIVER=postgres` at it on the `Test` step alone, so no secret
+  is involved and every other step sees the environment it saw before. Fourteen suite files and
+  161 tests that a run without the variable skipped are now executed on every pull request. Two
+  things this does not cover: the suites still run against the TCP driver only, so the `neon`
+  HTTP adapter is proved by a local run and not by CI, and the three `*.live*` storage suites
+  stay skipped because `HQ_CONTROL_PLANE_TEST_STORAGE_*` names an S3-compatible bucket the job
+  does not stand up.

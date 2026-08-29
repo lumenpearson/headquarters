@@ -25,7 +25,7 @@ name: gremuchaya-hq
 services:
   postgres:
     # Major-only on purpose, where the Node base image is pinned exactly: the
-    # ten migrations target the major, patch releases do not change initdb
+    # migrations target the major, patch releases do not change initdb
     # output, and an exact patch pin here would go stale with nobody assigned
     # to move it. The Node pin is different in kind — it must match
     # `.tool-versions`, which a human already maintains.
