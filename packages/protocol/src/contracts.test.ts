@@ -86,6 +86,7 @@ describe('versioned Protobuf contracts', () => {
       'SetLeader',
       'TimeSync',
       'UpdateGroup',
+      'UpdatePresence',
       'WatchGroup',
     ]);
     expect(methodNames(TelemetryService)).toEqual([
@@ -160,6 +161,61 @@ describe('versioned Protobuf contracts', () => {
       ),
     ).toEqual(refreshRequest);
   });
+  /**
+   * The four fields a device may report about its own presence.
+   *
+   * `Presence` declared them from the start and nothing could set them, so a
+   * client had no way to say which screen it was on. The reporting message is
+   * separate from `Presence` on purpose: three of that message's seven fields —
+   * the device, its status and the observation time — are the server's to
+   * decide, and a client that could put them on the wire would look entitled to.
+   */
+  it('carries reportable presence detail on the join and on its own request', () => {
+    const detail = create(syncV1.PresenceDetailSchema, {
+      activeScreen: '/operations/map',
+      selectedElement: 'sector-7',
+      clockOffsetMs: -1_234n,
+      latencyMs: 87,
+    });
+    const join = create(syncV1.JoinGroupRequestSchema, {
+      groupId: { value: 'grp_01jbxn3r8vqf12tkr6g7ndz9wq' },
+      detail,
+    });
+    const report = create(syncV1.UpdatePresenceRequestSchema, {
+      groupId: { value: 'grp_01jbxn3r8vqf12tkr6g7ndz9wq' },
+      detail,
+    });
+
+    expect(
+      fromBinary(syncV1.JoinGroupRequestSchema, toBinary(syncV1.JoinGroupRequestSchema, join))
+        .detail,
+    ).toEqual(detail);
+    expect(
+      fromBinary(
+        syncV1.UpdatePresenceRequestSchema,
+        toBinary(syncV1.UpdatePresenceRequestSchema, report),
+      ).detail,
+    ).toEqual(detail);
+
+    // The addition is additive in the sense that matters on a versioned wire: a
+    // `JoinGroupRequest` encoded before the field existed still decodes, and its
+    // detail reads as absent rather than as a decoding failure.
+    const withoutDetail = create(syncV1.JoinGroupRequestSchema, {
+      groupId: { value: 'grp_01jbxn3r8vqf12tkr6g7ndz9wq' },
+    });
+    expect(
+      fromBinary(
+        syncV1.JoinGroupRequestSchema,
+        toBinary(syncV1.JoinGroupRequestSchema, withoutDetail),
+      ).detail,
+    ).toBeUndefined();
+
+    // The report answers presence, so a client learns the effect of its own
+    // call without a second read.
+    expect(SyncService.method.updatePresence.output).toBe(syncV1.UpdatePresenceResponseSchema);
+    expect(SyncService.method.updatePresence.methodKind).toBe('unary');
+  });
+
   it('marks realtime watchers as server-streaming RPCs', () => {
     expect(MaterialService.method.watchMaterialEvents.methodKind).toBe('server_streaming');
     expect(SettingsService.method.watchSettings.methodKind).toBe('server_streaming');

@@ -429,6 +429,110 @@ describeIntegration('durable group administration against real PostgreSQL', () =
   );
 
   it(
+    'updates a reported screen in place, and reports nothing for a device the group no longer has',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const second = await pairDevice(runtime, owner);
+      const presence = new DurablePresenceStore({ database });
+      await presence.record({
+        groupId: owner.groupId,
+        deviceId: owner.authenticated.device.id,
+        status: 'ONLINE',
+        activeScreen: '/overview',
+        latencyMs: 40,
+      });
+      await presence.record({
+        groupId: owner.groupId,
+        deviceId: second.deviceId,
+        status: 'ONLINE',
+        activeScreen: '/overview',
+      });
+
+      const reported = await presence.reportDetail({
+        groupId: owner.groupId,
+        deviceId: owner.authenticated.device.id,
+        activeScreen: '/materials',
+        selectedElement: 'case-12',
+        clockOffsetMs: -34n,
+        latencyMs: 11,
+      });
+
+      // The four columns the table has carried since the first migration, now
+      // written by something other than a join, and read back from the row
+      // rather than from the value the store returned.
+      expect(reported).toMatchObject({
+        activeScreen: '/materials',
+        selectedElement: 'case-12',
+        clockOffsetMs: -34n,
+        latencyMs: 11,
+      });
+      const stored = await database.query<{
+        status: string;
+        active_screen: string;
+        selected_element: string;
+        clock_offset_ms: string;
+        latency_ms: number;
+      }>({
+        text: `SELECT status, active_screen, selected_element,
+                      clock_offset_ms::text AS clock_offset_ms, latency_ms
+                 FROM presence_snapshots WHERE group_id = $1 AND device_id = $2`,
+        values: [owner.groupId, owner.authenticated.device.id],
+      });
+      expect(stored[0]).toEqual({
+        // Untouched by the report: joining and leaving are the only two things
+        // that move it, and a report that could set it would be a third way
+        // into the session.
+        status: 'ONLINE',
+        active_screen: '/materials',
+        selected_element: 'case-12',
+        clock_offset_ms: '-34',
+        latency_ms: 11,
+      });
+
+      await runtime.revokeDevice(owner.authenticated, owner.groupId, second.deviceId);
+      const afterRevocation = await presence.reportDetail({
+        groupId: owner.groupId,
+        deviceId: second.deviceId,
+        activeScreen: '/materials',
+        selectedElement: '',
+        clockOffsetMs: 0n,
+        latencyMs: 5,
+      });
+
+      // The membership join inside the statement is what refuses it, so the
+      // check cannot be stale by the time the row is written; a revoked device
+      // holding a token that outlived its membership updates nothing.
+      expect(afterRevocation).toBeUndefined();
+      const revokedRow = await database.query<{ active_screen: string }>({
+        text: 'SELECT active_screen FROM presence_snapshots WHERE group_id = $1 AND device_id = $2',
+        values: [owner.groupId, second.deviceId],
+      });
+      expect(revokedRow[0]?.active_screen).toBe('/overview');
+
+      // And a device with no presence row at all gets none: the statement is an
+      // `UPDATE`, so there is nothing for it to insert.
+      const third = await pairDevice(runtime, owner);
+      expect(
+        await presence.reportDetail({
+          groupId: owner.groupId,
+          deviceId: third.deviceId,
+          activeScreen: '/system',
+          selectedElement: '',
+          clockOffsetMs: 0n,
+          latencyMs: 5,
+        }),
+      ).toBeUndefined();
+      const rows = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM presence_snapshots WHERE group_id = $1 AND device_id = $2',
+        values: [owner.groupId, third.deviceId],
+      });
+      expect(rows[0]?.n).toBe(0);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'removes a group’s events, allocator and presence when the group is deleted',
     async () => {
       const runtime = createRuntime();

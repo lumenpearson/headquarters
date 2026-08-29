@@ -337,10 +337,20 @@ export function createPairedDeviceSyncService(
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
+        // The four reported fields ride on the join because the join is already
+        // publishing `PRESENCE_UPDATED`: a device that arrives on a screen tells
+        // the group which one in the same row that says it arrived. A request
+        // that carries no detail reports the four empty rather than inheriting
+        // whatever the device's previous participation left in the row.
+        const detail = toPresenceDetail(request.detail);
         const recorded = await presence.record({
           groupId,
           deviceId: authenticated.device.id,
           status: 'ONLINE',
+          activeScreen: detail.activeScreen,
+          selectedElement: detail.selectedElement,
+          clockOffsetMs: detail.clockOffsetMs,
+          latencyMs: detail.latencyMs,
         });
         await publishPresence(options, groupId, recorded);
         return { group: toGroup(authenticated.group) };
@@ -354,6 +364,10 @@ export function createPairedDeviceSyncService(
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
+        // No detail travels with a departure, and `record` writes the four
+        // fields empty: a device that left is not looking at anything, so
+        // keeping the screen it was on would leave the pairing dialog showing
+        // a live-looking readout for a device that is gone.
         const recorded = await presence.record({
           groupId,
           deviceId: authenticated.device.id,
@@ -406,6 +420,60 @@ export function createPairedDeviceSyncService(
         // Before the read, so the answer already accounts for the renewal the
         // caller just earned. No event is published: liveness that lasts until
         // it lapses is not a change worth a row in the group's history.
+        await presence.renew({ groupId, deviceId: authenticated.device.id });
+        const devices = await presence.list(groupId);
+        return { devices: devices.map(toPresence) };
+      });
+    },
+
+    /**
+     * Reports what the calling device is looking at, and answers with the
+     * group's presence.
+     *
+     * This is the path that was missing: the store has carried `active_screen`,
+     * `selected_element`, `clock_offset_ms` and `latency_ms` since the first
+     * migration and `Presence` has carried them on the wire, but nothing a
+     * client could call ever set them, so every device reported them empty
+     * forever. `JoinGroup` now carries the first report and this carries every
+     * one after it.
+     *
+     * Three properties are deliberate, and each is a refusal:
+     *
+     * - It names no device. `UpdatePresenceRequest` has no device field, so the
+     *   row a report reaches is the one the bearer token authenticated — a
+     *   caller cannot describe a neighbour's screen.
+     * - It creates nothing. `reportDetail` updates a row and refuses to insert
+     *   one, so a device that never joined, or that left, is not put back on
+     *   the list by reporting; announcing presence stays `JoinGroup`'s alone.
+     * - It publishes nothing. A screen change is as frequent as navigation, and
+     *   an event per change would append a durable `sync_events` row and spend
+     *   a sequence number each time. That is the same growth that keeps
+     *   liveness renewal out of `JoinGroup`; neighbours read the detail on the
+     *   presence poll they already make.
+     *
+     * The renewal happens for the same reason it happens on a read: reporting a
+     * screen is evidence of being at it, so a reporting client cannot forget to
+     * keep itself alive. The answer is built after the renewal, so it already
+     * accounts for it.
+     */
+    async updatePresence(request, context) {
+      return withRuntimeErrors(async () => {
+        const presence = requirePresence(options.presence);
+        const authenticated = await authenticateRequest(options.runtime, context);
+        assertContextActor(authenticated, request.context?.actorDeviceId?.value);
+        const groupId = requireResourceId(request.groupId?.value, 'group_id');
+        assertAuthenticatedGroup(authenticated, groupId);
+        const reported = await presence.reportDetail({
+          groupId,
+          deviceId: authenticated.device.id,
+          ...toPresenceDetail(request.detail),
+        });
+        if (reported === undefined) {
+          throw new PairedDeviceRuntimeError(
+            'FAILED_PRECONDITION',
+            'This device has no presence in the group; join it before reporting what it shows.',
+          );
+        }
         await presence.renew({ groupId, deviceId: authenticated.device.id });
         const devices = await presence.list(groupId);
         return { devices: devices.map(toPresence) };
@@ -1056,6 +1124,75 @@ async function publishPresence(
     kind: syncV1.GroupEventKind.PRESENCE_UPDATED,
     presence: toPresence(snapshot),
   });
+}
+
+/**
+ * The longest screen or element identifier a device may report.
+ *
+ * `active_screen` and `selected_element` are `text` columns with no length
+ * constraint, and presence is the one row a client may rewrite as often as it
+ * likes. Without a ceiling a paired device could park megabytes in the group's
+ * presence and every neighbour would fetch them on every poll. Route and
+ * element identifiers in this application are short; 256 characters is far
+ * above any of them and far below a payload worth carrying.
+ */
+const maxPresenceIdentifierLength = 256;
+
+/**
+ * The largest round trip a client may claim, in milliseconds.
+ *
+ * `latency_ms` is `uint32` on the wire and `integer` in the table, so a value
+ * above 2^31 - 1 would not be a wrong reading but a failed `INSERT` — a
+ * numeric-overflow error with nothing in it for the operator. Five minutes is
+ * refused as an argument instead, because nothing above it is a measurement.
+ *
+ * `clock_offset_ms` gets no such bound: it is `int64` on the wire and `bigint`
+ * in the table, and a device whose clock is set to the wrong year honestly
+ * reports an offset in the billions.
+ */
+const maxReportedLatencyMs = 300_000;
+
+/**
+ * Reads the four fields a device may report about itself.
+ *
+ * An absent message is the four empty values rather than an error: a client
+ * that has nothing to say about its screen is still entitled to join, and the
+ * proto3 defaults are exactly what "nothing to say" means. What is refused is a
+ * value the storage cannot hold or should not carry, and it is refused here —
+ * before the write — so the caller is told which field was wrong.
+ */
+function toPresenceDetail(detail: syncV1.PresenceDetail | undefined): {
+  readonly activeScreen: string;
+  readonly selectedElement: string;
+  readonly clockOffsetMs: bigint;
+  readonly latencyMs: number;
+} {
+  return {
+    activeScreen: boundedPresenceIdentifier(detail?.activeScreen ?? '', 'active_screen'),
+    selectedElement: boundedPresenceIdentifier(detail?.selectedElement ?? '', 'selected_element'),
+    clockOffsetMs: detail?.clockOffsetMs ?? 0n,
+    latencyMs: boundedLatency(detail?.latencyMs ?? 0),
+  };
+}
+
+function boundedPresenceIdentifier(value: string, field: string): string {
+  if (value.length > maxPresenceIdentifierLength) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      `${field} must not exceed ${maxPresenceIdentifierLength.toString()} characters.`,
+    );
+  }
+  return value;
+}
+
+function boundedLatency(value: number): number {
+  if (value > maxReportedLatencyMs) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      `latency_ms must not exceed ${maxReportedLatencyMs.toString()} milliseconds.`,
+    );
+  }
+  return value;
 }
 
 function toPresence(snapshot: PresenceSnapshot) {

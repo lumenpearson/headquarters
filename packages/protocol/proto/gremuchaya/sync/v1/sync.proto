@@ -75,6 +75,32 @@ message Presence {
   google.protobuf.Timestamp observed_at = 7;
 }
 
+// What a device reports about itself, as opposed to what the server decides.
+//
+// `Presence` carries seven fields and a device may only ever speak for four of
+// them: `device_id` comes from the bearer token, `status` from whether the
+// device joined or left, and `observed_at` from the server clock. Declaring the
+// reportable four as their own message is what keeps a client from appearing to
+// be able to set the other three — and lets the same four travel on a join and
+// on every later report without being written twice.
+//
+// The field numbers deliberately do not mirror `Presence`: this is a separate
+// message, and matching numbers across two messages is a coincidence a reader
+// would come to rely on.
+message PresenceDetail {
+  // The screen this device is showing, as the client's own route identifier.
+  string active_screen = 1;
+  // The element the operator has selected on that screen, or empty for none.
+  string selected_element = 2;
+  // The offset this device believes its clock has from the server's, as
+  // `TimeSync` estimated it. Signed, because a device may be behind or ahead.
+  int64 clock_offset_ms = 3;
+  // The round trip this device last measured. Unsigned, because a latency is
+  // not negative; the server bounds it, since the column that stores it is
+  // narrower than this type.
+  uint32 latency_ms = 4;
+}
+
 message CreateGroupRequest {
   gremuchaya.common.v1.MutationContext context = 1;
   string name = 2;
@@ -161,6 +187,15 @@ message RevokeDeviceResponse {
 message JoinGroupRequest {
   gremuchaya.common.v1.MutationContext context = 1;
   gremuchaya.common.v1.ResourceId group_id = 2;
+  // What this device is looking at as it joins. Optional, and absent means the
+  // four fields are reported empty rather than left at whatever a previous
+  // session of the same device happened to leave behind: a join is a new
+  // participation, so it may not inherit a stale screen.
+  //
+  // It travels on the join rather than in a call of its own because the join
+  // already publishes `PRESENCE_UPDATED`; a separate first report would append
+  // a second row to the group log saying what the first one could have said.
+  PresenceDetail detail = 3;
 }
 
 message JoinGroupResponse {
@@ -280,6 +315,29 @@ message GetPresenceRequest {
 }
 
 message GetPresenceResponse {
+  repeated Presence devices = 1;
+}
+
+// Reports what this device is looking at, after it has already joined.
+//
+// The device is never named: like `GetPresenceRequest` this message carries no
+// device field at all, so the row a report can reach is only the one the bearer
+// token authenticated. A caller therefore cannot describe another operator's
+// screen, and cannot make a device that never joined appear present.
+message UpdatePresenceRequest {
+  // Carried for the actor check every mutating call in this service makes. It
+  // needs no idempotency receipt: a report replaces the four fields outright,
+  // so a retry and the call it retries leave the same row.
+  gremuchaya.common.v1.MutationContext context = 1;
+  gremuchaya.common.v1.ResourceId group_id = 2;
+  PresenceDetail detail = 3;
+}
+
+// The group's presence after the report, which is the same list `GetPresence`
+// answers. A reporting client would otherwise have to make two calls to learn
+// the effect of its own, and each of those calls renews liveness — so the pair
+// would cost twice what one does.
+message UpdatePresenceResponse {
   repeated Presence devices = 1;
 }
 
@@ -413,6 +471,13 @@ service SyncService {
   rpc PublishSessionCommand(PublishSessionCommandRequest) returns (PublishSessionCommandResponse);
   rpc TimeSync(TimeSyncRequest) returns (TimeSyncResponse);
   rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
+  // Reports the caller's own presence detail and reads the group's presence
+  // back. It publishes no `PRESENCE_UPDATED` event: a screen change is as
+  // frequent as navigation, and an event per change would append a durable row
+  // and spend a sequence number every time — the same log growth that keeps
+  // liveness renewal out of `JoinGroup`. Neighbours pick the detail up from
+  // their own presence read, which they already make on a timer.
+  rpc UpdatePresence(UpdatePresenceRequest) returns (UpdatePresenceResponse);
   rpc WatchGroup(WatchGroupRequest) returns (stream WatchGroupResponse);
   rpc ReadGroupEvents(ReadGroupEventsRequest) returns (ReadGroupEventsResponse);
   rpc GetDocumentSnapshot(GetDocumentSnapshotRequest) returns (GetDocumentSnapshotResponse);
