@@ -317,7 +317,7 @@ export function SettingsScreen() {
                   onValueChange={(value) => state.setProductionOption('clockMode', value)}
                   options={[
                     { value: 'fixed', label: 'FIXED' },
-                    { value: 'real', label: 'SYSTEM REAL' },
+                    { value: 'real', label: 'SYSTEM' },
                   ]}
                 />
               </Setting>

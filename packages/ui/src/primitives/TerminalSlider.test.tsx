@@ -183,7 +183,9 @@ describe('TerminalSlider', () => {
     expect(input.getAttribute('aria-label')).toBe('Громкость');
     // A label of its own displaces the label element Base UI would otherwise point the thumb at.
     expect(input.hasAttribute('aria-labelledby')).toBe(false);
-    expect(root(labelled).className).toBe('terminal-slider hq-mixer__fader');
+    expect(root(labelled).className).toBe(
+      'terminal-slider group grid min-w-0 gap-hq-2 text-hq-text-1 font-mono text-hq-xs hq-mixer__fader',
+    );
     expect(labelled.querySelector('output')).not.toBeNull();
 
     const quiet = mount(<Harness initial={10} onChange={vi.fn()} showValue={false} />);

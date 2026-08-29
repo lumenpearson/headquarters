@@ -51,8 +51,38 @@ body.terminal-theme *,
 body.terminal-theme *::before,
 body.terminal-theme *::after {
   border-radius: 0 !important;
-  box-shadow: none !important;
   text-shadow: none !important;
+}
+
+/*
+ * The blanket `box-shadow: none !important` this replaced also killed
+ * affordances load-bearing under the terminal theme: the settings-docs
+ * active-link inset bar, `patterns.focus='glow'`, the Yandex marker halos,
+ * and the curve-editor's own focus ring (packages/ui, out of reach here).
+ * `--shadow-panel`/`--shadow-window` above already flatten every legacy-shell
+ * surface that reads them (`.hq-panel`, `.virtual-explorer`,
+ * `.workspace-window`, `.command-palette`, `.dev-gate > section`,
+ * `.telemetry-panel`); the handful below carry a literal box-shadow in
+ * hq.css instead of one of those tokens, so they need zeroing by name.
+ */
+body.terminal-theme .topbar,
+body.terminal-theme .online-dot::before,
+body.terminal-theme .map-marker i,
+body.terminal-theme .target-box,
+body.terminal-theme .cctv-mosaic div.is-selected,
+body.terminal-theme .photo-grid button.is-selected,
+body.terminal-theme .vehicle-box.is-active,
+body.terminal-theme .file-row.is-selected,
+body.terminal-theme .developer-panel {
+  box-shadow: none;
+}
+
+/* The halo `@keyframes pulse-marker` animates onto `.map-marker.is-pulsing i`
+   would otherwise still paint over the `box-shadow: none` above -- an
+   animated property outranks a static declaration of the same specificity
+   for as long as it runs. */
+body.terminal-theme .map-marker.is-pulsing i {
+  animation: none;
 }
 
 body.terminal-theme * {
@@ -91,14 +121,23 @@ body.terminal-theme kbd {
  * nothing anywhere -- the rule that read it never applied to a button, a field
  * or a select.
  *
- * The property is declared on `.ops-shell`, so it reaches the controls inside
- * the shell and the fallback stands for the portalled surfaces outside it.
+ * `--ops-focus-ring-width` is mirrored onto `body` alongside the shell root
+ * (`OperationsShell`), so it reaches a portalled dialog's controls too; the
+ * fallback stands only for a route that never mounts the shell.
+ *
+ * The colour follows the active ops theme's accent rather than this file's
+ * own `--accent-strong`: `--ops-orange-bright` is themed by `data-theme` and
+ * `data-accent` (operations.css), so a control under `terminal-green`,
+ * `cold-cyan` or `monochrome` no longer flashes orange on focus regardless of
+ * the chosen accent. `--accent-strong` is the fallback for a route with no
+ * ops palette declared at all, where it resolves to the same value this rule
+ * used to hardcode.
  */
 body.terminal-theme button:focus-visible,
 body.terminal-theme input:focus-visible,
 body.terminal-theme select:focus-visible,
 body.terminal-theme textarea:focus-visible {
-  outline: var(--ops-focus-ring-width, 1px) solid var(--accent-strong);
+  outline: var(--ops-focus-ring-width, 1px) solid var(--ops-orange-bright, var(--accent-strong));
   outline-offset: -2px;
 }
 
@@ -771,20 +810,16 @@ body.terminal-theme .dossier-copy div span {
   background: transparent;
 }
 
-body.terminal-theme .hq-data-table,
 body.terminal-theme .system-table table {
   border: 1px solid var(--line-2);
   font-family: var(--font-mono);
 }
 
-body.terminal-theme .hq-data-table th,
-body.terminal-theme .hq-data-table td,
 body.terminal-theme .system-table th,
 body.terminal-theme .system-table td {
   border: 1px solid var(--line-1);
 }
 
-body.terminal-theme .hq-data-table tbody tr:hover,
 body.terminal-theme .system-table tbody tr:hover {
   background: var(--accent-strong);
   color: var(--text-inverse);

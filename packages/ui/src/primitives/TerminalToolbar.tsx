@@ -26,22 +26,39 @@ export function TerminalToolbar({
   className,
   orientation = 'horizontal',
 }: TerminalToolbarProps) {
+  /*
+   * `.terminal-toolbar` is Toolbar.Root's plain `<div role="toolbar">` and
+   * migrates in full. `.terminal-toolbar__button` shares its primitives.css
+   * rule with `.terminal-toggle` (TerminalToggle.tsx carries the matching
+   * utilities): chrome and the `[data-pressed]`/`:focus-visible` overrides
+   * stay in css there, and the `[data-tone='critical']` colour stays here for
+   * the same reason -- the attribute selector already outranks `.ops-shell
+   * button`. The `kbd` shortcut's own styling is uncontested (`body.terminal-
+   * theme` only reaches its `font-family`, not the rest of the `font: inherit`
+   * shorthand this rule sets, nor its colour or opacity) and migrates in full.
+   */
   return (
     <Toolbar.Root
       aria-label={label}
       orientation={orientation}
-      className={classNames('terminal-toolbar', className)}
+      className={classNames(
+        'terminal-toolbar',
+        'flex min-w-0 gap-[2px] data-[orientation=vertical]:flex-col',
+        className,
+      )}
     >
       {actions.map((action) => (
         <Toolbar.Button
           key={action.id}
           disabled={action.disabled}
-          className="terminal-toolbar__button"
+          className="terminal-toolbar__button inline-flex items-center justify-between gap-hq-3 min-h-[30px] px-hq-2 uppercase cursor-pointer"
           data-tone={action.tone ?? 'neutral'}
           onClick={action.onPress}
         >
           <span>{action.label}</span>
-          {action.shortcut ? <kbd>{action.shortcut}</kbd> : null}
+          {action.shortcut ? (
+            <kbd className="text-current [font:inherit] opacity-70">{action.shortcut}</kbd>
+          ) : null}
         </Toolbar.Button>
       ))}
     </Toolbar.Root>

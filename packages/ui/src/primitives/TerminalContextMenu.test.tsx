@@ -138,9 +138,12 @@ describe('TerminalContextMenu', () => {
      */
     expect(event.defaultPrevented).toBe(true);
     expect(popup().getAttribute('aria-label')).toBe('Действия с материалом');
-    // Both the shared menu class and the context-specific one, with the
-    // consumer's appended rather than replacing them.
-    expect(popup().className).toBe('terminal-menu terminal-context-menu ops-card__menu');
+    // Both the shared menu class and the context-specific one lead, and the
+    // consumer's own trails after the utility classes primitives.css still
+    // governs today; none of the three replace one another.
+    const popupClass = popup().className;
+    expect(popupClass.startsWith('terminal-menu terminal-context-menu ')).toBe(true);
+    expect(popupClass.endsWith(' ops-card__menu')).toBe(true);
     // Portalled out of the trigger's subtree, so an ancestor's overflow cannot clip it.
     expect(container.contains(popup())).toBe(false);
     expect(popup().closest('.terminal-menu__positioner')).not.toBeNull();

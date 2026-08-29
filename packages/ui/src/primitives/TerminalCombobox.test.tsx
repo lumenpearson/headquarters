@@ -91,7 +91,7 @@ describe('TerminalCombobox', () => {
       />,
     );
     expect(mustFind(container, '.terminal-combobox').className).toBe(
-      'terminal-combobox panel-combobox',
+      'terminal-combobox grid min-w-0 grid-cols-[minmax(0,1fr)_32px] border border-hq-line-1 bg-hq-bg-0 focus-within:border-hq-line-focus data-[popup-open]:border-hq-line-focus panel-combobox',
     );
     expect(input(container).getAttribute('aria-label')).toBe('Канал связи');
     expect(input(container).getAttribute('placeholder')).toBe('[SEARCH / SELECT]');
@@ -145,6 +145,40 @@ describe('TerminalCombobox', () => {
 
     act(() => enabled.click());
     expect(onValueChange.mock.calls).toEqual([['beta']]);
+  });
+
+  it('keeps item text as the last child so the CSS grid pin lands it in the text column', () => {
+    /*
+     * `.terminal-combobox__item > :last-child { grid-column: 2 }` (primitives.css)
+     * relies on the label `<span>` always being the last child of an item,
+     * whether or not `Combobox.ItemIndicator` renders ahead of it. jsdom
+     * does not compute grid placement, so this asserts the structural
+     * contract the CSS pin depends on rather than the resulting layout.
+     */
+    const container = mount(
+      <TerminalCombobox
+        value="beta"
+        options={options}
+        onValueChange={vi.fn()}
+        label="Канал связи"
+      />,
+    );
+    const rendered = open(container);
+    rendered.forEach((item, index) => {
+      const option = options[index];
+      if (option === undefined) throw new Error('option missing');
+      // Every item's last child is its label span, matched by option order, never the indicator.
+      expect(item.lastElementChild?.textContent).toBe(option.label);
+      expect(item.lastElementChild?.classList.contains('terminal-combobox__indicator')).toBe(false);
+    });
+
+    const selected = rendered[1];
+    if (selected === undefined) throw new Error('items missing');
+    // The selected item has two children; the indicator, when present, is first, never last.
+    expect(selected.children).toHaveLength(2);
+    expect(selected.firstElementChild?.classList.contains('terminal-combobox__indicator')).toBe(
+      true,
+    );
   });
 
   it('shows the empty label the wrapper defaults, and the one the consumer overrides it with', () => {

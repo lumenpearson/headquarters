@@ -75,13 +75,14 @@ describe('TerminalProgress', () => {
   it('defaults the tone to neutral and keeps the consumer class beside its own', () => {
     const neutral = mount(<TerminalProgress value={10} label="Ток" />);
     expect(bar(neutral).getAttribute('data-tone')).toBe('neutral');
-    expect(bar(neutral).className).toBe('terminal-progress');
+    expect(bar(neutral).className).toContain('terminal-progress');
 
     const critical = mount(
       <TerminalProgress value={10} label="Ток" tone="critical" className="hq-panel__meter" />,
     );
     expect(bar(critical).getAttribute('data-tone')).toBe('critical');
-    expect(bar(critical).className).toBe('terminal-progress hq-panel__meter');
+    expect(bar(critical).className).toContain('terminal-progress');
+    expect(bar(critical).className.endsWith('hq-panel__meter')).toBe(true);
   });
 
   it('renders the readout by default and drops it when showValue is off', () => {

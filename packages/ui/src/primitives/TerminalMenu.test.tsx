@@ -131,8 +131,12 @@ describe('TerminalMenu', () => {
     await settle();
 
     expect(popup().getAttribute('aria-label')).toBe('Команды штаба');
-    // The consumer's class is appended to the primitive's own, not replacing it.
-    expect(popup().className).toBe('terminal-menu ops-menu');
+    // The consumer's class is appended after the primitive's own semantic
+    // class and the utility classes primitives.css still governs today, not
+    // replacing either.
+    const popupClass = popup().className;
+    expect(popupClass.startsWith('terminal-menu ')).toBe(true);
+    expect(popupClass.endsWith(' ops-menu')).toBe(true);
     expect(popup().closest('.terminal-menu__positioner')).toBe(positioner());
 
     const rendered = entries();
@@ -141,11 +145,7 @@ describe('TerminalMenu', () => {
       'ВторойCtrl+B',
       'Третий',
     ]);
-    expect(rendered.map((entry) => entry.className)).toEqual([
-      'terminal-menu__item',
-      'terminal-menu__item',
-      'terminal-menu__item',
-    ]);
+    expect(rendered.every((entry) => entry.className.startsWith('terminal-menu__item'))).toBe(true);
     // An item that names no tone still carries one, so the stylesheet never has
     // to describe an entry without `data-tone`.
     expect(rendered.map((entry) => entry.getAttribute('data-tone'))).toEqual([

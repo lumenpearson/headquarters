@@ -21,6 +21,18 @@ export function TerminalCheckbox({
   disabled = false,
   indeterminate = false,
 }: TerminalCheckboxProps) {
+  /*
+   * Chrome (border, background, color, font) and the `[data-checked]`/
+   * `[data-indeterminate]`/`:focus-visible` state overrides stay in
+   * primitives.css: the state selectors carry two classes' worth of
+   * specificity (the class plus the attribute or pseudo-class), which already
+   * outranks `.ops-shell button`'s single class today, and moving them to a
+   * lower-priority utility layer would not change that -- but the base
+   * (unchecked, unfocused) chrome is exactly what `.ops-shell button` already
+   * overrides at equal-or-higher specificity, so it stays for consistency
+   * with the states next to it rather than because it still wins. Shape,
+   * size and the disabled dimming, which nothing contests, move here.
+   */
   return (
     <Checkbox.Root
       nativeButton
@@ -29,7 +41,11 @@ export function TerminalCheckbox({
       disabled={disabled}
       indeterminate={indeterminate}
       aria-label={label}
-      className={classNames('terminal-checkbox', className)}
+      className={classNames(
+        'terminal-checkbox',
+        'inline-grid place-items-center size-6 cursor-pointer data-[disabled]:cursor-not-allowed data-[disabled]:opacity-[0.38]',
+        className,
+      )}
       onCheckedChange={(nextChecked) => onCheckedChange(nextChecked)}
     >
       <Checkbox.Indicator className="terminal-checkbox__indicator">

@@ -1293,8 +1293,7 @@ button {
 .explorer-controls .terminal-select {
   width: auto;
   min-height: 25px;
-  height: 25px;
-  font-size: 8px;
+  font-size: var(--ops-font-size, var(--font-xs));
 }
 .file-list__head,
 .file-row {

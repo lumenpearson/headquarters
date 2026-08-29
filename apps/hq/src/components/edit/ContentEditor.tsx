@@ -79,23 +79,25 @@ export function ContentEditor({ host = 'panel' }: { readonly host?: ContentEdito
   if (definition === undefined && changed.length === 0) return null;
 
   return (
-    <section className="edit-panel__category edit-content">
-      <h3>СОДЕРЖИМОЕ / CONTENT</h3>
+    <section className="edit-panel__category edit-content grid gap-hq-1">
+      <h3 className="sticky top-0 z-[1] pt-hq-2 px-0 pb-hq-1 border-b border-b-hq-line-2 bg-hq-panel-raised text-hq-accent text-hq-xs tracking-[0.12em]">
+        СОДЕРЖИМОЕ / CONTENT
+      </h3>
       {target !== undefined && definition !== undefined && value !== undefined ? (
         // Keyed by the selection so a text draft never carries over from one
         // field to the next.
         <ContentFieldControl key={selected} definition={definition} target={target} value={value} />
       ) : null}
       {changed.length > 0 ? (
-        <ul className="edit-content__changed">
+        <ul className="edit-content__changed grid gap-hq-1 m-0 p-0 list-none">
           {changed.map(([key, current]) => {
             const entry = parseContentKey(key);
             const label = entry === undefined ? key : getContentFieldDefinition(entry.id)?.label;
             return (
-              <li key={key}>
-                <span>
+              <li key={key} className="flex gap-hq-2 items-center justify-between">
+                <span className="grid min-w-0 text-hq-xs tracking-[0.06em]">
                   <strong>{label ?? key}</strong>
-                  <small>
+                  <small className="text-hq-text-2 wrap-anywhere">
                     {entry?.entityId} · {current}
                   </small>
                 </span>
@@ -233,16 +235,20 @@ function ContentFieldControl({
   })();
 
   return (
-    <div className="edit-content__field">
-      <span>
+    <div className="edit-content__field grid gap-hq-1 pb-hq-2">
+      <span className="grid min-w-0 text-hq-xs tracking-[0.06em]">
         <strong>{label}</strong>
-        <small>
+        <small className="text-hq-text-2 wrap-anywhere">
           {target.entityId} · ИСХОДНОЕ: {seed ?? '—'}
         </small>
       </span>
       {control}
       {error === null ? null : (
-        <small id={errorId} role="status" className="edit-content__error">
+        <small
+          id={errorId}
+          role="status"
+          className="edit-content__error text-hq-critical text-hq-xs tracking-[0.08em]"
+        >
           {error}
         </small>
       )}

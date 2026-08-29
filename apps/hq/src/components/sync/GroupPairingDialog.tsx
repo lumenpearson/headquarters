@@ -6,13 +6,16 @@ import {
   TerminalField,
   TerminalInput,
   TerminalSelect,
+  TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { dateTimeFormat } from '@/application/localization/intl';
+import { useBooleanSetting } from '@/application/personalization/useSetting';
 import {
   authorityModeLabel,
   connectionModeLabel,
+  controlPlaneAddressSourceLabel,
   deviceRoleLabel,
   realtimeStatusLabel,
   realtimeStatusToken,
@@ -24,8 +27,13 @@ import {
   type PairingRole,
 } from '@/application/sync/connection';
 import type { PairingCodeGrant } from '@/application/sync/controlPlanePort';
+import {
+  clearManualControlPlaneAddress,
+  readManualControlPlaneAddress,
+  writeManualControlPlaneAddress,
+} from '@/application/sync/manualControlPlaneAddress';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
-import { useOperationsStore } from '@/state/operationsStore';
+import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { currentControlPlaneSession, subscribeControlPlaneSession } from './ControlPlaneRuntime';
 
@@ -85,6 +93,19 @@ export function GroupPairingDialog() {
   const [pairingRole, setPairingRole] = useState<PairingRole>('EDITOR');
   /* The issued code, held here for the same reason as the secret above. */
   const [grant, setGrant] = useState<PairingCodeGrant | null>(null);
+  /*
+   * The manual address field. Read from `manualControlPlaneAddress` when the
+   * dialog opens rather than kept in sync with it continuously: it is a draft
+   * an operator is editing, and a store that overwrote it on every external
+   * change would erase a half-typed address the moment another window saved
+   * one. Synced from the opener callback below rather than from an effect
+   * keyed on `open` -- `openGroupPairing` is the one path that actually opens
+   * this dialog, and setting state there is a response to that call rather
+   * than a state update running during an effect's own body.
+   */
+  const [addressDraft, setAddressDraft] = useState('');
+  const [addressFeedback, setAddressFeedback] = useState('');
+  const localOnly = useBooleanSetting('general.localOnly');
   const session = useSyncExternalStore(
     subscribeControlPlaneSession,
     currentControlPlaneSession,
@@ -94,7 +115,11 @@ export function GroupPairingDialog() {
   );
 
   useEffect(() => {
-    const opener = () => setOpen(true);
+    const opener = () => {
+      setOpen(true);
+      setAddressDraft(readManualControlPlaneAddress().join(', '));
+      setAddressFeedback('');
+    };
     openers.add(opener);
     return () => {
       openers.delete(opener);
@@ -118,7 +143,11 @@ export function GroupPairingDialog() {
 
   useContextMenuAction(
     'shell.groupPairing',
-    useCallback(() => setOpen(true), []),
+    useCallback(() => {
+      setOpen(true);
+      setAddressDraft(readManualControlPlaneAddress().join(', '));
+      setAddressFeedback('');
+    }, []),
   );
 
   const run = <Value,>(operation: () => Promise<Value>): Promise<Value> => {
@@ -145,7 +174,7 @@ export function GroupPairingDialog() {
       description="Общая группа сессий: одна главная или все главные, с общими часами"
       className="group-pairing"
       footer={
-        <div className="group-pairing__actions">
+        <div className="group-pairing__actions flex flex-wrap gap-hq-2">
           {foreignInstallation ? (
             <TerminalButton
               className="ops-action ops-action--danger"
@@ -200,15 +229,36 @@ export function GroupPairingDialog() {
       ) : null}
 
       {session === null ? (
-        <p className="group-pairing__note">
-          {connection.mode === 'local-only'
-            ? 'РЕЖИМ ТОЛЬКО ЭТОЙ МАШИНЫ. ВЫКЛЮЧИТЕ GENERAL.LOCALONLY И УКАЖИТЕ АДРЕС CONTROL PLANE, ЧТОБЫ ВОЙТИ В ГРУППУ.'
-            : 'КЛИЕНТ СИНХРОНИЗАЦИИ НЕ ЗАПУЩЕН.'}
-        </p>
+        <ControlPlaneAddressForm
+          connection={connection}
+          localOnly={localOnly}
+          addressDraft={addressDraft}
+          addressFeedback={addressFeedback}
+          onAddressDraftChange={setAddressDraft}
+          onSave={() => {
+            const outcome = writeManualControlPlaneAddress(addressDraft);
+            if (!outcome.ok) {
+              setAddressFeedback(outcome.message);
+              return;
+            }
+            setAddressDraft(outcome.addresses.join(', '));
+            setAddressFeedback('АДРЕС СОХРАНЁН');
+          }}
+          onClear={() => {
+            clearManualControlPlaneAddress();
+            setAddressDraft('');
+            setAddressFeedback('');
+          }}
+          onLocalOnlyChange={(next) =>
+            operationsStore
+              .getState()
+              .applySettingsPatch([{ id: 'general.localOnly', value: next }])
+          }
+        />
       ) : null}
 
       {session !== null && !paired && !foreignInstallation ? (
-        <div className="group-pairing__form">
+        <div className="group-pairing__form grid gap-hq-2 mt-hq-3">
           <TerminalField label="КОД ПАРЫ" description="Код выдаёт администратор группы">
             <TerminalInput
               aria-label="Код пары"
@@ -339,7 +389,9 @@ export function GroupPairingDialog() {
                     {device.deviceId === connection.leaderDeviceId ? ' · ГЛАВНАЯ' : ''}
                   </small>
                   {admin && lock !== '' ? (
-                    <small className="group-pairing__hint">{lock}</small>
+                    <small className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
+                      {lock}
+                    </small>
                   ) : null}
                 </span>
                 {/* Only an administrator may move the leader, change a role or
@@ -422,6 +474,92 @@ export function GroupPairingDialog() {
 }
 
 /**
+ * The three ways an operator leaves local-only from this dialog: type an
+ * address, flip the setting that gates it, or read where the address the
+ * runtime already tried came from (R27 follow-up).
+ *
+ * Rendered exactly while `session === null`, which in this application's own
+ * runtime is exactly local-only or no address configured at all -- the state
+ * this whole surface exists to get an operator out of. Kept as one component
+ * because the three read one another: the switch is pointless while no
+ * address is reachable, the source line explains why a save might still leave
+ * the client local-only (a project file or build variable can rank below the
+ * field but a broken override cannot be fixed from here), and the field is
+ * the one of the three sources this dialog can actually write.
+ */
+function ControlPlaneAddressForm({
+  addressDraft,
+  addressFeedback,
+  connection,
+  localOnly,
+  onAddressDraftChange,
+  onClear,
+  onLocalOnlyChange,
+  onSave,
+}: {
+  readonly addressDraft: string;
+  readonly addressFeedback: string;
+  readonly connection: ConnectionState;
+  readonly localOnly: boolean;
+  readonly onAddressDraftChange: (value: string) => void;
+  readonly onClear: () => void;
+  readonly onLocalOnlyChange: (next: boolean) => void;
+  readonly onSave: () => void;
+}) {
+  return (
+    <div className="group-pairing__address grid gap-hq-2 mt-hq-3">
+      <p className="group-pairing__note m-0 text-hq-text-2 text-hq-xs tracking-[0.08em]">
+        {connection.mode === 'local-only'
+          ? 'РЕЖИМ ТОЛЬКО ЭТОЙ МАШИНЫ. УКАЖИТЕ АДРЕС CONTROL PLANE НИЖЕ И ВЫКЛЮЧИТЕ ЛОКАЛЬНЫЙ РЕЖИМ, ЧТОБЫ ВОЙТИ В ГРУППУ. ФАЙЛ /runtime/project.override.json И ПЕРЕМЕННАЯ NEXT_PUBLIC_HQ_CONTROL_PLANE_URL — ЗАПАСНЫЕ СПОСОБЫ ЗАДАТЬ АДРЕС, ЕСЛИ ЭТО ПОЛЕ ПУСТО.'
+          : 'КЛИЕНТ СИНХРОНИЗАЦИИ НЕ ЗАПУЩЕН.'}
+      </p>
+      <TerminalField
+        label="АДРЕС CONTROL PLANE"
+        description="Один адрес или до четырёх через запятую — сначала ближний по сети, затем облачный"
+      >
+        <TerminalInput
+          aria-label="Адрес control plane"
+          placeholder="http://192.168.10.5:4100"
+          value={addressDraft}
+          onValueChange={onAddressDraftChange}
+        />
+      </TerminalField>
+      <div className="group-pairing__actions flex flex-wrap gap-hq-2">
+        <TerminalButton
+          className="ops-action ops-action--primary"
+          tone="primary"
+          disabled={addressDraft.trim().length === 0}
+          onClick={onSave}
+        >
+          [S] СОХРАНИТЬ
+        </TerminalButton>
+        <TerminalButton className="ops-action" onClick={onClear}>
+          [O] ОЧИСТИТЬ
+        </TerminalButton>
+      </div>
+      {addressFeedback === '' ? null : (
+        <p
+          className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]"
+          role="status"
+        >
+          {addressFeedback}
+        </p>
+      )}
+      <p className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
+        ИСТОЧНИК АДРЕСА: {controlPlaneAddressSourceLabel(connection.addressSource)}
+      </p>
+      <TerminalSwitch
+        label="Локальный режим"
+        checked={localOnly}
+        onCheckedChange={onLocalOnlyChange}
+        onLabel="ЛОКАЛЬНЫЙ РЕЖИМ: ВКЛ"
+        offLabel="ЛОКАЛЬНЫЙ РЕЖИМ: ВЫКЛ"
+      />
+    </div>
+  );
+}
+
+/**
  * Why this device cannot be demoted right now, or `''` when it can.
  *
  * The control plane refuses two demotions outright, under the membership lock
@@ -490,7 +628,7 @@ function GroupAdministration({
     <section className="group-pairing__admin">
       <h3>УПРАВЛЕНИЕ ГРУППОЙ</h3>
       {admin ? null : (
-        <p className="group-pairing__hint">
+        <p className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
           ЭТИМИ КОМАНДАМИ РАСПОРЯЖАЕТСЯ АДМИНИСТРАТОР ГРУППЫ. ПОПРОСИТЕ ЕГО ПОВЫСИТЬ ЭТО УСТРОЙСТВО.
         </p>
       )}

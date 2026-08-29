@@ -251,6 +251,66 @@ export function OperationsShell({
     }
   };
 
+  // Everything the shell root carries as an inline custom property, kept in
+  // one memo so the mirror effect below compares against the same values the
+  // shell itself renders rather than recomputing them.
+  const shellCustomProperties = useMemo<Record<string, string>>(
+    () => ({
+      ...presentation.customProperties,
+      // The product of the two scale settings, bounded. Typography and
+      // element size are separate controls and either alone stays inside
+      // the interface; together they can leave it, which R19 asks the
+      // bounds to prevent.
+      '--ops-type-scale': String(
+        Math.min(
+          1.25,
+          Math.max(
+            0.85,
+            scaleOf(presentation, '--ops-type-scale-setting') *
+              scaleOf(presentation, '--ops-size-scale-setting'),
+          ),
+        ),
+      ),
+      '--ops-motion-duration': `${resolveMotionDurationMs(animationIntensity, editActive)}ms`,
+      '--ops-background-duration': `${Math.round(30_000 - animationIntensity * 18_000)}ms`,
+      // Quoted: an object URL is machine-made, but url() without quotes is
+      // a place where a stray character would become syntax.
+      ...(backgroundImageUrl === null
+        ? {}
+        : { '--ops-background-source': `url("${backgroundImageUrl}")` }),
+    }),
+    [presentation, animationIntensity, editActive, backgroundImageUrl],
+  );
+
+  // Base UI portals popups, dialogs, menus and toasts to `document.body`,
+  // outside `.ops-shell` in the DOM: a data attribute or a custom property
+  // declared only on the shell root never reaches them. Mirroring
+  // `data-theme`, `data-accent` and every custom property the shell carries
+  // onto `body` is what lets a portalled surface pick up the same palette,
+  // the same fluid type scale and the same focus-ring width --
+  // `operations.css` keys its `--ops-*` matrices off `body[data-theme=...]` /
+  // `body[data-accent=...]` for exactly this reason, and `terminal.css` reads
+  // `--ops-focus-ring-width` and `--ops-orange-bright` off `body` directly.
+  // The shell element keeps carrying its own copies too, for the CSS
+  // structure and for the Playwright locators that key off `.ops-shell`.
+  useEffect(() => {
+    const body = document.body;
+    const theme = presentation.attributes['data-theme'];
+    const accent = presentation.attributes['data-accent'];
+    if (theme !== undefined) body.setAttribute('data-theme', theme);
+    if (accent !== undefined) body.setAttribute('data-accent', accent);
+    for (const [property, value] of Object.entries(shellCustomProperties)) {
+      body.style.setProperty(property, value);
+    }
+    return () => {
+      if (theme !== undefined) body.removeAttribute('data-theme');
+      if (accent !== undefined) body.removeAttribute('data-accent');
+      for (const property of Object.keys(shellCustomProperties)) {
+        body.style.removeProperty(property);
+      }
+    };
+  }, [presentation.attributes, shellCustomProperties]);
+
   return (
     <div
       className={`ops-shell ${compact ? 'ops-shell--compact' : ''} ${production.cameraSafe ? 'ops-shell--camera-safe' : ''} ${motionAllowed ? '' : 'ops-shell--no-motion'} ops-cursor--${production.cursorMode}`}
@@ -259,30 +319,7 @@ export function OperationsShell({
       {...presentation.attributes}
       data-background-image={backgroundImageUrl === null ? 'none' : 'material'}
       onPointerDownCapture={disableAutoDemo}
-      style={
-        {
-          ...presentation.customProperties,
-          // The product of the two scale settings, bounded. Typography and
-          // element size are separate controls and either alone stays inside
-          // the interface; together they can leave it, which R19 asks the
-          // bounds to prevent.
-          '--ops-type-scale': Math.min(
-            1.25,
-            Math.max(
-              0.85,
-              scaleOf(presentation, '--ops-type-scale-setting') *
-                scaleOf(presentation, '--ops-size-scale-setting'),
-            ),
-          ),
-          '--ops-motion-duration': `${resolveMotionDurationMs(animationIntensity, editActive)}ms`,
-          '--ops-background-duration': `${Math.round(30_000 - animationIntensity * 18_000)}ms`,
-          // Quoted: an object URL is machine-made, but url() without quotes is
-          // a place where a stray character would become syntax.
-          ...(backgroundImageUrl === null
-            ? {}
-            : { '--ops-background-source': `url("${backgroundImageUrl}")` }),
-        } as CSSProperties
-      }
+      style={shellCustomProperties as CSSProperties}
     >
       {backgroundVideoUrl === null ? null : (
         <BackgroundVideoLayer source={backgroundVideoUrl} paused={!motionAllowed} />

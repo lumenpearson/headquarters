@@ -32,7 +32,8 @@
     "test:ui": {
       "dependsOn": ["^build"],
       "cache": false,
-      "outputs": ["playwright-report/**", "test-results/**"]
+      "outputs": ["playwright-report/**", "test-results/**"],
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"]
     },
     "dev": {
       "dependsOn": ["^build"],

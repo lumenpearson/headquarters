@@ -74,14 +74,20 @@ export function KeybindIntro() {
   if (!open) return null;
 
   return (
-    <div className="keybind-intro" role="dialog" aria-label="Сочетания клавиш">
-      <div className="keybind-intro__card">
-        <header>
+    <div
+      className="keybind-intro fixed inset-0 z-[var(--z-dialog)] grid place-items-center backdrop-blur-[16px] backdrop-saturate-[90%] bg-[color-mix(in_srgb,var(--bg-0)_62%,transparent)]"
+      role="dialog"
+      aria-label="Сочетания клавиш"
+    >
+      <div className="keybind-intro__card grid grid-rows-[auto_minmax(0,1fr)_auto] gap-hq-3 w-[min(760px,92vw)] max-h-[82dvh] p-hq-4 border border-hq-accent bg-hq-panel-raised">
+        <header className="flex gap-hq-2 items-baseline justify-between text-hq-accent text-hq-xs tracking-[0.12em]">
           <strong>СОЧЕТАНИЯ КЛАВИШ</strong>
-          <span>Нажмите любое — строка подсветится</span>
+          <span className="text-hq-text-2 tracking-[0.04em]">
+            Нажмите любое — строка подсветится
+          </span>
         </header>
         <KeybindList />
-        <footer>
+        <footer className="flex justify-end">
           <TerminalButton onClick={dismiss}>ПОНЯТНО</TerminalButton>
         </footer>
       </div>

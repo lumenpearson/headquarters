@@ -56,20 +56,24 @@ export function KeybindList() {
   }, [highlightMs]);
 
   return (
-    <div className="keybind-list">
+    <div className="keybind-list grid gap-hq-3 min-h-0">
       {groupKeybinds(keybinds)
         .filter((group) => !hiddenCategories.includes(group.category))
         .map((group) => (
           <section key={group.category} className="keybind-list__group">
-            <h4>{keybindCategoryLabel(group.category)}</h4>
-            <ul>
+            <h4 className="m-0 mb-hq-1 text-hq-accent text-hq-xs tracking-[0.14em]">
+              {keybindCategoryLabel(group.category)}
+            </h4>
+            <ul className="m-0 p-0 list-none">
               {group.keybinds.map((keybind) => (
                 <li
                   key={keybind.id}
-                  className="keybind-list__row"
+                  className="keybind-list__row group grid grid-cols-[minmax(120px,max-content)_minmax(0,1fr)] gap-hq-2 items-baseline py-[2px] px-[4px] border-l border-l-transparent data-[fired=true]:border-l-hq-accent data-[fired=true]:bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]"
                   data-fired={firedId === keybind.id ? 'true' : 'false'}
                 >
-                  <kbd>{formatChord(keybind.chord)}</kbd>
+                  <kbd className="border border-hq-line-2 py-[1px] px-[6px] text-hq-text-1 [font-family:inherit] [line-height:inherit] text-hq-xs whitespace-nowrap group-data-[fired=true]:border-hq-accent group-data-[fired=true]:text-hq-accent">
+                    {formatChord(keybind.chord)}
+                  </kbd>
                   <span>{translate(keybind.descriptionId, keybind.descriptionParams)}</span>
                 </li>
               ))}

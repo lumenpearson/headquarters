@@ -4,37 +4,19 @@
  * Kept out of operations.css for the same reason edit.css is: this is an
  * overlay drawn over the shell for a few hundred milliseconds, not a part of
  * the shell's grid.
+ *
+ * Layout, colour and spacing moved onto `StartupSequence.tsx` as Tailwind
+ * utilities. What remains here is exactly what does not map onto a utility
+ * class: the keyframes, the animation-attachment rules that reference them
+ * (each needs the running total from `--startup-stage-duration` /
+ * `--startup-total-duration`, written by the component as inline custom
+ * properties), the caret's pseudo-element (there is no element in the markup
+ * to hang a class on), and the reduced-motion gate over all of them.
  */
 
-.startup-sequence {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-devtools);
-  display: grid;
-  /* R26: the overlay is exactly the viewport. A taller box here would make the
-     document scrollable for as long as the sequence runs. */
-  place-items: center;
-  /* Opaque: the sequence stands in for the shell rather than tinting it, so
-     what an operator sees during a cold start is a terminal coming up and not
-     a half-drawn dashboard behind a veil. */
-  background: var(--bg-0);
-  pointer-events: none;
-}
-
-.startup-sequence__readout {
-  display: grid;
-  gap: var(--space-1);
-  width: min(520px, 72vw);
-}
-
+/* Each line is new on the frame it appears, so animating it in is enough --
+   the staggering is done by the component revealing one line per stage. */
 .startup-sequence__line {
-  margin: 0;
-  color: var(--accent);
-  font-size: var(--font-xs);
-  letter-spacing: 0.12em;
-  text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
-  /* Each line is new on the frame it appears, so animating it in is enough --
-     the staggering is done by the component revealing one line per stage. */
   animation: startup-line-in var(--startup-stage-duration, 320ms) ease-out both;
 }
 
@@ -50,12 +32,7 @@
  * the same plan that drives the interval.
  */
 .startup-sequence__progress {
-  height: 2px;
-  margin-top: var(--space-2);
-  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
   animation: startup-progress var(--startup-total-duration, 1280ms) linear both;
-  transform-origin: left center;
 }
 
 .startup-sequence[data-stage='ready'] {

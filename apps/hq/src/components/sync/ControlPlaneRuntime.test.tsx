@@ -2,6 +2,10 @@
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  clearManualControlPlaneAddress,
+  writeManualControlPlaneAddress,
+} from '@/application/sync/manualControlPlaneAddress';
 import { groupMirrorStorageKey } from '@/infrastructure/controlPlane/GroupSnapshotDownloader';
 import { operationsStore } from '@/state/operationsStore';
 
@@ -285,6 +289,210 @@ describe('ControlPlaneRuntime and the local copy of the group', () => {
     expect(draftValue('telemetry.source')).toBe('simulation');
     // The copy is still reported, because it is still on the disk.
     expect(operationsStore.getState().connection.mirror.revision).toBe(7);
+  });
+});
+
+describe('ControlPlaneRuntime and the manual address', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    operationsStore.getState().resetWorld();
+    operationsStore.getState().patchConnection({ mode: 'connecting' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('tries the manual address before reading the project file or the build variable', async () => {
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL) => new Response(null, { status: 503 }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    writeManualControlPlaneAddress(cloudPlane);
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'general.localOnly', value: false }]);
+    });
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    // The operator's own entry is checked first: neither the runtime
+    // configuration nor the build variable is worth a round trip once it
+    // answers. Any call the mounted client itself makes afterwards -- probing
+    // the address it resolved to -- is expected and is not one of these two.
+    const runtimeConfigCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const url = typeof input === 'string' ? input : String(input);
+      return url.includes('/runtime/project.');
+    });
+    expect(runtimeConfigCalls).toEqual([]);
+    expect(operationsStore.getState().connection.links).toMatchObject([
+      { linkId: 'link-0', baseUrl: cloudPlane, role: 'primary' },
+    ]);
+    expect(operationsStore.getState().connection.addressSource).toBe('manual');
+  });
+
+  it('re-resolves once the manual address changes after mount', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url === '/runtime/project.override.json') return new Response(null, { status: 404 });
+        if (url === '/runtime/project.default.json') {
+          return new Response(JSON.stringify({ ...projectDefault, controlPlaneUrl: nearPlane }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(null, { status: 503 });
+      }),
+    );
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'general.localOnly', value: false }]);
+    });
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    expect(operationsStore.getState().connection.links).toMatchObject([{ baseUrl: nearPlane }]);
+    expect(operationsStore.getState().connection.addressSource).toBe('project-file');
+
+    act(() => {
+      writeManualControlPlaneAddress(cloudPlane);
+    });
+    await settle();
+
+    // The manual entry now outranks the project file this device was already
+    // connected through -- the operator's most recent, explicit statement.
+    expect(operationsStore.getState().connection.links).toMatchObject([{ baseUrl: cloudPlane }]);
+    expect(operationsStore.getState().connection.addressSource).toBe('manual');
+  });
+
+  it('falls back to the build variable once the manual address is cleared', async () => {
+    vi.stubEnv('NEXT_PUBLIC_HQ_CONTROL_PLANE_URL', cloudPlane);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url === '/runtime/project.override.json') return new Response(null, { status: 404 });
+        if (url === '/runtime/project.default.json') {
+          return new Response(JSON.stringify(projectDefault), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(null, { status: 503 });
+      }),
+    );
+    writeManualControlPlaneAddress(nearPlane);
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'general.localOnly', value: false }]);
+    });
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    expect(operationsStore.getState().connection.addressSource).toBe('manual');
+
+    act(() => {
+      clearManualControlPlaneAddress();
+    });
+    await settle();
+
+    expect(operationsStore.getState().connection.links).toMatchObject([{ baseUrl: cloudPlane }]);
+    expect(operationsStore.getState().connection.addressSource).toBe('build-variable');
+  });
+});
+
+describe('ControlPlaneRuntime and a broken project override', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    operationsStore.getState().resetWorld();
+    operationsStore.getState().patchConnection({ mode: 'connecting' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function configureOverrideBody(body: string): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url === '/runtime/project.override.json') {
+          return new Response(body, {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url === '/runtime/project.default.json') {
+          return new Response(JSON.stringify(projectDefault), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(null, { status: 503 });
+      }),
+    );
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'general.localOnly', value: false }]);
+    });
+  }
+
+  it('names the override file when it holds invalid JSON, instead of asking for an address that is already there', async () => {
+    configureOverrideBody('{"version":');
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    expect(operationsStore.getState().connection.failure).toContain(
+      '/runtime/project.override.json',
+    );
+    // No manual address, no working project address, no build variable: this
+    // launch is genuinely local-only, and the failure line is the reason why.
+    expect(operationsStore.getState().connection.mode).toBe('local-only');
+  });
+
+  it('names the override file when its controlPlaneUrl fails the schema, without swallowing the report', async () => {
+    configureOverrideBody(
+      JSON.stringify({ version: 1, values: { controlPlaneUrl: 'not-a-url' }, assetOverrides: {} }),
+    );
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    expect(operationsStore.getState().connection.failure).toContain(
+      '/runtime/project.override.json',
+    );
+    expect(operationsStore.getState().connection.addressSource).toBe('none');
+  });
+
+  it('stays quiet about an override that simply is not there', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url === '/runtime/project.override.json') return new Response(null, { status: 404 });
+        if (url === '/runtime/project.default.json') {
+          return new Response(JSON.stringify(projectDefault), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(null, { status: 503 });
+      }),
+    );
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'general.localOnly', value: false }]);
+    });
+
+    render(<ControlPlaneRuntime />);
+    await settle();
+
+    // A 404 is silence, exactly as it was before this file could tell "absent"
+    // from "broken" apart.
+    expect(operationsStore.getState().connection.failure).toBe('');
   });
 });
 

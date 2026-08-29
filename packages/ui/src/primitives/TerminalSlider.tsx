@@ -59,7 +59,11 @@ export function TerminalSlider({
       max={max}
       step={step}
       disabled={disabled}
-      className={classNames('terminal-slider', className)}
+      className={classNames(
+        'terminal-slider',
+        'group grid min-w-0 gap-hq-2 text-hq-text-1 font-mono text-hq-xs',
+        className,
+      )}
       data-adjusting={adjusting ? '' : undefined}
       onValueChange={(nextValue) => {
         setAdjusting(true);
@@ -68,15 +72,18 @@ export function TerminalSlider({
       onValueCommitted={() => setAdjusting(false)}
     >
       {showLabel || showValue ? (
-        <div className="terminal-slider__header">
+        <div className="terminal-slider__header flex justify-between gap-hq-2 uppercase">
           {showLabel ? <Slider.Label>{label}</Slider.Label> : null}
           {showValue ? <Slider.Value>{() => value}</Slider.Value> : null}
         </div>
       ) : null}
-      <Slider.Control className="terminal-slider__control">
-        <Slider.Track className="terminal-slider__track">
-          <Slider.Indicator className="terminal-slider__indicator" />
-          <Slider.Thumb className="terminal-slider__thumb" getAriaLabel={() => label} />
+      <Slider.Control className="terminal-slider__control flex h-6 items-center cursor-pointer group-data-[adjusting]:cursor-grabbing">
+        <Slider.Track className="terminal-slider__track relative w-full h-[5px] bg-hq-line-2">
+          <Slider.Indicator className="terminal-slider__indicator h-full bg-hq-accent" />
+          <Slider.Thumb
+            className="terminal-slider__thumb w-[10px] h-[18px] border border-hq-accent outline-none bg-hq-bg-0 focus-within:bg-hq-accent group-data-[adjusting]:bg-hq-accent"
+            getAriaLabel={() => label}
+          />
         </Slider.Track>
       </Slider.Control>
     </Slider.Root>

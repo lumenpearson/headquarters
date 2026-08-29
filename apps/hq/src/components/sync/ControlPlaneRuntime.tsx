@@ -1,19 +1,16 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { toAuthorityMode } from '@/application/sync/authority';
 import { disconnectedConnection, type ControlPlaneLinkRole } from '@/application/sync/connection';
-import {
-  createLinkStates,
-  isLinkOfSameDatabase,
-  parseControlPlaneAddressList,
-} from '@/application/sync/controlPlaneLinks';
+import { resolveControlPlaneAddresses } from '@/application/sync/controlPlaneAddressResolution';
+import { createLinkStates, isLinkOfSameDatabase } from '@/application/sync/controlPlaneLinks';
 import { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
 import { groupValuePatches } from '@/application/sync/GroupSettingsSync';
 import { mirrorSummary } from '@/application/sync/localMirror';
-import { loadProjectConfiguration } from '@/infrastructure/config/RuntimeConfigLoader';
+import { subscribeManualControlPlaneAddress } from '@/application/sync/manualControlPlaneAddress';
 import { ControlPlaneClient } from '@/infrastructure/controlPlane/ControlPlaneClient';
 import { DeviceSessionStore } from '@/infrastructure/controlPlane/DeviceSessionStore';
 import { readGroupMirror } from '@/infrastructure/controlPlane/GroupSnapshotDownloader';
@@ -129,6 +126,20 @@ export function ControlPlaneRuntime() {
     () => null,
   );
   const session = connection === null ? null : connection.session;
+  /*
+   * A tick rather than the address list itself: the manual store re-reads
+   * `localStorage` on every call and returns a fresh array each time, which
+   * would fail `useSyncExternalStore`'s requirement that a snapshot compare
+   * equal until something actually changed. The tick only has to change
+   * identity when the store notifies, which a counter does trivially, and the
+   * effect below reads the address itself through `resolveControlPlaneAddresses`
+   * once it re-runs.
+   */
+  const [manualAddressTick, setManualAddressTick] = useState(0);
+  useEffect(
+    () => subscribeManualControlPlaneAddress(() => setManualAddressTick((tick) => tick + 1)),
+    [],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -150,17 +161,21 @@ export function ControlPlaneRuntime() {
       };
     }
 
-    void resolveControlPlaneAddresses(controller.signal).then((addresses) => {
+    void resolveControlPlaneAddresses(controller.signal).then((resolved) => {
       if (disposed) return;
-      if (addresses.length === 0) {
+      if (resolved.addresses.length === 0) {
         // No address configured is the same fact as local-only: there is no
-        // group to be out of.
-        operationsStore
-          .getState()
-          .patchConnection({ ...disconnectedConnection('local-only'), links: [] });
+        // group to be out of. A broken override is still worth reporting, so
+        // it rides along on the same patch rather than being cleared by it.
+        operationsStore.getState().patchConnection({
+          ...disconnectedConnection('local-only'),
+          links: [],
+          addressSource: resolved.source,
+          failure: resolved.overrideFailure,
+        });
         return;
       }
-      const states = createLinkStates(addresses);
+      const states = createLinkStates(resolved.addresses);
       /*
        * One store instance for every link, so that "which client may write the
        * credentials" is a question about the clients rather than about which
@@ -210,9 +225,12 @@ export function ControlPlaneRuntime() {
        * waiting on would be wrong. This runtime already writes the mode on the
        * two local-only branches above.
        */
-      operationsStore
-        .getState()
-        .patchConnection({ links: states, mode: 'connecting', failure: '' });
+      operationsStore.getState().patchConnection({
+        links: states,
+        mode: 'connecting',
+        addressSource: resolved.source,
+        failure: resolved.overrideFailure,
+      });
       void probeLinks(links, controller.signal).then(() => {
         if (disposed) return;
         void created.connect(false, controller.signal);
@@ -224,7 +242,7 @@ export function ControlPlaneRuntime() {
       controller.abort();
       setActiveControlPlane(null);
     };
-  }, [localOnly]);
+  }, [localOnly, manualAddressTick]);
 
   useEffect(() => {
     if (session === null || mode !== 'online') return;
@@ -359,30 +377,4 @@ async function probeLinks(links: readonly ControlPlaneLink[], signal: AbortSigna
       });
     }),
   );
-}
-
-/**
- * Where the control plane answers, if anywhere, in the operator's order.
- *
- * The project configuration wins over the environment variable: the variable
- * is a developer's convenience, while `project.override.json` is the file an
- * operator edits on the shoot machine, and the machine's own answer has to
- * outrank the one baked into the build.
- *
- * A list rather than an address since F14 stage 7. One address behaves exactly
- * as it did, and so does none; more than one is a group reachable both over the
- * set's LAN and over the internet, and the order is the operator's statement of
- * which plane to prefer.
- */
-async function resolveControlPlaneAddresses(signal: AbortSignal): Promise<readonly string[]> {
-  try {
-    const project = await loadProjectConfiguration(signal);
-    if (project.config.controlPlaneUrl.length > 0) return project.config.controlPlaneUrl;
-  } catch {
-    // The runtime configuration is unavailable on a route that ships without
-    // it; the variable is then the only answer left, and no address at all is
-    // a valid one.
-  }
-  const configured = process.env.NEXT_PUBLIC_HQ_CONTROL_PLANE_URL;
-  return configured === undefined ? [] : parseControlPlaneAddressList(configured);
 }

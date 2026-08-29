@@ -94,7 +94,7 @@ describe('TerminalTabs', () => {
     // The indicator is the wrapper's own addition: no consumer prop asks for it.
     expect(container.querySelectorAll('.terminal-tabs__indicator')).toHaveLength(1);
     expect(container.querySelector('.terminal-tabs')?.getAttribute('class')).toBe(
-      'terminal-tabs hq-shift-tabs',
+      'terminal-tabs group grid min-w-0 min-h-0 grid-rows-[auto_minmax(0,1fr)] data-[orientation=vertical]:grid-rows-[minmax(0,1fr)] data-[orientation=vertical]:grid-cols-[auto_minmax(0,1fr)] hq-shift-tabs',
     );
 
     // A panel per entry is declared, but only the selected one is mounted, so

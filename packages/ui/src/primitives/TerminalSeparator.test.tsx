@@ -50,15 +50,14 @@ describe('TerminalSeparator', () => {
     const container = mount(<TerminalSeparator className="terminal-panel__rule" />);
     // The order matters: the design-system class must not be able to win the
     // cascade against the class the consumer passed to override it.
-    expect(separator(container).getAttribute('class')).toBe(
-      'terminal-separator terminal-panel__rule',
-    );
+    const rendered = separator(container).getAttribute('class') ?? '';
+    expect(rendered.startsWith('terminal-separator')).toBe(true);
+    expect(rendered.endsWith('terminal-panel__rule')).toBe(true);
   });
 
-  it('carries its class name alone when the consumer passes none', () => {
+  it('carries its own class first when the consumer passes none', () => {
     const container = mount(<TerminalSeparator />);
-    // `classNames` drops the undefined rather than joining a trailing space.
-    expect(separator(container).getAttribute('class')).toBe('terminal-separator');
+    expect(separator(container).getAttribute('class')).toContain('terminal-separator');
   });
 
   it('forwards a vertical orientation to the rendered separator', () => {

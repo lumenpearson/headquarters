@@ -18,7 +18,15 @@ export const TerminalInput = forwardRef<HTMLElement, TerminalInputProps>(functio
     <Input
       {...properties}
       ref={reference}
-      className={classNames('hq-input', 'terminal-input', className)}
+      /*
+       * Chrome (border, background, color, font, min-height) stays in
+       * primitives.css: `.ops-shell input` and `body.terminal-theme input`
+       * reach the bare `<input>` element at equal-or-higher specificity, and
+       * `.ops-shell[data-control-sizing='custom'] .terminal-input` names this
+       * class directly for its min-height override. Only sizing that nothing
+       * contests moves here.
+       */
+      className={classNames('hq-input', 'terminal-input', 'w-full rounded-none', className)}
     />
   );
 });

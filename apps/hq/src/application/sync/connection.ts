@@ -132,6 +132,18 @@ export const initialRealtimeLinkState: RealtimeLinkState = {
 };
 
 /**
+ * Where the addresses this device tried came from, in the resolution order
+ * `resolveControlPlaneAddresses` tries them (F14 follow-up, R27).
+ *
+ * A fact about the configuration, not about the connection: it survives a
+ * disconnect the way `links` does, and for the same reason `disconnectedConnection`
+ * leaves both out of what it clears -- an operator looking at an offline or
+ * local-only screen is looking for exactly this, to know which of the three
+ * places to go and change it.
+ */
+export type ControlPlaneAddressSource = 'manual' | 'project-file' | 'build-variable' | 'none';
+
+/**
  * Which of a device's links owns the session (F14, stage 7).
  *
  * `primary` is the first address the operator configured and the only client
@@ -320,6 +332,14 @@ export interface ConnectionState {
    */
   readonly links: readonly ControlPlaneLinkState[];
   /**
+   * Where {@link links} came from, the last time `resolveControlPlaneAddresses`
+   * ran. `'none'` before it has ever run, which is also true of a session that
+   * never leaves local-only -- the resolver is not called while
+   * `general.localOnly` is on, so a manual address configured underneath it is
+   * simply not checked yet.
+   */
+  readonly addressSource: ControlPlaneAddressSource;
+  /**
    * The local copy of the group's state, which is a fact about the disk rather
    * than about the connection and survives every mode this slice can take.
    */
@@ -341,6 +361,7 @@ export const initialConnectionState: ConnectionState = {
   devices: [],
   clock: { offsetMs: 0, latencyMs: 0, sampledAt: '' },
   links: [],
+  addressSource: 'none',
   mirror: initialGroupMirrorSummary,
   failure: '',
 };
@@ -355,19 +376,25 @@ export const initialConnectionState: ConnectionState = {
  * it when there is no connection to reset -- `general.localOnly` is on, or no
  * control plane address is configured at all.
  *
- * `mirror` and `links` are the two fields left out, and deliberately. The local
- * copy is a fact about the disk rather than about the connection, and clearing
- * it here would make the status line report "no local copy" for a session that
- * has one -- at exactly the moment the operator most needs to know it does. The
- * links are a fact about the configuration: the addresses this device was told
- * to try do not stop existing because a probe failed, and an operator looking
- * at an offline screen is looking for exactly those addresses. Their *live*
+ * `mirror`, `links` and `addressSource` are the three fields left out, and
+ * deliberately. The local copy is a fact about the disk rather than about the
+ * connection, and clearing it here would make the status line report "no
+ * local copy" for a session that has one -- at exactly the moment the
+ * operator most needs to know it does. The links, and where they came from,
+ * are facts about the configuration: the addresses this device was told to
+ * try do not stop existing because a probe failed, and an operator looking at
+ * an offline screen is looking for exactly those addresses. Their *live*
  * fields are reset by whoever owns them, through `resetLinkDelivery`.
  */
 export function disconnectedConnection(
   mode: ConnectionMode,
-): Omit<ConnectionState, 'mirror' | 'links'> {
-  const { mirror: _mirror, links: _links, ...cleared } = initialConnectionState;
+): Omit<ConnectionState, 'mirror' | 'links' | 'addressSource'> {
+  const {
+    mirror: _mirror,
+    links: _links,
+    addressSource: _addressSource,
+    ...cleared
+  } = initialConnectionState;
   return {
     ...cleared,
     mode,
@@ -520,4 +547,18 @@ export function deviceRoleLabel(role: DeviceRole): string {
 
 export function authorityModeLabel(mode: AuthorityMode): string {
   return mode === 'leader' ? 'ОДНА ГЛАВНАЯ СЕССИЯ' : 'ВСЕ СЕССИИ ГЛАВНЫЕ';
+}
+
+/** Where the address the pairing dialog is trying came from, for the operator. */
+export function controlPlaneAddressSourceLabel(source: ControlPlaneAddressSource): string {
+  switch (source) {
+    case 'manual':
+      return 'РУЧНОЙ АДРЕС';
+    case 'project-file':
+      return 'ФАЙЛ ПРОЕКТА';
+    case 'build-variable':
+      return 'ПЕРЕМЕННАЯ СБОРКИ';
+    case 'none':
+      return 'НЕ ЗАДАН';
+  }
 }

@@ -69,7 +69,7 @@ export function StartupSequence() {
 
   return (
     <div
-      className="startup-sequence"
+      className="startup-sequence fixed inset-0 z-[var(--z-devtools)] grid place-items-center bg-hq-bg-0 pointer-events-none"
       data-stage={stage}
       role="presentation"
       aria-hidden="true"
@@ -80,13 +80,17 @@ export function StartupSequence() {
         } as React.CSSProperties
       }
     >
-      <div className="startup-sequence__readout">
+      <div className="startup-sequence__readout grid gap-hq-1 w-[min(520px,72vw)]">
         {startupStages.slice(0, stageIndex + 1).map((line) => (
-          <p key={line} className="startup-sequence__line" data-line={line}>
+          <p
+            key={line}
+            className="startup-sequence__line m-0 text-hq-accent text-hq-xs tracking-[0.12em] [text-shadow:0_0_12px_color-mix(in_srgb,var(--accent)_45%,transparent)]"
+            data-line={line}
+          >
             {startupLines[line]}
           </p>
         ))}
-        <div className="startup-sequence__progress" />
+        <div className="startup-sequence__progress h-[2px] mt-hq-2 origin-left bg-[linear-gradient(90deg,var(--accent),var(--accent-strong))] shadow-[0_0_10px_color-mix(in_srgb,var(--accent)_60%,transparent)]" />
       </div>
     </div>
   );

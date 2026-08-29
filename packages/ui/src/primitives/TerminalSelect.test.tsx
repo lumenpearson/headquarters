@@ -80,7 +80,9 @@ describe('TerminalSelect', () => {
     );
     expect(trigger(container).getAttribute('aria-label')).toBe('Канал связи');
     // `classNames` appends the consumer class rather than replacing the base one.
-    expect(trigger(container).className).toBe('terminal-select panel-select');
+    expect(trigger(container).className).toBe(
+      'terminal-select grid min-h-[34px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-hq-2 px-hq-2 border border-hq-line-1 outline-none bg-hq-bg-0 text-hq-text-0 cursor-pointer font-mono text-hq-sm text-left panel-select',
+    );
     // The raw value never reaches the trigger: the option's label is looked up.
     expect(selectedLabel(container)).toBe('Гамма');
     expect(mustFind(container, '.terminal-select__icon').textContent).toBe('[⌄]');
@@ -129,6 +131,38 @@ describe('TerminalSelect', () => {
     expect(selected.hasAttribute('data-selected')).toBe(true);
     expect(disabled.querySelector('.terminal-select__indicator')).toBeNull();
     expect(disabled.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('keeps item text as the last child so the CSS grid pin lands it in the text column', () => {
+    /*
+     * `.terminal-select__item > :last-child { grid-column: 2 }` (primitives.css)
+     * relies on `Select.ItemText` always being the last child of an item,
+     * whether or not `Select.ItemIndicator` renders ahead of it. jsdom does
+     * not compute grid placement, so this asserts the structural contract
+     * the CSS pin depends on rather than the resulting layout.
+     */
+    const container = mount(
+      <TerminalSelect
+        value="alpha"
+        options={options}
+        onValueChange={vi.fn()}
+        label="Канал связи"
+      />,
+    );
+    const rendered = open(container);
+    rendered.forEach((item, index) => {
+      const option = options[index];
+      if (option === undefined) throw new Error('option missing');
+      // Every item's last child is its text, matched by option order, never the indicator.
+      expect(item.lastElementChild?.textContent).toBe(option.label);
+      expect(item.lastElementChild?.classList.contains('terminal-select__indicator')).toBe(false);
+    });
+
+    const selected = rendered[0];
+    if (selected === undefined) throw new Error('items missing');
+    // The selected item has two children; the indicator, when present, is first, never last.
+    expect(selected.children).toHaveLength(2);
+    expect(selected.firstElementChild?.classList.contains('terminal-select__indicator')).toBe(true);
   });
 
   it('reports the chosen option value once, and nothing for a disabled option', () => {

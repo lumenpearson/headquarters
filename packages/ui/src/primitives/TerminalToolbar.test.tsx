@@ -131,7 +131,9 @@ describe('TerminalToolbar', () => {
       />,
     );
     expect(toolbar(container).getAttribute('aria-label')).toBe('Управление съёмкой');
-    expect(toolbar(container).getAttribute('class')).toBe('terminal-toolbar hq-shot-toolbar');
+    const toolbarClass = toolbar(container).getAttribute('class') ?? '';
+    expect(toolbarClass.startsWith('terminal-toolbar')).toBe(true);
+    expect(toolbarClass.endsWith('hq-shot-toolbar')).toBe(true);
     expect(toolbar(container).getAttribute('aria-orientation')).toBe('vertical');
 
     // Only the vertical case above can fail on the default alone: Base UI's own
