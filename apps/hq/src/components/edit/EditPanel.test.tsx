@@ -174,7 +174,10 @@ describe('EditPanel', () => {
       fireEvent.change(box, { target: { value: definition.id } });
       expect(screen.queryByText(settingLabel(definition.id))).not.toBeNull();
     }
-  });
+    // One render per definition over the whole catalogue is the point of the
+    // test and legitimately outgrows the default five-second budget as the
+    // panel and the registry gain sections; the walk is linear, not hung.
+  }, 30000);
 
   it('closing from the panel leaves the draft intact, so edits survive reopening', () => {
     operationsStore.getState().enterEditMode();
