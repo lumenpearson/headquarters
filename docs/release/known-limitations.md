@@ -74,31 +74,64 @@ the code that makes it true, so the next reader can check rather than trust.
   pipeline renders another. What no container can settle is a hosted store's own behaviour —
   bucket policy, lifecycle rules, cross-region latency and a provider's multipart limits are
   still unmeasured.
-- **Three `IntegrationService` RPCs answer `unimplemented`** for the same reason: `CreateIssue`,
-  `CreateTranslationPullRequest` and `GetPullRequestStatus` need GitHub egress the composition
-  root holds no secret for.
-- **Three `TelemetryService` RPCs are unimplemented by design.** `ListDataSources`,
-  `GetTelemetrySnapshot` and `StreamTelemetry` need a data-source registry and a sample store
-  that migrations 0001–0008 do not declare. The simulation half of the contract is complete; the
-  measurement half is not.
-- **Realtime fan-out is single-process.** Two control-plane processes both persist to
-  `sync_events`, but neither pushes the other's events to its own sockets, because nothing in this
-  repository carries an event between processes: `CoordinationRedisClient` offers
-  `set/sadd/expire/smembers/mget/incr` and subscribes to nothing. A client's periodic reconnect
-  picks up the gap through replay. An earlier version of this entry gave the reason as Upstash REST
-  having no pub/sub, which is wrong — it documents `POST /subscribe/{channel}` over Server-Sent
-  Events, and the pinned `@upstash/redis` exposes `subscribe()`. The limitation is one nobody has
-  lifted, not one that cannot be lifted.
-- **The container deployment is therefore one replica, and `compose.yaml` says so rather than
-  leaving it to a default.** `deploy.replicas: 1` is a constraint, not a starting point: a second
-  replica splits the audience of every live publication silently, because the entry above means
-  neither replica pushes the other's events to its own sockets. Scaling this stack needs the
-  cross-process carrier that does not exist, not a larger number.
+- **The three outbound `IntegrationService` RPCs reach a GitHub nobody here can log in to.**
+  `CreateIssue`, `CreateTranslationPullRequest` and `GetPullRequestStatus` are served by a REST
+  gateway written directly over `fetch`, wired when `HQ_CONTROL_PLANE_GITHUB_TOKEN` and
+  `HQ_CONTROL_PLANE_GITHUB_REPOSITORY` are set; without them they answer `FAILED_PRECONDITION`
+  naming those two variables rather than `unimplemented`, and `Health` reports `github` while
+  `GetCapabilities` reports `integration.github-egress` either way. The token stays inside a
+  configuration closure, is spent only by a group that registered no installation of its own,
+  and only against the configured repository. What is proved is every request the gateway
+  sends and every documented answer it reads — against a scripted `fetch`, against a real HTTP
+  GitHub on loopback, and end to end over binary gRPC-Web against live PostgreSQL. What is not
+  proved is github.com itself: a live call needs a real token this repository does not hold, so
+  rate limits, GitHub App permission scoping, and whether a repository accepts a draft pull
+  request are unmeasured. A translation pull request commits a proposal record at a
+  configurable path rather than editing a message catalogue, because this control plane cannot
+  parse an arbitrary repository's catalogue format. No RPC registers a per-group
+  `github_installations` row, and no composition root supplies the `CredentialSealer` that
+  storing one needs, so the per-group credential path is still reachable only from the store.
+- **Telemetry measures only what a simulation profile declares.** `ListDataSources`,
+  `GetTelemetrySnapshot` and `StreamTelemetry` answer from the registry and sample store
+  migration 0011 declares, and both halves of the contract are now served. What feeds them is the
+  group's own published `SimulationChannel` list: a data source exists because a channel names
+  it, and a reading is that channel evaluated by the arithmetic
+  `PreviewSimulationProfile` and the client's own simulation already share, so every screen of a
+  group reads one number at one sequence. Every snapshot therefore reports `simulated: true`.
+  There is no ingest RPC in the contract and none was added, so a control plane cannot receive a
+  reading taken on a machine; hardware telemetry stays a client-side concern. A group that has
+  published no profile is refused rather than served an empty snapshot, and a stream's cadence is
+  the shortest `update_interval_ms ÷ time_scale` its profiles ask for, floored at 200 ms. A group
+  keeps its last 720 snapshots; a client that reconnects further behind that resumes from the
+  oldest still held.
+- **Realtime fan-out crosses processes only where Redis is configured.** A control plane
+  announces every group publication on one Redis channel — `hq:realtime:group-events`, carrying a
+  group id, a sequence and the announcing process's id, and no event content — and answers a
+  sibling's announcement by reading `sync_events` from the cursor of its furthest-behind socket.
+  So two processes sharing a database and an Upstash pair no longer split the audience. Without
+  Redis nothing carries the announcement and the old behaviour stands: each process serves what it
+  published itself, and a client's periodic reconnect picks up the rest through replay. Two
+  earlier versions of this entry were wrong in turn — the first blamed Upstash REST for having no
+  pub/sub, which it documents as `POST /subscribe/{channel}` over Server-Sent Events; the second
+  said nobody had lifted the limitation, which is no longer true.
+  What is still unproved is the hosted endpoint itself. The carrier is proved against the pinned
+  `@upstash/redis` client, a real Redis and a real PostgreSQL, but Upstash's own SSE route has
+  never been reached from this repository: the container stand-in for it,
+  `hiett/serverless-redis-http`, answers the command endpoint and returns
+  `404 SRH: Endpoint not found` for `/subscribe/{channel}`.
+- **The container deployment is one replica because the compose tier configures no Redis.**
+  `deploy.replicas: 1` is a constraint there, not a starting point: without the carrier a second
+  replica splits the audience of every live publication silently. Scaling this stack is two steps
+  — configure the Redis REST pair, then raise the count — and raising the count alone reinstates
+  the split.
 - **The compose tier has no object storage and no Redis, so two capabilities are off in it.**
   `materials.storage-grants` is disabled and the four grant RPCs answer `FAILED_PRECONDITION`;
-  presence reports the last state a device recorded rather than noticing one gone, and group
-  publications are not rate limited. Both are upgrades that need an account, and both are reported
-  by `Health` and `GetCapabilities` rather than having to be inferred.
+  presence reports the last state a device recorded rather than noticing one gone, group
+  publications are not rate limited, and no announcement leaves the process — which is the entry
+  above, and why the tier pins one replica. Both are upgrades that need an account, and both are
+  reported by `Health` and `GetCapabilities` rather than having to be inferred. The fan-out is
+  not: nothing in `GetCapabilities` yet says whether a deployment carries announcements across
+  processes, so an operator reads it from the Redis capability instead.
   `docs/release/self-hosting.md` holds the full table of what each tier has; it is not repeated
   here.
 - **The container image has never been built.** `apps/control-plane/Dockerfile`, `compose.yaml` and

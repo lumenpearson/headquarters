@@ -67,6 +67,13 @@ export interface ResolvedControlPlaneCollaborators {
    */
   readonly storageGrantsEnabled?: boolean;
   /**
+   * Whether the integration service can reach GitHub. Reported by
+   * `getCapabilities` as `integration.github-egress` so a client can tell a
+   * deployment that can open an issue from one that can only build the draft
+   * and the prefilled link.
+   */
+  readonly githubEgressEnabled?: boolean;
+  /**
    * What the health endpoint reports. It is captured at startup and never
    * probed: a health check that opened a network connection to Upstash would
    * make this endpoint fail for a reason that has nothing to do with whether
@@ -156,10 +163,32 @@ export function registerControlPlaneRoutes(
             version: 'v1',
             enabled: collaborators.telemetryService !== undefined,
           },
+          // The measurement half is read off the built service rather than off
+          // a constant, for the same reason `sync` is read off the event store:
+          // a deployment whose schema predates the registry and sample store
+          // builds the simulation half alone and answers `ListDataSources`,
+          // `GetTelemetrySnapshot` and `StreamTelemetry` `unimplemented`. A
+          // client that was told otherwise would open a stream nothing serves.
+          {
+            name: 'telemetry.measurement',
+            version: 'v1',
+            enabled: collaborators.telemetryService?.listDataSources !== undefined,
+          },
           {
             name: 'integration',
             version: 'v1',
             enabled: collaborators.integrationService !== undefined,
+          },
+          // The outbound half, read off the built gateway for the same reason
+          // `materials.storage-grants` is read off the issuer: `BuildIssueDraft`
+          // and `OpenPrefilledIssue` work on a plane that will never reach
+          // GitHub, and `CreateIssue`, `CreateTranslationPullRequest` and
+          // `GetPullRequestStatus` refuse there. A client told otherwise would
+          // offer to file a report the deployment cannot send.
+          {
+            name: 'integration.github-egress',
+            version: 'v1',
+            enabled: collaborators.githubEgressEnabled === true,
           },
         ],
       };
@@ -220,6 +249,7 @@ export async function resolveControlPlaneCollaborators(
     integrationService: lifecycle.integrationService,
     eventStore: lifecycle.eventStore,
     storageGrantsEnabled: lifecycle.storageConfigured,
+    githubEgressEnabled: lifecycle.githubConfigured,
     dependencies: [
       {
         name: 'database',
@@ -256,6 +286,16 @@ export async function resolveControlPlaneCollaborators(
           lifecycle.storageConfigured && config.storage !== undefined
             ? `S3-compatible object storage; presigned upload, download and preview grants expire after ${Math.trunc(config.storage.grantTtlMs / 1000).toString()} s`
             : 'not configured; BeginUpload, CreateMaterialVersion, GetDownloadGrant and GetPreviewGrant answer FAILED_PRECONDITION',
+      },
+      {
+        // Health is unauthenticated, so the detail names neither the token nor
+        // the repository it may be spent against: what an operator needs from
+        // here is whether this plane can send to GitHub at all.
+        name: 'github',
+        configured: lifecycle.githubConfigured,
+        detail: lifecycle.githubConfigured
+          ? 'GitHub REST egress for issues, translation pull requests and pull-request status'
+          : 'not configured; CreateIssue, CreateTranslationPullRequest and GetPullRequestStatus answer FAILED_PRECONDITION',
       },
     ],
     realtime: {

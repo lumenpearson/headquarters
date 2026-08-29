@@ -90,7 +90,16 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
       const capabilities = await control.getCapabilities({});
       // Every one of these read `enabled: false` before F6, and two of them said
       // so while the service did not exist at all.
-      for (const name of ['settings', 'materials', 'telemetry', 'integration', 'sync']) {
+      for (const name of [
+        'settings',
+        'materials',
+        'telemetry',
+        // The measurement half is reported separately from the simulation half,
+        // because a deployment can serve one without the other.
+        'telemetry.measurement',
+        'integration',
+        'sync',
+      ]) {
         expect(capabilities.capabilities).toContainEqual({
           $typeName: 'gremuchaya.control.v1.Capability',
           name,
@@ -103,6 +112,7 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
         'database',
         'redis',
         'storage',
+        'github',
       ]);
       expect(capabilities.capabilities).toContainEqual({
         $typeName: 'gremuchaya.control.v1.Capability',
@@ -174,6 +184,13 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
         { headers },
       );
       expect(profiles.profiles).toEqual([]);
+
+      // The measurement half answers over the same binary gRPC-Web transport
+      // rather than `unimplemented`, which is what the capability above claims.
+      // The group has published no profile, so it declares no source, and an
+      // empty registry is the honest answer to that.
+      const dataSources = await telemetry.listDataSources({}, { headers });
+      expect(dataSources.sources).toEqual([]);
 
       const status = await integration.getIntegrationStatus(
         { groupId: { value: groupId }, provider: 1 },

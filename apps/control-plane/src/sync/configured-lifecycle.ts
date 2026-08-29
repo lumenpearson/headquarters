@@ -9,6 +9,10 @@ import { readInstallationId } from '../db/installation.js';
 import { runMigrations, type MigrationRunResult } from '../db/migrations.js';
 import { DurableIntegrationStore } from '../integration/store.js';
 import { createIntegrationService } from '../integration/service.js';
+import {
+  createGitHubRestGateway,
+  type GitHubGatewayFactory,
+} from '../integration/github-gateway.js';
 import { DurableMaterialStore } from '../material/store.js';
 import { createMaterialService } from '../material/service.js';
 import { DurableRealtimeEventStore } from '../realtime/eventStore.js';
@@ -19,6 +23,7 @@ import {
   type CoordinationClientFactory,
   type UpstashCoordination,
 } from '../redis/coordination.js';
+import { createRedisRealtimeFanout } from '../redis/fanout.js';
 
 import { CoordinatedPresenceStore } from './coordinated-presence-store.js';
 import { DurablePairedDeviceRuntime } from './durable-runtime.js';
@@ -30,6 +35,7 @@ import { DurableSettingsStore } from '../settings/store.js';
 import { controlPlaneSettingsSchema } from '../settings/schema.js';
 import { createSettingsService } from '../settings/service.js';
 import { createS3GrantIssuer, type StorageGrantIssuerFactory } from '../storage/s3-grant-issuer.js';
+import { DurableTelemetryMeasurementStore } from '../telemetry/measurement-store.js';
 import { DurableSimulationProfileStore } from '../telemetry/store.js';
 import { createTelemetryService } from '../telemetry/service.js';
 
@@ -62,6 +68,13 @@ export interface ConfiguredPairedDeviceLifecycleOptions {
    * grant-minting RPCs keep refusing.
    */
   readonly storageFactory?: StorageGrantIssuerFactory;
+  /**
+   * Optional GitHub-egress seam, so a test can drive the outbound calls against
+   * a scripted GitHub instead of the real API. It is consulted only when
+   * `config.github` is present; without a token no gateway exists and the three
+   * outbound RPCs keep refusing.
+   */
+  readonly githubFactory?: GitHubGatewayFactory;
 }
 
 export interface ConfiguredPairedDeviceLifecycle {
@@ -78,6 +91,8 @@ export interface ConfiguredPairedDeviceLifecycle {
   readonly coordination: UpstashCoordination;
   /** Whether a `StorageGrantIssuer` was built, which is what `Health` and `GetCapabilities` report. */
   readonly storageConfigured: boolean;
+  /** Whether a GitHub gateway was built, which is what `Health` and `GetCapabilities` report. */
+  readonly githubConfigured: boolean;
   readonly hub: RealtimeHub;
   readonly syncService: ReturnType<typeof createPairedDeviceSyncService>;
   readonly settingsService: ReturnType<typeof createSettingsService>;
@@ -158,7 +173,15 @@ export async function createConfiguredPairedDeviceLifecycle(
   const presence: PresenceStore = coordination.configured
     ? new CoordinatedPresenceStore(durablePresence, coordination)
     : durablePresence;
-  const hub = new RealtimeHub({ store: eventStore });
+  // The cross-process carrier exists exactly when Redis does. Without one the
+  // hub serves only what this process published, which is why a deployment
+  // without Redis still pins itself to a single replica: a second one would
+  // split the audience of every live publication silently.
+  const fanout = createRedisRealtimeFanout({ coordination });
+  const hub = new RealtimeHub({
+    store: eventStore,
+    ...(fanout === undefined ? {} : { fanout }),
+  });
   // Every store shares the runtime's own receipt guard rather than building its
   // own: one request identifier has to mean the same thing whichever service
   // received it, and two guards with two hashers would not agree.
@@ -166,6 +189,11 @@ export async function createConfiguredPairedDeviceLifecycle(
   const settingsStore = new DurableSettingsStore({ database, receipts });
   const materialStore = new DurableMaterialStore({ database, receipts });
   const simulationProfiles = new DurableSimulationProfileStore({ database, receipts });
+  // The measurement half needs no receipt guard: none of its three RPCs is a
+  // mutation a client can retry. The one write it does is a capture the server
+  // decides to take, addressed by a sequence the server allocates, so there is
+  // no client-supplied identity for a receipt to be about.
+  const telemetryMeasurements = new DurableTelemetryMeasurementStore({ database });
   const integrationStore = new DurableIntegrationStore({ database, receipts });
   // The issuer is a pure signer over the configured bucket: building it opens no
   // connection, and the first network call is the CreateMultipartUpload of the
@@ -174,6 +202,15 @@ export async function createConfiguredPairedDeviceLifecycle(
     config.storage === undefined
       ? undefined
       : (options.storageFactory ?? createS3GrantIssuer)(config.storage);
+  // Built for the same reason and on the same terms as the storage issuer:
+  // constructing it opens no connection, the first request is the first
+  // outbound call a client asks for, and the deployment token stays inside
+  // `config.github`'s closure rather than being copied onto the gateway.
+  const githubConfig = config.github;
+  const github =
+    githubConfig === undefined
+      ? undefined
+      : (options.githubFactory ?? createGitHubRestGateway)(githubConfig);
 
   return {
     runtime,
@@ -183,6 +220,7 @@ export async function createConfiguredPairedDeviceLifecycle(
     presence,
     coordination,
     storageConfigured: storage !== undefined,
+    githubConfigured: github !== undefined,
     hub,
     syncService: createPairedDeviceSyncService({
       runtime,
@@ -196,9 +234,9 @@ export async function createConfiguredPairedDeviceLifecycle(
     // The material service receives the storage issuer only when a bucket is
     // configured; otherwise the four grant-minting RPCs answer
     // `FAILED_PRECONDITION` naming what is missing while everything else works.
-    // No GitHub gateway is configured here for the same reason: it needs a
-    // deployment secret this composition root does not hold. That is the honest
-    // reduced mode, not a stub.
+    // The GitHub gateway is wired on exactly those terms: present when
+    // `HQ_CONTROL_PLANE_GITHUB_*` is, absent otherwise, and the three outbound
+    // RPCs refuse with the variables named rather than pretending to send.
     // The schema is injected here rather than left absent: `GetSettingsSchema`
     // needs no database, only the shared registry, so a deployment that reaches
     // this point can always answer it. Leaving it out made a declared method
@@ -213,8 +251,33 @@ export async function createConfiguredPairedDeviceLifecycle(
       store: materialStore,
       ...(storage === undefined ? {} : { storage }),
     }),
-    telemetryService: createTelemetryService({ runtime, profiles: simulationProfiles }),
-    integrationService: createIntegrationService({ runtime, store: integrationStore }),
+    // The measurement store is always supplied here, because reaching this
+    // point means the migration gate ran and migration 0011 declared the
+    // registry and the sample store. It stays an option of the service rather
+    // than a requirement so a deployment that applies migrations as a separate
+    // step, and a test that exercises the simulation half alone, can build the
+    // service without one and have the three RPCs answer `unimplemented`
+    // honestly instead of failing against tables that are not there.
+    telemetryService: createTelemetryService({
+      runtime,
+      profiles: simulationProfiles,
+      measurements: telemetryMeasurements,
+    }),
+    // The deployment credential is passed as the closure that opens it, not as
+    // a value: `config.github` holds the token and this composition root never
+    // reads it, so nothing between here and the outbound call has a copy.
+    integrationService: createIntegrationService({
+      runtime,
+      store: integrationStore,
+      ...(github === undefined || githubConfig === undefined
+        ? {}
+        : {
+            github,
+            githubCredentials: () => githubConfig.openToken(),
+            issueRepository: githubConfig.repository,
+            issueLabels: githubConfig.issueLabels,
+          }),
+    }),
     realtime: {
       admission: createPairedDeviceRealtimeAdmission(runtime),
       hub,
