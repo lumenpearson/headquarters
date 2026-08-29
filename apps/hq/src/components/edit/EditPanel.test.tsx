@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { contentElementId } from '../../application/edit/contentFields';
 import { settingGroups } from '../../application/personalization/catalog';
 import { operationsStore } from '../../state/operationsStore';
+import { fireKeybind } from '../keybinds/KeybindRuntime';
 import { settingLabel } from '../settings/SchemaSetting';
 import { EditPanel } from './EditPanel';
 
@@ -33,6 +34,39 @@ describe('EditPanel', () => {
     operationsStore.getState().dockEditPanel('left');
     const { container } = render(<EditPanel />);
     expect(container.querySelector('.edit-panel')?.getAttribute('data-edge')).toBe('left');
+  });
+
+  it('docks to the next edge from the keyboard, alongside the pointer drag', () => {
+    // The keyboard equivalent of the magnetic edge dragging snaps to: there is
+    // no pointer release position to read, so the chord cycles the same four
+    // edges instead of picking one directly.
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().dockEditPanel('left');
+    const { container } = render(<EditPanel />);
+    const panel = () => container.querySelector('.edit-panel');
+    expect(panel()?.getAttribute('data-edge')).toBe('left');
+
+    act(() => {
+      fireKeybind('edit.dockPanel');
+    });
+    expect(panel()?.getAttribute('data-edge')).toBe('top');
+
+    act(() => {
+      fireKeybind('edit.dockPanel');
+    });
+    expect(panel()?.getAttribute('data-edge')).toBe('right');
+  });
+
+  it('does nothing while edit mode is off, though there is no panel to dock', () => {
+    // `EditPanel` is mounted whether or not edit mode is active -- it only
+    // renders `null` -- so the chord stays claimed and `fireKeybind` reports
+    // it ran; the guard inside the handler is what keeps it a no-op here,
+    // the same way the panel's own placement effects guard themselves.
+    operationsStore.getState().dockEditPanel('left');
+    render(<EditPanel />);
+
+    expect(fireKeybind('edit.dockPanel')).toBe(true);
+    expect(operationsStore.getState().edit.dockEdge).toBe('left');
   });
 
   it('disables undo and the issue draft until something is actually changed', () => {

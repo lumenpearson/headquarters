@@ -19,6 +19,7 @@ import {
   type SettingGroup,
 } from '@/application/personalization/catalog';
 import { dateTimeFormat } from '@/application/localization/intl';
+import { TileVisibility } from '@/components/edit/TileVisibility';
 import { KeybindList } from '@/components/keybinds/KeybindList';
 import { Panel } from '@/components/operations/OpsUi';
 import { openGroupPairing } from '@/components/sync/GroupPairingDialog';
@@ -79,6 +80,15 @@ export function SettingsScreen() {
   const [historyOrder, setHistoryOrder] = useState<'newest' | 'oldest'>('newest');
   const [historyPageNumber, setHistoryPageNumber] = useState(1);
   /*
+   * R29's remaining tail: the group journal mixed an ordinary settings patch
+   * and a content field edited from the floating edit panel into the same
+   * rows, with nothing that named which was which. `elementId` is the
+   * server's own signal for the second kind -- `RESET_ELEMENT` and a content
+   * patch both carry one, an ordinary settings patch never does -- so this
+   * filters on it rather than inventing a new field.
+   */
+  const [historyGroupEditModeOnly, setHistoryGroupEditModeOnly] = useState(false);
+  /*
    * The scope switch is the source switch too (F8, R29). `device` and `all`
    * describe this machine's ledger and nothing else exists for them to
    * describe. `group` is the one that reaches further: the local rows under it
@@ -89,6 +99,18 @@ export function SettingsScreen() {
    * `useGroupSettingsHistory`.
    */
   const groupHistory = useGroupSettingsHistory(historyScope === 'group');
+  // R29: the group journal's own filter for "changes made from edit mode
+  // specifically" -- an element-scoped entry (a content field, or a
+  // `RESET_ELEMENT`) always names `elementId`; an ordinary settings patch
+  // never does. Filtered client-side over the page already loaded, since the
+  // server pages by keyset and has no server-side filter to ask for instead.
+  const groupHistoryEntries = useMemo(
+    () =>
+      historyGroupEditModeOnly
+        ? groupHistory.entries.filter((entry) => entry.elementId !== '')
+        : groupHistory.entries,
+    [groupHistory.entries, historyGroupEditModeOnly],
+  );
   /*
    * The documentation layout (R26 still holds: the column scrolls, the page
    * does not). `layout.settingsNavSide` picks the side the section list sits
@@ -506,6 +528,21 @@ export function SettingsScreen() {
                   ИЗМЕНЕНО В РАЗДЕЛЕ
                 </span>
               </div>
+              {/*
+                The same checkbox surface the edit panel offers for `tiles`,
+                above the raw `tiles.hiddenIds`/`tiles.hiddenCategories`
+                editors below rather than instead of them: an operator who
+                knows a tile is called `cases:registry` can still type it, and
+                one who does not now has a control that names it. Shown
+                whenever the section holding `tiles` is in view and the
+                operator is not mid-search -- the same gate the panel uses,
+                since a search result is the operator naming one setting.
+              */}
+              {catalogSearch.trim().length === 0 &&
+              (catalogCategory === 'tiles' ||
+                (catalogCategory === 'all' && catalogGroup === 'layout')) ? (
+                <TileVisibility />
+              ) : null}
               {catalog.definitions.map((definition) => (
                 <SchemaSetting
                   key={definition.id}
@@ -776,9 +813,29 @@ export function SettingsScreen() {
                               }`}
                     </span>
                   </header>
-                  {groupHistory.entries.length === 0 ? null : (
+                  {/*
+                    R29: "отдельно — история изменений именно режима
+                    редактирования". The rows are one list on the server, so
+                    this narrows the same list rather than opening a second
+                    one -- an entry an operator edited from the floating panel
+                    always names the element it touched, and an ordinary
+                    settings patch never does.
+                  */}
+                  <TerminalSwitch
+                    label="Только правки режима редактирования"
+                    className="settings-toggle"
+                    checked={historyGroupEditModeOnly}
+                    onCheckedChange={setHistoryGroupEditModeOnly}
+                  />
+                  {groupHistoryEntries.length === 0 ? (
+                    groupHistory.entries.length === 0 ? null : (
+                      <p className="settings-history-empty">
+                        НЕТ ПРАВОК РЕЖИМА РЕДАКТИРОВАНИЯ НА ЭТОЙ СТРАНИЦЕ
+                      </p>
+                    )
+                  ) : (
                     <div className="settings-history-list" aria-live="polite">
-                      {groupHistory.entries.map((entry) => (
+                      {groupHistoryEntries.map((entry) => (
                         <article className="settings-history-row" key={entry.id}>
                           <div>
                             <strong>{groupHistoryOperationLabel(entry.operation)}</strong>

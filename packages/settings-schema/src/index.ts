@@ -294,6 +294,34 @@ const isSpanList = withEditor(
 );
 
 /**
+ * `screen:tile=full|compact|minimal` and `category=full|compact|minimal`. The
+ * per-tile and per-category ceiling on how rich a tile may be drawn, in the
+ * shape `tiles.animations`/`tiles.categoryAnimations` already carry: a tile
+ * identifier is unique only within a screen, so a per-tile entry has to name
+ * the screen, and a per-category entry does not. `auto` has no spelling here
+ * -- the entry is simply absent, the way an inherited tile motion is.
+ */
+const tilePresentationEntry = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*=(full|compact|minimal)$/;
+const categoryPresentationEntry = /^[a-z][a-z0-9-]*=(full|compact|minimal)$/;
+const isTilePresentationList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string' && tilePresentationEntry.test(item)),
+);
+const isCategoryPresentationList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === 'string' &&
+        categoryPresentationEntry.test(item) &&
+        (tileCategories as readonly string[]).includes(item.split('=')[0] ?? ''),
+    ),
+);
+
+/**
  * The languages the application ships a catalogue for.
  *
  * Written once rather than at each of the two definitions that need it:
@@ -407,10 +435,12 @@ const oneOfNumbers = (values: readonly number[]) =>
  *
  * Declared here with the rest of the vocabulary the safe editor may offer, the
  * way `tileCategories` is. The list is the world the shell already simulates:
- * the seven session metrics, the two a system node reports, and the three a
- * comms channel reports.
+ * the seven session metrics, the two a system node reports, the four a comms
+ * channel reports (load, latency, signal and packet loss), and the two
+ * device-signal readings a sensor and a camera each report.
  */
 export const simulationChannels = [
+  'camera-signal',
   'cpu',
   'gpu',
   'link-latency',
@@ -420,12 +450,37 @@ export const simulationChannels = [
   'network-out',
   'node-load',
   'node-temperature',
+  'packet-loss',
   'ram',
   'readiness',
+  'sensor-signal',
   'storage',
 ] as const;
 
 export type SimulationChannelName = (typeof simulationChannels)[number];
+
+/**
+ * The named simulation presets an operator may mark, in the order the schema
+ * offers them.
+ *
+ * Declared here, next to `simulationChannels`, for the reason that list is:
+ * `simulation.preset`'s reader (`simulationCurves.ts`) has to name the exact
+ * same vocabulary the definition validates, or a preset the schema accepts
+ * could be one the reader has never heard of.
+ */
+export const simulationPresets = [
+  'normal',
+  'elevated',
+  'degraded',
+  'critical',
+  'incident',
+  'recovery',
+  'network-attack',
+  'storage-exhaustion',
+  'cpu-overload',
+] as const;
+
+export type SimulationPresetName = (typeof simulationPresets)[number];
 
 /**
  * The four interpolations `evaluateCurve` implements, offered by name.
@@ -1228,17 +1283,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'normal',
     'group',
     'Marked simulation preset.',
-    oneOf([
-      'normal',
-      'elevated',
-      'degraded',
-      'critical',
-      'incident',
-      'recovery',
-      'network-attack',
-      'storage-exhaustion',
-      'cpu-overload',
-    ]),
+    oneOf(simulationPresets),
   ),
   definition(
     'simulation.channel',
@@ -1840,6 +1885,22 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Narrowest a tile may be before the layout moves it, in pixels.',
     numberWithin(160, 480),
+  ),
+  definition(
+    'tiles.presentationOverrides',
+    'tiles',
+    [],
+    'device',
+    'Presentation cap the operator chose per tile, as `screen:tile=full|compact|minimal` entries; overrides the category and the application ceiling.',
+    isTilePresentationList,
+  ),
+  definition(
+    'tiles.categoryPresentation',
+    'tiles',
+    [],
+    'device',
+    `Presentation cap per tile group, as \`group=full|compact|minimal\`: ${tileCategories.join(', ')}.`,
+    isCategoryPresentationList,
   ),
 ] as const;
 

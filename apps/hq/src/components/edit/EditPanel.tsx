@@ -20,13 +20,15 @@ import {
   type SettingGroup,
 } from '@/application/personalization/catalog';
 import { repositorySlug } from '@/application/repository';
+import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { categoryLabel, groupLabel, SchemaSetting } from '@/components/settings/SchemaSetting';
 import { operationsStore, useOperationsStore, type EditDockEdge } from '@/state/operationsStore';
 
 import { ContentEditor } from './ContentEditor';
-import { resolveDockEdge } from './EditPanelDock';
+import { nextDockEdge, resolveDockEdge } from './EditPanelDock';
 import { ElementTranslation } from './ElementTranslation';
 import { TileMotionPicker } from './TileMotionPicker';
+import { TilePresentationPicker } from './TilePresentationPicker';
 import { TileVisibility } from './TileVisibility';
 
 const dockThresholdPx = 120;
@@ -294,6 +296,21 @@ export function EditPanel() {
     setDragging(false);
   }, []);
 
+  /*
+   * The keyboard equivalent of the magnetic edge dragging snaps to.
+   * `resolveDockEdge` reads where the pointer left the window, and a keypress
+   * has no such position to read, so this cycles the same four edges instead
+   * of guessing one -- see `EditPanelDock.nextDockEdge`. Guarded on `active`
+   * rather than left unclaimed while the panel is closed: the panel mounts
+   * regardless of it, and an unclaimed keybind would let the chord fall
+   * through to whatever the browser does with it instead of being silently
+   * absorbed here.
+   */
+  useKeybind('edit.dockPanel', () => {
+    if (!active) return;
+    operationsStore.getState().dockEditPanel(nextDockEdge(dockEdge));
+  });
+
   if (!active) return null;
 
   const changeCount = draft.changedIds.length + Object.keys(overrides).length;
@@ -383,7 +400,12 @@ export function EditPanel() {
                  * search is the operator naming one setting, and answering it with
                  * a picker over every tile on the screen would bury the answer.
                  */}
-                {!searching && run.category === 'tiles' ? <TileVisibility /> : null}
+                {!searching && run.category === 'tiles' ? (
+                  <>
+                    <TileVisibility />
+                    <TilePresentationPicker />
+                  </>
+                ) : null}
                 {!searching && run.category === 'animations' ? <TileMotionPicker /> : null}
                 {!searching && run.category === 'localization' ? <ElementTranslation /> : null}
                 {run.definitions.map((definition) => (

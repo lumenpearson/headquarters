@@ -92,6 +92,7 @@ const ru = {
   'keybind.shell.fullscreen': 'Полный экран',
   'keybind.shell.togglePlayback': 'Пуск и пауза видео (на видеоэкранах)',
   'keybind.edit.toggle': 'Режим редактирования',
+  'keybind.edit.dockPanel': 'Пристыковать панель редактирования к следующему краю',
   'keybind.keybinds.list': 'Список сочетаний клавиш',
   'keybind.files.import': 'Импорт материалов',
   'keybind.scene.commandPalette': 'Палитра команд сцены',
@@ -171,6 +172,10 @@ const ru = {
   'settingsCategory.github': 'ИНТЕГРАЦИЯ GITHUB',
   'settingsCategory.advanced': 'РАСШИРЕННЫЕ',
 
+  // Shown beside a setting listed in `settingsAwaitingTheirFeature`: it can be
+  // changed, but nothing reads it yet.
+  'settings.awaitingFeature': 'ПОКА НЕ ДЕЙСТВУЕТ — изменение ни на что не влияет',
+
   /*
    * Tile groups, reconciled.
    *
@@ -198,13 +203,24 @@ const ru = {
   'tileMotion.rise': 'ПОДЪЁМ',
   'tileMotion.scan': 'РАЗВЁРТКА',
 
+  'tilePresentation.auto': 'КАК У ГРУППЫ',
+  'tilePresentation.full': 'ПОЛНЫЙ ВИД',
+  'tilePresentation.compact': 'КОМПАКТНЫЙ ВИД',
+  'tilePresentation.minimal': 'МИНИМАЛЬНЫЙ ВИД',
+
   // Edit mode.
   'edit.tiles.heading': 'ПЛИТКИ ЭКРАНА',
   'edit.tiles.groups': 'ГРУППЫ',
+  'edit.tiles.noneOnScreen':
+    'На этом экране сейчас нет плиток — поимённый выбор появится, когда вы откроете экран с плитками. Группы ниже переключаются и без него.',
   'edit.tileMotion.heading': 'ДВИЖЕНИЕ ПЛИТОК',
   'edit.tileMotion.hint': 'Нажмите на плитку, чтобы задать её собственное движение.',
   'edit.tileMotion.tile': 'Движение плитки {tile}',
   'edit.tileMotion.category': 'Движение группы {category}',
+  'edit.tilePresentation.heading': 'ВИД ПЛИТОК',
+  'edit.tilePresentation.hint': 'Нажмите на плитку, чтобы задать её собственный вид.',
+  'edit.tilePresentation.tile': 'Вид плитки {tile}',
+  'edit.tilePresentation.category': 'Вид группы {category}',
 
   'edit.translation.heading': 'ПЕРЕВОД ЭЛЕМЕНТА',
   'edit.translation.hint': 'Нажмите на плитку, чтобы задать её подпись на текущем языке.',
@@ -256,6 +272,7 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
   'keybind.shell.fullscreen': 'Full screen',
   'keybind.shell.togglePlayback': 'Play and pause video (on video screens)',
   'keybind.edit.toggle': 'Edit mode',
+  'keybind.edit.dockPanel': 'Dock the edit panel to the next edge',
   'keybind.keybinds.list': 'Keyboard shortcut list',
   'keybind.files.import': 'Material import',
   'keybind.scene.commandPalette': 'Scene command palette',
@@ -326,6 +343,8 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
   'settingsCategory.github': 'GITHUB INTEGRATION',
   'settingsCategory.advanced': 'ADVANCED',
 
+  'settings.awaitingFeature': 'NOT WIRED YET — changing this has no effect',
+
   'tileCategory.summary': 'SUMMARY',
   'tileCategory.records': 'REGISTRIES',
   'tileCategory.detail': 'CARDS',
@@ -340,12 +359,23 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
   'tileMotion.rise': 'RISE',
   'tileMotion.scan': 'SCAN',
 
+  'tilePresentation.auto': 'SAME AS GROUP',
+  'tilePresentation.full': 'FULL VIEW',
+  'tilePresentation.compact': 'COMPACT VIEW',
+  'tilePresentation.minimal': 'MINIMAL VIEW',
+
   'edit.tiles.heading': 'SCREEN TILES',
   'edit.tiles.groups': 'GROUPS',
+  'edit.tiles.noneOnScreen':
+    'No tiles on this screen right now -- picking them by name appears once you open a screen that has tiles. The groups below still switch without it.',
   'edit.tileMotion.heading': 'TILE MOTION',
   'edit.tileMotion.hint': 'Press a tile to give it a motion of its own.',
   'edit.tileMotion.tile': 'Motion of tile {tile}',
   'edit.tileMotion.category': 'Motion of group {category}',
+  'edit.tilePresentation.heading': 'TILE VIEW',
+  'edit.tilePresentation.hint': 'Press a tile to give it a view of its own.',
+  'edit.tilePresentation.tile': 'View of tile {tile}',
+  'edit.tilePresentation.category': 'View of group {category}',
 
   'edit.translation.heading': 'ELEMENT TRANSLATION',
   'edit.translation.hint': 'Press a tile to give it a caption in the current language.',

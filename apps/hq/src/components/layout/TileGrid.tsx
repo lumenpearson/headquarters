@@ -19,6 +19,7 @@ import {
 } from '@/application/localization/elementTranslations';
 import { useAppLocale } from '@/application/localization/locale';
 import { resolveTileMotion } from '@/application/personalization/tileMotion';
+import { resolveTilePresentationCap } from '@/application/personalization/tilePresentation';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { TileCaptionProvider } from './tileCaption';
@@ -196,6 +197,18 @@ export function TileGrid({
     const value = state.personalization.draft.values['tiles.presentation'];
     return value === 'full' || value === 'compact' || value === 'minimal' ? value : null;
   });
+  /*
+   * The two finer tiers over the application ceiling above, in the shape
+   * `tiles.animations`/`tiles.categoryAnimations` already carry: a tile
+   * identifier is unique only within a screen, so the per-tile entries name
+   * it and the per-category ones do not.
+   */
+  const presentationTileEntries = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values['tiles.presentationOverrides']),
+  );
+  const presentationCategoryEntries = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values['tiles.categoryPresentation']),
+  );
 
   /*
    * The gap is read from the stylesheet below, not from here. `--ops-tile-gap`
@@ -273,10 +286,29 @@ export function TileGrid({
 
   const arranged = useMemo(
     () =>
-      visible.map((tile) =>
-        applyOperatorArrangement(tile.descriptor, screen, order, spans, presentationCap),
-      ),
-    [order, presentationCap, screen, spans, visible],
+      visible.map((tile) => {
+        // Per tile, then per category, then the application ceiling read
+        // above -- the same precedence `resolveTileMotion` gives R19's
+        // per-element animation.
+        const cap = resolveTilePresentationCap({
+          screen,
+          tile: tile.descriptor.id,
+          category: tile.category,
+          tileEntries: presentationTileEntries,
+          categoryEntries: presentationCategoryEntries,
+          applicationCap: presentationCap,
+        });
+        return applyOperatorArrangement(tile.descriptor, screen, order, spans, cap);
+      }),
+    [
+      order,
+      presentationCap,
+      presentationCategoryEntries,
+      presentationTileEntries,
+      screen,
+      spans,
+      visible,
+    ],
   );
 
   const layout = useMemo(
