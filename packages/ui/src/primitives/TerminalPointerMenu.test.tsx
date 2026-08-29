@@ -118,9 +118,12 @@ describe('TerminalPointerMenu', () => {
     await settle();
 
     expect(popup().getAttribute('aria-label')).toBe('Действия');
-    // Both the shared menu class and the pointer-specific one, with the
-    // consumer's appended rather than replacing them.
-    expect(popup().className).toBe('terminal-menu terminal-pointer-menu ops-runtime-menu');
+    // Both the shared menu class and the pointer-specific one lead, and the
+    // consumer's own trails after the utility classes primitives.css still
+    // governs today; none of the three replace one another.
+    const popupClass = popup().className;
+    expect(popupClass.startsWith('terminal-menu terminal-pointer-menu ')).toBe(true);
+    expect(popupClass.endsWith(' ops-runtime-menu')).toBe(true);
     // There is no trigger element to portal out of; the popup still lands
     // beside the component's own container rather than inside it.
     expect(view.container.contains(popup())).toBe(false);

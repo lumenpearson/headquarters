@@ -40,6 +40,14 @@ function query(selector: string): HTMLElement {
 
 const missing = (selector: string): boolean => document.body.querySelector(selector) === null;
 
+/*
+ * The semantic class always leads; the utility classes primitives.css still
+ * governs today sit after it and are not this wrapper's own contract, so
+ * only the leading token of each part is pinned here.
+ */
+const semanticClasses = (elements: readonly Element[]): string[] =>
+  elements.map((element) => element.className.split(' ')[0] ?? '');
+
 function click(element: Element): void {
   act(() => (element as HTMLElement).click());
 }
@@ -103,7 +111,7 @@ describe('TerminalPopover', () => {
     expect(popup.getAttribute('aria-describedby')).toBe(description.id);
 
     // Order matters: title, description, then the body the children go into.
-    expect(Array.from(popup.children).map((child) => child.className)).toEqual([
+    expect(semanticClasses(Array.from(popup.children))).toEqual([
       'terminal-popover__title',
       'terminal-popover__description',
       'terminal-popover__body',
@@ -126,9 +134,7 @@ describe('TerminalPopover', () => {
     // Nothing to point at, so Base UI leaves the attributes off entirely.
     expect(popup.hasAttribute('aria-labelledby')).toBe(false);
     expect(popup.hasAttribute('aria-describedby')).toBe(false);
-    expect(Array.from(popup.children).map((child) => child.className)).toEqual([
-      'terminal-popover__body',
-    ]);
+    expect(semanticClasses(Array.from(popup.children))).toEqual(['terminal-popover__body']);
     expect(query('.terminal-popover__body').querySelector('[data-testid="body-content"]')).not.toBe(
       null,
     );
@@ -140,10 +146,12 @@ describe('TerminalPopover', () => {
         <p>Содержимое</p>
       </TerminalPopover>,
     );
-    expect(Array.from(query('.terminal-popover').classList)).toEqual(['terminal-popover', 'wide']);
-    expect(Array.from(query('.terminal-popover__positioner').classList)).toEqual([
-      'terminal-popover__positioner',
-    ]);
+    const popupClass = query('.terminal-popover').className;
+    expect(popupClass.startsWith('terminal-popover ')).toBe(true);
+    expect(popupClass.endsWith(' wide')).toBe(true);
+    expect(
+      query('.terminal-popover__positioner').className.startsWith('terminal-popover__positioner'),
+    ).toBe(true);
   });
 
   it('reports both directions of the toggle through onOpenChange', () => {

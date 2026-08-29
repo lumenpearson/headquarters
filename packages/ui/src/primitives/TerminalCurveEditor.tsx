@@ -557,33 +557,40 @@ export function TerminalCurveEditor({
     <div
       role="group"
       aria-label={label}
-      className={classNames('terminal-curve-editor', className)}
+      className={classNames(
+        'terminal-curve-editor',
+        'group grid min-w-0 gap-hq-2 text-hq-text-1 font-mono text-hq-xs',
+        className,
+      )}
       data-adjusting={adjusting ? '' : undefined}
       data-readonly={readOnly ? '' : undefined}
     >
-      <div className="terminal-curve-editor__header">
+      <div className="terminal-curve-editor__header flex justify-between gap-hq-2 uppercase">
         <span className="terminal-curve-editor__label">{label}</span>
         {readout === null ? null : (
-          <span className="terminal-curve-editor__readout" aria-live="polite">
+          <span
+            className="terminal-curve-editor__readout text-hq-text-0 tabular-nums"
+            aria-live="polite"
+          >
             {readout}
           </span>
         )}
       </div>
       <div
         ref={plotRef}
-        className="terminal-curve-editor__plot"
+        className="terminal-curve-editor__plot relative w-full aspect-[var(--terminal-curve-editor-aspect,2/1)] border border-hq-line-1 outline-none bg-hq-bg-0 cursor-crosshair touch-none select-none focus-visible:border-hq-line-focus group-data-[adjusting]:cursor-grabbing group-data-[readonly]:cursor-default"
         tabIndex={readOnly ? -1 : 0}
         onKeyDown={handlePlotKeyDown}
         onDoubleClick={handlePlotDoubleClick}
       >
         <svg
-          className="terminal-curve-editor__svg"
+          className="terminal-curve-editor__svg absolute inset-0 block w-full h-full overflow-visible"
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
           aria-hidden="true"
           focusable="false"
         >
-          <g className="terminal-curve-editor__grid">
+          <g className="terminal-curve-editor__grid stroke-hq-line-1 stroke-1">
             {[25, 50, 75].map((at) => (
               <line
                 key={`v${at}`}
@@ -608,7 +615,7 @@ export function TerminalCurveEditor({
           {tangents.map((tangent) => (
             <line
               key={`${tangent.side}${tangent.index}`}
-              className="terminal-curve-editor__tangent-line"
+              className="terminal-curve-editor__tangent-line stroke-hq-text-2 stroke-1 [stroke-dasharray:3_3]"
               x1={tangent.u * 100}
               y1={(1 - tangent.v) * 100}
               x2={tangent.anchor.u * 100}
@@ -618,7 +625,7 @@ export function TerminalCurveEditor({
           ))}
           {pathData === '' ? null : (
             <path
-              className="terminal-curve-editor__path"
+              className="terminal-curve-editor__path fill-none stroke-hq-accent stroke-[1.5] [stroke-linecap:round] [stroke-linejoin:round]"
               d={pathData}
               vectorEffect="non-scaling-stroke"
             />
@@ -629,7 +636,7 @@ export function TerminalCurveEditor({
             key={`point${index}`}
             role="slider"
             tabIndex={0}
-            className="terminal-curve-editor__handle"
+            className="terminal-curve-editor__handle absolute box-border w-3 h-3 border border-hq-accent outline-none bg-hq-bg-0 cursor-grab touch-none -translate-x-1/2 -translate-y-1/2 hover:bg-hq-accent data-[active]:bg-hq-accent focus-visible:border-hq-line-focus focus-visible:shadow-[0_0_0_2px_var(--accent-soft)] group-data-[adjusting]:cursor-grabbing group-data-[readonly]:cursor-default group-data-[readonly]:opacity-[0.62]"
             data-handle="point"
             data-index={index}
             data-active={active?.kind === 'point' && active.index === index ? '' : undefined}
@@ -658,7 +665,7 @@ export function TerminalCurveEditor({
             key={`${tangent.side}${tangent.index}`}
             role="slider"
             tabIndex={0}
-            className="terminal-curve-editor__tangent"
+            className="terminal-curve-editor__tangent absolute box-border w-2 h-2 rounded-full border border-hq-text-2 outline-none bg-hq-bg-0 cursor-grab touch-none -translate-x-1/2 -translate-y-1/2 hover:bg-hq-text-2 data-[active]:bg-hq-text-2 focus-visible:border-hq-line-focus focus-visible:shadow-[0_0_0_2px_var(--accent-soft)] group-data-[adjusting]:cursor-grabbing group-data-[readonly]:cursor-default group-data-[readonly]:opacity-[0.62]"
             data-handle={tangent.side}
             data-index={tangent.index}
             data-active={

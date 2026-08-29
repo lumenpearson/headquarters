@@ -60,7 +60,8 @@ describe('TerminalToggle', () => {
     );
     expect(rendered.getAttribute('aria-label')).toBe('Сетка');
     expect(rendered.textContent).toBe('Сетка');
-    expect(rendered.className).toBe('terminal-toggle hq-toolbar__toggle');
+    expect(rendered.className).toContain('terminal-toggle');
+    expect(rendered.className.endsWith('hq-toolbar__toggle')).toBe(true);
     expect(rendered.getAttribute('aria-pressed')).toBe('false');
   });
 

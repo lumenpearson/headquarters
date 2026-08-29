@@ -5,6 +5,12 @@ import type { ReactElement } from 'react';
 
 import { classNames } from './classNames.js';
 import type { TerminalPopupSide } from './TerminalTooltip.js';
+import {
+  TERMINAL_MENU_BASE_UTILITY,
+  TERMINAL_MENU_ITEM_KBD_UTILITY,
+  TERMINAL_MENU_ITEM_UTILITY,
+  TERMINAL_POPUP_POSITIONER_UTILITY,
+} from './terminalOverlayStyles.js';
 
 export interface TerminalMenuItem {
   readonly id: string;
@@ -40,19 +46,24 @@ export function TerminalMenu({
           side={side}
           align={align}
           sideOffset={4}
-          className="terminal-menu__positioner"
+          className={classNames('terminal-menu__positioner', TERMINAL_POPUP_POSITIONER_UTILITY)}
         >
-          <Menu.Popup aria-label={label} className={classNames('terminal-menu', className)}>
+          <Menu.Popup
+            aria-label={label}
+            className={classNames('terminal-menu', TERMINAL_MENU_BASE_UTILITY, className)}
+          >
             {items.map((item) => (
               <Menu.Item
                 key={item.id}
                 disabled={item.disabled}
-                className="terminal-menu__item"
+                className={classNames('terminal-menu__item', TERMINAL_MENU_ITEM_UTILITY)}
                 data-tone={item.tone ?? 'neutral'}
                 onClick={item.onSelect}
               >
                 <span>{item.label}</span>
-                {item.shortcut ? <kbd>{item.shortcut}</kbd> : null}
+                {item.shortcut ? (
+                  <kbd className={TERMINAL_MENU_ITEM_KBD_UTILITY}>{item.shortcut}</kbd>
+                ) : null}
               </Menu.Item>
             ))}
           </Menu.Popup>

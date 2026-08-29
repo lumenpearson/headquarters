@@ -5,6 +5,12 @@ import type { ReactElement } from 'react';
 
 import { classNames } from './classNames.js';
 import type { TerminalMenuItem } from './TerminalMenu.js';
+import {
+  TERMINAL_MENU_BASE_UTILITY,
+  TERMINAL_MENU_ITEM_KBD_UTILITY,
+  TERMINAL_MENU_ITEM_UTILITY,
+  TERMINAL_POPUP_POSITIONER_UTILITY,
+} from './terminalOverlayStyles.js';
 
 export interface TerminalContextMenuProps {
   readonly trigger: ReactElement;
@@ -28,21 +34,30 @@ export function TerminalContextMenu({
       */}
       <ContextMenu.Trigger data-context-menu-own="" render={trigger} />
       <ContextMenu.Portal>
-        <ContextMenu.Positioner className="terminal-menu__positioner">
+        <ContextMenu.Positioner
+          className={classNames('terminal-menu__positioner', TERMINAL_POPUP_POSITIONER_UTILITY)}
+        >
           <ContextMenu.Popup
             aria-label={label}
-            className={classNames('terminal-menu', 'terminal-context-menu', className)}
+            className={classNames(
+              'terminal-menu',
+              'terminal-context-menu',
+              TERMINAL_MENU_BASE_UTILITY,
+              className,
+            )}
           >
             {items.map((item) => (
               <ContextMenu.Item
                 key={item.id}
                 disabled={item.disabled}
-                className="terminal-menu__item"
+                className={classNames('terminal-menu__item', TERMINAL_MENU_ITEM_UTILITY)}
                 data-tone={item.tone ?? 'neutral'}
                 onClick={item.onSelect}
               >
                 <span>{item.label}</span>
-                {item.shortcut ? <kbd>{item.shortcut}</kbd> : null}
+                {item.shortcut ? (
+                  <kbd className={TERMINAL_MENU_ITEM_KBD_UTILITY}>{item.shortcut}</kbd>
+                ) : null}
               </ContextMenu.Item>
             ))}
           </ContextMenu.Popup>

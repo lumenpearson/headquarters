@@ -80,7 +80,9 @@ describe('TerminalSelect', () => {
     );
     expect(trigger(container).getAttribute('aria-label')).toBe('Канал связи');
     // `classNames` appends the consumer class rather than replacing the base one.
-    expect(trigger(container).className).toBe('terminal-select panel-select');
+    expect(trigger(container).className).toBe(
+      'terminal-select grid min-h-[34px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-hq-2 px-hq-2 border border-hq-line-1 outline-none bg-hq-bg-0 text-hq-text-0 cursor-pointer font-mono text-hq-sm text-left panel-select',
+    );
     // The raw value never reaches the trigger: the option's label is looked up.
     expect(selectedLabel(container)).toBe('Гамма');
     expect(mustFind(container, '.terminal-select__icon').textContent).toBe('[⌄]');

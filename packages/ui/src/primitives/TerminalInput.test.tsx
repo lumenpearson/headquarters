@@ -59,13 +59,14 @@ afterEach(() => {
 describe('TerminalInput', () => {
   it('always carries both stylesheet classes and appends the caller class after them', () => {
     const bare = mount(<TerminalInput />);
-    expect(input(bare).getAttribute('class')).toBe('hq-input terminal-input');
+    expect(input(bare).getAttribute('class')).toContain('hq-input terminal-input');
 
     const dressed = mount(<TerminalInput className="settings-editor__value" />);
-    // The caller adds to the base classes; it cannot displace them.
-    expect(dressed.querySelector('input')?.getAttribute('class')).toBe(
-      'hq-input terminal-input settings-editor__value',
-    );
+    // The caller adds to the base classes; it cannot displace them, and it
+    // stays last so it can still win the cascade.
+    const dressedClass = dressed.querySelector('input')?.getAttribute('class') ?? '';
+    expect(dressedClass).toContain('hq-input terminal-input');
+    expect(dressedClass.endsWith('settings-editor__value')).toBe(true);
   });
 
   it('forwards the ref to the rendered input element', () => {

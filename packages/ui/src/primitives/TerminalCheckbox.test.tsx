@@ -63,7 +63,9 @@ describe('TerminalCheckbox', () => {
     expect(button.type).toBe('button');
     expect(button.getAttribute('aria-label')).toBe('Показывать сетку');
     expect(button.disabled).toBe(false);
-    expect([...button.classList]).toEqual(['terminal-checkbox']);
+    // `toContain` rather than an exact list: utility classes sit between the
+    // semantic class and the (absent, here) consumer one.
+    expect([...button.classList]).toContain('terminal-checkbox');
     // Nothing is ticked, so the indicator is not in the tree at all.
     expect(indicator(container)).toBeNull();
 
@@ -75,7 +77,9 @@ describe('TerminalCheckbox', () => {
         className="settings-row__control"
       />,
     );
-    expect([...control(themed).classList]).toEqual(['terminal-checkbox', 'settings-row__control']);
+    const themedClasses = [...control(themed).classList];
+    expect(themedClasses[0]).toBe('terminal-checkbox');
+    expect(themedClasses.at(-1)).toBe('settings-row__control');
   });
 
   it('draws the tick while checked and the dash while indeterminate, whatever `checked` says', () => {

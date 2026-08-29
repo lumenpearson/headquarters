@@ -23,6 +23,13 @@ export function TerminalSwitch({
   onLabel = '[ON]',
   offLabel = '[OFF]',
 }: TerminalSwitchProps) {
+  /*
+   * Chrome (border, background, color, font) and the `[data-checked]`/
+   * `:focus-visible` state overrides stay in primitives.css for the same
+   * reason as TerminalCheckbox's. Layout, spacing, the disabled dimming and
+   * the thumb dot -- nothing here is contested by `[data-control-sizing]`,
+   * which never names `.terminal-switch` -- move to utilities.
+   */
   return (
     <Switch.Root
       nativeButton
@@ -30,11 +37,16 @@ export function TerminalSwitch({
       checked={checked}
       disabled={disabled}
       aria-label={label}
-      className={classNames('terminal-switch', checked && 'is-active', className)}
+      className={classNames(
+        'terminal-switch',
+        'inline-flex min-h-[27px] items-center justify-between gap-hq-2 px-hq-2 uppercase cursor-pointer data-[disabled]:cursor-not-allowed data-[disabled]:opacity-[0.38]',
+        checked && 'is-active',
+        className,
+      )}
       onCheckedChange={(nextChecked) => onCheckedChange(nextChecked)}
     >
       <span className="terminal-switch__label">{checked ? onLabel : offLabel}</span>
-      <Switch.Thumb className="terminal-switch__thumb" />
+      <Switch.Thumb className="terminal-switch__thumb size-[7px] bg-current" />
     </Switch.Root>
   );
 }

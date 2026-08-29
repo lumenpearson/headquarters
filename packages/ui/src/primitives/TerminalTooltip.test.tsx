@@ -89,7 +89,7 @@ describe('TerminalTooltip', () => {
     // Base UI gives the popup no role of its own; the wrapper supplies it.
     expect(popup().getAttribute('role')).toBe('tooltip');
     expect(popup().textContent).toBe('Подсказка');
-    expect(positioner().className).toBe('terminal-tooltip__positioner');
+    expect(positioner().className.startsWith('terminal-tooltip__positioner')).toBe(true);
   });
 
   it('appends the consumer class after its own and leaves no gap when there is none', () => {
@@ -99,7 +99,9 @@ describe('TerminalTooltip', () => {
       </TerminalTooltip>,
     );
     open(bare);
-    expect(popup().className).toBe('terminal-tooltip');
+    // The utility classes primitives.css still governs today sit between the
+    // semantic class and the caller's own, so only those two ends are pinned.
+    expect(popup().className.startsWith('terminal-tooltip ')).toBe(true);
     unmountAll();
 
     const dressed = mount(
@@ -108,7 +110,9 @@ describe('TerminalTooltip', () => {
       </TerminalTooltip>,
     );
     open(dressed);
-    expect(popup().className).toBe('terminal-tooltip gallery-hint');
+    const dressedClass = popup().className;
+    expect(dressedClass.startsWith('terminal-tooltip ')).toBe(true);
+    expect(dressedClass.endsWith(' gallery-hint')).toBe(true);
   });
 
   it('places the popup on the side it was asked for, and above the trigger by default', () => {

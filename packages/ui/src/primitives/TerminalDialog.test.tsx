@@ -43,6 +43,20 @@ const missing = (selector: string): boolean => document.body.querySelector(selec
 
 const classes = (element: Element): string[] => Array.from(element.classList);
 
+/*
+ * `toEqual` on the full class list would pin the exact set of utility
+ * classes the wrapper appends alongside its semantic one -- an
+ * implementation detail primitives.css still governs today. What is this
+ * wrapper's own contract is that the semantic class leads and the caller's
+ * class trails, so only those two ends are asserted.
+ */
+const hasClasses = (element: Element, semantic: string, trailing?: string): boolean => {
+  const className = element.className;
+  return trailing === undefined
+    ? className === semantic || className.startsWith(`${semantic} `)
+    : className.startsWith(`${semantic} `) && className.endsWith(` ${trailing}`);
+};
+
 function click(element: Element): void {
   act(() => (element as HTMLElement).click());
 }
@@ -80,7 +94,7 @@ describe('TerminalDialog', () => {
     );
 
     const popup = query('[role="dialog"]');
-    expect(classes(popup)).toEqual(['terminal-dialog', 'extra']);
+    expect(hasClasses(popup, 'terminal-dialog', 'extra')).toBe(true);
     expect(query('.terminal-dialog__viewport').contains(popup)).toBe(true);
     expect(missing('.terminal-dialog__backdrop')).toBe(false);
 
@@ -111,7 +125,7 @@ describe('TerminalDialog', () => {
     );
 
     const popup = query('[role="dialog"]');
-    expect(classes(popup)).toEqual(['terminal-dialog']);
+    expect(hasClasses(popup, 'terminal-dialog')).toBe(true);
     expect(query('.terminal-dialog__heading').querySelector('span')).toBe(null);
     expect(missing('.terminal-dialog__description')).toBe(true);
     expect(missing('.terminal-dialog__footer')).toBe(true);
@@ -215,7 +229,7 @@ describe('TerminalDrawer', () => {
 
     const panel = query('[role="dialog"]');
     expect(panel.tagName).toBe('ASIDE');
-    expect(classes(panel)).toEqual(['terminal-drawer', 'panel']);
+    expect(hasClasses(panel, 'terminal-drawer', 'panel')).toBe(true);
     expect(missing('.terminal-drawer__backdrop')).toBe(false);
     // The drawer is its own viewport; only TerminalDialog wraps one.
     expect(missing('.terminal-dialog__viewport')).toBe(true);

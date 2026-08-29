@@ -63,13 +63,13 @@ describe('TerminalTextarea', () => {
     const element = textarea(bare);
     expect(element.tagName).toBe('TEXTAREA');
     // It shares `hq-input`/`terminal-input` with TerminalInput so the two text
-    // controls are styled as one, and adds the multiline-only class last.
-    expect(element.getAttribute('class')).toBe('hq-input terminal-input terminal-textarea');
+    // controls are styled as one, and adds the multiline-only class next.
+    expect(element.getAttribute('class')).toContain('hq-input terminal-input terminal-textarea');
 
     const dressed = mount(<TerminalTextarea className="content-editor__body" />);
-    expect(dressed.querySelector('textarea')?.getAttribute('class')).toBe(
-      'hq-input terminal-input terminal-textarea content-editor__body',
-    );
+    const dressedClass = dressed.querySelector('textarea')?.getAttribute('class') ?? '';
+    expect(dressedClass).toContain('hq-input terminal-input terminal-textarea');
+    expect(dressedClass.endsWith('content-editor__body')).toBe(true);
   });
 
   it('forwards the ref to the textarea and passes the native props through', () => {

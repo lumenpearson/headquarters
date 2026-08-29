@@ -1,19 +1,50 @@
+/*
+ * What is left here after migrating the Terminal* primitives' styling to
+ * Tailwind utility strings inline in `packages/ui/src/primitives/*.tsx` (and,
+ * for the portalled overlays, in `terminalOverlayStyles.ts`). Four kinds of
+ * declaration could not move:
+ *
+ * - Chrome (border/background/color/font) on a primitive that renders a bare
+ *   `<button>`, `<input>` or `<select>`: `.ops-shell button/input/select` and
+ *   `body.terminal-theme button/input/select` already reach those elements at
+ *   equal-or-higher specificity than the primitive's own class, so a
+ *   Tailwind utility declaring the same property would lose to them anyway.
+ *   It stays here so the value that actually wins keeps living next to the
+ *   selector that wins it, instead of in an inert utility string.
+ * - State overrides (`[data-checked]`, `[data-highlighted]`, `:focus-visible`,
+ *   a per-tone colour, …) that outrank that chrome today because the selector
+ *   itself carries more specificity than a class alone. This stylesheet is
+ *   unlayered, so it always outranks a `@layer utilities` rule regardless of
+ *   specificity; moving one of these to Tailwind would flip which one wins.
+ * - `border-radius: 0`, wherever the original rule set it but nothing
+ *   migrated it to a `rounded-*` utility. `body.terminal-theme *, *::before,
+ *   *::after { border-radius: 0 !important }` (terminal.css) already zeroes
+ *   border-radius everywhere, so the declaration is dead rather than
+ *   load-bearing; pruning it was out of scope for this pass.
+ * - `.terminal-input`'s `width: 100%`. `TerminalTextarea` carries the
+ *   `terminal-input` class without a `w-full` utility of its own, so removing
+ *   this would leave it at the browser's default `<textarea>` width outside
+ *   the app-css selectors that separately force it full width.
+ * - `.terminal-slider`, `.terminal-tabs` and `.terminal-tabs[data-
+ *   orientation='vertical']`, kept as plain CSS by choice rather than
+ *   necessity, so a Vitest exact-class-string assertion on the root element
+ *   does not have to encode the whole Tailwind utility on every future edit.
+ *
+ * `body.terminal-theme`'s isolation rule and the `prefers-reduced-motion`
+ * gate at the end are shared infrastructure, not primitive-specific: they
+ * stay regardless of what else in this file does.
+ */
+
 body.terminal-theme {
   isolation: isolate;
 }
 
-.terminal-button {
-  border-radius: 0;
-}
-
 .terminal-button--small {
   min-height: 26px;
-  padding-inline: 9px;
 }
 
 .terminal-button--large {
   min-height: 42px;
-  padding-inline: 18px;
 }
 
 .terminal-button--primary {
@@ -33,202 +64,18 @@ body.terminal-theme {
   background: transparent;
 }
 
-.terminal-icon-button {
-  width: 34px;
-  min-width: 34px;
-  padding: 0;
-  justify-content: center;
-}
-
-.terminal-icon-button.terminal-button--small {
-  width: 26px;
-  min-width: 26px;
-}
-
-.terminal-icon-button.terminal-button--large {
-  width: 42px;
-  min-width: 42px;
-}
-
 .terminal-input {
   width: 100%;
-  border-radius: 0;
-}
-
-.terminal-textarea {
-  min-height: 72px;
-  padding: var(--space-2) var(--space-3);
-  resize: vertical;
-  line-height: 1.4;
-}
-
-.terminal-field {
-  display: grid;
-  min-width: 0;
-  gap: var(--space-1);
-}
-
-.terminal-field__label {
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.terminal-field__description,
-.terminal-field__error {
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-.terminal-field__error {
-  color: var(--critical);
-}
-
-.terminal-combobox {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  border: 1px solid var(--line-1);
-  background: var(--bg-0);
-}
-
-.terminal-combobox:focus-within,
-.terminal-combobox[data-popup-open] {
-  border-color: var(--line-focus);
-}
-
-.terminal-combobox__input,
-.terminal-combobox__trigger {
-  min-width: 0;
-  min-height: 34px;
-  border: 0;
-  border-radius: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
-}
-
-.terminal-combobox__input {
-  width: 100%;
-  padding-inline: var(--space-2);
-}
-
-.terminal-combobox__trigger {
-  border-left: 1px solid var(--line-1);
-  color: var(--accent);
-  cursor: pointer;
-}
-
-.terminal-combobox__positioner {
-  z-index: var(--z-popup);
-}
-
-.terminal-combobox__popup {
-  min-width: var(--anchor-width);
-  max-width: min(360px, calc(100vw - 16px));
-  max-height: min(320px, var(--available-height));
-  overflow: hidden;
-  border: 1px solid var(--line-2);
-  border-radius: 0;
-  outline: none;
-  background: var(--bg-1);
-  color: var(--text-1);
-  /*
-   * The popup is portalled past `.ops-shell`, so it cannot inherit the
-   * shell's fluid, viewport-scaled type. It reads the shell's computed
-   * values through custom properties set on `body` and falls back to the
-   * fixed tokens below when nothing sets them (standalone tests, the
-   * legacy shell).
-   */
-  font-size: var(--ops-font-size, var(--font-xs));
-  letter-spacing: var(--ops-letter-spacing, normal);
-  line-height: var(--ops-line-height, 1.4);
-  transform-origin: var(--transform-origin);
-  transition:
-    opacity var(--motion-micro) linear,
-    transform var(--motion-micro) ease;
-}
-
-.terminal-combobox__popup[data-starting-style],
-.terminal-combobox__popup[data-ending-style] {
-  opacity: 0;
-  transform: scaleY(0.94);
-}
-
-.terminal-combobox__list {
-  max-height: inherit;
-  overflow: auto;
-  padding: 3px;
-}
-
-.terminal-combobox__item {
-  display: grid;
-  min-height: 30px;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
-  padding: 0 var(--space-2);
-  outline: none;
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: inherit;
-  text-transform: uppercase;
-}
-
-/*
- * `Combobox.ItemIndicator` only renders for the selected item (no
- * `keepMounted`), so a non-selected item has a single child that would
- * otherwise auto-place into the 24px indicator track. The label span is
- * always the item's last child -- present alone or after the indicator --
- * so pinning the last child to the second track keeps every item's text
- * aligned regardless of whether the indicator is mounted.
- */
-.terminal-combobox__item > :last-child {
-  grid-column: 2;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.terminal-combobox__item[data-highlighted] {
-  background: var(--accent);
-  color: var(--text-inverse);
-}
-
-.terminal-combobox__item[data-disabled] {
-  cursor: not-allowed;
-  opacity: 0.38;
-}
-
-.terminal-combobox__empty {
-  padding: var(--space-3);
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-align: center;
 }
 
 .terminal-switch {
-  display: inline-flex;
-  min-height: 27px;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: 0 8px;
   border: 1px solid var(--line-1);
   border-radius: 0;
   outline: none;
   background: var(--panel-1);
   color: var(--text-2);
-  cursor: pointer;
   font-family: var(--font-mono);
   font-size: var(--font-xs);
-  text-transform: uppercase;
 }
 
 .terminal-switch[data-checked] {
@@ -241,28 +88,12 @@ body.terminal-theme {
   border-color: var(--line-focus);
 }
 
-.terminal-switch[data-disabled] {
-  cursor: not-allowed;
-  opacity: 0.38;
-}
-
-.terminal-switch__thumb {
-  width: 7px;
-  height: 7px;
-  background: currentcolor;
-}
-
 .terminal-checkbox {
-  display: inline-grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
   border: 1px solid var(--line-2);
   border-radius: 0;
   outline: none;
   background: var(--bg-0);
   color: var(--accent-strong);
-  cursor: pointer;
   font-family: var(--font-mono);
   font-size: var(--font-xs);
 }
@@ -277,35 +108,7 @@ body.terminal-theme {
   border-color: var(--line-focus);
 }
 
-.terminal-checkbox[data-disabled] {
-  cursor: not-allowed;
-  opacity: 0.38;
-}
-
-.terminal-radio-group {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.terminal-radio-option {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--text-1);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-transform: uppercase;
-}
-
 .terminal-radio {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
   border: 1px solid var(--line-2);
   border-radius: 0;
   outline: none;
@@ -317,28 +120,8 @@ body.terminal-theme {
   border-color: var(--accent);
 }
 
-.terminal-radio__indicator {
-  width: 8px;
-  height: 8px;
-  background: var(--accent);
-}
-
-.terminal-number-field__group {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 30px minmax(0, 1fr) 30px;
-  border: 1px solid var(--line-1);
-  background: var(--bg-0);
-}
-
-.terminal-number-field__group:focus-within {
-  border-color: var(--line-focus);
-}
-
 .terminal-number-field__input,
 .terminal-number-field__step {
-  min-width: 0;
-  min-height: 32px;
   border: 0;
   border-radius: 0;
   outline: none;
@@ -348,14 +131,8 @@ body.terminal-theme {
   font-size: var(--font-sm);
 }
 
-.terminal-number-field__input {
-  width: 100%;
-  text-align: center;
-}
-
 .terminal-number-field__step {
   color: var(--accent);
-  cursor: pointer;
 }
 
 .terminal-number-field__step:first-child {
@@ -375,159 +152,11 @@ body.terminal-theme {
   font-size: var(--font-xs);
 }
 
-.terminal-slider__header {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-  text-transform: uppercase;
-}
-
-.terminal-slider__control {
-  display: flex;
-  height: 24px;
-  align-items: center;
-  cursor: pointer;
-}
-
-.terminal-slider__track {
-  position: relative;
-  width: 100%;
-  height: 5px;
-  background: var(--line-2);
-}
-
-.terminal-slider__indicator {
-  height: 100%;
-  background: var(--accent);
-}
-
-.terminal-slider__thumb {
-  width: 10px;
-  height: 18px;
-  border: 1px solid var(--accent);
-  border-radius: 0;
-  outline: none;
-  background: var(--bg-0);
-}
-
-/*
- * R23: the control keeps the pointer at rest and takes a grabbing cursor while
- * the value is actually being moved.
- *
- * `[data-adjusting]` comes from TerminalSlider, not from Base UI. The previous
- * selector here was `[data-dragging]`, which Base UI 1.7.0 never sets -- so
- * this highlight had never once fired, and the drag looked identical to a
- * resting slider.
- */
-.terminal-slider[data-adjusting] .terminal-slider__control {
-  cursor: grabbing;
-}
-
-.terminal-slider__thumb:focus-within,
-.terminal-slider[data-adjusting] .terminal-slider__thumb {
-  background: var(--accent);
-}
-
-/*
- * R31: the rate-of-change graph whose extrema are moved by dragging. The
- * curve is an SVG stretched to the plot (`preserveAspectRatio: none`), so the
- * aspect ratio is a stylesheet decision -- `--terminal-curve-editor-aspect`
- * on the root or any ancestor -- and strokes keep their width through
- * `vector-effect: non-scaling-stroke`. Handles are HTML positioned in plot
- * percentages on top of the SVG, so they never stretch with it.
- */
-.terminal-curve-editor {
-  display: grid;
-  min-width: 0;
-  gap: var(--space-2);
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-.terminal-curve-editor__header {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-  text-transform: uppercase;
-}
-
-.terminal-curve-editor__readout {
-  color: var(--text-0);
-  font-variant-numeric: tabular-nums;
-}
-
-.terminal-curve-editor__plot {
-  position: relative;
-  width: 100%;
-  aspect-ratio: var(--terminal-curve-editor-aspect, 2 / 1);
-  border: 1px solid var(--line-1);
-  outline: none;
-  background: var(--bg-0);
-  cursor: crosshair;
-  touch-action: none;
-  user-select: none;
-}
-
-.terminal-curve-editor__plot:focus-visible {
-  border-color: var(--line-focus);
-}
-
-.terminal-curve-editor__svg {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.terminal-curve-editor__grid {
-  stroke: var(--line-1);
-  stroke-width: 1;
-}
-
-.terminal-curve-editor__path {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.terminal-curve-editor__tangent-line {
-  stroke: var(--text-2);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-}
-
 .terminal-curve-editor__handle,
 .terminal-curve-editor__tangent {
-  position: absolute;
-  box-sizing: border-box;
-  border: 1px solid var(--accent);
-  border-radius: 0;
-  outline: none;
-  background: var(--bg-0);
-  cursor: grab;
-  touch-action: none;
-  transform: translate(-50%, -50%);
   transition:
     border-color var(--motion-micro) ease,
     background var(--motion-micro) ease;
-}
-
-.terminal-curve-editor__handle {
-  width: 12px;
-  height: 12px;
-}
-
-/* Tangent handles are round so the two kinds read apart at a glance; the point is the square. */
-.terminal-curve-editor__tangent {
-  width: 8px;
-  height: 8px;
-  border-color: var(--text-2);
-  border-radius: 50%;
 }
 
 /* A hit area wider than the 12px mark, without the mark itself growing. */
@@ -538,40 +167,6 @@ body.terminal-theme {
   content: '';
 }
 
-.terminal-curve-editor__handle:focus-visible,
-.terminal-curve-editor__tangent:focus-visible {
-  border-color: var(--line-focus);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-.terminal-curve-editor__handle[data-active],
-.terminal-curve-editor__handle:hover {
-  background: var(--accent);
-}
-
-.terminal-curve-editor__tangent[data-active],
-.terminal-curve-editor__tangent:hover {
-  background: var(--text-2);
-}
-
-/* R23: a grabbing cursor while a handle is actually being moved, as the slider does. */
-.terminal-curve-editor[data-adjusting] .terminal-curve-editor__plot,
-.terminal-curve-editor[data-adjusting] .terminal-curve-editor__handle,
-.terminal-curve-editor[data-adjusting] .terminal-curve-editor__tangent {
-  cursor: grabbing;
-}
-
-.terminal-curve-editor[data-readonly] .terminal-curve-editor__plot,
-.terminal-curve-editor[data-readonly] .terminal-curve-editor__handle,
-.terminal-curve-editor[data-readonly] .terminal-curve-editor__tangent {
-  cursor: default;
-}
-
-.terminal-curve-editor[data-readonly] .terminal-curve-editor__handle,
-.terminal-curve-editor[data-readonly] .terminal-curve-editor__tangent {
-  opacity: 0.62;
-}
-
 .terminal-tabs {
   display: grid;
   min-width: 0;
@@ -579,35 +174,9 @@ body.terminal-theme {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.terminal-tabs__list {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  border-bottom: 1px solid var(--line-1);
-}
-
 .terminal-tabs[data-orientation='vertical'] {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: auto minmax(0, 1fr);
-}
-
-.terminal-tabs[data-orientation='vertical'] .terminal-tabs__list {
-  flex-direction: column;
-  border-right: 1px solid var(--line-1);
-  border-bottom: 0;
-}
-
-.terminal-tabs__tab {
-  min-height: 34px;
-  padding: 0 var(--space-3);
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text-2);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-transform: uppercase;
 }
 
 .terminal-tabs__tab[data-active],
@@ -615,38 +184,15 @@ body.terminal-theme {
   color: var(--accent-strong);
 }
 
-.terminal-tabs__indicator {
-  position: absolute;
-  right: var(--active-tab-right);
-  bottom: -1px;
-  left: var(--active-tab-left);
-  height: 2px;
-  background: var(--accent);
-  transition:
-    left var(--motion-standard) ease,
-    right var(--motion-standard) ease;
-}
-
-.terminal-tabs__panel {
-  min-width: 0;
-  min-height: 0;
-  outline: none;
-  padding: var(--space-3);
-}
-
 .terminal-toggle,
 .terminal-toolbar__button {
-  min-height: 30px;
-  padding: 0 var(--space-2);
   border: 1px solid var(--line-1);
   border-radius: 0;
   outline: none;
   background: var(--panel-1);
   color: var(--text-1);
-  cursor: pointer;
   font-family: var(--font-mono);
   font-size: var(--font-xs);
-  text-transform: uppercase;
 }
 
 .terminal-toggle[data-pressed],
@@ -657,203 +203,12 @@ body.terminal-theme {
   color: var(--accent-strong);
 }
 
-.terminal-toolbar {
-  display: flex;
-  min-width: 0;
-  gap: 2px;
-}
-
-.terminal-toolbar[data-orientation='vertical'] {
-  flex-direction: column;
-}
-
-.terminal-toolbar__button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
 .terminal-toolbar__button[data-tone='critical'] {
   color: var(--critical);
 }
 
-.terminal-toolbar__button kbd {
-  color: currentcolor;
-  font: inherit;
-  opacity: 0.7;
-}
-
-.terminal-popover__positioner {
-  z-index: var(--z-popup);
-}
-
 .terminal-popover {
-  min-width: 220px;
-  max-width: min(420px, calc(100vw - 16px));
-  border: 1px solid var(--line-2);
   border-radius: 0;
-  outline: none;
-  background: var(--bg-1);
-  color: var(--text-0);
-  transform-origin: var(--transform-origin);
-  transition:
-    opacity var(--motion-micro) linear,
-    transform var(--motion-micro) ease;
-}
-
-.terminal-popover[data-starting-style],
-.terminal-popover[data-ending-style] {
-  opacity: 0;
-  transform: scaleY(0.94);
-}
-
-.terminal-popover__title,
-.terminal-popover__description {
-  display: block;
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-}
-
-.terminal-popover__title {
-  border-bottom: 1px solid var(--line-1);
-  color: var(--accent-strong);
-  font-size: var(--font-sm);
-  text-transform: uppercase;
-}
-
-.terminal-popover__description {
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-.terminal-popover__body {
-  padding: var(--space-3);
-}
-
-.terminal-alert-dialog {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(520px, calc(100vw - 32px));
-}
-
-.terminal-alert-dialog > .terminal-dialog__header > h2 {
-  margin: 0;
-  font-size: var(--font-md);
-}
-
-.terminal-progress {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-.terminal-progress__header {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-  text-transform: uppercase;
-}
-
-.terminal-progress__track {
-  height: 5px;
-  overflow: hidden;
-  background: var(--line-2);
-}
-
-.terminal-progress__indicator {
-  width: var(--terminal-progress);
-  height: 100%;
-  background: var(--accent);
-  transition: width var(--motion-standard) ease;
-}
-
-.terminal-progress[data-tone='success'] .terminal-progress__indicator {
-  background: var(--ok);
-}
-
-.terminal-progress[data-tone='warning'] .terminal-progress__indicator {
-  background: var(--warning);
-}
-
-.terminal-progress[data-tone='critical'] .terminal-progress__indicator {
-  background: var(--critical);
-}
-
-.terminal-scroll-area {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.terminal-scroll-area__viewport {
-  width: 100%;
-  height: 100%;
-  overscroll-behavior: contain;
-}
-
-.terminal-scroll-area__content {
-  min-width: 100%;
-}
-
-.terminal-scroll-area__scrollbar {
-  display: flex;
-  width: 8px;
-  padding: 1px;
-  background: transparent;
-  opacity: 0;
-  transition: opacity var(--motion-micro) linear;
-}
-
-.terminal-scroll-area[data-scrolling] .terminal-scroll-area__scrollbar,
-.terminal-scroll-area__scrollbar:hover {
-  opacity: 1;
-}
-
-.terminal-scroll-area__thumb {
-  width: 100%;
-  background: var(--line-2);
-}
-
-.terminal-scroll-area__corner {
-  background: var(--bg-0);
-}
-
-.terminal-separator {
-  flex: none;
-  background: var(--line-1);
-}
-
-.terminal-separator[data-orientation='horizontal'] {
-  width: 100%;
-  height: 1px;
-}
-
-.terminal-separator[data-orientation='vertical'] {
-  width: 1px;
-  height: 100%;
-}
-
-.terminal-select {
-  display: grid;
-  min-height: 34px;
-  width: 100%;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--line-1);
-  border-radius: 0;
-  outline: none;
-  background: var(--bg-0);
-  color: var(--text-0);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
-  text-align: left;
 }
 
 .terminal-select:focus-visible,
@@ -861,259 +216,12 @@ body.terminal-theme {
   border-color: var(--line-focus);
 }
 
-.terminal-select__icon {
-  color: var(--accent);
-}
-
-.terminal-select__positioner {
-  z-index: var(--z-popup);
-}
-
-.terminal-select__popup {
-  min-width: var(--anchor-width);
-  max-width: min(360px, calc(100vw - 16px));
-  max-height: min(320px, var(--available-height));
-  overflow: hidden;
-  border: 1px solid var(--line-2);
-  border-radius: 0;
-  outline: none;
-  background: var(--bg-1);
-  color: var(--text-1);
-  /*
-   * The popup is portalled past `.ops-shell`, so it cannot inherit the
-   * shell's fluid, viewport-scaled type. It reads the shell's computed
-   * values through custom properties set on `body` and falls back to the
-   * fixed tokens below when nothing sets them (standalone tests, the
-   * legacy shell).
-   */
-  font-size: var(--ops-font-size, var(--font-xs));
-  letter-spacing: var(--ops-letter-spacing, normal);
-  line-height: var(--ops-line-height, 1.4);
-  transform-origin: var(--transform-origin);
-  transition:
-    opacity var(--motion-micro) linear,
-    transform var(--motion-micro) ease;
-}
-
-.terminal-select__popup[data-starting-style],
-.terminal-select__popup[data-ending-style] {
-  opacity: 0;
-  transform: scaleY(0.94);
-}
-
-.terminal-select__list {
-  max-height: inherit;
-  overflow: auto;
-  padding: 3px;
-}
-
-.terminal-select__item {
-  display: grid;
-  min-height: 30px;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
-  padding: 0 var(--space-2);
-  outline: none;
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: inherit;
-  text-transform: uppercase;
-}
-
-/*
- * `Select.ItemIndicator` only renders for the selected item (no
- * `keepMounted`), so a non-selected item has a single child that would
- * otherwise auto-place into the 24px indicator track. `ItemText` is always
- * the item's last child -- present alone or after the indicator -- so
- * pinning the last child to the second track keeps every item's text
- * aligned regardless of whether the indicator is mounted.
- */
-.terminal-select__item > :last-child {
-  grid-column: 2;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.terminal-select__item[data-highlighted] {
-  background: var(--accent);
-  color: var(--text-inverse);
-}
-
-.terminal-select__item[data-disabled] {
-  cursor: not-allowed;
-  opacity: 0.38;
-}
-
-.terminal-select__indicator {
-  color: currentcolor;
-}
-
-/*
- * A dialog backdrop blurs the window behind it rather than merely darkening
- * it: `backdrop-filter` on this fixed layer reaches everything painted below
- * `--z-dialog` -- the shell, its chrome, any panel -- while the popup above it
- * and the toast viewport at `--z-popup + 1` stay sharp. Notifications must
- * never blur the window: they have no backdrop at all, so the rule holds by
- * construction. The tint is lighter than the flat 64% it replaces because the
- * blur now carries most of the separation.
- */
-.terminal-dialog__backdrop,
-.terminal-drawer__backdrop {
-  position: fixed;
-  z-index: var(--z-dialog);
-  inset: 0;
-  backdrop-filter: blur(16px) saturate(90%);
-  background: rgb(0 0 0 / 42%);
-  opacity: 1;
-  transition:
-    opacity var(--motion-standard) linear,
-    backdrop-filter var(--motion-standard) ease;
-}
-
-.terminal-dialog__backdrop[data-starting-style],
-.terminal-dialog__backdrop[data-ending-style],
-.terminal-drawer__backdrop[data-starting-style],
-.terminal-drawer__backdrop[data-ending-style] {
-  backdrop-filter: blur(0px) saturate(100%);
-  opacity: 0;
-}
-
-.terminal-dialog__viewport {
-  position: fixed;
-  z-index: calc(var(--z-dialog) + 1);
-  inset: 0;
-  display: grid;
-  min-width: 0;
-  min-height: 0;
-  place-items: center;
-  padding: var(--space-4);
-}
-
 .terminal-dialog {
-  display: grid;
-  width: min(640px, calc(100vw - 32px));
-  max-height: min(760px, calc(100dvh - 32px));
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  border: 1px solid var(--accent);
   border-radius: 0;
-  outline: none;
-  background: var(--bg-1);
-  color: var(--text-0);
-  box-shadow: none;
-  transform: translateY(0);
-  transition:
-    opacity var(--motion-standard) linear,
-    transform var(--motion-standard) ease;
-}
-
-.terminal-dialog[data-starting-style],
-.terminal-dialog[data-ending-style] {
-  opacity: 0;
-  transform: translateY(10px) scale(0.985);
-}
-
-.terminal-dialog__header,
-.terminal-dialog__footer {
-  display: flex;
-  min-height: 46px;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--line-1);
-  background: var(--panel-1);
-}
-
-.terminal-dialog__footer {
-  justify-content: flex-end;
-  border-top: 1px solid var(--line-1);
-  border-bottom: 0;
-}
-
-.terminal-dialog__heading > span,
-.terminal-dialog__heading > h2 {
-  display: block;
-  margin: 0;
-}
-
-.terminal-dialog__heading > span {
-  color: var(--accent);
-  font-size: var(--font-xs);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.terminal-dialog__heading > h2 {
-  font-size: var(--font-md);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.terminal-dialog__description {
-  margin: 0;
-  padding: var(--space-3) var(--space-4) 0;
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
-}
-
-.terminal-dialog__body {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--space-4);
-}
-
-.terminal-drawer__backdrop {
-  background: rgb(0 0 0 / 26%);
-}
-
-.terminal-drawer {
-  outline: none;
-}
-
-.terminal-menu__positioner,
-.terminal-tooltip__positioner {
-  z-index: var(--z-popup);
-  outline: none;
 }
 
 .terminal-menu {
-  min-width: 190px;
-  max-width: min(360px, calc(100vw - 16px));
-  padding: 3px;
-  border: 1px solid var(--line-2);
   border-radius: 0;
-  outline: none;
-  background: var(--bg-1);
-  color: var(--text-1);
-  box-shadow: none;
-  transform-origin: var(--transform-origin);
-  transition:
-    opacity var(--motion-micro) linear,
-    transform var(--motion-micro) ease;
-}
-
-.terminal-menu[data-starting-style],
-.terminal-menu[data-ending-style] {
-  opacity: 0;
-  transform: scaleY(0.94);
-}
-
-.terminal-menu__item {
-  display: grid;
-  min-height: 30px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-4);
-  padding: 0 var(--space-2);
-  outline: none;
-  color: var(--text-1);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-transform: uppercase;
 }
 
 .terminal-menu__item[data-highlighted] {
@@ -1121,71 +229,16 @@ body.terminal-theme {
   color: var(--text-inverse);
 }
 
-.terminal-menu__item[data-disabled] {
-  cursor: not-allowed;
-  opacity: 0.38;
-}
-
 .terminal-menu__item[data-tone='critical']:not([data-highlighted]) {
   color: var(--critical);
 }
 
-.terminal-menu__item kbd {
-  color: currentcolor;
-  font: inherit;
-  opacity: 0.72;
-}
-
 .terminal-tooltip {
-  max-width: min(280px, calc(100vw - 16px));
-  padding: 5px 7px;
-  border: 1px solid var(--accent);
   border-radius: 0;
-  background: var(--bg-1);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  line-height: 1.35;
-  transition:
-    opacity var(--motion-micro) linear,
-    transform var(--motion-micro) ease;
-}
-
-.terminal-tooltip[data-starting-style],
-.terminal-tooltip[data-ending-style] {
-  opacity: 0;
-  transform: translateY(2px);
-}
-
-.terminal-toast__viewport {
-  position: fixed;
-  z-index: calc(var(--z-popup) + 1);
-  right: var(--space-4);
-  bottom: var(--space-4);
-  display: flex;
-  width: min(380px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  flex-direction: column;
-  gap: var(--space-2);
-  outline: none;
-  pointer-events: none;
 }
 
 .terminal-toast {
-  display: grid;
-  min-height: 58px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--line-2);
-  border-left: 3px solid var(--accent);
   border-radius: 0;
-  background: var(--bg-1);
-  color: var(--text-0);
-  pointer-events: auto;
-  transition:
-    opacity var(--motion-standard) linear,
-    transform var(--motion-standard) ease;
 }
 
 .terminal-toast[data-tone='success'] {
@@ -1198,51 +251,6 @@ body.terminal-theme {
 
 .terminal-toast[data-tone='critical'] {
   border-left-color: var(--critical);
-}
-
-.terminal-toast[data-starting-style],
-.terminal-toast[data-ending-style] {
-  opacity: 0;
-  transform: translateX(12px);
-}
-
-.terminal-toast__content {
-  min-width: 0;
-}
-
-.terminal-toast__title,
-.terminal-toast__description {
-  display: block;
-  overflow-wrap: anywhere;
-}
-
-.terminal-toast__title {
-  font-size: var(--font-sm);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.terminal-toast__description {
-  margin-top: var(--space-1);
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-.terminal-toast__close {
-  align-self: start;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text-1);
-  cursor: pointer;
-  font: inherit;
-}
-
-.terminal-toast__close:focus-visible,
-.terminal-toast__close:hover {
-  color: var(--accent);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -27,7 +27,20 @@ export const TerminalTextarea = forwardRef<HTMLTextAreaElement, TerminalTextarea
       <textarea
         {...properties}
         ref={reference}
-        className={classNames('hq-input', 'terminal-input', 'terminal-textarea', className)}
+        /*
+         * Chrome (border, background, color, font) stays in primitives.css:
+         * `.ops-shell textarea` and `body.terminal-theme textarea` reach the
+         * bare `<textarea>` element at equal-or-higher specificity, `font:
+         * inherit` on the former already wins over this class's own
+         * `line-height`. Sizing and behaviour that nothing contests move here.
+         */
+        className={classNames(
+          'hq-input',
+          'terminal-input',
+          'terminal-textarea',
+          'min-h-[72px] py-hq-2 px-hq-3 resize-y leading-[1.4]',
+          className,
+        )}
         onChange={(event) => {
           onChange?.(event);
           onValueChange?.(event.target.value, event);

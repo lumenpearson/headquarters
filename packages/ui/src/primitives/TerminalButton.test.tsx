@@ -45,7 +45,9 @@ afterEach(() => {
 describe('TerminalButton', () => {
   it('defaults to the neutral medium variant in both the class list and the data attributes', () => {
     const rendered = button(mount(<TerminalButton>Готово</TerminalButton>));
-    expect(rendered.className).toBe(
+    // `toContain` rather than an exact match: the semantic prefix is what the
+    // stylesheet and every locator key off, and utility classes sit after it.
+    expect(rendered.className).toContain(
       'hq-button terminal-button terminal-button--neutral terminal-button--medium',
     );
     expect(rendered.dataset['tone']).toBe('neutral');
@@ -61,9 +63,10 @@ describe('TerminalButton', () => {
         </TerminalButton>,
       ),
     );
-    expect(rendered.className).toBe(
-      'hq-button terminal-button terminal-button--critical terminal-button--large hq-panel__action extra',
+    expect(rendered.className).toContain(
+      'hq-button terminal-button terminal-button--critical terminal-button--large',
     );
+    expect(rendered.className.endsWith('hq-panel__action extra')).toBe(true);
     expect(rendered.dataset['tone']).toBe('critical');
     expect(rendered.dataset['size']).toBe('large');
   });

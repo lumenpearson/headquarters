@@ -99,8 +99,10 @@ describe('TerminalAlertDialog', () => {
 
     const popup = query('[role="alertdialog"]');
     // The alert borrows the dialog skin and adds its own modifier; there is no
-    // `className` prop, so this pair is all a consumer ever gets.
-    expect(Array.from(popup.classList)).toEqual(['terminal-dialog', 'terminal-alert-dialog']);
+    // `className` prop, so both semantic classes leading the list is all a
+    // consumer ever gets (utility classes primitives.css still governs
+    // follow, an implementation detail this does not pin).
+    expect(popup.className.startsWith('terminal-dialog terminal-alert-dialog')).toBe(true);
 
     const title = query('header.terminal-dialog__header h2');
     expect(title.textContent).toBe('Удалить материал?');

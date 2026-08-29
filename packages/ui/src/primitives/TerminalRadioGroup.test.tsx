@@ -80,10 +80,11 @@ describe('TerminalRadioGroup', () => {
         className="settings-row__control"
       />,
     );
-    expect([...group(container).classList]).toEqual([
-      'terminal-radio-group',
-      'settings-row__control',
-    ]);
+    // `toContain`/positional checks rather than an exact list: utility
+    // classes sit between the semantic class and the consumer one.
+    const groupClasses = [...group(container).classList];
+    expect(groupClasses[0]).toBe('terminal-radio-group');
+    expect(groupClasses.at(-1)).toBe('settings-row__control');
     expect(group(container).getAttribute('role')).toBe('radiogroup');
     expect(group(container).getAttribute('aria-label')).toBe('Режим карты');
     // `disabled` defaults to false, so the group is not announced as disabled.

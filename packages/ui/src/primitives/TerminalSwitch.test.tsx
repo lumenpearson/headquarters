@@ -79,7 +79,11 @@ describe('TerminalSwitch', () => {
     expect(button.type).toBe('button');
     expect(button.getAttribute('aria-label')).toBe('Ночной режим');
     expect(button.disabled).toBe(false);
-    expect([...button.classList]).toEqual(['terminal-switch', 'settings-row__control']);
+    // `toContain`/positional checks rather than an exact list: utility
+    // classes sit between the semantic class and the consumer one.
+    const classes = [...button.classList];
+    expect(classes[0]).toBe('terminal-switch');
+    expect(classes.at(-1)).toBe('settings-row__control');
     expect(caption(container)).toBe('[OFF]');
     expect(container.querySelector('.terminal-switch__thumb')).not.toBeNull();
   });
@@ -89,7 +93,9 @@ describe('TerminalSwitch', () => {
     expect(control(container).classList.contains('is-active')).toBe(false);
 
     click(control(container));
-    expect([...control(container).classList]).toEqual(['terminal-switch', 'is-active']);
+    const checkedClasses = [...control(container).classList];
+    expect(checkedClasses).toContain('terminal-switch');
+    expect(checkedClasses).toContain('is-active');
     expect(caption(container)).toBe('[ON]');
 
     // The class follows the state back down; it is not a mount-time constant.

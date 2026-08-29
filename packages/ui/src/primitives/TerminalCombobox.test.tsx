@@ -91,7 +91,7 @@ describe('TerminalCombobox', () => {
       />,
     );
     expect(mustFind(container, '.terminal-combobox').className).toBe(
-      'terminal-combobox panel-combobox',
+      'terminal-combobox grid min-w-0 grid-cols-[minmax(0,1fr)_32px] border border-hq-line-1 bg-hq-bg-0 focus-within:border-hq-line-focus data-[popup-open]:border-hq-line-focus panel-combobox',
     );
     expect(input(container).getAttribute('aria-label')).toBe('Канал связи');
     expect(input(container).getAttribute('placeholder')).toBe('[SEARCH / SELECT]');

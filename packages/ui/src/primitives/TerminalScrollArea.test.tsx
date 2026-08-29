@@ -78,9 +78,11 @@ describe('TerminalScrollArea', () => {
         <span />
       </TerminalScrollArea>,
     );
-    expect(query(dressed, '.terminal-scroll-area').className).toBe('terminal-scroll-area hq-log');
+    expect(query(dressed, '.terminal-scroll-area').className).toBe(
+      'terminal-scroll-area group relative min-w-0 min-h-0 overflow-hidden hq-log',
+    );
     expect(query(dressed, '.terminal-scroll-area__content').className).toBe(
-      'terminal-scroll-area__content hq-log__content',
+      'terminal-scroll-area__content min-w-full hq-log__content',
     );
     /*
      * The viewport is the one part Base UI adds a class of its own to, so it is
@@ -99,9 +101,11 @@ describe('TerminalScrollArea', () => {
         <span />
       </TerminalScrollArea>,
     );
-    expect(query(bare, '.terminal-scroll-area').className).toBe('terminal-scroll-area');
+    expect(query(bare, '.terminal-scroll-area').className).toBe(
+      'terminal-scroll-area group relative min-w-0 min-h-0 overflow-hidden',
+    );
     expect(query(bare, '.terminal-scroll-area__content').className).toBe(
-      'terminal-scroll-area__content',
+      'terminal-scroll-area__content min-w-full',
     );
   });
 });

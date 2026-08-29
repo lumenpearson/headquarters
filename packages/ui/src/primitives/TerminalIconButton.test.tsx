@@ -67,9 +67,11 @@ describe('TerminalIconButton', () => {
         </TerminalIconButton>,
       ),
     );
-    expect(rendered.className).toBe(
-      'hq-button terminal-button terminal-button--quiet terminal-button--small terminal-icon-button hq-toolbar__icon',
+    expect(rendered.className).toContain(
+      'hq-button terminal-button terminal-button--quiet terminal-button--small',
     );
+    expect(rendered.className).toContain('terminal-icon-button');
+    expect(rendered.className.endsWith('hq-toolbar__icon')).toBe(true);
     // Tone and size are not consumed here: they have to reach TerminalButton.
     expect(rendered.dataset['tone']).toBe('quiet');
     expect(rendered.dataset['size']).toBe('small');

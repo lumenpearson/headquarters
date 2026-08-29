@@ -61,14 +61,18 @@ describe('TerminalField', () => {
       </TerminalField>,
     );
     // `classNames` appends the consumer class rather than replacing the base one.
-    expect(field(container).className).toBe('terminal-field panel-field');
-    expect(
-      Array.from(field(container).children).map((child) => [child.className, child.textContent]),
-    ).toEqual([
-      ['terminal-field__label', 'Позывной'],
-      ['terminal-field__description', 'Латиница, до 12 знаков'],
-      ['', 'alpha-1'],
+    const rootClass = field(container).className;
+    expect(rootClass).toContain('terminal-field');
+    expect(rootClass.endsWith('panel-field')).toBe(true);
+    const children = Array.from(field(container).children);
+    expect(children.map((child) => child.textContent)).toEqual([
+      'Позывной',
+      'Латиница, до 12 знаков',
+      'alpha-1',
     ]);
+    expect(children[0]?.className).toContain('terminal-field__label');
+    expect(children[1]?.className).toContain('terminal-field__description');
+    expect(children[2]?.className).toBe('');
   });
 
   it('drops the description when the consumer has none', () => {
