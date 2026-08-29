@@ -435,6 +435,39 @@ describe('GroupPairingDialog over the group administration commands', () => {
     expect(rows[1]?.textContent).toContain('ПЕРЕДАЙТЕ ГЛАВНУЮ СЕССИЮ');
   });
 
+  /*
+   * F10 presence publish: a device row shows what that device last reported
+   * of itself, falling back to a dash for one that never reported at all --
+   * a device `ListDevices` named but no `Presence` row has arrived for.
+   */
+  it('shows the screen and clock offset a device reported, and a dash for one that never did', async () => {
+    useSession();
+    joined('ADMIN');
+    act(() => {
+      operationsStore.getState().patchConnection({
+        presence: [
+          {
+            deviceId: 'device-a',
+            status: 'ONLINE',
+            activeScreen: '/video',
+            clockOffsetMs: 42,
+            latencyMs: 9,
+            observedAt: '2026-08-29T00:00:00.000Z',
+          },
+        ],
+      });
+    });
+    const dialog = await open();
+
+    const rows = [...dialog.querySelectorAll('.group-pairing__devices article')];
+    expect(rows).toHaveLength(2);
+    // `device-a` reported; `device-b` is in the roster but never sent a
+    // presence row at all.
+    expect(rows[0]?.textContent).toContain('/video');
+    expect(rows[0]?.textContent).toContain('42 MS');
+    expect(rows[1]?.textContent).toContain('—');
+  });
+
   it('prints what the control plane refused rather than swallowing it', async () => {
     useSession();
     joined('ADMIN');

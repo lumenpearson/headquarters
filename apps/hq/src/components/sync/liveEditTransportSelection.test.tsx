@@ -92,6 +92,10 @@ function density(): unknown {
   return operationsStore.getState().personalization.draft.values['layout.density'];
 }
 
+function caseTitle(entityId: string): string | undefined {
+  return operationsStore.getState().cases[entityId]?.title;
+}
+
 describe('live edit transport selection', () => {
   beforeEach(() => {
     // `resetWorld` rebuilds from `createBaseState`, so the draft comes back at
@@ -182,5 +186,93 @@ describe('live edit transport selection', () => {
     });
 
     expect(density()).toBe('dense');
+  });
+
+  // R4 tail (F10 task 2, R27 remainder): domain-content edits over the group
+  // transport, not only settings.
+
+  it('sends a domain-content edit over the group channel as a content delta', () => {
+    const channel = fakeChannel();
+    join(channel);
+    enableLiveEdit();
+    render(<EditModeRuntime />);
+
+    act(() => {
+      operationsStore
+        .getState()
+        .applyContentPatch([{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / ПРОВЕРЕНО' }]);
+    });
+
+    expect(channel.published).toHaveLength(1);
+    expect(channel.published[0]?.documentId).toBe(liveEditDocumentId);
+    expect(channel.published[0]?.documentType).toBe('content');
+  });
+
+  it('applies a content edit the group channel delivers as its own undoable entry', () => {
+    const channel = fakeChannel();
+    join(channel);
+    enableLiveEdit();
+    render(<EditModeRuntime />);
+    const seedTitle = caseTitle('CASE-01');
+
+    act(() => {
+      channel.deliver({
+        documentDelta: new TextEncoder().encode(
+          JSON.stringify({
+            protocol: 1,
+            kind: 'content',
+            patches: [{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / СОСЕД' }],
+          }),
+        ),
+      });
+    });
+
+    expect(caseTitle('CASE-01')).toBe('ДЕЛО / СОСЕД');
+    // Landing a received patch runs the same store action that publishes one,
+    // so an unguarded apply would have the two sessions echoing forever.
+    expect(channel.published).toEqual([]);
+
+    // The neighbor's edit is its own reversible ledger entry, the same way a
+    // local content patch already is: undo reverts it specifically.
+    act(() => {
+      operationsStore.getState().undoSettingsDraft();
+    });
+    expect(caseTitle('CASE-01')).toBe(seedTitle);
+  });
+
+  it('undoes only the more recent edit when a local one precedes a remote one', () => {
+    const channel = fakeChannel();
+    join(channel);
+    enableLiveEdit();
+    render(<EditModeRuntime />);
+    const seedTitle = caseTitle('CASE-01');
+
+    act(() => {
+      operationsStore
+        .getState()
+        .applyContentPatch([{ id: 'case.title', entityId: 'CASE-02', value: 'ДЕЛО / МЕСТНОЕ' }]);
+    });
+    act(() => {
+      channel.deliver({
+        documentDelta: new TextEncoder().encode(
+          JSON.stringify({
+            protocol: 1,
+            kind: 'content',
+            patches: [{ id: 'case.title', entityId: 'CASE-01', value: 'ДЕЛО / СОСЕД' }],
+          }),
+        ),
+      });
+    });
+
+    act(() => {
+      operationsStore.getState().undoSettingsDraft();
+    });
+
+    // The neighbor's edit is undone -- it landed last -- and the local edit
+    // that preceded it survives. Before this fix, undo replaced the whole
+    // overrides record from the local entry's own snapshot and erased the
+    // neighbor's edit outright regardless of order.
+    expect(caseTitle('CASE-01')).toBe(seedTitle);
+    expect(caseTitle('CASE-02')).toBe('ДЕЛО / МЕСТНОЕ');
   });
 });

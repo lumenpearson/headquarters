@@ -25,6 +25,7 @@ import {
   type DeviceRole,
   type GroupDevice,
   type PairingRole,
+  type PresenceEntry,
 } from '@/application/sync/connection';
 import type { PairingCodeGrant } from '@/application/sync/controlPlanePort';
 import {
@@ -380,6 +381,9 @@ export function GroupPairingDialog() {
           <h3>УСТРОЙСТВА ГРУППЫ</h3>
           {connection.devices.map((device) => {
             const lock = demotionLock(device, connection);
+            const presence = connection.presence.find(
+              (entry) => entry.deviceId === device.deviceId,
+            );
             return (
               <article key={device.deviceId}>
                 <span>
@@ -388,6 +392,7 @@ export function GroupPairingDialog() {
                     {deviceRoleLabel(device.role)} · {device.status}
                     {device.deviceId === connection.leaderDeviceId ? ' · ГЛАВНАЯ' : ''}
                   </small>
+                  <small>{devicePresenceLabel(presence)}</small>
                   {admin && lock !== '' ? (
                     <small className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
                       {lock}
@@ -587,6 +592,24 @@ function demotionLock(device: GroupDevice, connection: ConnectionState): string 
     return 'В ГРУППЕ ДОЛЖЕН ОСТАТЬСЯ ХОТЯ БЫ ОДИН АДМИНИСТРАТОР';
   }
   return '';
+}
+
+/**
+ * What one device's row reads for the screen and clock offset it last
+ * reported (F10 presence publish).
+ *
+ * `undefined` is a device this session has never received a presence row for
+ * at all -- one `ListDevices` named but `JoinGroup` has not yet reported for,
+ * or a control plane without presence storage. An empty `activeScreen` is a
+ * device that joined and reported nothing, which reads the same to an
+ * operator: neither names a screen worth showing, so both fall back to the
+ * same dash rather than one reading as a device and the other as a fact.
+ */
+function devicePresenceLabel(presence: PresenceEntry | undefined): string {
+  const screen =
+    presence === undefined || presence.activeScreen === '' ? '—' : presence.activeScreen;
+  const clock = presence === undefined ? '—' : `СДВИГ ЧАСОВ ${presence.clockOffsetMs} MS`;
+  return `${screen} · ${clock}`;
 }
 
 /**

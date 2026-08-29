@@ -241,6 +241,26 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
         ],
       };
     },
+    async updatePresence(request) {
+      recorded.mutationContexts.push({
+        requestId: request.context.requestId,
+        ...(request.context.actorDeviceId === undefined
+          ? {}
+          : { actorDeviceId: request.context.actorDeviceId.value }),
+      });
+      return {
+        devices: [
+          {
+            deviceId: { value: 'device-a' },
+            status: syncV1.DeviceStatus.ONLINE,
+            activeScreen: request.detail.activeScreen,
+            clockOffsetMs: request.detail.clockOffsetMs,
+            latencyMs: request.detail.latencyMs,
+            observedAt: timestamp(2_000),
+          },
+        ],
+      };
+    },
     async readGroupEvents() {
       return {
         events: [],
@@ -557,6 +577,73 @@ describe('ControlPlaneClient', () => {
       },
     ]);
   });
+
+  it('joins with nothing to report when no detail is given, exactly as before this existed', async () => {
+    const { client: created } = client();
+    await created.pair('CODE-1', 'MON-01');
+
+    // No throw, no argument: a caller from before F10 presence publish still
+    // joins, and the wire message carries the proto3 defaults.
+    await expect(created.join()).resolves.toBeDefined();
+  });
+
+  it('reports the screen it is given on join and on UpdatePresence, and reads the roster back', async () => {
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+    };
+    let lastJoinDetail: { readonly activeScreen: string } | null = null;
+    const sync = syncClient(recorded, {
+      async joinGroup(request) {
+        lastJoinDetail = { activeScreen: request.detail.activeScreen };
+        return {
+          group: {
+            id: { value: 'group-a' },
+            name: 'ШТАБ',
+            authorityMode: syncV1.AuthorityMode.MULTI_AUTHORITY,
+            leaderDeviceId: { value: 'device-a' },
+          },
+        };
+      },
+    });
+    const store = new DeviceSessionStore(memoryStorage());
+    const created = new ControlPlaneClient({
+      baseUrl: 'http://127.0.0.1:4100',
+      sessionStore: store,
+      clients: { control: controlClient, sync },
+      mintRequestId: () => 'request-1',
+      now: () => 0,
+    });
+    await created.pair('CODE-1', 'MON-01');
+
+    await created.join({
+      activeScreen: '/video',
+      selectedElement: 'camera-1',
+      clockOffsetMs: 12,
+      latencyMs: 34,
+    });
+
+    expect(lastJoinDetail).toEqual({ activeScreen: '/video' });
+
+    const roster = await created.updatePresence({
+      activeScreen: '/system',
+      selectedElement: '',
+      clockOffsetMs: 5,
+      latencyMs: 6,
+    });
+
+    expect(roster).toEqual([
+      {
+        deviceId: 'device-a',
+        status: 'ONLINE',
+        activeScreen: '/system',
+        clockOffsetMs: 5,
+        latencyMs: 6,
+        observedAt: new Date(2_000).toISOString(),
+      },
+    ]);
+  });
 });
 
 /**
@@ -665,6 +752,42 @@ describe('two links over one session store', () => {
     expect(recorded.mutationContexts).toHaveLength(1);
     expect(store.read()?.controlPlaneInstallationId).toBe('');
     expect(reader.session()).not.toBeNull();
+  });
+
+  /*
+   * The rebuild plane failover performs: the plane that used to carry the
+   * session stopped answering, and the one that did takes over -- presenting
+   * the same stored session, because the store is shared and scoped by
+   * database rather than by address.
+   */
+  it('promotes a reader to owner and demotes the owner to reader, over the same session', async () => {
+    const { owner, reader, recorded } = pair(() => 0);
+    await owner.pair('CODE-1', 'MON-01');
+
+    const promoted = reader.asOwner();
+    const demoted = owner.asReader();
+
+    expect(promoted.credentials).toBe('owner');
+    expect(demoted.credentials).toBe('reader');
+    // The address moves with the client, not with the role: promoting the
+    // link the operator configured as secondary must not make it answer as
+    // if it were the primary's own address.
+    expect(promoted.baseUrl).toBe(reader.baseUrl);
+    expect(demoted.baseUrl).toBe(owner.baseUrl);
+    // Same store, so the tokens the original owner earned are exactly what
+    // the promoted sibling presents -- no re-pairing.
+    expect(promoted.session()).toEqual(owner.session());
+
+    await expect(demoted.refresh()).rejects.toMatchObject({ kind: 'failed-precondition' });
+    await promoted.refresh();
+    expect(recorded.refreshRequestIds).toHaveLength(1);
+  });
+
+  it('answers itself from asOwner and asReader when the role already matches', () => {
+    const { owner, reader } = pair(() => 0);
+
+    expect(owner.asOwner()).toBe(owner);
+    expect(reader.asReader()).toBe(reader);
   });
 });
 

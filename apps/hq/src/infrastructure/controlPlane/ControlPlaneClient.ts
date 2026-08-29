@@ -1,15 +1,17 @@
 import { Code, ConnectError, createClient, type Transport } from '@connectrpc/connect';
 import { ControlPlaneService, SyncService, syncV1 } from '@gremuchaya/protocol';
 
-import type {
-  AuthorityMode,
-  ConnectionSession,
-  ControlPlaneCapabilities,
-  DeviceRole,
-  GroupDevice,
-  GroupSummary,
-  PairingRole,
-  PresenceEntry,
+import {
+  emptyPresenceDetail,
+  type AuthorityMode,
+  type ConnectionSession,
+  type ControlPlaneCapabilities,
+  type DeviceRole,
+  type GroupDevice,
+  type GroupSummary,
+  type PairingRole,
+  type PresenceDetail,
+  type PresenceEntry,
 } from '@/application/sync/connection';
 import {
   ControlPlaneError,
@@ -36,6 +38,7 @@ import { DeviceSessionStore, type StoredDeviceSession } from './DeviceSessionSto
 import {
   fromDeviceRole,
   fromGroupSessionAction,
+  fromPresenceDetail,
   fromSynchronizedDocumentType,
   toDeviceRole,
   toEpochMs,
@@ -49,6 +52,7 @@ import {
   type WireDevice,
   type WireGroup,
   type WirePresence,
+  type WirePresenceDetail,
   type WireResourceId,
   type WireTimestamp,
 } from './groupEventCodec';
@@ -211,7 +215,11 @@ export interface SyncRpcClient {
     options?: CallOptions,
   ): Promise<unknown>;
   joinGroup(
-    request: { readonly context: WireMutationContext; readonly groupId: WireResourceId },
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly detail: WirePresenceDetail;
+    },
     options?: CallOptions,
   ): Promise<{ readonly group?: WireGroup | undefined }>;
   leaveGroup(
@@ -247,6 +255,14 @@ export interface SyncRpcClient {
   }>;
   getPresence(
     request: { readonly groupId: WireResourceId },
+    options?: CallOptions,
+  ): Promise<{ readonly devices: readonly WirePresence[] }>;
+  updatePresence(
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly detail: WirePresenceDetail;
+    },
     options?: CallOptions,
   ): Promise<{ readonly devices: readonly WirePresence[] }>;
   publishDocumentDelta(
@@ -709,12 +725,23 @@ export class ControlPlaneClient implements ControlPlanePort {
     return { deviceId: next.deviceId, groupId: next.groupId, role: next.role };
   }
 
-  /** Enters the group's session: participation, not membership. */
-  async join(signal?: AbortSignal): Promise<GroupSummary> {
+  /**
+   * Enters the group's session, and reports what this device is showing on
+   * the same call (F10 presence publish): participation, not membership.
+   *
+   * `detail` defaults to nothing to report, so a caller that supplies none --
+   * a test, or a client from before this existed -- still joins exactly as it
+   * always did; the wire message carries the proto3 defaults either way.
+   */
+  async join(detail?: PresenceDetail, signal?: AbortSignal): Promise<GroupSummary> {
     const stored = this.#requireSession();
     const response = await call(() =>
       this.#sync.joinGroup(
-        { context: this.#mutation(stored), groupId: { value: stored.groupId } },
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          detail: fromPresenceDetail(detail ?? emptyPresenceDetail),
+        },
         options(signal),
       ),
     );
@@ -826,6 +853,33 @@ export class ControlPlaneClient implements ControlPlanePort {
     const stored = this.#requireSession();
     const response = await call(() =>
       this.#sync.getPresence({ groupId: { value: stored.groupId } }, options(signal)),
+    );
+    return response.devices.map(toPresenceEntry);
+  }
+
+  /**
+   * Reports what this device is currently showing, and renews its liveness
+   * with the same call (F10 presence publish).
+   *
+   * The answer is the group's presence after the report, exactly as
+   * `getPresence` would answer it, so `ControlPlaneSession.refreshPresence`
+   * learns both a neighbour's change and the effect of its own report from
+   * one round trip.
+   */
+  async updatePresence(
+    detail: PresenceDetail,
+    signal?: AbortSignal,
+  ): Promise<readonly PresenceEntry[]> {
+    const stored = this.#requireSession();
+    const response = await call(() =>
+      this.#sync.updatePresence(
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          detail: fromPresenceDetail(detail),
+        },
+        options(signal),
+      ),
     );
     return response.devices.map(toPresenceEntry);
   }
@@ -976,6 +1030,45 @@ export class ControlPlaneClient implements ControlPlanePort {
    */
   #stored(): StoredDeviceSession | null {
     return this.#store.read();
+  }
+
+  /**
+   * A sibling client for the same address, store and RPC clients, with
+   * `owner` credentials (F14 stage 7, plane failover).
+   *
+   * A no-op when this client already owns the credentials. Otherwise a new
+   * instance, because `credentials` is declared `readonly` and stays that way
+   * -- the refusal it gates protects the one property a stolen-token replay
+   * depends on: exactly one client minting refresh request ids against the
+   * stored token at a time. Promoting a link is therefore building the client
+   * failover needs and retiring the old one, never mutating one in place.
+   */
+  asOwner(): ControlPlaneClient {
+    return this.#withCredentials('owner');
+  }
+
+  /** The same sibling, demoted to `reader` -- the plane failover retired. */
+  asReader(): ControlPlaneClient {
+    return this.#withCredentials('reader');
+  }
+
+  #withCredentials(role: ControlPlaneCredentialRole): ControlPlaneClient {
+    if (this.credentials === role) return this;
+    return new ControlPlaneClient({
+      baseUrl: this.baseUrl,
+      sessionStore: this.#store,
+      credentials: role,
+      device: this.#device,
+      mintRequestId: this.#mintRequestId,
+      now: this.#now,
+      // A test injects RPC clients rather than a transport; the sibling reuses
+      // the very same fakes, so it answers exactly as the client it replaces
+      // would have. A real deployment rebuilds the transport instead, which is
+      // cheap next to the round trip every call on it will make anyway.
+      ...(this.#transport === undefined
+        ? { clients: { control: this.#control, sync: this.#sync } }
+        : {}),
+    });
   }
 
   /**

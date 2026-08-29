@@ -178,6 +178,11 @@ class FakeControlPlane implements ControlPlanePort {
     return this.serverGroup;
   }
 
+  async updatePresence() {
+    this.calls.push('updatePresence');
+    return this.roster();
+  }
+
   async leave(): Promise<void> {
     this.calls.push('leave');
   }
@@ -225,6 +230,11 @@ class FakeControlPlane implements ControlPlanePort {
 
   async getPresence() {
     this.calls.push('getPresence');
+    return this.roster();
+  }
+
+  /** The roster both `getPresence` and `updatePresence` answer with. */
+  roster() {
     return [
       {
         deviceId: 'device-b',
@@ -492,7 +502,7 @@ describe('ControlPlaneSession', () => {
       'pair',
       'join',
       'listDevices',
-      'getPresence',
+      'updatePresence',
       'timeSync',
       'timeSync',
       'timeSync',

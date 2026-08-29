@@ -218,6 +218,36 @@ export interface PresenceEntry {
   readonly observedAt: string;
 }
 
+/**
+ * What this device reports about itself, before the server fills in
+ * `deviceId`, `status` and `observedAt` (F10 presence publish).
+ *
+ * `JoinGroup` carries it on the way in and `UpdatePresence` carries it on
+ * every report after that -- the same four fields `Presence` above holds for
+ * a neighbour, declared on their own because a client may only ever state
+ * these four about itself.
+ *
+ * Bounded to the server's own limits before it is sent (`sync/service.ts`):
+ * identifiers up to 256 characters, latency up to five minutes. The offset
+ * carries no ceiling, for the same reason the server gives none -- a device
+ * with the wrong year on its clock honestly reports an offset in the
+ * billions.
+ */
+export interface PresenceDetail {
+  readonly activeScreen: string;
+  readonly selectedElement: string;
+  readonly clockOffsetMs: number;
+  readonly latencyMs: number;
+}
+
+/** What a session with nothing to report sends -- the proto3 defaults. */
+export const emptyPresenceDetail: PresenceDetail = {
+  activeScreen: '',
+  selectedElement: '',
+  clockOffsetMs: 0,
+  latencyMs: 0,
+};
+
 export interface GroupDevice {
   readonly deviceId: string;
   readonly name: string;

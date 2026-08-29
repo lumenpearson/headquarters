@@ -6,6 +6,7 @@ import type {
   GroupDevice,
   GroupSummary,
   PairingRole,
+  PresenceDetail,
   PresenceEntry,
 } from './connection';
 import type {
@@ -86,7 +87,17 @@ export interface ControlPlanePort {
    */
   setDeviceRole(deviceId: string, role: DeviceRole, signal?: AbortSignal): Promise<GroupDevice>;
   refresh(signal?: AbortSignal): Promise<ConnectionSession>;
-  join(signal?: AbortSignal): Promise<GroupSummary>;
+  /**
+   * Enters the group's session, and reports what this device is showing on
+   * the same call (F10 presence publish).
+   *
+   * `detail` is optional so a caller with nothing to report -- a test, or a
+   * client built before this existed -- may omit it; the wire message is
+   * still sent, filled with the proto3 defaults, because `JoinGroup` already
+   * publishes `PRESENCE_UPDATED` and a bare join must not leave a neighbour's
+   * previous participation showing on the row.
+   */
+  join(detail?: PresenceDetail, signal?: AbortSignal): Promise<GroupSummary>;
   leave(signal?: AbortSignal): Promise<void>;
   listDevices(signal?: AbortSignal): Promise<readonly GroupDevice[]>;
   revoke(deviceId: string, signal?: AbortSignal): Promise<void>;
@@ -94,6 +105,16 @@ export interface ControlPlanePort {
   setLeader(deviceId: string, signal?: AbortSignal): Promise<GroupSummary>;
   timeSync(signal?: AbortSignal): Promise<ClockSample>;
   getPresence(signal?: AbortSignal): Promise<readonly PresenceEntry[]>;
+  /**
+   * Reports what this device is currently showing, and renews its liveness
+   * with the same call (F10 presence publish).
+   *
+   * The answer is the group's presence after the report -- the same list
+   * `getPresence` answers -- so a caller that reports on a timer learns both
+   * what a neighbour changed and what its own report just produced, from one
+   * round trip rather than two.
+   */
+  updatePresence(detail: PresenceDetail, signal?: AbortSignal): Promise<readonly PresenceEntry[]>;
   /**
    * Appends one document delta to the group log. The server allocates the
    * sequence; an editor role is required and a viewer is refused.
