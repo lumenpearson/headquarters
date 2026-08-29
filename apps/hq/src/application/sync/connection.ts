@@ -445,6 +445,38 @@ export function realtimeStatusLabel(status: RealtimeLinkStatus): string {
   }
 }
 
+/**
+ * What the status line's `SYSTEM:` badge prints, in the same Latin register as
+ * `connectionModeToken` beside it.
+ *
+ * The badge used to be the literal `SYSTEM:READY` regardless of what this
+ * session actually knew -- it opened `/system` but read no state to get
+ * there. This is the runtime signal it now reads instead: `failure` is the
+ * last thing this session's own connection reported going wrong, checked
+ * first because it is worth naming over the mode that produced it, and the
+ * mode after it covers the rest. `local-only` and `online` both read `READY`
+ * -- an operator working alone is not "not ready" for having chosen not to
+ * pair, which is why the mode alone, and not the branch below, decides it.
+ */
+export function systemReadinessToken(
+  connection: Pick<ConnectionState, 'mode' | 'failure'>,
+): string {
+  if (connection.failure !== '') return 'DEGRADED';
+  switch (connection.mode) {
+    case 'offline':
+      return 'OFFLINE';
+    case 'connecting':
+      return 'SYNCING';
+    case 'reauth-required':
+      return 'REAUTH';
+    case 'installation-changed':
+      return 'CONFLICT';
+    case 'local-only':
+    case 'online':
+      return 'READY';
+  }
+}
+
 /** The status token the shell prints beside the bus, in the status line's Latin register. */
 export function connectionModeToken(mode: ConnectionMode): string {
   switch (mode) {

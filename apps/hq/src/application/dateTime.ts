@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react';
 
 import { dateTimeFormat } from '@/application/localization/intl';
-import { t, useAppLocale } from '@/application/localization/locale';
+import { intlTag, t, useAppLocale } from '@/application/localization/locale';
 import type { MessageId } from '@/application/localization/messages';
 import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
@@ -229,4 +229,24 @@ export function useShellClock(): string {
     operationSeconds: operationSecondsOfDay({ clockMode, fixedTime }, operationElapsed, now),
     showSeconds,
   });
+}
+
+/**
+ * The topbar's `ДАТА` reading: the calendar date, not the operation's own
+ * clock. `dateTime.mode` picks which clock names the time of day, but there is
+ * no fictional calendar behind it, only a fictional time of day -- `system`
+ * and `utc` both read the machine's date for the same reason they read its
+ * time, and `operation` has no date of its own to offer instead.
+ */
+export function formatShellDate(now: Date): string {
+  const day = dateTimeFormat({ day: '2-digit', month: '2-digit', year: 'numeric' }).format(now);
+  const weekday = dateTimeFormat({ weekday: 'short' }).format(now).toLocaleUpperCase(intlTag());
+  return `${day} / ${weekday}`;
+}
+
+/** `formatShellDate`, ticking and following the locale, the way `useShellClock` does. */
+export function useShellDate(): string {
+  useAppLocale();
+  useSyncExternalStore(subscribeToTick, tickSnapshot, serverTickSnapshot);
+  return formatShellDate(new Date());
 }

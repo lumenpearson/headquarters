@@ -49,10 +49,15 @@ export async function readHostWindowProfile(): Promise<HostWindowProfile> {
 /**
  * Asks DWM for the corner treatment the profile calls for.
  *
- * Rounding is the only thing this decides. Windows 11 gets `DWMWCP_ROUND`,
- * Windows 10 and everything older get `DWMWCP_DONOTROUND` from the same call
- * rather than from a second code path, which is what makes the legacy square
- * window R24 asks for the same window with one attribute changed.
+ * Rounding is the only thing this decides, and only Windows 11 is actually
+ * asked: `apply_corners` in `src-tauri/src/host_profile.rs` classifies the
+ * host before calling `DwmSetWindowAttribute` and returns early for every
+ * other family, so `DWMWCP_ROUND` is the one preference this call ever sends.
+ * Windows 10 and legacy hosts are left square by DWM's own default rather
+ * than by a `DWMWCP_DONOTROUND` this call requests -- `DWMWA_WINDOW_CORNER_
+ * PREFERENCE` only exists from build 22000, and earlier DWM builds reject it
+ * with `E_INVALIDARG` and draw square corners anyway, so there is nothing for
+ * a second code path to ask for.
  *
  * On the web build there is no window to address and nothing is invoked: a
  * browser draws the tab chrome, and the title bar below is drawn by this

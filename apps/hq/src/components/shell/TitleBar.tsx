@@ -38,9 +38,13 @@ const productTitle = 'ГРЕМУЧАЯ СМЕСЬ — ОПЕРАТИВНЫЙ Ш�
  *
  * Windows 11 and Windows 10 get the same bar. The only difference R24 allows
  * between them is the window's corners, and those are DWM's -- asked for by
- * `apply_window_corners` and never redrawn here. Vista through 8.1 classify as
- * `legacy` and are told not to round by that same call, so the square window is
- * the same code path with one argument changed.
+ * `apply_window_corners` and never redrawn here, but only Windows 11 is
+ * actually asked: `apply_corners` (`src-tauri/src/host_profile.rs`) classifies
+ * the host first and calls `DwmSetWindowAttribute` only for that family.
+ * Windows 10 and legacy hosts (Vista through 8.1, classified `legacy`) are
+ * left square by DWM's own default rather than by a request this call sends
+ * them -- `DWMWA_WINDOW_CORNER_PREFERENCE` only exists from build 22000, so
+ * there is nothing for an earlier host to be asked for.
  *
  * The web build renders the bar identically and its controls do nothing: a
  * browser owns its own chrome, `isTauri()` is false, and every native call
@@ -315,9 +319,11 @@ function useHostWindowProfile(): HostWindowProfile {
       .then(async (next) => {
         if (cancelled) return;
         setProfile(next);
-        // `rounded` is true only for win11. Windows 10 and legacy hosts are
-        // told not to round through the same call, which is what makes the
-        // square window one argument rather than a second code path.
+        // `rounded` is true only for win11, and `next.rounded` is what this
+        // call is named for -- but `apply_corners` on the native side only
+        // reaches `DwmSetWindowAttribute` for that one family. Windows 10 and
+        // legacy hosts are left square by DWM's own default; the call still
+        // runs for them, it just has nothing to ask DWM for.
         await applyWindowCorners(next.rounded);
       })
       .catch((error: unknown) => {

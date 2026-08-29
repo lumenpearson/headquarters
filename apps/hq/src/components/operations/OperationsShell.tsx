@@ -17,7 +17,12 @@ import {
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 
-import { dateTimeModeLabel, useDateTimeMode, useShellClock } from '@/application/dateTime';
+import {
+  dateTimeModeLabel,
+  useDateTimeMode,
+  useShellClock,
+  useShellDate,
+} from '@/application/dateTime';
 import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { formatChord } from '@/application/keybinds/match';
 import { primaryNavigation, routeLabels } from '@/application/navigation';
@@ -60,6 +65,7 @@ import {
   connectionModeToken,
   realtimeStatusLabel,
   realtimeStatusToken,
+  systemReadinessToken,
 } from '@/application/sync/connection';
 import { linkStatusTokens } from '@/application/sync/controlPlaneLinks';
 
@@ -69,6 +75,7 @@ import { TitleBar } from '@/components/shell/TitleBar';
 import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
 import { resolveMotionDurationMs } from './ShellMotion';
+import { clearanceReadout, secureLinkReadout, sectorFocus } from './TopBarReadouts';
 
 const routePaths: Readonly<Partial<Record<OperationsRoute, string>>> = {
   overview: '/overview',
@@ -350,6 +357,8 @@ function scaleOf(presentation: ResolvedPresentation, property: string): number {
 function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
   const operation = useOperationsStore((state) => state.operation);
   const production = useOperationsStore((state) => state.production);
+  const sectors = useOperationsStore((state) => state.sectors);
+  const connection = useOperationsStore((state) => state.connection);
   const activeAlerts = useOperationsStore((state) =>
     Object.values(state.alerts).filter((alert) => alert.lifecycle !== 'RESOLVED'),
   );
@@ -359,6 +368,9 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
   // is why `dateTime.mode` could be set to `system` or `utc` and the header
   // would go on showing the operation's own time.
   const clock = useShellClock();
+  const date = useShellDate();
+  const sector = sectorFocus(sectors);
+  const clearance = clearanceReadout(connection.session);
 
   return (
     <header className="ops-topbar">
@@ -382,11 +394,11 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
       <div className="ops-topbar__metadata">
         <span data-header-entry="date">
           <small>ДАТА</small>
-          <b>12.09.2026 / СБ</b>
+          <b>{date}</b>
         </span>
         <span data-operational-context="sector">
           <small>СЕКТОР</small>
-          <b>S-03 / ТУ</b>
+          <b>{sector === undefined ? '—' : `${sector.code} / ${sector.abbreviation}`}</b>
         </span>
         <span>
           <small>СЕССИЯ</small>
@@ -394,11 +406,13 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
         </span>
         <span>
           <small>ДОПУСК</small>
-          <b>АЛЬФА / А1</b>
+          <b>
+            {clearance.tier} / {clearance.code}
+          </b>
         </span>
         <span className="is-secure">
           <small>СВЯЗЬ</small>
-          <b>ЗАЩИЩЕНА</b>
+          <b>{secureLinkReadout(connection.mode)}</b>
         </span>
         <TerminalButton
           onClick={() => {
@@ -496,6 +510,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
   const router = useRouter();
   const metrics = useOperationsStore((state) => state.metrics);
   const alerts = useOperationsStore((state) => state.alerts);
+  const connection = useOperationsStore((state) => state.connection);
   const openDrawer = useOperationsStore((state) => state.openDrawer);
   const elements = useStringListSetting('statusline.elements');
   const bus = typeof BroadcastChannel === 'undefined' ? 'FALLBACK' : 'BROADCAST';
@@ -540,6 +555,11 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
    * the system badge opens `/system`, the load counters open `/analytics`,
    * the alert counter opens the newest unhandled alert, and the clock cycles
    * `dateTime.mode` through the same enum the settings screen offers.
+   *
+   * The system badge used to print `SYSTEM:READY` regardless of what this
+   * session's connection was doing; `systemReadinessToken` is what it reads
+   * now, from the same `connection` slice `TransportProbe` already reports on
+   * below.
    */
   const entries: Readonly<Record<StatuslineElement, ReactNode>> = {
     system: (
@@ -548,7 +568,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
         title="Открыть состояние системы"
         onClick={() => router.push('/system')}
       >
-        <strong>[ SYSTEM:READY ]</strong>
+        <strong>[ SYSTEM:{systemReadinessToken(connection)} ]</strong>
       </TerminalButton>
     ),
     route: <span>~/{route}</span>,

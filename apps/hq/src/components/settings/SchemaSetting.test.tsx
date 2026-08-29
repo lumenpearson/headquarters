@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { getSettingDefinition } from '@gremuchaya/settings-schema';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { SchemaSetting, settingLabel } from './SchemaSetting';
 
@@ -41,12 +41,19 @@ describe('SchemaSetting number editors', () => {
 });
 
 /**
- * `settingsAwaitingTheirFeature` names two settings an operator can already
- * change with no effect. Before this, the catalogue said nothing: the row
- * looked exactly like every wired one.
+ * `settingsAwaitingTheirFeature` is empty: every setting it once named has
+ * since left it, and the notice below is what told an operator so before
+ * each one did. It is exercised here anyway, on a setting that used to be in
+ * it, so the notice itself does not go untested along with the list.
  */
 describe('SchemaSetting warns about settings nothing reads yet', () => {
-  it('prints the awaiting-feature notice beside layout.tileMinimumWidth', () => {
+  /*
+   * `layout.tileMinimumWidth` left `settingsAwaitingTheirFeature` once
+   * `resolveGridLayout` gained a `minimumTileWidth` input and `TileGrid`
+   * started measuring its container and passing both through. The notice
+   * would otherwise tell an operator a working control does nothing.
+   */
+  it('prints no notice beside layout.tileMinimumWidth, which now has a reader', () => {
     const definition = getSettingDefinition('layout.tileMinimumWidth');
     if (definition === undefined) throw new Error('layout.tileMinimumWidth is not declared');
 
@@ -59,7 +66,7 @@ describe('SchemaSetting warns about settings nothing reads yet', () => {
       />,
     );
 
-    expect(screen.getByText('ПОКА НЕ ДЕЙСТВУЕТ — изменение ни на что не влияет')).toBeTruthy();
+    expect(screen.queryByText('ПОКА НЕ ДЕЙСТВУЕТ — изменение ни на что не влияет')).toBeNull();
   });
 
   /*
@@ -94,5 +101,126 @@ describe('SchemaSetting warns about settings nothing reads yet', () => {
     );
 
     expect(screen.queryByText('ПОКА НЕ ДЕЙСТВУЕТ — изменение ни на что не влияет')).toBeNull();
+  });
+});
+
+/**
+ * `statusline.elements` is edited as a raw comma list -- `string-list` has no
+ * per-value catalogue the way `enum` does -- so its definition's own
+ * description fell back to `join(', ')` over the bare English member ids and
+ * printed them verbatim on an otherwise Russian settings screen.
+ */
+describe('SchemaSetting translates the statusline.elements row', () => {
+  it('shows the operator-language names, not the raw member ids', () => {
+    const definition = getSettingDefinition('statusline.elements');
+    if (definition === undefined) throw new Error('statusline.elements is not declared');
+
+    render(
+      <SchemaSetting
+        definition={definition}
+        value={definition.defaultValue}
+        changed={false}
+        onValueChange={() => {}}
+      />,
+    );
+
+    // Named twice now: once in the row `TerminalElementsConstructor` drew for
+    // the chosen element, once in the detail line beside it -- both translated.
+    expect(screen.getAllByText(/СИСТЕМА/u).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/\bsystem\b/u)).toBeNull();
+  });
+});
+
+/**
+ * `titlebar.elements` and `statusline.elements` are both an arrangement of a
+ * fixed, small roster -- exactly what `TerminalElementsConstructor` (R25's
+ * titlebar constructor) is for, and what replaced the free-typed comma field
+ * every other `string-list` setting still uses.
+ */
+describe('SchemaSetting draws titlebar.elements and statusline.elements as a constructor', () => {
+  it('draws titlebar.elements with the pick-and-order control, not the free-text field', () => {
+    const definition = getSettingDefinition('titlebar.elements');
+    if (definition === undefined) throw new Error('titlebar.elements is not declared');
+
+    const { container } = render(
+      <SchemaSetting
+        definition={definition}
+        value={definition.defaultValue}
+        changed={false}
+        onValueChange={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('.terminal-elements-constructor')).not.toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('reports a reordered list through onValueChange, in the operator’s new order', () => {
+    const onValueChange = vi.fn();
+    const definition = getSettingDefinition('titlebar.elements');
+    if (definition === undefined) throw new Error('titlebar.elements is not declared');
+
+    const { container } = render(
+      <SchemaSetting
+        definition={definition}
+        value={['title', 'information', 'close']}
+        changed={false}
+        onValueChange={onValueChange}
+      />,
+    );
+
+    const rows = container.querySelectorAll('.terminal-elements-constructor__row');
+    const secondRowUp = rows[1]?.querySelector<HTMLButtonElement>(
+      '.terminal-elements-constructor__move[aria-label*="выше"]',
+    );
+    if (secondRowUp === null || secondRowUp === undefined) throw new Error('no up control');
+    fireEvent.click(secondRowUp);
+
+    expect(onValueChange).toHaveBeenCalledWith(['information', 'title', 'close']);
+  });
+
+  it('names every titlebar.elements option in Russian rather than as a raw identifier', () => {
+    const definition = getSettingDefinition('titlebar.elements');
+    if (definition === undefined) throw new Error('titlebar.elements is not declared');
+
+    render(
+      <SchemaSetting
+        definition={definition}
+        value={definition.defaultValue}
+        changed={false}
+        onValueChange={() => {}}
+      />,
+    );
+
+    expect(screen.queryByText(/\bclose\b/u)).toBeNull();
+  });
+});
+
+/**
+ * `colors.accent` declares itself "never arbitrary CSS": the definition is
+ * still a fixed `oneOf`, and this is what proves the row now draws it as
+ * swatches rather than falling through to the generic dropdown every other
+ * `enum` setting uses.
+ */
+describe('SchemaSetting draws colors.accent as swatches', () => {
+  it('renders one swatch per accent, radiogroup-checked at the current value', () => {
+    const definition = getSettingDefinition('colors.accent');
+    if (definition === undefined) throw new Error('colors.accent is not declared');
+    if (definition.editor.kind !== 'enum') throw new Error('colors.accent is not an enum');
+
+    const { container } = render(
+      <SchemaSetting
+        definition={definition}
+        value="green"
+        changed={false}
+        onValueChange={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole('combobox')).toBeNull();
+    const swatches = container.querySelectorAll('.terminal-color-swatch');
+    expect(swatches).toHaveLength(definition.editor.options.length);
+    const checked = container.querySelector('.terminal-color-swatch[aria-checked="true"]');
+    expect(checked?.getAttribute('aria-label')).toBe('GREEN');
   });
 });

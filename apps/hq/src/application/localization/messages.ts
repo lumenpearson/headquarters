@@ -241,6 +241,32 @@ const ru = {
   // The clock marker. `utc` is not here: it is a token, not a word.
   'clock.mode.operation': 'ОПЕР',
   'clock.mode.system': 'СИСТ',
+
+  /*
+   * What each `statusline.elements` and `titlebar.elements` member is, in the
+   * operator's language. Both settings were edited as a raw comma list of
+   * these ids (`SchemaSetting`'s `string-list` editor had no per-value
+   * catalogue), which is what `statuslineElementLabel` and
+   * `titlebarElementLabel` read instead -- for the row's own detail text and
+   * for `TerminalElementsConstructor`, which replaced the text field with a
+   * pick-and-order control for both.
+   */
+  'statuslineElement.system': 'СИСТЕМА',
+  'statuslineElement.route': 'ТЕКУЩИЙ МАРШРУТ',
+  'statuslineElement.cpu': 'ЗАГРУЗКА ПРОЦЕССОРА',
+  'statuslineElement.ram': 'ЗАГРУЗКА ПАМЯТИ',
+  'statuslineElement.net': 'СЕТЕВОЙ ТРАФИК',
+  'statuslineElement.probe': 'ТРАНСПОРТ СЕССИИ',
+  'statuslineElement.alerts': 'СЧЁТЧИК ТРЕВОГ',
+  'statuslineElement.encoding': 'КОДИРОВКА',
+  'statuslineElement.clock': 'ЧАСЫ',
+  'statuslineElement.hints': 'ПОДСКАЗКИ КЛАВИШ',
+
+  'titlebarElement.title': 'ЗАГОЛОВОК ОКНА',
+  'titlebarElement.information': 'ИНФОРМАЦИОННЫЙ СЛОТ',
+  'titlebarElement.minimize': 'СВЕРНУТЬ',
+  'titlebarElement.maximize': 'РАЗВЕРНУТЬ',
+  'titlebarElement.close': 'ЗАКРЫТЬ',
 } as const satisfies Readonly<Record<string, string>>;
 
 export type MessageId = keyof typeof ru | TokenId;
@@ -388,6 +414,23 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
 
   'clock.mode.operation': 'OPER',
   'clock.mode.system': 'SYS',
+
+  'statuslineElement.system': 'SYSTEM',
+  'statuslineElement.route': 'CURRENT ROUTE',
+  'statuslineElement.cpu': 'CPU LOAD',
+  'statuslineElement.ram': 'MEMORY LOAD',
+  'statuslineElement.net': 'NETWORK TRAFFIC',
+  'statuslineElement.probe': 'SESSION TRANSPORT',
+  'statuslineElement.alerts': 'ALERT COUNTER',
+  'statuslineElement.encoding': 'ENCODING',
+  'statuslineElement.clock': 'CLOCK',
+  'statuslineElement.hints': 'KEYBIND HINTS',
+
+  'titlebarElement.title': 'WINDOW TITLE',
+  'titlebarElement.information': 'INFORMATION SLOT',
+  'titlebarElement.minimize': 'MINIMIZE',
+  'titlebarElement.maximize': 'MAXIMIZE',
+  'titlebarElement.close': 'CLOSE',
 };
 
 /**

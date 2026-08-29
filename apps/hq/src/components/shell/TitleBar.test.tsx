@@ -90,7 +90,7 @@ describe('R24: the host family decides the corner treatment and nothing else', (
     });
   });
 
-  it('asks for square corners on Windows 10 and on a legacy host, through the same call', async () => {
+  it('sends the same command with rounded:false for Windows 10 and a legacy host', async () => {
     for (const profile of [profiles.win10, profiles.legacy]) {
       cleanup();
       clearMocks();
@@ -98,6 +98,13 @@ describe('R24: the host family decides the corner treatment and nothing else', (
 
       await mountTitleBar();
 
+      // What this asserts is the frontend's own behavior: one command, called
+      // for every family, with the profile's `rounded` flag as its argument.
+      // Whether that reaches DWM is a native-side decision this mock does not
+      // model -- `apply_corners` (`src-tauri/src/host_profile.rs`) answers
+      // `Ok(())` without calling `DwmSetWindowAttribute` for anything but
+      // Windows 11, so neither host here is actually asked for square
+      // corners; both are left square by DWM's own default.
       expect(calls).toContainEqual({
         command: 'apply_window_corners',
         args: { rounded: false },

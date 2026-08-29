@@ -120,6 +120,70 @@ body.terminal-theme {
   border-color: var(--accent);
 }
 
+/*
+ * The swatch's own background is inline style (an arbitrary CSS color, set by
+ * the consumer), so selection cannot be shown by recoloring the root the way
+ * `.terminal-radio[data-checked]` does -- the ring and the glyph both have to
+ * read against a background this stylesheet does not know in advance.
+ */
+.terminal-color-swatch {
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  outline: none;
+  cursor: pointer;
+}
+
+.terminal-color-swatch[data-checked] {
+  box-shadow:
+    inset 0 0 0 2px var(--bg-0),
+    inset 0 0 0 3px var(--text-0);
+}
+
+.terminal-color-swatch:focus-visible {
+  border-color: var(--line-focus);
+}
+
+.terminal-color-swatch[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.terminal-color-swatch__indicator {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  /* Reads against any swatch color, the ring's background included. */
+  mix-blend-mode: difference;
+}
+
+.terminal-elements-constructor__move,
+.terminal-elements-constructor__remove,
+.terminal-elements-constructor__add {
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  outline: none;
+  background: var(--bg-0);
+  color: var(--text-1);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+.terminal-elements-constructor__move:focus-visible,
+.terminal-elements-constructor__remove:focus-visible,
+.terminal-elements-constructor__add:focus-visible {
+  border-color: var(--line-focus);
+}
+
+.terminal-elements-constructor__move:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
 .terminal-number-field__input,
 .terminal-number-field__step {
   border: 0;
