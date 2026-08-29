@@ -90,6 +90,37 @@ export interface StorageObjectRequest {
   readonly byteSize: bigint;
 }
 
+/**
+ * What an assembled object must turn out to be before a version may name it.
+ *
+ * `contentHash` is the digest the *database* holds for the material, not the
+ * one the completion request carried: the completion statement already refuses
+ * a request whose hash differs from the material's, so re-deriving it from the
+ * request would only reintroduce a client-chosen value into the check.
+ */
+export interface StorageObjectVerificationRequest {
+  readonly storageKey: string;
+  readonly contentHash: string;
+  readonly byteSize: bigint;
+}
+
+/**
+ * The outcome of that check.
+ *
+ * It is a value rather than an exception because none of these outcomes is a
+ * storage failure: the store answered, and what it holds is not what the
+ * client declared. `unverifiable-digest` is the fail-closed case — a
+ * `content_hash` in a format the issuer cannot recompute is refused rather
+ * than waved through, because a digest nobody checks is the gap this exists
+ * to close.
+ */
+export type StorageObjectVerification =
+  | { readonly outcome: 'verified' }
+  | { readonly outcome: 'missing' }
+  | { readonly outcome: 'size-mismatch'; readonly actualByteSize: bigint }
+  | { readonly outcome: 'hash-mismatch' }
+  | { readonly outcome: 'unverifiable-digest' };
+
 export interface StoragePreviewRequest extends StorageObjectRequest {
   readonly variant: string;
 }
@@ -115,15 +146,24 @@ export interface StoragePreviewGrant extends StorageGrant {
  * four RPCs that would spend it keep refusing with `FAILED_PRECONDITION`.
  *
  * The three URL-minting operations are pure presigning; the three multipart
- * lifecycle operations are calls the control plane makes itself, because a
- * `CreateMultipartUpload`, `CompleteMultipartUpload` or `AbortMultipartUpload`
- * carries a server credential and cannot be a URL handed to a browser.
+ * lifecycle operations plus {@link StorageGrantIssuer.verifyObject} are calls
+ * the control plane makes itself, because a `CreateMultipartUpload`,
+ * `CompleteMultipartUpload`, `AbortMultipartUpload` or read-back of the
+ * assembled object carries a server credential and cannot be a URL handed to a
+ * browser.
  */
 export interface StorageGrantIssuer {
   createMultipartUpload(target: StorageMultipartTarget): Awaitable<StorageMultipartHandle>;
   issueUploadPart(request: StorageUploadPartRequest): Awaitable<StorageGrant>;
   completeMultipartUpload(completion: StorageMultipartCompletion): Awaitable<void>;
   abortMultipartUpload(abort: StorageMultipartAbort): Awaitable<void>;
+  /**
+   * Decides whether the object at `storageKey` is the content the material
+   * reserved. It is a required member, not an optional one: an issuer that
+   * could omit it would leave `content_hash` unchecked in exactly the
+   * deployments nobody audits.
+   */
+  verifyObject(request: StorageObjectVerificationRequest): Awaitable<StorageObjectVerification>;
   issueDownload(request: StorageObjectRequest): Awaitable<StorageGrant>;
   issuePreview(request: StoragePreviewRequest): Awaitable<StoragePreviewGrant>;
 }
@@ -265,9 +305,11 @@ export function createMaterialService(
         const completedParts = request.parts.map(toCompletedPart);
         // The bucket's own multipart upload is finished first: the assembled
         // object must exist before the material points at it, or a download
-        // grant would presign a GET to a key with no object behind it. Only
-        // then is the database completion recorded.
-        await completeStorageMultipart(options, authenticated, uploadId, completedParts);
+        // grant would presign a GET to a key with no object behind it. The
+        // same step reads the object back and re-derives its digest, so the
+        // database completion below can only run over bytes that really are
+        // the content the material reserved.
+        await assembleAndVerifyStoredObject(options, authenticated, uploadId, completedParts);
         const completed = await callWithMutation(
           toMutationReceiptContext(request.context?.requestId),
           (mutation) =>
@@ -624,13 +666,32 @@ async function issueUploadParts(
 }
 
 /**
- * Drives `CompleteMultipartUpload` for an upload that opened one. A session with
- * no `storageUploadId` opened no multipart upload — the deduplicated path, where
- * the bytes already existed — so there is nothing to complete and the call is a
- * no-op. When there is one, storage is required: an upload that must be assembled
- * in a bucket cannot be finished without the issuer that opened it.
+ * Drives `CompleteMultipartUpload` for an upload that opened one, then refuses
+ * to let the caller proceed unless the assembled object really is the content
+ * the material reserved.
+ *
+ * A session with no `storageUploadId` opened no multipart upload — the
+ * deduplicated path, where the bytes already existed and were verified by the
+ * completion that first stored them — so there is nothing to assemble and
+ * nothing to re-read. When there is one, storage is required: an upload that
+ * must be assembled in a bucket cannot be finished without the issuer that
+ * opened it.
+ *
+ * The verification matters because `material_objects` is keyed by
+ * `(group_id, content_hash)` and `storageKeyFor` derives the object key from
+ * the same hash. A completion that recorded a hash the bytes do not have would
+ * make every later upload of those bytes deduplicate onto the wrong object —
+ * one poisoned upload, every future reference wrong. The check therefore runs
+ * before the database records the version, never after.
+ *
+ * A failed check leaves the object where it is rather than deleting it. The
+ * key is content-addressed, so a concurrent honest completion of the same hash
+ * writes the same key; deleting here would remove bytes another material may
+ * already point at. An unverified object is harmless while it is unreferenced,
+ * and it stays unreferenced precisely because this refusal stops the row that
+ * would reference it.
  */
-async function completeStorageMultipart(
+async function assembleAndVerifyStoredObject(
   options: MaterialServiceOptions,
   authenticated: AuthenticatedDevice,
   uploadId: string,
@@ -645,12 +706,46 @@ async function completeStorageMultipart(
   // refused by the store below, without a bucket call it would only undo.
   if (!openUploadStates.has(status.session.state)) return;
   const storage = requireStorage(options.storage, 'upload');
-  const storageKey = await resolveMaterialStorageKey(options.store, authenticated, materialId);
+  const object = await resolveMaterialObject(options.store, authenticated, materialId);
   await storage.completeMultipartUpload({
-    storageKey,
+    storageKey: object.storageKey,
     remoteUploadId,
     parts: parts.map((part) => ({ partNumber: part.partNumber, etag: part.etag })),
   });
+  const verification = await storage.verifyObject({
+    storageKey: object.storageKey,
+    // The material's own hash, read back from the database, not the one this
+    // request carried: the completion statement compares the two itself, so
+    // taking the client's value here would check a number against itself.
+    contentHash: object.contentHash,
+    byteSize: status.session.totalSize,
+  });
+  assertObjectVerified(verification);
+}
+
+/**
+ * Turns a verification outcome into a refusal.
+ *
+ * The three content outcomes share one message on purpose: which of them
+ * occurred says nothing a client can act on beyond "these bytes are not what
+ * you declared", and enumerating them would let a caller probe what the bucket
+ * currently holds at a key it did not upload. An unverifiable digest is a
+ * separate message because it is a deployment fact, not a client one.
+ */
+function assertObjectVerified(verification: StorageObjectVerification): void {
+  if (verification.outcome === 'verified') return;
+  if (verification.outcome === 'unverifiable-digest') {
+    throw new PairedDeviceRuntimeError(
+      'FAILED_PRECONDITION',
+      'content_hash is not in a digest format this control plane can verify, so the uploaded object ' +
+        'cannot be checked against it. Expected a 64-character lowercase hexadecimal digest, ' +
+        'optionally prefixed with "blake3:" or "sha256:".',
+    );
+  }
+  throw new PairedDeviceRuntimeError(
+    'FAILED_PRECONDITION',
+    'The uploaded object does not match the content this material reserved, so no version was recorded.',
+  );
 }
 
 /**
@@ -678,21 +773,25 @@ async function resolveStorageAbort(
   const remoteUploadId = status?.session.storageUploadId;
   const materialId = status?.session.materialId;
   if (remoteUploadId === undefined || materialId === undefined) return undefined;
-  const storageKey = await resolveMaterialStorageKey(options.store, authenticated, materialId);
-  return { issuer, storageKey, remoteUploadId };
+  const object = await resolveMaterialObject(options.store, authenticated, materialId);
+  return { issuer, storageKey: object.storageKey, remoteUploadId };
 }
 
 /**
- * The reserved object key of a material's current content, which is the key its
- * open multipart upload was created against: the same content hash names both.
+ * The reserved object key of a material's current content and the digest that
+ * key was derived from. It is the key its open multipart upload was created
+ * against: the same content hash names both.
  */
-async function resolveMaterialStorageKey(
+async function resolveMaterialObject(
   store: DurableMaterialStore,
   authenticated: AuthenticatedDevice,
   materialId: string,
-): Promise<string> {
+): Promise<{ readonly storageKey: string; readonly contentHash: string }> {
   const found = await store.getMaterial(authenticated, materialId);
-  return storageKeyFor(found.material.groupId, found.material.contentHash);
+  return {
+    storageKey: storageKeyFor(found.material.groupId, found.material.contentHash),
+    contentHash: found.material.contentHash,
+  };
 }
 
 function resolveLocation(

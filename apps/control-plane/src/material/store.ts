@@ -2468,9 +2468,23 @@ function requireContentHash(value: string): string {
   return normalized;
 }
 
+/**
+ * Bounds a declared upload size from below.
+ *
+ * Zero is refused, not accepted as an empty file. `planUploadParts` returns no
+ * parts for it, so nothing would open a multipart upload, no client PUT would
+ * ever happen, and `CompleteUpload` would mark the material READY with no
+ * object behind it — a library row whose download grant presigns a GET to a key
+ * that holds nothing. Storing a real empty object instead would mean a second
+ * upload path outside the multipart lifecycle (S3 refuses a zero-length part),
+ * so the smaller and safer answer is to say no at the boundary.
+ */
 function requireByteSize(value: bigint): bigint {
-  if (value < 0n) {
-    throw new PairedDeviceRuntimeError('INVALID_ARGUMENT', 'total_size must not be negative.');
+  if (value <= 0n) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      'total_size must be greater than zero; a material with no bytes cannot be stored.',
+    );
   }
   return value;
 }

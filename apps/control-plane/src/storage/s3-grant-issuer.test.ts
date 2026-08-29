@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+
+import { blake3 } from '@noble/hashes/blake3.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 
 import { loadControlPlaneConfig, type ControlPlaneStorageConfig } from '../config.js';
@@ -41,7 +45,14 @@ interface RecordedCall {
   readonly request: StorageFetchRequest;
 }
 
-function scriptedFetch(answers: readonly { readonly status: number; readonly body?: string }[]): {
+function scriptedFetch(
+  answers: readonly {
+    readonly status: number;
+    readonly body?: string;
+    /** Supplied only where the scenario is an object read-back rather than XML. */
+    readonly bytes?: readonly Uint8Array[];
+  }[],
+): {
   readonly fetch: StorageFetch;
   readonly calls: RecordedCall[];
 } {
@@ -53,10 +64,19 @@ function scriptedFetch(answers: readonly { readonly status: number; readonly bod
       calls.push({ url, request });
       const answer = queue.shift();
       if (answer === undefined) throw new Error('unexpected bucket call');
+      const bytes = answer.bytes;
       return {
         ok: answer.status >= 200 && answer.status < 300,
         status: answer.status,
         text: () => Promise.resolve(answer.body ?? ''),
+        // Several chunks rather than one, so the incremental digest is proved
+        // to be incremental: a single-chunk answer would pass even if the
+        // issuer hashed only the last piece it saw.
+        ...(bytes === undefined
+          ? {}
+          : {
+              chunks: (): AsyncIterable<Uint8Array> => toAsyncIterable(bytes),
+            }),
       };
     },
   };
@@ -300,3 +320,158 @@ describe('S3 grant issuer: multipart lifecycle', () => {
     expect(new URL(bucket.calls[0]?.url ?? '').searchParams.get('uploadId')).toBe('remote-1');
   });
 });
+
+/**
+ * The read-back that decides whether the assembled object is the content the
+ * material declared. These scenarios drive the digest logic; whether a real
+ * store hands back the bytes it was given is proved against MinIO in
+ * `s3-grant-issuer.live.integration.test.ts`.
+ */
+describe('S3 grant issuer: object verification', () => {
+  const payload = Buffer.from('гремучая смесь — кадр 17', 'utf8');
+  const blake3Hex = bytesToHex(blake3(payload));
+  const sha256Digest = createHash('sha256').update(payload).digest('hex');
+  const halves = [
+    new Uint8Array(payload.subarray(0, 7)),
+    new Uint8Array(payload.subarray(7)),
+  ] as const;
+
+  it('signs a GET the server sends itself and accepts an object that hashes to the bare BLAKE3 digest', async () => {
+    const bucket = scriptedFetch([{ status: 200, bytes: halves }]);
+    const issuer = createS3GrantIssuer(config(), { fetch: bucket.fetch, now: () => fixedNow });
+
+    const verification = await issuer.verifyObject({
+      storageKey,
+      contentHash: blake3Hex,
+      byteSize: BigInt(payload.byteLength),
+    });
+
+    expect(verification).toEqual({ outcome: 'verified' });
+    const call = bucket.calls[0];
+    expect(call?.request.method).toBe('GET');
+    // No query at all: the read-back addresses the object itself, not a grant,
+    // so it carries neither a part number nor a response-content override.
+    expect(new URL(call?.url ?? '').search).toBe('');
+    expect(call?.request.headers['x-amz-content-sha256']).toBe(emptyPayloadHash);
+    expect(call?.request.headers.authorization).toContain('AWS4-HMAC-SHA256 Credential=');
+    // The read-back is a signed request, never a presigned URL: a URL that
+    // hands out an object's bytes must not exist for this purpose.
+    expect(call?.url).not.toContain('X-Amz-Signature');
+    expect(JSON.stringify(call)).not.toContain(secretAccessKey);
+  });
+
+  it('accepts the two explicit digest prefixes and refuses every other format', async () => {
+    const prefixedBlake3 = await createS3GrantIssuer(config(), {
+      fetch: scriptedFetch([{ status: 200, bytes: halves }]).fetch,
+    }).verifyObject({
+      storageKey,
+      contentHash: `blake3:${blake3Hex}`,
+      byteSize: BigInt(payload.byteLength),
+    });
+    expect(prefixedBlake3).toEqual({ outcome: 'verified' });
+
+    const prefixedSha256 = await createS3GrantIssuer(config(), {
+      fetch: scriptedFetch([{ status: 200, bytes: halves }]).fetch,
+    }).verifyObject({
+      storageKey,
+      contentHash: `sha256:${sha256Digest}`,
+      byteSize: BigInt(payload.byteLength),
+    });
+    expect(prefixedSha256).toEqual({ outcome: 'verified' });
+
+    // `content_hash` is validated by the store as a storage-key-safe string,
+    // which is far wider than a digest. Anything this issuer cannot recompute
+    // is refused rather than waved through, and refused without a bucket call:
+    // an unverifiable hash is decided before a byte is spent.
+    for (const unverifiable of [
+      'sha256:0f1e2d3c4b5a69788796a5b4c3d2e1f0',
+      blake3Hex.toUpperCase(),
+      `md5:${'0'.repeat(64)}`,
+      blake3Hex.slice(0, 63),
+    ]) {
+      const bucket = scriptedFetch([]);
+      const verification = await createS3GrantIssuer(config(), {
+        fetch: bucket.fetch,
+      }).verifyObject({
+        storageKey,
+        contentHash: unverifiable,
+        byteSize: BigInt(payload.byteLength),
+      });
+      expect(verification).toEqual({ outcome: 'unverifiable-digest' });
+      expect(bucket.calls).toHaveLength(0);
+    }
+  });
+
+  it('reports a hash mismatch when the bytes are a different file of the same length', async () => {
+    const impostor = Buffer.from(payload);
+    impostor[0] = (impostor[0] ?? 0) ^ 0xff;
+    const issuer = createS3GrantIssuer(config(), {
+      fetch: scriptedFetch([{ status: 200, bytes: [new Uint8Array(impostor)] }]).fetch,
+    });
+
+    const verification = await issuer.verifyObject({
+      storageKey,
+      contentHash: blake3Hex,
+      byteSize: BigInt(payload.byteLength),
+    });
+
+    expect(verification).toEqual({ outcome: 'hash-mismatch' });
+  });
+
+  it('reports a size mismatch, counting the bytes it streamed rather than a header', async () => {
+    const issuer = createS3GrantIssuer(config(), {
+      fetch: scriptedFetch([{ status: 200, bytes: [halves[0]] }]).fetch,
+    });
+
+    const verification = await issuer.verifyObject({
+      storageKey,
+      contentHash: blake3Hex,
+      byteSize: BigInt(payload.byteLength),
+    });
+
+    expect(verification).toEqual({ outcome: 'size-mismatch', actualByteSize: 7n });
+  });
+
+  it('reports a missing object, and raises a backend error for any other refusal', async () => {
+    const missing = createS3GrantIssuer(config(), {
+      fetch: scriptedFetch([{ status: 404, body: '<Error><Code>NoSuchKey</Code></Error>' }]).fetch,
+    });
+    await expect(
+      missing.verifyObject({ storageKey, contentHash: blake3Hex, byteSize: 24n }),
+    ).resolves.toEqual({ outcome: 'missing' });
+
+    const denied = createS3GrantIssuer(config(), {
+      fetch: scriptedFetch([
+        {
+          status: 403,
+          body: `<Error><Code>AccessDenied</Code><StringToSign>${secretAccessKey}</StringToSign></Error>`,
+        },
+      ]).fetch,
+    });
+    let error: unknown;
+    try {
+      await denied.verifyObject({ storageKey, contentHash: blake3Hex, byteSize: 24n });
+    } catch (caught) {
+      error = caught;
+    }
+    // A store that refuses the read is a backend failure, not a verdict about
+    // the bytes: answering `hash-mismatch` there would blame the client for an
+    // outage. It must be distinguishable, so it throws.
+    expect(error).toBeInstanceOf(StorageBackendError);
+    expect((error as StorageBackendError).status).toBe(403);
+    expect(String(error)).toContain('GetObject failed with status 403');
+
+    const bodiless = createS3GrantIssuer(config(), {
+      fetch: scriptedFetch([{ status: 200 }]).fetch,
+    });
+    await expect(
+      bodiless.verifyObject({ storageKey, contentHash: blake3Hex, byteSize: 24n }),
+    ).rejects.toThrow('response carried no readable body');
+  });
+});
+
+async function* toAsyncIterable(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) {
+    yield await Promise.resolve(chunk);
+  }
+}

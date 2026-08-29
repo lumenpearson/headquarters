@@ -11,6 +11,29 @@ import { cors } from '@connectrpc/connect';
  * different opinion about who may call and what a preflight answers.
  */
 
+/**
+ * The largest document payload either direction of an RPC may carry.
+ *
+ * Mounted in the web build the router runs as a Vercel Function, and the
+ * platform caps a Function's request body and its response body at 4.5 MB
+ * each. Over that it answers `FUNCTION_PAYLOAD_TOO_LARGE` before the handler is
+ * reached, so nothing in this repository gets to name the cause: the client
+ * sees a platform error with no method, no group and no document in it.
+ *
+ * The ceiling is set below the platform's rather than at it. A gRPC-Web frame
+ * carries an envelope, the request carries identifiers and a receipt, and the
+ * response carries trailers; measuring only the payload and stopping at exactly
+ * 4.5 MB would let a payload that fits refuse at the platform anyway. Half a
+ * megabyte of headroom is more than any of that costs.
+ *
+ * It is a control-plane decision and not a transport one because the two
+ * adapters disagree about whether the cap exists at all: the Node server in
+ * `server.ts` answers behind a socket the deployment owns and has no such
+ * limit. Deployments that know they are not behind a Function may raise it
+ * through `PairedDeviceServiceOptions.maxDocumentBodyBytes`.
+ */
+export const maxDocumentBodyBytes = 4_000_000;
+
 /** What the decision reads from a request; nothing else about it matters. */
 export interface RpcHttpRequest {
   /** `GET`, `POST`, `OPTIONS`; `undefined` only where a runtime omits it. */

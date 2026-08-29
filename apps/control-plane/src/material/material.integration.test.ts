@@ -17,6 +17,8 @@ import {
   type StorageMultipartAbort,
   type StorageMultipartCompletion,
   type StorageMultipartTarget,
+  type StorageObjectVerification,
+  type StorageObjectVerificationRequest,
 } from './service.js';
 import { DurableMaterialStore, storageKeyFor, type BeginUploadOutcome } from './store.js';
 
@@ -732,11 +734,15 @@ describeIntegration('durable material library against real PostgreSQL', () => {
       // material currently points at. Releasing the old object here deleted the
       // bytes of a version that is still listed and still restorable — and did
       // it while the replacement was still uploading.
+      // The hashes are bound one per placeholder rather than as one array parameter:
+      // `SqlParameter` is deliberately scalar, so the port stays the same shape here as
+      // in the production statements this scenario is meant to mirror.
+      const [lowerHash, upperHash] = [firstHash, secondHash].sort();
       const afterReplacement = await database.query<{ content_hash: string; n: number }>({
         text: `SELECT content_hash, reference_count::int AS n
-               FROM material_objects WHERE group_id = $1 AND content_hash = ANY($2::text[])
+               FROM material_objects WHERE group_id = $1 AND content_hash IN ($2, $3)
                ORDER BY content_hash`,
-        values: [owner.groupId, [firstHash, secondHash].sort()],
+        values: [owner.groupId, lowerHash ?? '', upperHash ?? ''],
       });
       expect(afterReplacement).toHaveLength(2);
       expect(afterReplacement.every((row) => row.n === 1)).toBe(true);
@@ -754,8 +760,8 @@ describeIntegration('durable material library against real PostgreSQL', () => {
       // ever names them again.
       const afterPurge = await database.query<{ n: number }>({
         text: `SELECT count(*)::int AS n FROM material_objects
-               WHERE group_id = $1 AND content_hash = ANY($2::text[])`,
-        values: [owner.groupId, [firstHash, secondHash].sort()],
+               WHERE group_id = $1 AND content_hash IN ($2, $3)`,
+        values: [owner.groupId, lowerHash ?? '', upperHash ?? ''],
       });
       expect(afterPurge[0]?.n).toBe(0);
     },
@@ -803,6 +809,115 @@ describeIntegration('durable material library against real PostgreSQL', () => {
     networkTimeoutMs,
   );
 
+  it(
+    'leaves no material behind when a zero-byte upload is refused',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const store = createStore(runtime);
+      const contentHash = uniqueContentHash();
+
+      await expect(
+        store.beginUpload(owner.authenticated, {
+          groupId: owner.groupId,
+          displayName: 'Пустой файл',
+          originalFileName: 'empty.mp4',
+          category: 'VIDEO',
+          mimeType: 'video/mp4',
+          totalSize: 0n,
+          contentHash,
+        }),
+      ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'INVALID_ARGUMENT' });
+
+      // The refusal is what keeps `READY` honest. Before it, this call created
+      // a material, an upload session and no parts at all, and the completion
+      // that followed marked the material READY over an object that was never
+      // opened, let alone assembled.
+      const rows = await database.query<{
+        materials: number;
+        objects: number;
+        sessions: number;
+      }>({
+        text: `SELECT
+                 (SELECT count(*)::int FROM materials WHERE group_id = $1) AS materials,
+                 (SELECT count(*)::int FROM material_objects WHERE group_id = $1) AS objects,
+                 (SELECT count(*)::int FROM upload_sessions WHERE group_id = $1) AS sessions`,
+        values: [owner.groupId],
+      });
+      expect(rows[0]).toEqual({ materials: 0, objects: 0, sessions: 0 });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'reads the assembled object back while the session is still open, and records nothing when it disagrees',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const store = createStore(runtime);
+      const bucket = recordingStorageIssuer({ outcome: 'hash-mismatch' });
+      const service = createMaterialService({ runtime, store, storage: bucket.issuer });
+      const contentHash = uniqueContentHash();
+      const context = handlerContext(owner.accessToken);
+      const materialId = randomUUID();
+
+      const begun = await service.beginUpload?.(
+        create(materialV1.BeginUploadRequestSchema, {
+          context: { requestId: `begin-${uniqueSuffix()}` },
+          groupId: { value: owner.groupId },
+          materialId: { value: materialId },
+          displayName: 'Съёмка',
+          originalFileName: 'take.mp4',
+          category: materialV1.MaterialCategory.VIDEO,
+          mimeType: 'video/mp4',
+          totalSize: 1024n,
+          contentHash,
+        }),
+        context,
+      );
+
+      await expect(
+        Promise.resolve(
+          service.completeUpload?.(
+            create(materialV1.CompleteUploadRequestSchema, {
+              context: { requestId: `complete-${uniqueSuffix()}` },
+              uploadId: { value: begun?.session?.id?.value ?? '' },
+              contentHash,
+              parts: [{ partNumber: 1, etag: '"a"', checksum: '' }],
+            }),
+            context,
+          ),
+        ),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining('does not match the content this material reserved'),
+      });
+
+      // The read-back is addressed to the key the content hash derives, and it
+      // happens while the session is still open — that is, strictly before the
+      // statement that would set the material READY.
+      expect(bucket.verified).toEqual([
+        {
+          storageKey: storageKeyFor(owner.groupId, contentHash),
+          contentHash,
+          byteSize: 1024n,
+        },
+      ]);
+      expect(bucket.sessionStatesAtVerification).toEqual(['PENDING']);
+
+      const rows = await database.query<{ status: string; versions: number; state: string }>({
+        text: `SELECT material.status,
+                      (SELECT count(*)::int FROM material_versions WHERE material_id = material.id) AS versions,
+                      (SELECT state FROM upload_sessions WHERE material_id = material.id) AS state
+               FROM materials AS material WHERE material.id = $1`,
+        values: [materialId],
+      });
+      expect(rows[0]?.status).toBe('UPLOADING');
+      expect(rows[0]?.versions).toBe(0);
+      expect(rows[0]?.state).toBe('PENDING');
+    },
+    networkTimeoutMs,
+  );
+
   function createRuntime(): DurablePairedDeviceRuntime {
     return new DurablePairedDeviceRuntime({ database, tokenPepper });
   }
@@ -834,15 +949,38 @@ describeIntegration('durable material library against real PostgreSQL', () => {
    * reads the session's state from the database at the moment the bucket is
    * asked to complete or abort — which is how the tests see the order of the
    * bucket step and the database step, not only that both happened.
+   *
+   * `verification` is what the stand-in reports when the service reads the
+   * assembled object back. It defaults to `verified` because these scenarios
+   * are about the database, and it is a parameter so one of them can be about
+   * what happens when the bytes disagree with the declared hash. Whether a real
+   * store's bytes hash to what the client said is proved against MinIO in
+   * `storage/s3-grant-issuer.live.integration.test.ts`, not here.
    */
-  function recordingStorageIssuer(): RecordingStorageIssuer {
+  function recordingStorageIssuer(
+    verification: StorageObjectVerification = { outcome: 'verified' },
+  ): RecordingStorageIssuer {
     const expiresAt = new Date(Date.now() + 600_000);
     const opened: StorageMultipartTarget[] = [];
     const remoteUploadIds: string[] = [];
     const completed: StorageMultipartCompletion[] = [];
     const aborted: StorageMultipartAbort[] = [];
+    const verified: StorageObjectVerificationRequest[] = [];
+    const sessionStatesAtVerification: string[] = [];
     const sessionStatesAtCompletion: string[] = [];
     const sessionStatesAtAbort: string[] = [];
+    async function sessionStateByMaterial(storageKey: string): Promise<string> {
+      const rows = await database.query<{ state: string }>({
+        text: `SELECT session.state
+               FROM upload_sessions AS session
+               JOIN materials AS material ON material.id = session.material_id
+               WHERE $1 = 'materials/' || material.group_id || '/' || material.content_hash
+               ORDER BY session.created_at DESC
+               LIMIT 1`,
+        values: [storageKey],
+      });
+      return rows[0]?.state ?? 'MISSING';
+    }
     async function sessionState(remoteUploadId: string): Promise<string> {
       const rows = await database.query<{ state: string }>({
         text: 'SELECT state FROM upload_sessions WHERE storage_upload_id = $1',
@@ -855,6 +993,8 @@ describeIntegration('durable material library against real PostgreSQL', () => {
       remoteUploadIds,
       completed,
       aborted,
+      verified,
+      sessionStatesAtVerification,
       sessionStatesAtCompletion,
       sessionStatesAtAbort,
       issuer: {
@@ -875,6 +1015,14 @@ describeIntegration('durable material library against real PostgreSQL', () => {
         abortMultipartUpload: async (abort) => {
           sessionStatesAtAbort.push(await sessionState(abort.remoteUploadId));
           aborted.push(abort);
+        },
+        verifyObject: async (request) => {
+          // Recorded together with the session state so a test can show the
+          // read-back happens while the session is still open — that is, before
+          // the statement that would make the material READY.
+          sessionStatesAtVerification.push(await sessionStateByMaterial(request.storageKey));
+          verified.push(request);
+          return verification;
         },
         issueDownload: (request) => ({
           url: `https://storage.invalid/${request.storageKey}`,
@@ -934,6 +1082,8 @@ interface RecordingStorageIssuer {
   readonly remoteUploadIds: readonly string[];
   readonly completed: readonly StorageMultipartCompletion[];
   readonly aborted: readonly StorageMultipartAbort[];
+  readonly verified: readonly StorageObjectVerificationRequest[];
+  readonly sessionStatesAtVerification: readonly string[];
   readonly sessionStatesAtCompletion: readonly string[];
   readonly sessionStatesAtAbort: readonly string[];
 }

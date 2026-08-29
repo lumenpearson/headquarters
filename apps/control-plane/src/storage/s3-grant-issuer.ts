@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+
+import { blake3 } from '@noble/hashes/blake3.js';
+
 import type { ControlPlaneStorageConfig } from '../config.js';
 import type {
   StorageGrant,
@@ -7,6 +11,8 @@ import type {
   StorageMultipartHandle,
   StorageMultipartTarget,
   StorageObjectRequest,
+  StorageObjectVerification,
+  StorageObjectVerificationRequest,
   StoragePreviewGrant,
   StoragePreviewRequest,
   StorageUploadPartRequest,
@@ -20,11 +26,13 @@ import { emptyPayloadHash, sha256Hex } from './sigv4.js';
  *
  * The three URL-minting operations — part upload, download, preview — are pure
  * SigV4 presigning and make no network call: whoever holds the URL talks to the
- * bucket directly, which is the whole point of a grant. The three lifecycle
- * operations — create, complete and abort a multipart upload — are the calls
- * the control plane must make itself, because each carries the server's own
- * credential and cannot be a URL a browser follows. They go through an
- * injected `fetch` so a test can drive the multipart path without a bucket.
+ * bucket directly, which is the whole point of a grant. The four remaining
+ * operations — create, complete and abort a multipart upload, and read the
+ * assembled object back to verify it — are the calls the control plane must
+ * make itself, because each carries the server's own credential and cannot be a
+ * URL a browser follows. They go through an injected `fetch` so a test can
+ * drive the multipart path without a bucket; that a real bucket answers them is
+ * proved in `s3-grant-issuer.live.integration.test.ts`.
  *
  * The issuer never holds a secret. Signing is delegated to the
  * {@link ControlPlaneStorageConfig} closures the configuration parser built
@@ -40,6 +48,16 @@ export interface StorageFetchResponse {
   readonly ok: boolean;
   readonly status: number;
   text(): Promise<string>;
+  /**
+   * The response body as a stream of chunks.
+   *
+   * Only the object read-back reads it, and it reads a stream rather than a
+   * buffer because an assembled material is a video file, not an XML document:
+   * holding one in memory to hash it would put the largest upload the library
+   * accepts into the control plane's heap. Optional so a scripted response can
+   * omit it for the XML operations, which never call it.
+   */
+  chunks?(): AsyncIterable<Uint8Array>;
 }
 
 export interface StorageFetchRequest {
@@ -195,6 +213,66 @@ export const createS3GrantIssuer: StorageGrantIssuerFactory = (config, options =
       );
     },
 
+    /**
+     * Reads the assembled object back and re-derives its digest.
+     *
+     * This is the only operation that spends the object's own bytes, and it is
+     * deliberate: `content_hash` is a BLAKE3 digest of the whole file, which no
+     * S3-compatible store can compute, so nothing but a read-back can decide
+     * whether the stored bytes are the ones the material declared. The GET is
+     * signed with the server's credential rather than presigned, because the
+     * answer is for the control plane and must not be a URL anyone can hold.
+     *
+     * The stream is hashed chunk by chunk and never buffered, and the byte
+     * count is taken from the same pass — so a truncated object is caught by
+     * the size comparison even before the digest disagrees.
+     */
+    async verifyObject(
+      request: StorageObjectVerificationRequest,
+    ): Promise<StorageObjectVerification> {
+      const declared = parseDeclaredDigest(request.contentHash);
+      // Fail closed. A digest in a format this issuer cannot recompute is
+      // exactly the case the old behaviour handled by not checking at all.
+      if (declared === undefined) return { outcome: 'unverifiable-digest' };
+
+      const url = objectUrl(config, request.storageKey);
+      const headers = config.sign({
+        method: 'GET',
+        url,
+        headers: {},
+        payloadHash: emptyPayloadHash,
+        signedAt: now(),
+      });
+      const response = await doFetch(url.toString(), { method: 'GET', headers });
+      if (response.status === 404) return { outcome: 'missing' };
+      if (!response.ok) {
+        throw new StorageBackendError(
+          'GetObject',
+          response.status,
+          boundedDetail(await response.text()),
+        );
+      }
+      const chunks = response.chunks?.();
+      if (chunks === undefined) {
+        throw new StorageBackendError(
+          'GetObject',
+          response.status,
+          'response carried no readable body',
+        );
+      }
+
+      const digest = createDigest(declared.algorithm);
+      let byteSize = 0n;
+      for await (const chunk of chunks) {
+        digest.update(chunk);
+        byteSize += BigInt(chunk.byteLength);
+      }
+      if (byteSize !== request.byteSize)
+        return { outcome: 'size-mismatch', actualByteSize: byteSize };
+      if (digest.hex() !== declared.hex) return { outcome: 'hash-mismatch' };
+      return { outcome: 'verified' };
+    },
+
     issueDownload(request: StorageObjectRequest): StorageGrant {
       const url = objectUrl(config, request.storageKey);
       // An attachment disposition is what makes a browser save the original
@@ -262,6 +340,66 @@ function escapeXml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
+/** The digest algorithms a declared `content_hash` may name. */
+type DeclaredDigestAlgorithm = 'blake3' | 'sha256';
+
+interface DeclaredDigest {
+  readonly algorithm: DeclaredDigestAlgorithm;
+  readonly hex: string;
+}
+
+/**
+ * Reads the algorithm and the value out of a declared `content_hash`.
+ *
+ * Every client this repository ships computes a bare lowercase hexadecimal
+ * BLAKE3 digest — `BrowserBlake3Hasher` in `apps/hq` and `MaterialMirror` in
+ * `apps/file-bridge`, which validates `^[a-f0-9]{64}$` before it accepts one —
+ * so an unprefixed 64-character digest is BLAKE3 and nothing else. The two
+ * explicit prefixes exist so a future client can name what it computed instead
+ * of relying on that convention.
+ *
+ * Anything else returns `undefined`, which the caller turns into a refusal.
+ * `material_objects.content_hash` accepts a wider alphabet than this — it is a
+ * storage-key-safe string, not a digest grammar — and the difference is the
+ * point: a value the store will happily persist but nobody can recompute must
+ * not reach a READY material.
+ */
+function parseDeclaredDigest(contentHash: string): DeclaredDigest | undefined {
+  const normalized = contentHash.trim();
+  if (/^[0-9a-f]{64}$/u.test(normalized)) return { algorithm: 'blake3', hex: normalized };
+  const prefixed = /^(blake3|sha256):([0-9a-f]{64})$/u.exec(normalized);
+  const algorithm = prefixed?.[1];
+  const hex = prefixed?.[2];
+  if (algorithm === undefined || hex === undefined) return undefined;
+  return { algorithm: algorithm === 'sha256' ? 'sha256' : 'blake3', hex };
+}
+
+interface IncrementalDigest {
+  update(chunk: Uint8Array): void;
+  hex(): string;
+}
+
+/**
+ * SHA-256 comes from `node:crypto`, which streams it natively; BLAKE3 has no
+ * OpenSSL implementation to borrow, so it comes from `@noble/hashes`, the same
+ * package both upload clients hash with. Using the clients' own implementation
+ * is what makes agreement here mean agreement there.
+ */
+function createDigest(algorithm: DeclaredDigestAlgorithm): IncrementalDigest {
+  if (algorithm === 'sha256') {
+    const hash = createHash('sha256');
+    return {
+      update: (chunk) => void hash.update(chunk),
+      hex: () => hash.digest('hex'),
+    };
+  }
+  const hash = blake3.create();
+  return {
+    update: (chunk) => void hash.update(chunk),
+    hex: () => Buffer.from(hash.digest()).toString('hex'),
+  };
+}
+
 /** Bucket error bodies can be large; a bounded slice is enough to diagnose. */
 function boundedDetail(text: string): string {
   const collapsed = text.replace(/\s+/gu, ' ').trim();
@@ -279,5 +417,30 @@ const defaultFetch: StorageFetch = async (url, request) => {
     ok: response.ok,
     status: response.status,
     text: () => response.text(),
+    // `text` and `chunks` consume the same body, so exactly one of them is
+    // called per response: the verification path reads chunks on success and
+    // text only on the failure branch it never reaches afterwards.
+    chunks: () => readResponseChunks(response.body),
   };
 };
+
+/**
+ * A reader loop rather than `for await (const chunk of body)`: asynchronous
+ * iteration over a `ReadableStream` is a Node extension, and the adapter is
+ * meant to be readable by whichever runtime the deployment mounts.
+ */
+async function* readResponseChunks(
+  body: ReadableStream<Uint8Array> | null,
+): AsyncIterable<Uint8Array> {
+  if (body === null) return;
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      yield value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

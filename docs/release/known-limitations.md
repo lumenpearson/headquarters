@@ -43,24 +43,37 @@ the code that makes it true, so the next reader can check rather than trust.
   and the `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL` build variable. With no address, or with
   `general.localOnly` on, session synchronization runs over the browser screen bus alone
   (ADR 0001).
-- **Object storage is implemented and unproven against a live bucket.** `BeginUpload`,
+- **Object storage has been run against a live bucket once, in a container.** `BeginUpload`,
   `CreateMaterialVersion`, `GetDownloadGrant` and `GetPreviewGrant` mint AWS Signature Version 4
   presigned URLs once the `HQ_CONTROL_PLANE_STORAGE_*` group in `apps/control-plane/.env.example`
   is set (`apps/control-plane/src/storage/`, no SDK); without it they answer `FAILED_PRECONDITION`
-  naming the missing variables. What is proved: the signature algorithm against the AWS SigV4
-  test-suite vectors and the S3 API Reference examples (`sigv4.test.ts`), the multipart calls
-  against a scripted bucket (`s3-grant-issuer.test.ts`), and the whole lifecycle —
-  `CreateMultipartUpload`, part grants, `CompleteMultipartUpload` before the database records the
-  version, `AbortMultipartUpload` after it records the cancellation — over binary gRPC-Web against
-  live PostgreSQL (`services.wire.integration.test.ts`, `material.integration.test.ts`). What is
-  not, because no bucket exists in any environment this repository has been run in: that a real
-  store accepts the signed requests; that a client `PUT` to a part grant succeeds and returns the
-  etag the completion then sends; that `CompleteMultipartUpload` assembles the object; that a
-  download grant serves it. Three gaps are by design and stay open with a bucket: the store never
-  checks `content_hash`, so the stored bytes match the declared hash only as far as the client was
-  honest; a zero-byte upload plans no parts, opens no multipart upload, and marks the material
-  `READY` with no object behind it; every preview variant is the original object served inline,
-  because no conversion pipeline renders another.
+  naming the missing variables. What is proved offline: the signature algorithm against the AWS
+  SigV4 test-suite vectors and the S3 API Reference examples (`sigv4.test.ts`), the multipart calls
+  and the object read-back against a scripted bucket (`s3-grant-issuer.test.ts`), and the whole
+  lifecycle — `CreateMultipartUpload`, part grants, `CompleteMultipartUpload` and the verification
+  read-back before the database records the version, `AbortMultipartUpload` after it records the
+  cancellation — over binary gRPC-Web against live PostgreSQL
+  (`services.wire.integration.test.ts`, `material.integration.test.ts`). What was unproven until
+  2026-08-29, because no environment this repository had run in held a bucket, is now proved
+  against MinIO in Docker by two opt-in suites: a real store accepting the signed requests, a
+  client `PUT` to a part grant returning the etag the completion sends back,
+  `CompleteMultipartUpload` assembling a two-part 5 MiB + 4 KiB object, and a download grant
+  serving those exact bytes (`storage/s3-grant-issuer.live.integration.test.ts` and
+  `material/material.live-storage.integration.test.ts`, gated on `HQ_CONTROL_PLANE_TEST_STORAGE_*`
+  alongside `HQ_CONTROL_PLANE_TEST_DATABASE_URL`; both create and drop their own bucket). Two of
+  the three gaps that were "by design" are closed with them. `CompleteUpload` now reads the
+  assembled object back and re-derives its BLAKE3 digest before any version is recorded, so a
+  client that declares one file's hash and uploads another is refused rather than allowed to
+  poison every later deduplicated reference to that hash; the cost is that every completion reads
+  the object once more, and a `content_hash` that is not a 64-character lowercase hexadecimal
+  digest — optionally prefixed `blake3:` or `sha256:` — is refused rather than accepted unchecked.
+  A zero-byte upload is refused at `BeginUpload` and `CreateMaterialVersion` instead of producing
+  a `READY` material with no object behind it; an empty file cannot be stored at all, because a
+  real empty object would need an upload path outside the multipart lifecycle. The remaining gap
+  is unchanged: every preview variant is the original object served inline, because no conversion
+  pipeline renders another. What no container can settle is a hosted store's own behaviour —
+  bucket policy, lifecycle rules, cross-region latency and a provider's multipart limits are
+  still unmeasured.
 - **Three `IntegrationService` RPCs answer `unimplemented`** for the same reason: `CreateIssue`,
   `CreateTranslationPullRequest` and `GetPullRequestStatus` need GitHub egress the composition
   root holds no secret for.
@@ -140,17 +153,25 @@ the code that makes it true, so the next reader can check rather than trust.
   service still runs; `Health` says which of the two modes is in force.
 - `layout_documents`, `layout_versions` and `conversion_jobs` are created by migrations and
   reached by no code. No RPC in the current contract can fill them.
-- **Mounted in the web build, a request or response body above 4.5 MB fails.** The Fetch adapter
-  (`apps/control-plane/src/fetch-adapter.ts`) is mounted at `apps/hq/app/api/[[...rpc]]/route.web.ts`
-  in the web target, and Vercel caps a Function's request body and its response body at 4.5 MB
-  each; over that the platform answers `FUNCTION_PAYLOAD_TOO_LARGE` before the handler is reached,
-  so no control-plane error names the cause. The two RPCs that can produce a body that large are
-  `GetDocumentSnapshot`, whose reply carries the whole serialized document, and
-  `PublishDocumentDelta`, whose request carries an update. Nothing in the repository enforces a
-  ceiling below the platform's, and no document in any fixture approaches it, so this has not been
-  observed — it is recorded here rather than found on a shoot day. The Node process
-  (`apps/control-plane/src/server.ts`) has no such cap: it is the same router behind a socket the
-  deployment owns.
+- **A document body above 4 MB is refused, and above 4.5 MB the platform would refuse it first.**
+  The Fetch adapter (`apps/control-plane/src/fetch-adapter.ts`) is mounted at
+  `apps/hq/app/api/[[...rpc]]/route.web.ts` in the web target, and Vercel caps a Function's request
+  body and its response body at 4.5 MB each; over that the platform answers
+  `FUNCTION_PAYLOAD_TOO_LARGE` before the handler is reached, so no control-plane error would name
+  the cause. The two RPCs that can produce a body that large are `GetDocumentSnapshot`, whose reply
+  carries the whole serialized document, and `PublishDocumentDelta`, whose request carries an
+  update. Both now measure the payload against `maxDocumentBodyBytes` in
+  `apps/control-plane/src/http-policy.ts` — 4 000 000 bytes, half a megabyte below the platform's
+  limit so the gRPC-Web envelope, the identifiers and the trailers fit inside it — and refuse
+  before the log is touched: `INVALID_ARGUMENT` for a request the caller can shrink,
+  `FAILED_PRECONDITION` for a reply this deployment cannot deliver, both naming the size and the
+  ceiling. The refusal is a better error, not a fix: a document that has grown past the ceiling is
+  still a resync a client cannot complete, and nothing in the repository compacts one. The Node
+  process (`apps/control-plane/src/server.ts`) has no platform cap and may raise the ceiling
+  through `PairedDeviceServiceOptions.maxDocumentBodyBytes`; no assembly point sets it today, so
+  every deployment runs the default. The platform half of this — that Vercel really answers
+  `FUNCTION_PAYLOAD_TOO_LARGE` — remains unobserved, because no deployment exists to observe it
+  on.
 
 ## Personalization
 
