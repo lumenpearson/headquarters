@@ -185,6 +185,98 @@ message RevokeMaterialPlaybackGrantResponse {
   bool revoked = 1;
 }
 
+// Why every failure the file bridge returns carries one of these.
+//
+// Same mandate as ControlPlaneFailure -- a code can be translated, a sentence
+// cannot -- and one extra constraint that is this server's alone. The bridge
+// projects a physical tree behind virtual paths so that no physical path ever
+// reaches the UI (ADR 0002). Before these codes existed, four branches of
+// `toConnectError` rethrew the underlying exception's own message, and a Node
+// fs error quotes the absolute path it failed on. A code carries no path by
+// construction, and BridgeFailureDetail.developer_message is a fixed sentence
+// chosen per code rather than the exception's text.
+//
+// The set is closed: `apps/file-bridge/src/errors.ts` keys an exhaustive table
+// off it. Proto3 enums are open on the wire, so a bridge newer than the client
+// sends numbers the client degrades to its generic kind; nothing here may be
+// renumbered or removed.
+enum BridgeFailure {
+  BRIDGE_FAILURE_UNSPECIFIED = 0;
+
+  // Nothing more specific survived the handler boundary. This is the branch
+  // that used to carry `error.message`, which is where a physical path escaped.
+  BRIDGE_FAILURE_INTERNAL = 1;
+
+  BRIDGE_FAILURE_MISSING_FIELD = 2;
+
+  // The two refusals of pathSecurity.ts. Both mean the request named something
+  // outside the mount; neither says what, or where the mount is.
+  BRIDGE_FAILURE_PATH_ESCAPES_MOUNT = 3;
+  BRIDGE_FAILURE_SYMLINK_REFUSED = 4;
+
+  // A request that reached into the bridge's own `.hq` tree.
+  BRIDGE_FAILURE_INTERNAL_PATH_HIDDEN = 5;
+
+  BRIDGE_FAILURE_MOUNT_UNKNOWN = 6;
+  BRIDGE_FAILURE_NOT_A_DIRECTORY = 7;
+  BRIDGE_FAILURE_NOT_A_FILE = 8;
+
+  // The entry named by a virtual path is gone. Replaces the ENOENT branch,
+  // whose message quoted the absolute path it could not open.
+  BRIDGE_FAILURE_ENTRY_NOT_FOUND = 9;
+
+  BRIDGE_FAILURE_MATERIAL_IMPORT_DISABLED = 10;
+  BRIDGE_FAILURE_MATERIAL_TOO_LARGE = 11;
+  BRIDGE_FAILURE_MATERIAL_NAME_UNSAFE = 12;
+
+  // Offset mismatch, empty chunk, oversized chunk, or a chunk that would run
+  // past the declared size. One code: every one of them means the caller must
+  // restart the transfer from the session's reported position.
+  BRIDGE_FAILURE_MATERIAL_CHUNK_REJECTED = 13;
+
+  BRIDGE_FAILURE_MATERIAL_UPLOAD_INCOMPLETE = 14;
+  BRIDGE_FAILURE_MATERIAL_HASH_MISMATCH = 15;
+  BRIDGE_FAILURE_MATERIAL_SESSION_NOT_FOUND = 16;
+  BRIDGE_FAILURE_MATERIAL_NOT_FOUND = 17;
+
+  // The stored record exists and cannot be trusted: malformed JSON, a missing
+  // field, or an object that resolves outside the mirror. The last of those is
+  // a containment refusal, so it says nothing about where it resolved to.
+  BRIDGE_FAILURE_MATERIAL_RECORD_UNREADABLE = 18;
+
+  // This bridge has no `materials` mount, or the request named another one.
+  BRIDGE_FAILURE_MATERIAL_MOUNT_UNAVAILABLE = 19;
+
+  BRIDGE_FAILURE_PLAYBACK_UNSUPPORTED_MEDIA = 20;
+  BRIDGE_FAILURE_PLAYBACK_CAPACITY_REACHED = 21;
+
+  // No grant can be minted right now: the bridge is not listening yet, or its
+  // origin is not the loopback address a grant URL must name.
+  BRIDGE_FAILURE_PLAYBACK_UNAVAILABLE = 22;
+
+  // A material request the bridge will not begin: a declared size past the safe
+  // integer range, or an expected digest that is not a BLAKE3 digest.
+  BRIDGE_FAILURE_MATERIAL_REQUEST_INVALID = 23;
+
+  // The request did not name a virtual path this bridge will resolve at all:
+  // parent-traversal syntax, a NUL byte, an over-long name, or an undecodable
+  // percent escape. Distinct from PATH_ESCAPES_MOUNT, which is the containment
+  // check further in -- this one refuses before any root is consulted, so it
+  // knows nothing about the filesystem and can say nothing about it.
+  BRIDGE_FAILURE_PATH_REJECTED = 24;
+}
+
+// Attached to every ConnectError the file bridge returns, as a Connect error
+// detail. See ControlPlaneFailureDetail for why a detail and not metadata.
+message BridgeFailureDetail {
+  BridgeFailure code = 1;
+
+  // English, developer-facing, and never displayed. Fixed per code, never the
+  // caught exception's own message -- that is what kept absolute paths off the
+  // wire.
+  string developer_message = 2;
+}
+
 service FileBridgeService {
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc List(ListRequest) returns (ListResponse);

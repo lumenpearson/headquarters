@@ -2,9 +2,23 @@ import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { createVirtualPath, getVirtualPathSegments, type VirtualPath } from '@gremuchaya/domain';
+import { BridgeFailure } from '@gremuchaya/protocol';
 
-export class PathSecurityError extends Error {
-  readonly code = 'PATH_NOT_ALLOWED';
+import { BridgeFailureError, type BridgeFailureCode } from './errors.js';
+
+/**
+ * A containment refusal, carrying the code it crosses the wire with.
+ *
+ * It is a `BridgeFailureError` so that the refusal decides its own code here,
+ * where the reason is known, rather than at the transport boundary, where every
+ * refusal looked alike and had nothing to send but its message. The message is
+ * for this process's logs; only the code is shown to anyone.
+ */
+export class PathSecurityError extends BridgeFailureError {
+  constructor(code: BridgeFailureCode, message: string) {
+    super(code, message);
+    this.name = 'PathSecurityError';
+  }
 }
 
 export function resolveCandidate(
@@ -41,7 +55,10 @@ export function assertContained(root: string, target: string): void {
     (!difference.startsWith(`..${sep}`) && difference !== '..' && !isAbsolute(difference))
   )
     return;
-  throw new PathSecurityError('Requested path escapes the configured mount.');
+  throw new PathSecurityError(
+    BridgeFailure.PATH_ESCAPES_MOUNT,
+    'Requested path escapes the configured mount.',
+  );
 }
 
 async function assertNoSymlink(root: string, segments: readonly string[]): Promise<void> {
@@ -50,6 +67,9 @@ async function assertNoSymlink(root: string, segments: readonly string[]): Promi
     current = join(current, segment);
     const metadata = await lstat(current);
     if (metadata.isSymbolicLink())
-      throw new PathSecurityError('Symbolic links are not exposed by the bridge.');
+      throw new PathSecurityError(
+        BridgeFailure.SYMLINK_REFUSED,
+        'Symbolic links are not exposed by the bridge.',
+      );
   }
 }

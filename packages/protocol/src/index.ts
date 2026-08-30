@@ -1,6 +1,15 @@
 export * from './gen/gremuchaya/bridge/v1/bridge_pb.js';
 export * from './gen/gremuchaya/common/v1/common_pb.js';
-export { ControlPlaneService } from './gen/gremuchaya/control/v1/control_pb.js';
+export {
+  ControlPlaneService,
+  // The control plane's closed failure vocabulary, exported at the top level
+  // beside the bridge's own so both servers and both clients name it the same
+  // way. It is not service-scoped: every service this control plane registers
+  // answers with these codes.
+  ControlPlaneFailure,
+  ControlPlaneFailureDetailSchema,
+  type ControlPlaneFailureDetail,
+} from './gen/gremuchaya/control/v1/control_pb.js';
 export { IntegrationService } from './gen/gremuchaya/integration/v1/integration_pb.js';
 export { MaterialService } from './gen/gremuchaya/material/v1/material_pb.js';
 export { SettingsService } from './gen/gremuchaya/settings/v1/settings_pb.js';

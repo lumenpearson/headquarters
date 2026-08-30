@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { create, fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
-import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
+import type { HandlerContext, ServiceImpl } from '@connectrpc/connect';
 import {
   channelSeverity,
   channelValue,
@@ -12,8 +12,15 @@ import {
   type SimulationCurveLike,
   type TelemetrySeverityKind,
 } from '@gremuchaya/domain';
-import { ResourceIdSchema, RevisionSchema, telemetryV1 } from '@gremuchaya/protocol';
+import {
+  ControlPlaneFailure,
+  ResourceIdSchema,
+  RevisionSchema,
+  telemetryV1,
+} from '@gremuchaya/protocol';
 import type { TelemetryService } from '@gremuchaya/protocol';
+
+import { controlPlaneFailure, withRuntimeErrors } from '../errors.js';
 
 import type { Awaitable, PairedDeviceLifecycle } from '../sync/lifecycle.js';
 import {
@@ -719,31 +726,9 @@ function readBearerToken(context: HandlerContext): string {
   const header = context.requestHeader.get('authorization');
   const match = header === null ? undefined : /^Bearer ([^\s]+)$/u.exec(header.trim());
   if (match?.[1] === undefined) {
-    throw new ConnectError('A bearer access token is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BEARER_TOKEN_REQUIRED);
   }
   return match[1];
-}
-
-async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: unknown) {
-    if (error instanceof ConnectError) throw error;
-    if (error instanceof PairedDeviceRuntimeError) {
-      throw new ConnectError(error.message, toConnectCode(error.code));
-    }
-    throw error;
-  }
-}
-
-function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
-  if (code === 'ABORTED') return Code.Aborted;
-  if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
-  if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
-  if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;
-  if (code === 'NOT_FOUND') return Code.NotFound;
-  if (code === 'PERMISSION_DENIED') return Code.PermissionDenied;
-  return Code.Unauthenticated;
 }
 
 /**

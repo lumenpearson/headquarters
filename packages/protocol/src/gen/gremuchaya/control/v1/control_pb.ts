@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gremuchaya/control/v1/control.proto.
  */
 export const file_gremuchaya_control_v1_control: GenFile = /*@__PURE__*/
-  fileDesc("CiNncmVtdWNoYXlhL2NvbnRyb2wvdjEvY29udHJvbC5wcm90bxIVZ3JlbXVjaGF5YS5jb250cm9sLnYxIg8KDUhlYWx0aFJlcXVlc3QiegoQRGVwZW5kZW5jeUhlYWx0aBIMCgRuYW1lGAEgASgJEjQKBnN0YXR1cxgCIAEoDjIkLmdyZW11Y2hheWEuY29udHJvbC52MS5TZXJ2aW5nU3RhdHVzEhIKCmxhdGVuY3lfbXMYAyABKA0SDgoGZGV0YWlsGAQgASgJIqECCg5IZWFsdGhSZXNwb25zZRIPCgdzZXJ2aWNlGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgDIAEoCRI0CgZzdGF0dXMYBCABKA4yJC5ncmVtdWNoYXlhLmNvbnRyb2wudjEuU2VydmluZ1N0YXR1cxIuCgpzdGFydGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjaGVja2VkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI9CgxkZXBlbmRlbmNpZXMYByADKAsyJy5ncmVtdWNoYXlhLmNvbnRyb2wudjEuRGVwZW5kZW5jeUhlYWx0aCIYChZHZXRDYXBhYmlsaXRpZXNSZXF1ZXN0IjwKCkNhcGFiaWxpdHkSDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEg8KB2VuYWJsZWQYAyABKAgiawoXR2V0Q2FwYWJpbGl0aWVzUmVzcG9uc2USNwoMY2FwYWJpbGl0aWVzGAEgAygLMiEuZ3JlbXVjaGF5YS5jb250cm9sLnYxLkNhcGFiaWxpdHkSFwoPaW5zdGFsbGF0aW9uX2lkGAIgASgJKogBCg1TZXJ2aW5nU3RhdHVzEh4KGlNFUlZJTkdfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGgoWU0VSVklOR19TVEFUVVNfU0VSVklORxABEhsKF1NFUlZJTkdfU1RBVFVTX0RFR1JBREVEEAISHgoaU0VSVklOR19TVEFUVVNfTk9UX1NFUlZJTkcQAzLeAQoTQ29udHJvbFBsYW5lU2VydmljZRJVCgZIZWFsdGgSJC5ncmVtdWNoYXlhLmNvbnRyb2wudjEuSGVhbHRoUmVxdWVzdBolLmdyZW11Y2hheWEuY29udHJvbC52MS5IZWFsdGhSZXNwb25zZRJwCg9HZXRDYXBhYmlsaXRpZXMSLS5ncmVtdWNoYXlhLmNvbnRyb2wudjEuR2V0Q2FwYWJpbGl0aWVzUmVxdWVzdBouLmdyZW11Y2hheWEuY29udHJvbC52MS5HZXRDYXBhYmlsaXRpZXNSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("CiNncmVtdWNoYXlhL2NvbnRyb2wvdjEvY29udHJvbC5wcm90bxIVZ3JlbXVjaGF5YS5jb250cm9sLnYxIg8KDUhlYWx0aFJlcXVlc3QiegoQRGVwZW5kZW5jeUhlYWx0aBIMCgRuYW1lGAEgASgJEjQKBnN0YXR1cxgCIAEoDjIkLmdyZW11Y2hheWEuY29udHJvbC52MS5TZXJ2aW5nU3RhdHVzEhIKCmxhdGVuY3lfbXMYAyABKA0SDgoGZGV0YWlsGAQgASgJIqECCg5IZWFsdGhSZXNwb25zZRIPCgdzZXJ2aWNlGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgDIAEoCRI0CgZzdGF0dXMYBCABKA4yJC5ncmVtdWNoYXlhLmNvbnRyb2wudjEuU2VydmluZ1N0YXR1cxIuCgpzdGFydGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjaGVja2VkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI9CgxkZXBlbmRlbmNpZXMYByADKAsyJy5ncmVtdWNoYXlhLmNvbnRyb2wudjEuRGVwZW5kZW5jeUhlYWx0aCIYChZHZXRDYXBhYmlsaXRpZXNSZXF1ZXN0IjwKCkNhcGFiaWxpdHkSDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEg8KB2VuYWJsZWQYAyABKAgiawoXR2V0Q2FwYWJpbGl0aWVzUmVzcG9uc2USNwoMY2FwYWJpbGl0aWVzGAEgAygLMiEuZ3JlbXVjaGF5YS5jb250cm9sLnYxLkNhcGFiaWxpdHkSFwoPaW5zdGFsbGF0aW9uX2lkGAIgASgJInAKGUNvbnRyb2xQbGFuZUZhaWx1cmVEZXRhaWwSOAoEY29kZRgBIAEoDjIqLmdyZW11Y2hheWEuY29udHJvbC52MS5Db250cm9sUGxhbmVGYWlsdXJlEhkKEWRldmVsb3Blcl9tZXNzYWdlGAIgASgJKogBCg1TZXJ2aW5nU3RhdHVzEh4KGlNFUlZJTkdfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGgoWU0VSVklOR19TVEFUVVNfU0VSVklORxABEhsKF1NFUlZJTkdfU1RBVFVTX0RFR1JBREVEEAISHgoaU0VSVklOR19TVEFUVVNfTk9UX1NFUlZJTkcQAyrTCAoTQ29udHJvbFBsYW5lRmFpbHVyZRIlCiFDT05UUk9MX1BMQU5FX0ZBSUxVUkVfVU5TUEVDSUZJRUQQABIiCh5DT05UUk9MX1BMQU5FX0ZBSUxVUkVfSU5URVJOQUwQARIvCitDT05UUk9MX1BMQU5FX0ZBSUxVUkVfQkVBUkVSX1RPS0VOX1JFUVVJUkVEEAISOgo2Q09OVFJPTF9QTEFORV9GQUlMVVJFX0JPT1RTVFJBUF9BVVRIT1JJWkFUSU9OX1JFUVVJUkVEEAMSMQotQ09OVFJPTF9QTEFORV9GQUlMVVJFX1NFU1NJT05fVU5BVVRIRU5USUNBVEVEEAQSKwonQ09OVFJPTF9QTEFORV9GQUlMVVJFX1BFUk1JU1NJT05fREVOSUVEEAUSIwofQ09OVFJPTF9QTEFORV9GQUlMVVJFX05PVF9GT1VORBAGEigKJENPTlRST0xfUExBTkVfRkFJTFVSRV9BTFJFQURZX0VYSVNUUxAHEioKJkNPTlRST0xfUExBTkVfRkFJTFVSRV9JTlZBTElEX0FSR1VNRU5UEAgSLQopQ09OVFJPTF9QTEFORV9GQUlMVVJFX0ZBSUxFRF9QUkVDT05ESVRJT04QCRIxCi1DT05UUk9MX1BMQU5FX0ZBSUxVUkVfQ09OQ1VSUkVOVF9NT0RJRklDQVRJT04QChImCiJDT05UUk9MX1BMQU5FX0ZBSUxVUkVfUkFURV9MSU1JVEVEEAsSMAosQ09OVFJPTF9QTEFORV9GQUlMVVJFX1JFUExBWV9XSU5ET1dfRVhDRUVERUQQDBI6CjZDT05UUk9MX1BMQU5FX0ZBSUxVUkVfR1JPVVBfQURNSU5JU1RSQVRJT05fVU5BVkFJTEFCTEUQDRIuCipDT05UUk9MX1BMQU5FX0ZBSUxVUkVfUFJFU0VOQ0VfVU5BVkFJTEFCTEUQDhIvCitDT05UUk9MX1BMQU5FX0ZBSUxVUkVfRVZFTlRfTE9HX1VOQVZBSUxBQkxFEA8SMgouQ09OVFJPTF9QTEFORV9GQUlMVVJFX1JFQUxUSU1FX0hVQl9VTkFWQUlMQUJMRRAQEjUKMUNPTlRST0xfUExBTkVfRkFJTFVSRV9TRVRUSU5HU19TQ0hFTUFfVU5BVkFJTEFCTEUQERI2CjJDT05UUk9MX1BMQU5FX0ZBSUxVUkVfU0VUVElOR1NfU1RPUkFHRV9VTkFWQUlMQUJMRRASEjkKNUNPTlRST0xfUExBTkVfRkFJTFVSRV9JTlRFR1JBVElPTl9TVE9SQUdFX1VOQVZBSUxBQkxFEBMSOAo0Q09OVFJPTF9QTEFORV9GQUlMVVJFX0lOVEVHUkFUSU9OX0dJVEhVQl9VTkFWQUlMQUJMRRAUEjgKNENPTlRST0xfUExBTkVfRkFJTFVSRV9JTlRFR1JBVElPTl9HSVRIVUJfVU5SRUFDSEFCTEUQFTLeAQoTQ29udHJvbFBsYW5lU2VydmljZRJVCgZIZWFsdGgSJC5ncmVtdWNoYXlhLmNvbnRyb2wudjEuSGVhbHRoUmVxdWVzdBolLmdyZW11Y2hheWEuY29udHJvbC52MS5IZWFsdGhSZXNwb25zZRJwCg9HZXRDYXBhYmlsaXRpZXMSLS5ncmVtdWNoYXlhLmNvbnRyb2wudjEuR2V0Q2FwYWJpbGl0aWVzUmVxdWVzdBouLmdyZW11Y2hheWEuY29udHJvbC52MS5HZXRDYXBhYmlsaXRpZXNSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message gremuchaya.control.v1.HealthRequest
@@ -188,6 +188,40 @@ export const GetCapabilitiesResponseSchema: GenMessage<GetCapabilitiesResponse> 
   messageDesc(file_gremuchaya_control_v1_control, 5);
 
 /**
+ * Attached to every ConnectError the control plane returns, as a Connect error
+ * detail rather than as response metadata: a detail is part of this versioned
+ * contract and is regenerated and diffed by check-protocol-generation.mjs,
+ * where a header would be an unversioned side channel (ADR 0008). It also
+ * survives being carried on a locally constructed ConnectError, which metadata
+ * does not.
+ *
+ * @generated from message gremuchaya.control.v1.ControlPlaneFailureDetail
+ */
+export type ControlPlaneFailureDetail = Message<"gremuchaya.control.v1.ControlPlaneFailureDetail"> & {
+  /**
+   * @generated from field: gremuchaya.control.v1.ControlPlaneFailure code = 1;
+   */
+  code: ControlPlaneFailure;
+
+  /**
+   * English, developer-facing, and never displayed. It exists so the
+   * diagnostics copy names the exact refusal; the caption an operator reads is
+   * chosen by `code` alone. It never carries an underlying exception message,
+   * a path, a credential or a statement.
+   *
+   * @generated from field: string developer_message = 2;
+   */
+  developerMessage: string;
+};
+
+/**
+ * Describes the message gremuchaya.control.v1.ControlPlaneFailureDetail.
+ * Use `create(ControlPlaneFailureDetailSchema)` to create a new message.
+ */
+export const ControlPlaneFailureDetailSchema: GenMessage<ControlPlaneFailureDetail> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_control_v1_control, 6);
+
+/**
  * @generated from enum gremuchaya.control.v1.ServingStatus
  */
 export enum ServingStatus {
@@ -217,6 +251,169 @@ export enum ServingStatus {
  */
 export const ServingStatusSchema: GenEnum<ServingStatus> = /*@__PURE__*/
   enumDesc(file_gremuchaya_control_v1_control, 0);
+
+/**
+ * Why every failure this control plane returns carries one of these.
+ *
+ * The operator mandate is that every string they read has a translation. A
+ * message written in English prose cannot be translated by the client; a stable
+ * identifier can. The prose that still travels beside the code
+ * (ControlPlaneFailureDetail.developer_message) is a diagnostic, not a caption,
+ * and rewording it must never change what the client shows.
+ *
+ * The set is closed on purpose. `apps/control-plane/src/errors.ts` keys an
+ * exhaustive table off it, so a value added here without a message and a Connect
+ * code fails to compile rather than reaching a device as an untranslatable
+ * sentence.
+ *
+ * Proto3 enums are open on the wire: a control plane newer than the client will
+ * send a number this build has no name for. That is not an error condition. The
+ * client maps anything it does not recognise to its own generic kind, which is
+ * why nothing here may ever be renumbered or removed.
+ *
+ * @generated from enum gremuchaya.control.v1.ControlPlaneFailure
+ */
+export enum ControlPlaneFailure {
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Nothing more specific survived the handler boundary. Never carries the
+   * underlying exception text: a driver error can quote SQL and connection
+   * detail, and this reaches a browser.
+   *
+   * @generated from enum value: CONTROL_PLANE_FAILURE_INTERNAL = 1;
+   */
+  INTERNAL = 1,
+
+  /**
+   * No usable `Authorization: Bearer` header was presented at all. Distinct
+   * from SESSION_UNAUTHENTICATED, which means a token was presented and did not
+   * authenticate -- and which never says why.
+   *
+   * @generated from enum value: CONTROL_PLANE_FAILURE_BEARER_TOKEN_REQUIRED = 2;
+   */
+  BEARER_TOKEN_REQUIRED = 2,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_BOOTSTRAP_AUTHORIZATION_REQUIRED = 3;
+   */
+  BOOTSTRAP_AUTHORIZATION_REQUIRED = 3,
+
+  /**
+   * The whole authentication family: no such token, retired, rotated, replayed,
+   * revoked, expired, or bound to a session that no longer exists. One code, on
+   * purpose -- distinguishing them would hand an attacker the oracle the
+   * neutral message exists to deny.
+   *
+   * @generated from enum value: CONTROL_PLANE_FAILURE_SESSION_UNAUTHENTICATED = 4;
+   */
+  SESSION_UNAUTHENTICATED = 4,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_PERMISSION_DENIED = 5;
+   */
+  PERMISSION_DENIED = 5,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_NOT_FOUND = 6;
+   */
+  NOT_FOUND = 6,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_ALREADY_EXISTS = 7;
+   */
+  ALREADY_EXISTS = 7,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_INVALID_ARGUMENT = 8;
+   */
+  INVALID_ARGUMENT = 8,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_FAILED_PRECONDITION = 9;
+   */
+  FAILED_PRECONDITION = 9,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_CONCURRENT_MODIFICATION = 10;
+   */
+  CONCURRENT_MODIFICATION = 10,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_RATE_LIMITED = 11;
+   */
+  RATE_LIMITED = 11,
+
+  /**
+   * The resume point asked for has fallen off the retained window; the caller
+   * needs a snapshot rather than a retry.
+   *
+   * @generated from enum value: CONTROL_PLANE_FAILURE_REPLAY_WINDOW_EXCEEDED = 12;
+   */
+  REPLAY_WINDOW_EXCEEDED = 12,
+
+  /**
+   * A collaborator this deployment was started without. Each is its own code
+   * because the operator's next step differs: a missing event log is a
+   * deployment that cannot carry group state at all, a missing settings schema
+   * only closes the settings surface.
+   *
+   * @generated from enum value: CONTROL_PLANE_FAILURE_GROUP_ADMINISTRATION_UNAVAILABLE = 13;
+   */
+  GROUP_ADMINISTRATION_UNAVAILABLE = 13,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_PRESENCE_UNAVAILABLE = 14;
+   */
+  PRESENCE_UNAVAILABLE = 14,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_EVENT_LOG_UNAVAILABLE = 15;
+   */
+  EVENT_LOG_UNAVAILABLE = 15,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_REALTIME_HUB_UNAVAILABLE = 16;
+   */
+  REALTIME_HUB_UNAVAILABLE = 16,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_SETTINGS_SCHEMA_UNAVAILABLE = 17;
+   */
+  SETTINGS_SCHEMA_UNAVAILABLE = 17,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_SETTINGS_STORAGE_UNAVAILABLE = 18;
+   */
+  SETTINGS_STORAGE_UNAVAILABLE = 18,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_INTEGRATION_STORAGE_UNAVAILABLE = 19;
+   */
+  INTEGRATION_STORAGE_UNAVAILABLE = 19,
+
+  /**
+   * @generated from enum value: CONTROL_PLANE_FAILURE_INTEGRATION_GITHUB_UNAVAILABLE = 20;
+   */
+  INTEGRATION_GITHUB_UNAVAILABLE = 20,
+
+  /**
+   * GitHub was configured and the egress call did not complete. A fact about
+   * the internet, not about this deployment's configuration.
+   *
+   * @generated from enum value: CONTROL_PLANE_FAILURE_INTEGRATION_GITHUB_UNREACHABLE = 21;
+   */
+  INTEGRATION_GITHUB_UNREACHABLE = 21,
+}
+
+/**
+ * Describes the enum gremuchaya.control.v1.ControlPlaneFailure.
+ */
+export const ControlPlaneFailureSchema: GenEnum<ControlPlaneFailure> = /*@__PURE__*/
+  enumDesc(file_gremuchaya_control_v1_control, 1);
 
 /**
  * @generated from service gremuchaya.control.v1.ControlPlaneService

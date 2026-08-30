@@ -1,7 +1,9 @@
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
-import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
-import { integrationV1 } from '@gremuchaya/protocol';
+import type { HandlerContext, ServiceImpl } from '@connectrpc/connect';
+import { ControlPlaneFailure, integrationV1 } from '@gremuchaya/protocol';
 import type { IntegrationService } from '@gremuchaya/protocol';
+
+import { controlPlaneFailure, withRuntimeErrors } from '../errors.js';
 
 import type { Awaitable, PairedDeviceLifecycle } from '../sync/lifecycle.js';
 import {
@@ -456,10 +458,9 @@ async function callGateway<T>(call: () => Awaitable<T>): Promise<T> {
   try {
     return await call();
   } catch (error: unknown) {
-    throw new ConnectError(
-      'The GitHub request did not complete.',
-      error instanceof ConnectError ? error.code : Code.Unavailable,
-    );
+    // The upstream failure stays as `cause`: a GitHub client error can quote
+    // the request URL, and this crosses to a browser.
+    throw controlPlaneFailure(ControlPlaneFailure.INTEGRATION_GITHUB_UNREACHABLE, { cause: error });
   }
 }
 
@@ -769,27 +770,21 @@ function readBearerToken(context: HandlerContext): string {
   const header = context.requestHeader.get('authorization');
   const match = header === null ? undefined : /^Bearer ([^\s]+)$/u.exec(header.trim());
   if (match?.[1] === undefined) {
-    throw new ConnectError('A bearer access token is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BEARER_TOKEN_REQUIRED);
   }
   return match[1];
 }
 
 function requireStore(options: IntegrationServiceOptions): IntegrationStore {
   if (options.store === undefined) {
-    throw new ConnectError(
-      'This control plane was started without integration storage.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.INTEGRATION_STORAGE_UNAVAILABLE);
   }
   return options.store;
 }
 
 function requireGateway(options: IntegrationServiceOptions): GitHubIntegrationGateway {
   if (options.github === undefined) {
-    throw new ConnectError(
-      'This control plane was started without GitHub egress.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.INTEGRATION_GITHUB_UNAVAILABLE);
   }
   return options.github;
 }
@@ -885,24 +880,3 @@ function toMutationReceiptInput(requestId: string | undefined): {
  * duplicated rather than shared because that module exports neither the mapper
  * nor the code table; a shared `sync/connect-errors.ts` would remove this copy.
  */
-async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: unknown) {
-    if (error instanceof ConnectError) throw error;
-    if (error instanceof PairedDeviceRuntimeError) {
-      throw new ConnectError(error.message, toConnectCode(error.code));
-    }
-    throw error;
-  }
-}
-
-function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
-  if (code === 'ABORTED') return Code.Aborted;
-  if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
-  if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
-  if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;
-  if (code === 'NOT_FOUND') return Code.NotFound;
-  if (code === 'PERMISSION_DENIED') return Code.PermissionDenied;
-  return Code.Unauthenticated;
-}

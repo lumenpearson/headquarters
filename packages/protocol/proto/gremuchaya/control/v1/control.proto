@@ -62,6 +62,89 @@ message GetCapabilitiesResponse {
   string installation_id = 2;
 }
 
+// Why every failure this control plane returns carries one of these.
+//
+// The operator mandate is that every string they read has a translation. A
+// message written in English prose cannot be translated by the client; a stable
+// identifier can. The prose that still travels beside the code
+// (ControlPlaneFailureDetail.developer_message) is a diagnostic, not a caption,
+// and rewording it must never change what the client shows.
+//
+// The set is closed on purpose. `apps/control-plane/src/errors.ts` keys an
+// exhaustive table off it, so a value added here without a message and a Connect
+// code fails to compile rather than reaching a device as an untranslatable
+// sentence.
+//
+// Proto3 enums are open on the wire: a control plane newer than the client will
+// send a number this build has no name for. That is not an error condition. The
+// client maps anything it does not recognise to its own generic kind, which is
+// why nothing here may ever be renumbered or removed.
+enum ControlPlaneFailure {
+  CONTROL_PLANE_FAILURE_UNSPECIFIED = 0;
+
+  // Nothing more specific survived the handler boundary. Never carries the
+  // underlying exception text: a driver error can quote SQL and connection
+  // detail, and this reaches a browser.
+  CONTROL_PLANE_FAILURE_INTERNAL = 1;
+
+  // No usable `Authorization: Bearer` header was presented at all. Distinct
+  // from SESSION_UNAUTHENTICATED, which means a token was presented and did not
+  // authenticate -- and which never says why.
+  CONTROL_PLANE_FAILURE_BEARER_TOKEN_REQUIRED = 2;
+  CONTROL_PLANE_FAILURE_BOOTSTRAP_AUTHORIZATION_REQUIRED = 3;
+
+  // The whole authentication family: no such token, retired, rotated, replayed,
+  // revoked, expired, or bound to a session that no longer exists. One code, on
+  // purpose -- distinguishing them would hand an attacker the oracle the
+  // neutral message exists to deny.
+  CONTROL_PLANE_FAILURE_SESSION_UNAUTHENTICATED = 4;
+
+  CONTROL_PLANE_FAILURE_PERMISSION_DENIED = 5;
+  CONTROL_PLANE_FAILURE_NOT_FOUND = 6;
+  CONTROL_PLANE_FAILURE_ALREADY_EXISTS = 7;
+  CONTROL_PLANE_FAILURE_INVALID_ARGUMENT = 8;
+  CONTROL_PLANE_FAILURE_FAILED_PRECONDITION = 9;
+  CONTROL_PLANE_FAILURE_CONCURRENT_MODIFICATION = 10;
+  CONTROL_PLANE_FAILURE_RATE_LIMITED = 11;
+
+  // The resume point asked for has fallen off the retained window; the caller
+  // needs a snapshot rather than a retry.
+  CONTROL_PLANE_FAILURE_REPLAY_WINDOW_EXCEEDED = 12;
+
+  // A collaborator this deployment was started without. Each is its own code
+  // because the operator's next step differs: a missing event log is a
+  // deployment that cannot carry group state at all, a missing settings schema
+  // only closes the settings surface.
+  CONTROL_PLANE_FAILURE_GROUP_ADMINISTRATION_UNAVAILABLE = 13;
+  CONTROL_PLANE_FAILURE_PRESENCE_UNAVAILABLE = 14;
+  CONTROL_PLANE_FAILURE_EVENT_LOG_UNAVAILABLE = 15;
+  CONTROL_PLANE_FAILURE_REALTIME_HUB_UNAVAILABLE = 16;
+  CONTROL_PLANE_FAILURE_SETTINGS_SCHEMA_UNAVAILABLE = 17;
+  CONTROL_PLANE_FAILURE_SETTINGS_STORAGE_UNAVAILABLE = 18;
+  CONTROL_PLANE_FAILURE_INTEGRATION_STORAGE_UNAVAILABLE = 19;
+  CONTROL_PLANE_FAILURE_INTEGRATION_GITHUB_UNAVAILABLE = 20;
+
+  // GitHub was configured and the egress call did not complete. A fact about
+  // the internet, not about this deployment's configuration.
+  CONTROL_PLANE_FAILURE_INTEGRATION_GITHUB_UNREACHABLE = 21;
+}
+
+// Attached to every ConnectError the control plane returns, as a Connect error
+// detail rather than as response metadata: a detail is part of this versioned
+// contract and is regenerated and diffed by check-protocol-generation.mjs,
+// where a header would be an unversioned side channel (ADR 0008). It also
+// survives being carried on a locally constructed ConnectError, which metadata
+// does not.
+message ControlPlaneFailureDetail {
+  ControlPlaneFailure code = 1;
+
+  // English, developer-facing, and never displayed. It exists so the
+  // diagnostics copy names the exact refusal; the caption an operator reads is
+  // chosen by `code` alone. It never carries an underlying exception message,
+  // a path, a credential or a statement.
+  string developer_message = 2;
+}
+
 service ControlPlaneService {
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);

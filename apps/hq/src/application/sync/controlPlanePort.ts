@@ -192,21 +192,143 @@ export type ControlPlaneErrorKind =
   | 'unknown';
 
 /**
+ * What the operator is actually shown a caption for.
+ *
+ * The kind above answers the three questions the session service asks -- refresh
+ * and retry, pair again, or note the collaborator is absent -- and there are
+ * only eight of them because there are only three questions. It is the wrong
+ * key for a message catalogue: eight buckets cannot say "the pairing code has
+ * expired" and "this deployment has no settings storage" differently, and both
+ * of those are sentences an operator has to read in Russian.
+ *
+ * This is that key. Each member names one refusal the servers can decide on,
+ * and it is stable across any rewording of the English that travels beside it.
+ * Twenty-one of them mirror `gremuchaya.control.v1.ControlPlaneFailure` one for
+ * one; the remaining five have no wire code because they describe the transport
+ * rather than a decision the control plane took -- a call that was aborted, one
+ * that timed out, a host that did not answer, a method this deployment never
+ * registered, and a status this build cannot name.
+ *
+ * `'unknown'` is the degradation target and must never be removed: a control
+ * plane newer than this build will send a code that is not in this union, and
+ * the alternative to landing on `'unknown'` is landing on `undefined`.
+ */
+export type ControlPlaneErrorCode =
+  // Coded by the control plane.
+  | 'internal'
+  | 'bearer-token-required'
+  | 'bootstrap-authorization-required'
+  | 'session-unauthenticated'
+  | 'permission-denied'
+  | 'not-found'
+  | 'already-exists'
+  | 'invalid-argument'
+  | 'failed-precondition'
+  | 'concurrent-modification'
+  | 'rate-limited'
+  | 'replay-window-exceeded'
+  | 'group-administration-unavailable'
+  | 'presence-unavailable'
+  | 'event-log-unavailable'
+  | 'realtime-hub-unavailable'
+  | 'settings-schema-unavailable'
+  | 'settings-storage-unavailable'
+  | 'integration-storage-unavailable'
+  | 'integration-github-unavailable'
+  | 'integration-github-unreachable'
+  // Read off the transport, for failures the control plane never decided.
+  | 'canceled'
+  | 'deadline-exceeded'
+  | 'unavailable'
+  | 'unimplemented'
+  | 'unknown';
+
+/**
+ * Which of the three decisions each code implies.
+ *
+ * Total over the union, so a code added above without a kind fails to compile.
+ * The kinds are deliberately unchanged: every one of them keeps the meaning the
+ * matching Connect status had before codes existed, so nothing that branches on
+ * a kind changes behaviour because a code arrived. A rate limit and an aborted
+ * mutation land on `'unknown'` for that reason and not because they are
+ * unknown -- what an operator reads about them comes from the code.
+ */
+export const controlPlaneErrorKinds: Readonly<
+  Record<ControlPlaneErrorCode, ControlPlaneErrorKind>
+> = {
+  internal: 'unknown',
+  'bearer-token-required': 'unauthenticated',
+  'bootstrap-authorization-required': 'unauthenticated',
+  'session-unauthenticated': 'unauthenticated',
+  'permission-denied': 'permission-denied',
+  'not-found': 'not-found',
+  'already-exists': 'unknown',
+  'invalid-argument': 'invalid-argument',
+  'failed-precondition': 'failed-precondition',
+  'concurrent-modification': 'unknown',
+  'rate-limited': 'unknown',
+  'replay-window-exceeded': 'unknown',
+  'group-administration-unavailable': 'unimplemented',
+  'presence-unavailable': 'unimplemented',
+  'event-log-unavailable': 'unimplemented',
+  'realtime-hub-unavailable': 'unimplemented',
+  'settings-schema-unavailable': 'unimplemented',
+  'settings-storage-unavailable': 'unimplemented',
+  'integration-storage-unavailable': 'unimplemented',
+  'integration-github-unavailable': 'unimplemented',
+  'integration-github-unreachable': 'unavailable',
+  canceled: 'unavailable',
+  'deadline-exceeded': 'unavailable',
+  unavailable: 'unavailable',
+  unimplemented: 'unimplemented',
+  unknown: 'unknown',
+};
+
+/**
+ * The code a caller that names only a kind gets.
+ *
+ * `ControlPlaneError` is raised in four adapters, several of them for failures
+ * that never crossed a wire at all -- no stored session, a response missing a
+ * field. Those name a kind and nothing else, and this is how they still end up
+ * with a code, so `code` is never absent and a render site never has to ask
+ * whether one arrived.
+ */
+const codesForKinds: Readonly<Record<ControlPlaneErrorKind, ControlPlaneErrorCode>> = {
+  unauthenticated: 'session-unauthenticated',
+  'permission-denied': 'permission-denied',
+  unimplemented: 'unimplemented',
+  unavailable: 'unavailable',
+  'invalid-argument': 'invalid-argument',
+  'not-found': 'not-found',
+  'failed-precondition': 'failed-precondition',
+  unknown: 'unknown',
+};
+
+/**
  * A control-plane failure as the session service reasons about it.
  *
  * The Connect code is folded into a kind because the service takes exactly
  * three decisions on it -- refresh and retry, tell the operator to pair
  * again, or note that this deployment lacks the collaborator -- and a
  * `Code` import in the application layer would be the transport leaking up.
+ *
+ * `code` is the newer half and the one a catalogue keys on. `message` is
+ * developer-facing English and is not for display: it is what the diagnostics
+ * copy carries, it is written for whoever is reading a log at 3am, and it has no
+ * translation. A surface that prints it is showing an operator a sentence the
+ * mandate says they should never have to read.
  */
 export class ControlPlaneError extends Error {
+  readonly code: ControlPlaneErrorCode;
+
   constructor(
     readonly kind: ControlPlaneErrorKind,
     message: string,
-    options?: { readonly cause?: unknown },
+    options?: { readonly cause?: unknown; readonly code?: ControlPlaneErrorCode },
   ) {
     super(message, options);
     this.name = 'ControlPlaneError';
+    this.code = options?.code ?? codesForKinds[kind];
   }
 }
 

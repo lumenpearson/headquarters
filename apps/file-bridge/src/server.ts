@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { Code, ConnectError, cors, type ConnectRouter } from '@connectrpc/connect';
+import { cors, type ConnectRouter } from '@connectrpc/connect';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import {
   bridgeConfigSchema,
@@ -11,19 +11,19 @@ import {
   type BridgeEvent,
   type BridgeEntry,
 } from '@gremuchaya/config';
-import { EntryKind, FileBridgeService, FileEventKind } from '@gremuchaya/protocol';
+import { BridgeFailure, EntryKind, FileBridgeService, FileEventKind } from '@gremuchaya/protocol';
 
 import { BridgeEventHub } from './BridgeEventHub.js';
 import { BridgeService } from './BridgeService.js';
 import { BridgeWatcher } from './BridgeWatcher.js';
 import { loadBridgeConfig } from './config.js';
-import { MaterialMirror, MaterialMirrorError, type MaterialImportEntry } from './MaterialMirror.js';
+import { BridgeFailureError, bridgeFailureInterceptor, toBridgeConnectError } from './errors.js';
+import { MaterialMirror, type MaterialImportEntry } from './MaterialMirror.js';
 import {
   MaterialPlaybackGrantError,
   MaterialPlaybackRegistry,
   type MaterialPlaybackSource,
 } from './MaterialPlaybackRegistry.js';
-import { PathSecurityError } from './pathSecurity.js';
 
 const protocolVersion = bridgeProtocolVersion;
 const chunkSize = 64 * 1024;
@@ -47,6 +47,10 @@ export async function startBridge(config: BridgeConfig) {
     connect: false,
     grpc: false,
     grpcWeb: true,
+    // Applied to every registered method, so a handler that raises without a
+    // `try` of its own still answers with a code rather than with Connect's
+    // `unknown` and the raw exception text.
+    interceptors: [bridgeFailureInterceptor],
     routes: (router) =>
       registerBridgeRoutes(router, service, materials, playback, events, startedAt, () =>
         requireBridgeOrigin(bridgeOrigin),
@@ -116,7 +120,7 @@ function registerBridgeRoutes(
         const entries = await service.list(required(request.mountId, 'mount_id'), request.path);
         return { entries: entries.map(toRpcEntry) };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async *readFile(request, context) {
@@ -147,7 +151,7 @@ function registerBridgeRoutes(
           };
         }
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async *watch(request, context) {
@@ -169,7 +173,7 @@ function registerBridgeRoutes(
           ),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async uploadMaterialChunk(request) {
@@ -184,7 +188,7 @@ function registerBridgeRoutes(
           ),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     getMaterialImportStatus(request) {
@@ -193,7 +197,7 @@ function registerBridgeRoutes(
           session: toRpcImportSession(materials.status(required(request.uploadId, 'upload_id'))),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async completeMaterialImport(request) {
@@ -204,7 +208,7 @@ function registerBridgeRoutes(
           deduplicated: completed.deduplicated,
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async cancelMaterialImport(request) {
@@ -215,7 +219,7 @@ function registerBridgeRoutes(
           ),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async listImportedMaterials(request) {
@@ -230,7 +234,7 @@ function registerBridgeRoutes(
           nextCursor: page.nextCursor,
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async *readImportedMaterial(request, context) {
@@ -257,7 +261,7 @@ function registerBridgeRoutes(
           };
         }
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async getMaterialPlaybackGrant(request) {
@@ -277,7 +281,7 @@ function registerBridgeRoutes(
           },
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     revokeMaterialPlaybackGrant(request) {
@@ -434,7 +438,12 @@ function respondNotFound(response: ServerResponse): void {
 }
 
 function requireBridgeOrigin(value: string | undefined): string {
-  if (value === undefined) throw new MaterialPlaybackGrantError('Bridge is not listening yet.');
+  if (value === undefined) {
+    throw new MaterialPlaybackGrantError(
+      BridgeFailure.PLAYBACK_UNAVAILABLE,
+      'Bridge is not listening yet.',
+    );
+  }
   return value;
 }
 
@@ -530,36 +539,20 @@ function toRpcImportedMaterial(material: MaterialImportEntry) {
   };
 }
 
+/**
+ * The field name is not sent.
+ *
+ * `Missing field: mount_id` named a contract field, which is harmless, but it
+ * was also the last place a bridge error text was assembled rather than chosen,
+ * and a caption cannot be built out of an interpolated identifier. The code says
+ * a required field was empty; which one is a client defect, visible in the
+ * client's own stack.
+ */
 function required(value: string, field: string): string {
-  if (value.length === 0) throw new ConnectError(`Missing field: ${field}`, Code.InvalidArgument);
+  if (value.length === 0) {
+    throw new BridgeFailureError(BridgeFailure.MISSING_FIELD, `Missing field: ${field}`);
+  }
   return value;
-}
-
-function toConnectError(error: unknown): ConnectError {
-  if (error instanceof ConnectError) return error;
-  if (error instanceof PathSecurityError) {
-    return new ConnectError(error.message, Code.PermissionDenied);
-  }
-  if (error instanceof MaterialMirrorError) {
-    return new ConnectError(error.message, Code.InvalidArgument);
-  }
-  if (error instanceof MaterialPlaybackGrantError) {
-    return new ConnectError(error.message, Code.FailedPrecondition);
-  }
-  if (hasCode(error, 'ENOENT')) {
-    return new ConnectError(
-      error instanceof Error ? error.message : 'File not found',
-      Code.NotFound,
-    );
-  }
-  return new ConnectError(
-    error instanceof Error ? error.message : 'Unknown bridge error',
-    Code.InvalidArgument,
-  );
-}
-
-function hasCode(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 if (
