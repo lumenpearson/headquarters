@@ -204,7 +204,10 @@ test('R3: the operator can cap how rich a tile is drawn', async ({ page }) => {
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('combobox', { name: 'TILES / PRESENTATION' }).click();
-  await page.getByRole('option', { name: 'MINIMAL', exact: true }).click();
+  // The dropdown reuses the presentation picker's own phrases
+  // (`localizedEnumOptionLabel` -> `tilePresentationLabel`), not the bare
+  // uppercased identifier it showed before the chrome read the catalogue.
+  await page.getByRole('option', { name: 'МИНИМАЛЬНЫЙ ВИД', exact: true }).click();
 
   await page.goto('/overview');
   const brief = page.locator('[data-tile="brief"]');
