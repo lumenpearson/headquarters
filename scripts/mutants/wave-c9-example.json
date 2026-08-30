@@ -1,0 +1,34 @@
+[
+  {
+    "id": "plane-failover-admitted-guard",
+    "description": "attemptPlaneFailover skips a link the boot-time probe already marked as answering for a different database (ControlPlaneRuntime.tsx, commit d467336). Removing the guard would promote a plane known to be the wrong group.",
+    "package": "@gremuchaya/hq",
+    "file": "apps/hq/src/components/sync/ControlPlaneRuntime.tsx",
+    "find": "    if (known?.admitted === false) continue;\n    const capabilities = await probeLink(candidate, signal);",
+    "replace": "    const capabilities = await probeLink(candidate, signal);",
+    "testFiles": ["src/components/sync/ControlPlaneRuntime.test.tsx"],
+    "expectedKillingTests": ["skips a plane already known to answer for another database"]
+  },
+  {
+    "id": "plane-failover-device-lifecycle-guard",
+    "description": "attemptPlaneFailover refuses to promote a plane that answered without sync.device-lifecycle -- a control plane started without durable auth cannot carry a session (ControlPlaneRuntime.tsx, commit d467336).",
+    "package": "@gremuchaya/hq",
+    "file": "apps/hq/src/components/sync/ControlPlaneRuntime.tsx",
+    "find": "if (signal.aborted || capabilities === undefined || !capabilities.deviceLifecycle) continue;",
+    "replace": "if (signal.aborted || capabilities === undefined) continue;",
+    "testFiles": ["src/components/sync/ControlPlaneRuntime.test.tsx"],
+    "expectedKillingTests": ["does not promote a plane started without device lifecycle"]
+  },
+  {
+    "id": "remote-content-transition-ledger-guard",
+    "description": "remoteContentTransition only appends an undo-ledger entry when a peer's content snapshot actually changed something; short-circuiting it always (the pre-fix behaviour, commit 854ae28) drops the neighbor's edit from the local undo journal again -- a local undo would silently discard it, the exact regression R4's tail names.",
+    "package": "@gremuchaya/hq",
+    "file": "apps/hq/src/state/operationsStore.ts",
+    "find": "  const changedIds = contentOverrideChangedIds(content.record);\n  if (changedIds.length === 0) return content.patch;\n  const checkpoint = createSettingsDraftCheckpoint(state.personalization.draft);",
+    "replace": "  const changedIds = contentOverrideChangedIds(content.record);\n  void changedIds;\n  return content.patch;\n  const checkpoint = createSettingsDraftCheckpoint(state.personalization.draft);",
+    "testFiles": ["src/state/operationsHydration.test.ts"],
+    "expectedKillingTests": [
+      "records a peer world-sync content edit in the local ledger, so undo reverts specifically it"
+    ]
+  }
+]

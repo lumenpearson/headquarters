@@ -27,6 +27,7 @@
     "check:protocol-generation": "node scripts/check-protocol-generation.mjs",
     "env:generate": "node scripts/generate-env.mjs",
     "test:cargo": "cargo test --manifest-path apps/hq/src-tauri/Cargo.toml",
+    "mutation:run": "node scripts/mutation-run.mjs",
     "check": "pnpm check:ui-boundary && pnpm check:protocol-generation && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "check:release": "pnpm check && pnpm test:ui && pnpm build:offline && pnpm test:cargo",
     "format": "prettier --write .",
