@@ -24,6 +24,9 @@ import type { AppLocale, MessageId } from '@/application/localization/messages';
 import {
   localizedEnumOptionLabel,
   localizedSettingDescription,
+  localizedSettingLabel,
+  localizedSettingScope,
+  settingLabel,
 } from '@/application/localization/settingLocalization';
 import { statuslineElementLabel } from '@/application/localization/statuslineLabels';
 import { titlebarElementLabel } from '@/application/localization/titlebarLabels';
@@ -69,12 +72,13 @@ export function SchemaSetting({
   readonly changed: boolean;
   readonly onValueChange: (value: SettingValue) => void;
 }) {
-  const label = settingLabel(definition.id);
   const editor = definition.editor;
-  // Subscribed rather than read once: a description or enum option translated
-  // by `settingLocalization.ts` must follow `localization.locale` the way
-  // every other row on this screen already does.
+  // Subscribed rather than read once: a label, a description or an enum
+  // option translated by `settingLocalization.ts` must follow
+  // `localization.locale` the way every other row on this screen already
+  // does.
   const locale = useAppLocale();
+  const label = localizedSettingLabel(definition, locale);
 
   // Called unconditionally, as a hook must be, but the catalogue only loads
   // when a picker over it is actually on screen.
@@ -109,7 +113,7 @@ export function SchemaSetting({
               onValueChange={onValueChange}
               options={editor.options.map((option) => ({
                 value: option,
-                label: option.toUpperCase(),
+                label: localizedEnumOptionLabel(definition, option, locale),
                 swatch: accentSwatches[option] ?? option,
               }))}
             />
@@ -268,7 +272,7 @@ export function SchemaSetting({
   return (
     <Setting
       label={`${label}${changed ? ' *' : ''}`}
-      detail={`${definition.scope.toUpperCase()} · ${settingDescription(definition, locale)}`}
+      detail={`${localizedSettingScope(definition.scope, locale)} · ${settingDescription(definition, locale)}`}
       notice={awaitingFeature === undefined ? undefined : t('settings.awaitingFeature')}
     >
       {control}
@@ -322,12 +326,14 @@ export function Setting({
   );
 }
 
-export function settingLabel(id: string): string {
-  return id
-    .replaceAll('.', ' / ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .toUpperCase();
-}
+/**
+ * Re-exported so the existing `import { settingLabel } from './SchemaSetting'`
+ * call sites (`EditPanel.test.tsx`, `SchemaSetting.test.tsx`) keep working.
+ * The implementation moved to `settingLocalization.ts`: it is the last-resort
+ * fallback {@link localizedSettingLabel} falls back to, and living beside that
+ * function keeps the two from having to import back across each other.
+ */
+export { settingLabel };
 
 /**
  * The name of a section, in the words an operator would use to look for it.

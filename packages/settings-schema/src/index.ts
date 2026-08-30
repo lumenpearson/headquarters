@@ -575,7 +575,7 @@ const curveOver = (shape: CurveEditorShape): SettingValidator =>
     (value): value is readonly string[] => isCurveList(value, shape),
   );
 
-export const settingsDefinitions: readonly SettingDefinition[] = [
+const settingsDefinitionsList = [
   definition(
     'general.localOnly',
     'general',
@@ -1987,6 +1987,28 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
   ),
 ] as const;
 
+/**
+ * The full union of every definition's id.
+ *
+ * Published the way {@link settingCategories} and {@link simulationChannels}
+ * already are: a vocabulary the schema states once, so a consumer keyed by it
+ * -- `apps/hq`'s per-setting label and description tables -- fails
+ * `pnpm typecheck` rather than falling through to a runtime fallback when a
+ * definition is added with no corresponding entry. Reads no message table
+ * itself, so the trust boundary this file states above `settingsDefinitions`
+ * (`localizationKey: ''` on the wire) is unchanged: the schema still does not
+ * know a translation exists, only that an id does.
+ */
+export type SettingId = (typeof settingsDefinitionsList)[number]['id'];
+
+/**
+ * The public view of the same list, widened back to the shape every existing
+ * consumer already reads. `definition()`'s per-call literal `id` is what
+ * makes {@link SettingId} exact; nothing downstream of this export sees a
+ * different type than it did before that inference existed.
+ */
+export const settingsDefinitions: readonly SettingDefinition[] = settingsDefinitionsList;
+
 const definitionById = new Map(
   settingsDefinitions.map((definition) => [definition.id, definition]),
 );
@@ -2190,14 +2212,23 @@ export class InvalidSettingValueError extends Error {
   }
 }
 
-function definition(
-  id: string,
+/**
+ * `Id` is a `const` type parameter so each call site's literal id string
+ * survives into the return type instead of widening to `string` the way an
+ * ordinary parameter would -- the same device {@link oneOf} already uses for
+ * an enum's option literals. That is what lets {@link SettingId} be a real
+ * union of every id rather than `string`, which a `Record<SettingId, …>`
+ * elsewhere needs to reject a missing key at compile time instead of
+ * accepting any string.
+ */
+function definition<const Id extends string>(
+  id: Id,
   category: SettingCategory,
   defaultValue: SettingValue,
   scope: Exclude<SettingScope, 'factory'>,
   description: string,
   validate: SettingValidator,
-): SettingDefinition {
+): SettingDefinition & { readonly id: Id } {
   return { id, category, defaultValue, scope, description, editor: validate.editor, validate };
 }
 

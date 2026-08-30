@@ -4,14 +4,26 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { contentElementId } from '../../application/edit/contentFields';
+import { localizedSettingLabel } from '../../application/localization/settingLocalization';
 import { settingGroups } from '../../application/personalization/catalog';
 import { operationsStore } from '../../state/operationsStore';
 import { fireKeybind } from '../keybinds/KeybindRuntime';
-import { settingLabel } from '../settings/SchemaSetting';
 import { EditPanel } from './EditPanel';
 
 function button(name: RegExp): HTMLButtonElement {
   return screen.getByRole('button', { name }) as HTMLButtonElement;
+}
+
+/**
+ * The row label the panel actually draws, for the id given: `SchemaSetting`
+ * reads it through `localizedSettingLabel`, not through the raw id-surgery
+ * `settingLabel()` falls back to -- every definition has a translated label
+ * as of this pass, so the two would no longer agree.
+ */
+function rowLabel(id: string): string {
+  const definition = settingsDefinitions.find((candidate) => candidate.id === id);
+  if (definition === undefined) throw new Error(`${id} is not declared`);
+  return localizedSettingLabel(definition, 'ru');
 }
 
 describe('EditPanel', () => {
@@ -153,8 +165,8 @@ describe('EditPanel', () => {
     expect(headings).toContain('ТИПОГРАФИКА');
 
     // Settings from more than one of those categories are on screen together.
-    expect(screen.getByText(settingLabel('themes.id'))).toBeTruthy();
-    expect(screen.getByText(settingLabel('typography.weight'))).toBeTruthy();
+    expect(screen.getByText(rowLabel('themes.id'))).toBeTruthy();
+    expect(screen.getByText(rowLabel('typography.weight'))).toBeTruthy();
   });
 
   it('offers seven sections rather than thirty-two categories', () => {
@@ -172,7 +184,7 @@ describe('EditPanel', () => {
     render(<EditPanel />);
 
     // `advanced.liveEdit` lives in `system`; the panel is open on `appearance`.
-    expect(screen.queryByText(settingLabel('advanced.liveEdit'))).toBeNull();
+    expect(screen.queryByText(rowLabel('advanced.liveEdit'))).toBeNull();
 
     fireEvent.change(screen.getByLabelText('Поиск по настройкам'), {
       target: { value: 'liveedit' },
@@ -181,8 +193,8 @@ describe('EditPanel', () => {
     // A search scoped to the open section would answer "no such setting" for a
     // setting that exists, which is the failure a section grouping creates and
     // has to answer for.
-    expect(screen.getByText(settingLabel('advanced.liveEdit'))).toBeTruthy();
-    expect(screen.queryByText(settingLabel('themes.id'))).toBeNull();
+    expect(screen.getByText(rowLabel('advanced.liveEdit'))).toBeTruthy();
+    expect(screen.queryByText(rowLabel('themes.id'))).toBeNull();
   });
 
   it('says so when a search matches nothing, instead of showing an empty panel', () => {
@@ -209,7 +221,7 @@ describe('EditPanel', () => {
     // actually opens; this proves the search half over all of it.
     for (const definition of settingsDefinitions) {
       fireEvent.change(box, { target: { value: definition.id } });
-      expect(screen.queryByText(settingLabel(definition.id))).not.toBeNull();
+      expect(screen.queryByText(localizedSettingLabel(definition, 'ru'))).not.toBeNull();
     }
     // One render per definition over the whole catalogue is the point of the
     // test and legitimately outgrows the default five-second budget as the
