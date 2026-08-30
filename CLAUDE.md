@@ -73,10 +73,13 @@ State ownership:
   named regions, not per-domain slice files; a plan that assumes separate slice modules
   describes a target, not the code.
 - Scene definitions (52 Zod-validated scenes) are immutable configuration, not runtime state.
-- `localStorage` owns everything the browser persists, under ten keys:
+- `localStorage` owns everything the browser persists, under eleven keys:
   `gremuchaya-hq:operations:v3`, `…:production-snapshots:v3`, `…:snapshots:v1`,
   `…:device-session:v3` (the paired session, refresh token included; scoped by database, not by
-  address, so every configured plane of the group takes it), `…:group-mirror:v1` (the group's
+  address, so every configured plane of the group takes it), `…:device-identity:v1` (the
+  device's ECDSA P-256 identity keypair, both halves in clear text on the same stated trade-off
+  as the refresh token; its public half is what pairing presents as `public_key`, which the
+  control plane refuses empty, and the key grants nothing by itself), `…:group-mirror:v1` (the group's
   cloud state, staged under `…:draft` first), `…:control-plane-address:v1` (the operator's
   in-app control-plane address list, scoped to the device), `hq.camera-material-assignments.v1`,
   `hq.keybinds-intro-seen.v1`, `hq.material-annotations.v1` (timestamped notes on a material in

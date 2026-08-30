@@ -22,6 +22,13 @@ interface Recorded {
    * rather than off a single spy.
    */
   readonly bootstrapHeaders: string[];
+  /**
+   * What each pairing call presented as `public_key`. The control plane
+   * refuses an empty one (`durable-runtime.ts`, `normalizeDeviceInput`), so
+   * an empty entry here is a pairing that fails against every deployed
+   * plane.
+   */
+  readonly publicKeys: string[];
 }
 
 /** What the transport would actually have put on the wire for this call. */
@@ -40,6 +47,7 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
     async createGroup(request, options) {
       recorded.mutationContexts.push({ requestId: request.context.requestId });
       recorded.bootstrapHeaders.push(`createGroup:${bootstrapHeader(options)}`);
+      recorded.publicKeys.push(request.initialDevice.publicKey);
       return {
         group: {
           id: { value: 'group-a' },
@@ -118,6 +126,7 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
     async pairDevice(request, options) {
       recorded.mutationContexts.push({ requestId: request.context.requestId });
       recorded.bootstrapHeaders.push(`pairDevice:${bootstrapHeader(options)}`);
+      recorded.publicKeys.push(request.publicKey);
       return {
         group: {
           id: { value: 'group-a' },
@@ -299,6 +308,7 @@ function client(options: { readonly sync?: SyncRpcClient; readonly now?: () => n
     refreshRequestIds: [],
     mutationContexts: [],
     bootstrapHeaders: [],
+    publicKeys: [],
   };
   const store = new DeviceSessionStore(memoryStorage());
   let minted = 0;
@@ -352,6 +362,7 @@ describe('ControlPlaneClient', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const sync = syncClient(recorded, {
       async refreshDeviceSession(request) {
@@ -409,6 +420,7 @@ describe('ControlPlaneClient', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const sync = syncClient(recorded, {
       async refreshDeviceSession() {
@@ -474,7 +486,12 @@ describe('ControlPlaneClient', () => {
       sessionStore: store,
       clients: {
         control: controlRpcClient(''),
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
+        sync: syncClient({
+          refreshRequestIds: [],
+          mutationContexts: [],
+          bootstrapHeaders: [],
+          publicKeys: [],
+        }),
       },
     });
 
@@ -491,7 +508,12 @@ describe('ControlPlaneClient', () => {
       sessionStore: new DeviceSessionStore(memoryStorage()),
       clients: {
         control: controlClient,
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
+        sync: syncClient({
+          refreshRequestIds: [],
+          mutationContexts: [],
+          bootstrapHeaders: [],
+          publicKeys: [],
+        }),
       },
     });
 
@@ -519,7 +541,12 @@ describe('ControlPlaneClient', () => {
       sessionStore: store,
       clients: {
         control: controlClient,
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
+        sync: syncClient({
+          refreshRequestIds: [],
+          mutationContexts: [],
+          bootstrapHeaders: [],
+          publicKeys: [],
+        }),
       },
     });
 
@@ -542,7 +569,7 @@ describe('ControlPlaneClient', () => {
 
   it('turns a transport failure that never reached the host into an unavailable kind', async () => {
     const sync = syncClient(
-      { refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] },
+      { refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [], publicKeys: [] },
       {
         async getPresence() {
           throw new TypeError('Failed to fetch');
@@ -592,6 +619,7 @@ describe('ControlPlaneClient', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     let lastJoinDetail: { readonly activeScreen: string } | null = null;
     const sync = syncClient(recorded, {
@@ -664,6 +692,7 @@ describe('two links over one session store', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const store = new DeviceSessionStore(memoryStorage());
     const sync = syncClient(recorded);
@@ -836,6 +865,7 @@ describe('ControlPlaneClient over the group administration calls', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const reader = new ControlPlaneClient({
       baseUrl: 'https://plane.example',
@@ -922,5 +952,51 @@ describe('ControlPlaneClient over the group administration calls', () => {
     });
 
     expect(recorded.mutationContexts).toEqual([]);
+  });
+});
+
+/**
+ * Pairing carried `public_key: ''` from the day the client existed, and the
+ * control plane's durable runtime refuses an empty one -- so every real
+ * pairing this client made against a live plane with durable auth failed
+ * outright. The claim here is behavioural: what actually crosses the wire on
+ * the two pairing calls is the device's one identity, and it is never empty.
+ */
+describe('ControlPlaneClient presents the device identity when pairing', () => {
+  it('sends one non-empty public key on CreateGroup and the same one on PairDevice', async () => {
+    const { client: created, recorded } = client();
+
+    await created.createGroup({
+      name: 'ШТАБ',
+      deviceName: 'MON-01',
+      bootstrapSecret: 'secret-value',
+    });
+    await created.pair('PAIR-0001', 'MON-02');
+
+    expect(recorded.publicKeys).toHaveLength(2);
+    const [onCreate, onPair] = recorded.publicKeys;
+    expect(onCreate).toMatch(/^(ecdsa-p256|opaque):.+/u);
+    expect(onPair).toBe(onCreate);
+  });
+
+  it('sends an injected identity verbatim, so a paired session can present a chosen key', async () => {
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+      publicKeys: [],
+    };
+    const created = new ControlPlaneClient({
+      baseUrl: 'http://127.0.0.1:4100',
+      sessionStore: new DeviceSessionStore(memoryStorage()),
+      clients: { control: controlClient, sync: syncClient(recorded) },
+      identity: { publicKey: async () => 'ed25519:analyst' },
+      mintRequestId: () => 'request-1',
+      now: () => 0,
+    });
+
+    await created.pair('PAIR-0001', 'MON-02');
+
+    expect(recorded.publicKeys).toEqual(['ed25519:analyst']);
   });
 });

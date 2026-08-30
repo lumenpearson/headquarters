@@ -34,6 +34,7 @@ import type {
 import type { GroupEventPage } from '@/application/sync/groupEventFeed';
 
 import { createBearerInterceptor } from './authInterceptor';
+import { BrowserDeviceIdentity, type DeviceIdentity } from './DeviceIdentity';
 import { DeviceSessionStore, type StoredDeviceSession } from './DeviceSessionStore';
 import {
   fromDeviceRole,
@@ -340,6 +341,12 @@ export interface ControlPlaneClientOptions {
     readonly sync: SyncRpcClient;
   };
   readonly device?: { readonly platform: string; readonly applicationVersion: string };
+  /**
+   * What pairing presents as `public_key`; the browser-persisted keypair when
+   * absent. The control plane refuses an empty key, so a test that stubs the
+   * sync client but not this still pairs.
+   */
+  readonly identity?: DeviceIdentity;
   readonly mintRequestId?: () => string;
   /** Wall clock, epoch milliseconds. */
   readonly now?: () => number;
@@ -364,6 +371,7 @@ export class ControlPlaneClient implements ControlPlanePort {
   readonly #control: ControlRpcClient;
   readonly #sync: SyncRpcClient;
   readonly #device: { readonly platform: string; readonly applicationVersion: string };
+  readonly #identity: DeviceIdentity;
   readonly #mintRequestId: () => string;
   readonly #now: () => number;
   readonly #transport: Transport | undefined;
@@ -381,6 +389,7 @@ export class ControlPlaneClient implements ControlPlanePort {
     this.credentials = options.credentials ?? 'owner';
     this.#store = options.sessionStore ?? new DeviceSessionStore();
     this.#device = options.device ?? { platform: 'web', applicationVersion: '' };
+    this.#identity = options.identity ?? new BrowserDeviceIdentity();
     this.#mintRequestId = options.mintRequestId ?? (() => crypto.randomUUID());
     this.#now = options.now ?? (() => Date.now());
     if (options.clients !== undefined) {
@@ -518,6 +527,7 @@ export class ControlPlaneClient implements ControlPlanePort {
    */
   async createGroup(request: CreateGroupRequest, signal?: AbortSignal): Promise<PairingResult> {
     this.#requireCredentialOwner('create a group');
+    const publicKey = await this.#identity.publicKey();
     const response = await call(() =>
       this.#sync.createGroup(
         {
@@ -525,7 +535,7 @@ export class ControlPlaneClient implements ControlPlanePort {
           name: request.name.trim(),
           initialDevice: {
             name: request.deviceName.trim(),
-            publicKey: '',
+            publicKey,
             platform: this.#device.platform,
             applicationVersion: this.#device.applicationVersion,
           },
@@ -552,12 +562,13 @@ export class ControlPlaneClient implements ControlPlanePort {
     signal?: AbortSignal,
   ): Promise<PairingResult> {
     this.#requireCredentialOwner('pair');
+    const publicKey = await this.#identity.publicKey();
     const response = await call(() =>
       this.#sync.pairDevice(
         {
           pairingCode: pairingCode.trim(),
           deviceName: deviceName.trim(),
-          publicKey: '',
+          publicKey,
           platform: this.#device.platform,
           applicationVersion: this.#device.applicationVersion,
           context: { requestId: this.#mintRequestId() },
@@ -1059,6 +1070,7 @@ export class ControlPlaneClient implements ControlPlanePort {
       sessionStore: this.#store,
       credentials: role,
       device: this.#device,
+      identity: this.#identity,
       mintRequestId: this.#mintRequestId,
       now: this.#now,
       // A test injects RPC clients rather than a transport; the sibling reuses
