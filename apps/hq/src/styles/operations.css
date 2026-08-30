@@ -7164,3 +7164,85 @@ body {
   min-height: 24px;
   font-size: 8px;
 }
+
+/*
+ * t4-file-dialog-card: the file record's drawer renders as a centred,
+ * width-capped card instead of the right-anchored aside every other record
+ * kind keeps. `Drawer` (OpsUi.tsx) only adds `ops-drawer--card` when its
+ * `variant` prop is `'card'`, and only the `'file'` branch in
+ * `OperationsShell.tsx` passes it -- the other seven record kinds render
+ * `.ops-drawer` with no variant class and are unaffected.
+ *
+ * Deliberately the last `.ops-drawer` rule in this file: the base geometry
+ * (~1066), the fluid-matrix override (~4400), the Signal Mesh repaint
+ * (~5611) and the final cascade lock (~6080) -- plus their
+ * `@media (min-width: 2500px)` / `@media (max-height: 820px)` counterparts
+ * -- all set `top`/`right`/`bottom`/`width` on the plain `.ops-drawer`
+ * selector at this same specificity, so whichever of them a browser reads
+ * last wins per property. This rule resets every one of those properties
+ * itself, so landing after all of them -- the same "final cascade lock"
+ * convention that block already documents, rather than a specificity race
+ * -- is what makes it the geometry that actually paints.
+ */
+.ops-drawer--card {
+  /* `inset: 0` on the `position: fixed` box the base rule already sets, not
+     a transform: the fixed `::before` scrim above loses the viewport as its
+     containing block the moment an ancestor box gets a transform, which is
+     why the base drawer only ever animates its header/body children and
+     never itself (see the comment on `.ops-drawer` near the top of this
+     file). `margin: auto` is what centres a `position: fixed` box with
+     `inset: 0` and a definite (non-`auto`) size on both axes. */
+  inset: 0;
+  margin: auto;
+  /* 60% of the viewport, capped at 1040px -- the width this file already
+     treats as `.ops-screen`'s own working floor (`.ops-screen { min-width:
+     1040px }` inside `@media (max-width: 1180px)` below) rather than an
+     invented ceiling: a file card has no reason to grow past the width the
+     rest of the shell already refuses to shrink under. */
+  width: min(60vw, 1040px);
+  /* An explicit, non-`auto` size, not `auto`: `margin: auto` centring needs
+     a definite box to centre against `max-content` keeps the card only as
+     tall as its content, up to the cap below. */
+  height: max-content;
+  /* Never `100vh`/`100dvh` (R26 forbids page scroll): the margin scales with
+     viewport height so the box stays clear of the top and bottom edges at
+     every height in the bounded-layout matrix
+     (apps/hq/tests/bounded-layout.spec.ts, 1024x600 upward), and the body
+     row inherited from the base rule (`grid-template-rows: 50px minmax(0,
+     1fr)`, `.ops-drawer__body { overflow: auto }`) stays the only
+     scroller. */
+  max-height: min(760px, calc(100dvh - 2 * clamp(32px, 6dvh, 96px)));
+}
+
+/* `popups.drawerWidth` still reaches the card through the same class hooks
+   as the aside, scaled +-20% around the 60vw/1040px cap above instead of
+   reusing the aside's own 420px-based narrow/wide ratios, which were tuned
+   for a right-anchored sidebar and read oddly against a centred card. */
+.ops-drawer--card.ops-drawer--narrow {
+  width: min(48vw, 800px);
+}
+
+.ops-drawer--card.ops-drawer--wide {
+  width: min(72vw, 1280px);
+}
+
+/*
+ * Below the app's own layout floor: `@media (max-width: 1180px)` is where
+ * `.ops-screen` already gives up on reflowing further and accepts a
+ * 1040px-wide horizontal floor instead (the same number the width cap above
+ * reuses), so a 60vw card has no room left to be a card there. It becomes a
+ * full-screen surface instead, the same `fixed; inset: 0` shape
+ * `KeybindIntro` already uses for a full-bleed in-app overlay. Every width
+ * class is reset here, `ops-drawer--narrow`/`--wide` included, since those
+ * compound selectors outrank the plain `.ops-drawer--card` match on
+ * specificity and would otherwise keep the capped width under this query. */
+@media (max-width: 1180px) {
+  .ops-drawer--card,
+  .ops-drawer--card.ops-drawer--narrow,
+  .ops-drawer--card.ops-drawer--wide {
+    margin: 0;
+    width: auto;
+    height: auto;
+    max-height: none;
+  }
+}

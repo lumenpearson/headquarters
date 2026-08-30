@@ -236,3 +236,88 @@ test('R26: the camera matrix scrolls its own records', async ({ page }) => {
 
   expect((await scrollExtents(page)).workspaceY).toBe(0);
 });
+
+/**
+ * t4-file-dialog-card: opens the file record's drawer by double-clicking the
+ * first row of the registry table, which calls `openDrawer('file', id)`
+ * directly (`FilesScreen.tsx`) without depending on a prior row selection.
+ */
+async function openFileDrawer(page: Page) {
+  await page.goto('/files');
+  const firstRow = page.locator('.files-table tbody tr').first();
+  await expect(firstRow).toBeVisible();
+  await firstRow.dblclick();
+  const drawer = page.locator('.ops-drawer');
+  await expect(drawer).toBeVisible();
+  return drawer;
+}
+
+test('file drawer: the card is centred, width-capped and clear of both viewport edges', async ({
+  page,
+}) => {
+  // Above the app's own layout floor (`@media (max-width: 1180px)`, where
+  // `.ops-screen` itself gives up on reflowing further): the card variant
+  // must actually be a card here, not the full-screen surface below it.
+  const viewport = { width: 1280, height: 720 };
+  await page.setViewportSize(viewport);
+  const drawer = await openFileDrawer(page);
+
+  await expect(page.locator('.ops-drawer header span')).toContainText('FILE /');
+
+  const box = await drawer.boundingBox();
+  if (box === null) throw new Error('the file drawer is not laid out');
+
+  // Centred: the gap to the left edge and the gap to the right edge of the
+  // app viewport agree, which `inset: 0; margin: auto` gives for free and a
+  // right-anchored aside never would.
+  const leftGap = box.x;
+  const rightGap = viewport.width - (box.x + box.width);
+  expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(2);
+
+  // Capped at 60% of the app viewport width (`width: min(60vw, 1040px)`;
+  // 60% of 1280 is under the 1040px ceiling, so the vw term is the one that
+  // actually bites here).
+  expect(box.width).toBeLessThanOrEqual(viewport.width * 0.6 + 2);
+  expect(box.width).toBeGreaterThan(viewport.width * 0.6 - 2);
+
+  // Never touches the top or bottom edge: R26 forbids page scroll, so the
+  // margin the card leaves at both edges has to be real, not a rounding
+  // artefact of `100vh`/`100dvh`.
+  expect(box.y).toBeGreaterThan(0);
+  expect(viewport.height - (box.y + box.height)).toBeGreaterThan(0);
+
+  expect(await scrollExtents(page)).toEqual({
+    documentY: 0,
+    documentX: 0,
+    bodyY: 0,
+    workspaceY: 0,
+    workspaceX: 0,
+  });
+});
+
+test('file drawer: becomes a full-screen surface below the app layout floor', async ({ page }) => {
+  // 1024x600 is both the shortest window in the R26 matrix above and, at
+  // 1024px wide, already below the 1180px floor where `.ops-screen` stops
+  // reflowing -- the same floor `.ops-drawer--card`'s full-screen `@media`
+  // query keys off.
+  const viewport = { width: 1024, height: 600 };
+  await page.setViewportSize(viewport);
+  const drawer = await openFileDrawer(page);
+
+  const box = await drawer.boundingBox();
+  if (box === null) throw new Error('the file drawer is not laid out');
+  expect({
+    x: Math.round(box.x),
+    y: Math.round(box.y),
+    width: Math.round(box.width),
+    height: Math.round(box.height),
+  }).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+
+  expect(await scrollExtents(page)).toEqual({
+    documentY: 0,
+    documentX: 0,
+    bodyY: 0,
+    workspaceY: 0,
+    workspaceX: 0,
+  });
+});

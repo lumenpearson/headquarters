@@ -1053,7 +1053,7 @@ function OperationsDrawer() {
     const file = state.attachments[drawer.id];
     if (file === undefined) return null;
     return (
-      <Drawer title={file.title} eyebrow={`FILE / ${file.id}`} onClose={close}>
+      <Drawer title={file.title} eyebrow={`FILE / ${file.id}`} onClose={close} variant="card">
         <StatusBadge status={file.status} />
         <div className={`ops-file-preview ops-file-preview--${file.kind}`}>
           <i>[{file.kind.toUpperCase()}]</i>
