@@ -5,12 +5,13 @@ import { join } from 'node:path';
 
 import { createClient } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import type { BridgeConfig } from '@gremuchaya/config';
 import { createVirtualPath } from '@gremuchaya/domain';
 import { FileBridgeService } from '@gremuchaya/protocol';
 
 import { startBridge } from '../../file-bridge/src/server.js';
+import { gotoSettingsUnified } from './settingsHelpers';
 
 test('boots the unified operational world and opens a linked object', async ({ page }) => {
   await page.goto('/');
@@ -475,7 +476,7 @@ test('operates dialog, menu, context menu and toast through project wrappers', a
 });
 
 test('persists settings through Base UI switch, select and input adapters', async ({ page }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const animations = page.getByRole('switch', { name: 'Анимации' });
   await expect(animations).toBeChecked();
@@ -499,7 +500,7 @@ test('persists settings through Base UI switch, select and input adapters', asyn
 
 test('keeps settings overflow inside its own pane at 720p', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   await expect
     .poll(() =>
@@ -526,7 +527,7 @@ test('keeps settings overflow inside its own pane at 720p', async ({ page }) => 
 test('renders the full safe personalization catalogue and resets one selected category', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   // The catalogue is grouped now — thirty-two categories in one list stopped
   // being readable well before the seventy-one definitions R6 asks for — but the
@@ -552,7 +553,7 @@ test('renders the full safe personalization catalogue and resets one selected ca
 test('round-trips a schema-validated settings draft through the terminal import control', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const downloadReady = page.waitForEvent('download');
   await page.getByRole('button', { name: '[↓] EXPORT JSON', exact: true }).click();
@@ -567,7 +568,7 @@ test('round-trips a schema-validated settings draft through the terminal import 
 test('keeps local settings history filterable and reversible inside its own settings pane', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const theme = page.getByRole('combobox', { name: 'THEMES / ID' });
   await theme.click();
@@ -592,7 +593,7 @@ test('keeps local settings history filterable and reversible inside its own sett
 test('applies schema-backed visual preview tokens without introducing arbitrary style input', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
@@ -854,6 +855,111 @@ test('opens the hidden local material-import surface without adding page scroll'
     .toBe(true);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+});
+
+/**
+ * A loopback file-bridge, proxied under the address `BridgeMaterialClient`
+ * expects by default, for the two t5-player-rework tests below: both need a
+ * material an actual import put real bytes behind, not a fabricated store
+ * record a preview reader would fail to fetch.
+ */
+async function withMaterialsBridge(page: Page, run: () => Promise<void>): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), 'gremuchaya-import-preview-'));
+  const config: BridgeConfig = {
+    version: 1,
+    transport: 'grpc-web',
+    port: 0,
+    readOnly: false,
+    allowedOrigins: ['http://127.0.0.1:3000'],
+    mounts: [
+      {
+        id: 'materials',
+        label: 'МАТЕРИАЛЫ',
+        root,
+        virtualPath: createVirtualPath('/МАТЕРИАЛЫ'),
+      },
+    ],
+    stableFile: { probeIntervalMs: 50, timeoutMs: 500 },
+    watchDebounceMs: 25,
+    materialImport: {
+      enabled: true,
+      maxFileBytes: 64 * 1024 * 1024,
+      chunkSizeBytes: 1024 * 1024,
+    },
+  };
+  const running = await startBridge(config);
+  try {
+    const address = running.server.address() as AddressInfo;
+    const bridgeOrigin = `http://127.0.0.1:${address.port}`;
+    await page.route('http://127.0.0.1:4177/**', async (route) => {
+      const requested = new URL(route.request().url());
+      const proxied = await route.fetch({
+        url: `${bridgeOrigin}${requested.pathname}${requested.search}`,
+      });
+      await route.fulfill({ response: proxied });
+    });
+    await run();
+  } finally {
+    await running.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+const importPreviewNote = 'СЪЁМКА K-17: заметка для предпросмотра.';
+
+test('previews a selected library entry inside the import dialog', async ({ page }) => {
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    const dialog = page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' });
+    await expect(dialog).toBeVisible();
+
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'polevaya-zametka.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from(importPreviewNote, 'utf-8'),
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+
+    // No preview until an entry is picked -- the dialog used to list name,
+    // MIME and hash with nothing to look at (t5-player-rework).
+    await expect(page.locator('.material-import-dialog__preview')).toBeHidden();
+    await page
+      .locator('.material-import-dialog__entry', { hasText: 'polevaya-zametka.txt' })
+      .click();
+    const preview = page.locator('.material-import-dialog__preview');
+    await expect(preview).toBeVisible();
+    await expect(preview.locator('.local-material-preview--text pre')).toHaveText(
+      importPreviewNote,
+    );
+  });
+});
+
+test('opens the file drawer for an imported material and shows its preview', async ({ page }) => {
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'polevaya-zametka.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from(importPreviewNote, 'utf-8'),
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' })).toBeHidden();
+
+    // OperationsShell's file drawer used to read `attachments` only, so
+    // `[ENTER] FILE VIEWER` on an imported material opened nothing at all
+    // (t5-player-rework).
+    await page.getByRole('button', { name: '[ENTER] FILE VIEWER' }).click();
+    const drawer = page.locator('.ops-drawer--card');
+    await expect(drawer).toBeVisible();
+    await expect(drawer.locator('.local-material-preview--text pre')).toHaveText(importPreviewNote);
+  });
 });
 
 test('keeps overview, communications and tactical layers interactive through wrappers', async ({

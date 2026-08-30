@@ -119,6 +119,13 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
    * offers no `ListTrash`, so a screen on the mirror never sees the toggle.
    */
   const [dialogView, setDialogView] = useState<'recent' | 'trash'>('recent');
+  /*
+   * A selected library entry, previewed inline through the same
+   * `LocalMaterialPreview` surface the registry uses -- bounded by the same
+   * `materials.previewLimitMb`/`textPreviewLimitMb` limits, since neither the
+   * dialog nor this state carries a limit of its own (t5-player-rework).
+   */
+  const [previewMaterial, setPreviewMaterial] = useState<MaterialEntry | null>(null);
   const [trashMaterials, setTrashMaterials] = useState<readonly MaterialEntry[]>([]);
   const [nextTrashCursor, setNextTrashCursor] = useState('');
   const [trashStatus, setTrashStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle');
@@ -174,6 +181,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
     setBridgeStatus('loading');
     setBridgeMessage('');
     setDialogView('recent');
+    setPreviewMaterial(null);
     // `materials.rememberImportCategory` keeps the last choice instead. The
     // default stays "reset", so a category chosen for one batch does not
     // silently carry into the next unless the operator asked for that.
@@ -775,7 +783,10 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
               <TerminalButton
                 size="small"
                 className={dialogView === 'recent' ? 'is-active' : ''}
-                onClick={() => setDialogView('recent')}
+                onClick={() => {
+                  setPreviewMaterial(null);
+                  setDialogView('recent');
+                }}
               >
                 НЕДАВНИЕ
               </TerminalButton>
@@ -783,6 +794,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 size="small"
                 className={dialogView === 'trash' ? 'is-active' : ''}
                 onClick={() => {
+                  setPreviewMaterial(null);
                   setTrashStatus('loading');
                   setTrashMessage('');
                   setDialogView('trash');
@@ -814,12 +826,20 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 <ul>
                   {trashMaterials.map((entry) => (
                     <li key={entry.materialId}>
-                      <strong>{entry.displayName}</strong>
-                      <span>
-                        {entry.mimeType || 'application/octet-stream'} /{' '}
-                        {formatBytes(entry.byteSize)}
-                      </span>
-                      <code>{entry.contentHash.slice(0, 16)}</code>
+                      <TerminalButton
+                        tone="quiet"
+                        className={`material-import-dialog__entry ${
+                          previewMaterial?.materialId === entry.materialId ? 'is-active' : ''
+                        }`}
+                        onClick={() => setPreviewMaterial(entry)}
+                      >
+                        <strong>{entry.displayName}</strong>
+                        <span>
+                          {entry.mimeType || 'application/octet-stream'} /{' '}
+                          {formatBytes(entry.byteSize)}
+                        </span>
+                        <code>{entry.contentHash.slice(0, 16)}</code>
+                      </TerminalButton>
                       <div className="material-import-dialog__recent-actions">
                         <TerminalButton size="small" onClick={() => void restoreFromTrash(entry)}>
                           [R] ВОССТАНОВИТЬ
@@ -872,18 +892,41 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 <ul>
                   {libraryMaterials.map((material) => (
                     <li key={material.materialId}>
-                      <strong>{material.displayName}</strong>
-                      <span>
-                        {material.mimeType || 'application/octet-stream'} /{' '}
-                        {formatBytes(material.byteSize)}
-                      </span>
-                      <code>{material.contentHash.slice(0, 16)}</code>
+                      <TerminalButton
+                        tone="quiet"
+                        className={`material-import-dialog__entry ${
+                          previewMaterial?.materialId === material.materialId ? 'is-active' : ''
+                        }`}
+                        onClick={() => setPreviewMaterial(material)}
+                      >
+                        <strong>{material.displayName}</strong>
+                        <span>
+                          {material.mimeType || 'application/octet-stream'} /{' '}
+                          {formatBytes(material.byteSize)}
+                        </span>
+                        <code>{material.contentHash.slice(0, 16)}</code>
+                      </TerminalButton>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
           )}
+          {previewMaterial !== null ? (
+            <div className="material-import-dialog__preview">
+              <header>
+                <span>ПРЕДПРОСМОТР / {previewMaterial.displayName}</span>
+                <TerminalButton size="small" tone="quiet" onClick={() => setPreviewMaterial(null)}>
+                  [X] ЗАКРЫТЬ
+                </TerminalButton>
+              </header>
+              <LocalMaterialPreview
+                key={previewMaterial.materialId}
+                material={previewMaterial}
+                client={materialClient}
+              />
+            </div>
+          ) : null}
         </div>
       </TerminalDialog>
     </>

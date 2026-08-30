@@ -29,6 +29,47 @@ vi.mock('@vidstack/react', async () => {
     ) {
       return createElement('div', { 'aria-label': props['aria-label'] }, props.children);
     }),
+    Controls: {
+      Root: ({
+        children,
+        className,
+      }: {
+        readonly children?: ReactNode;
+        readonly className?: string;
+      }) => createElement('div', { className }, children),
+      Group: ({
+        children,
+        className,
+      }: {
+        readonly children?: ReactNode;
+        readonly className?: string;
+      }) => createElement('div', { className }, children),
+    },
+    TimeSlider: {
+      Root: (props: {
+        readonly children?: ReactNode;
+        readonly className?: string;
+        readonly 'aria-label'?: string;
+      }) =>
+        createElement(
+          'div',
+          { className: props.className, 'aria-label': props['aria-label'] },
+          props.children,
+        ),
+      Track: ({
+        children,
+        className,
+      }: {
+        readonly children?: ReactNode;
+        readonly className?: string;
+      }) => createElement('div', { className }, children),
+      TrackFill: ({ className }: { readonly className?: string }) =>
+        createElement('div', { className }),
+      Progress: ({ className }: { readonly className?: string }) =>
+        createElement('div', { className }),
+      Thumb: ({ className }: { readonly className?: string }) =>
+        createElement('div', { className }),
+    },
   };
 });
 
@@ -126,6 +167,12 @@ describe('the file viewer', () => {
     await waitFor(() => expect(screen.getByLabelText(/Локальный медиаплеер/u)).toBeTruthy());
     expect(asked).toEqual([]);
 
+    // The quality menu moved into the player's settings popover
+    // (t5-player-rework): it opens on the gear button rather than sitting in
+    // a permanently visible transport row.
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Настройки плеера'));
+    });
     await chooseRendition('720P');
 
     await waitFor(() => expect(asked).toEqual(['720p']));

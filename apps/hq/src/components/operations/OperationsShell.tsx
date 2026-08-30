@@ -73,8 +73,11 @@ import { linkStatusTokens } from '@/application/sync/controlPlaneLinks';
 
 import { EditableContent } from '@/components/edit/EditableContent';
 import { TitleBar } from '@/components/shell/TitleBar';
+import { toMaterialEntry } from '@/application/materials/importedMaterials';
+import { useMaterialLibrary } from '@/application/materials/useMaterialLibrary';
 
 import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
+import { LocalMaterialPreview } from './LocalMaterialPreview';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
 import { resolveMotionDurationMs } from './ShellMotion';
 import { clearanceReadout, secureLinkReadout, sectorFocus } from './TopBarReadouts';
@@ -1051,31 +1054,36 @@ function OperationsDrawer() {
   }
   if (drawer.kind === 'file') {
     const file = state.attachments[drawer.id];
-    if (file === undefined) return null;
-    return (
-      <Drawer title={file.title} eyebrow={`FILE / ${file.id}`} onClose={close} variant="card">
-        <StatusBadge status={file.status} />
-        <div className={`ops-file-preview ops-file-preview--${file.kind}`}>
-          <i>[{file.kind.toUpperCase()}]</i>
-          <strong>{file.preview}</strong>
-        </div>
-        <dl className="ops-definition-list">
-          <div>
-            <dt>{t('field.clearance')}</dt>
-            <dd>{file.classification}</dd>
+    if (file !== undefined) {
+      return (
+        <Drawer title={file.title} eyebrow={`FILE / ${file.id}`} onClose={close} variant="card">
+          <StatusBadge status={file.status} />
+          <div className={`ops-file-preview ops-file-preview--${file.kind}`}>
+            <i>[{file.kind.toUpperCase()}]</i>
+            <strong>{file.preview}</strong>
           </div>
-          <div>
-            <dt>{t('field.size')}</dt>
-            <dd>{file.sizeLabel}</dd>
-          </div>
-          <div>
-            <dt>{t('field.tags')}</dt>
-            <dd>{file.tags.join(', ')}</dd>
-          </div>
-        </dl>
-        <TerminalButton className="ops-action">{t('drawer.attachToCase')}</TerminalButton>
-      </Drawer>
-    );
+          <dl className="ops-definition-list">
+            <div>
+              <dt>{t('field.clearance')}</dt>
+              <dd>{file.classification}</dd>
+            </div>
+            <div>
+              <dt>{t('field.size')}</dt>
+              <dd>{file.sizeLabel}</dd>
+            </div>
+            <div>
+              <dt>{t('field.tags')}</dt>
+              <dd>{file.tags.join(', ')}</dd>
+            </div>
+          </dl>
+          <TerminalButton className="ops-action">{t('drawer.attachToCase')}</TerminalButton>
+        </Drawer>
+      );
+    }
+    // An imported material has no `attachments` record -- it lives in
+    // `materials.imported` instead -- so the branch above found nothing and
+    // this one is what actually opens the file viewer for it (t5-player-rework).
+    return <ImportedMaterialDrawer materialId={drawer.id} onClose={close} />;
   }
   const insight = state.insights[drawer.id];
   if (insight === undefined) return null;
@@ -1084,6 +1092,36 @@ function OperationsDrawer() {
       <SeverityBadge severity={insight.priority} />
       <p>{insight.explanation}</p>
       <p>{t('drawer.linkedObjects', { list: insight.linkedObjectIds.join(', ') })}</p>
+    </Drawer>
+  );
+}
+
+/**
+ * The file drawer for a material that lives in `materials.imported` rather
+ * than `state.attachments` -- every material an operator has imported through
+ * `FilesScreen`. `OperationsDrawer`'s file branch used to read `attachments`
+ * only, so `[ENTER] FILE VIEWER` on an import opened nothing at all
+ * (t5-player-rework).
+ */
+function ImportedMaterialDrawer({
+  materialId,
+  onClose,
+}: {
+  readonly materialId: string;
+  readonly onClose: () => void;
+}) {
+  const imported = useOperationsStore((state) => state.materials.imported[materialId]);
+  const materialClient = useMaterialLibrary();
+  if (imported === undefined) return null;
+  const material = toMaterialEntry(imported);
+  return (
+    <Drawer
+      title={material.displayName}
+      eyebrow={`FILE / ${material.materialId}`}
+      onClose={onClose}
+      variant="card"
+    >
+      <LocalMaterialPreview material={material} client={materialClient} />
     </Drawer>
   );
 }

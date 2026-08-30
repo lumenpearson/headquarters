@@ -9,7 +9,7 @@ import {
   readMaterialBlob,
   readMaterialText,
 } from '@/infrastructure/materials/MaterialPreviewReader';
-import { useNumberSetting } from '@/application/personalization/useSetting';
+import { useBooleanSetting, useNumberSetting } from '@/application/personalization/useSetting';
 
 import { LocalMaterialPlayer, type LocalMaterialPlayerHandle } from './LocalMaterialPlayer';
 import { MaterialAnnotationsPanel } from './MaterialAnnotationsPanel';
@@ -19,6 +19,16 @@ import {
   releaseMaterialSubtitleTracks,
   type MaterialSubtitleTrack,
 } from './materialSubtitleTracks';
+
+/*
+ * `materials.rememberPreviewPosition`'s storage: a page-session cache, not a
+ * persisted one. The preview panel remounts on every material switch (its
+ * caller keys it by `materialId`), which would otherwise lose `currentTime`
+ * on the very reselect this setting exists for; a browser reload losing it
+ * too is the deliberate trade-off of holding it here instead of adding a
+ * twelfth `localStorage` key for what is, on this surface, a convenience.
+ */
+const rememberedPreviewPositions = new Map<string, number>();
 
 type PreviewState =
   | { readonly type: 'loading' }
@@ -43,6 +53,9 @@ export function LocalMaterialPreview({
   const textBytes = useNumberSetting('materials.textPreviewLimitMb') * 1024 * 1024;
   const binaryBytes = useNumberSetting('materials.previewLimitMb') * 1024 * 1024;
   const limits = useMemo(() => ({ textBytes, binaryBytes }), [binaryBytes, textBytes]);
+  const autoplayPreview = useBooleanSetting('materials.autoplayPreview');
+  const loopPreview = useBooleanSetting('materials.loopPreview');
+  const rememberPosition = useBooleanSetting('materials.rememberPreviewPosition');
   const mode = previewModeForMaterial(material, limits);
   const [state, setState] = useState<PreviewState>({ type: 'loading' });
   const renditions = useMemo(() => client.renditions(material), [client, material]);
@@ -229,7 +242,15 @@ export function LocalMaterialPreview({
           sourceUrl={state.url}
           title={material.displayName}
           tracks={subtitleTracks}
-          onTimeUpdate={setPlayerTime}
+          autoPlay={autoplayPreview}
+          loop={loopPreview}
+          initialTime={
+            rememberPosition ? (rememberedPreviewPositions.get(material.materialId) ?? 0) : 0
+          }
+          onTimeUpdate={(seconds) => {
+            setPlayerTime(seconds);
+            if (rememberPosition) rememberedPreviewPositions.set(material.materialId, seconds);
+          }}
           quality={
             <MaterialRenditionMenu
               renditions={renditions}
