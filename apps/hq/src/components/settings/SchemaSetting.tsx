@@ -18,8 +18,12 @@ import {
 } from '@gremuchaya/ui/primitives';
 import { useEffect, type ReactNode } from 'react';
 
-import { t } from '@/application/localization/locale';
-import type { MessageId } from '@/application/localization/messages';
+import { t, useAppLocale } from '@/application/localization/locale';
+import type { AppLocale, MessageId } from '@/application/localization/messages';
+import {
+  localizedEnumOptionLabel,
+  localizedSettingDescription,
+} from '@/application/localization/settingLocalization';
 import { statuslineElementLabel } from '@/application/localization/statuslineLabels';
 import { titlebarElementLabel } from '@/application/localization/titlebarLabels';
 import type { SettingGroup } from '@/application/personalization/catalog';
@@ -66,6 +70,10 @@ export function SchemaSetting({
 }) {
   const label = settingLabel(definition.id);
   const editor = definition.editor;
+  // Subscribed rather than read once: a description or enum option translated
+  // by `settingLocalization.ts` must follow `localization.locale` the way
+  // every other row on this screen already does.
+  const locale = useAppLocale();
 
   // Called unconditionally, as a hook must be, but the catalogue only loads
   // when a picker over it is actually on screen.
@@ -117,7 +125,7 @@ export function SchemaSetting({
             }
             options={editor.options.map((option) => ({
               value: option,
-              label: option.toUpperCase(),
+              label: localizedEnumOptionLabel(definition, option, locale),
             }))}
           />
         );
@@ -226,7 +234,7 @@ export function SchemaSetting({
   return (
     <Setting
       label={`${label}${changed ? ' *' : ''}`}
-      detail={`${definition.scope.toUpperCase()} · ${settingDescription(definition)}`}
+      detail={`${definition.scope.toUpperCase()} · ${settingDescription(definition, locale)}`}
       notice={awaitingFeature === undefined ? undefined : t('settings.awaitingFeature')}
     >
       {control}
@@ -235,24 +243,26 @@ export function SchemaSetting({
 }
 
 /**
- * The row's own English description, save for the two settings whose
- * description is a bare `join(', ')` over their member ids: `titlebar.
- * elements` and `statusline.elements` are each edited as a comma list
- * (`string-list` has no per-value catalogue the way `enum` does), so their
- * definitions fall back to naming their members in the schema's own English
- * rather than the operator's language. These are the two detail lines that
- * read through `titlebarElementLabel`/`statuslineElementLabel` instead of the
- * raw description for that reason; every other setting still shows the
- * schema's description untranslated, as it always has.
+ * The row's own description, in the operator's language where one has been
+ * authored, save for the two settings whose description is a bare
+ * `join(', ')` over their member ids: `titlebar.elements` and
+ * `statusline.elements` are each edited as a comma list (`string-list` has no
+ * per-value catalogue the way `enum` does), so their definitions fall back to
+ * naming their members in the schema's own English rather than the
+ * operator's language. These are the two detail lines that read through
+ * `titlebarElementLabel`/`statuslineElementLabel` instead of the raw
+ * description for that reason; every other setting reads through
+ * `localizedSettingDescription`, which itself falls back to the schema's own
+ * English line for a definition this pass has not yet translated.
  */
-function settingDescription(definition: SettingDefinition): string {
+function settingDescription(definition: SettingDefinition, locale: AppLocale): string {
   if (definition.id === 'titlebar.elements') {
     return titlebarElements.map((element) => titlebarElementLabel(element)).join(', ');
   }
   if (definition.id === 'statusline.elements') {
     return statuslineElements.map((element) => statuslineElementLabel(element)).join(', ');
   }
-  return definition.description;
+  return localizedSettingDescription(definition, locale);
 }
 
 export function Setting({

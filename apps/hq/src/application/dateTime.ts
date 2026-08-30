@@ -35,13 +35,13 @@ export type DateTimeMode = (typeof dateTimeModes)[number];
  * **The locale.** `TopBar`, `VirtualExplorer`, `DeveloperPanel`,
  * `SettingsScreen`'s history stamps and the tables and feeds on the cases,
  * files, objects, overview, reports and search screens now take their
- * formatter from `localization/intl.ts` like this module does. Three still
- * hold a `'ru-RU'` literal, all of them owned by another agent while F11 slice
- * one was written: `OperationsShell`'s `formatDateTime` and snapshot button,
- * `CommunicationsScreen`'s event feed and `SystemScreen`'s log. Two more live
- * outside this app and cannot read a client setting at all --
- * `packages/domain/src/explorerTree.ts` is framework-free by design and
- * `apps/file-bridge/src/BridgeService.ts` is a separate process.
+ * formatter from `localization/intl.ts` like this module does.
+ * `OperationsShell`'s `formatDateTime` and snapshot button,
+ * `CommunicationsScreen`'s event feed and `SystemScreen`'s log followed in
+ * F11's chrome-translation pass, closing the last live `'ru-RU'` literals
+ * inside this app. Two live outside it and cannot read a client setting at
+ * all -- `packages/domain/src/explorerTree.ts` is framework-free by design
+ * and `apps/file-bridge/src/BridgeService.ts` is a separate process.
  *
  * **The mode.** Only the shell clock in `OpsTopBar` and the stamp in
  * `OpsStatusLine` follow `dateTime.mode`. Every stamp named above still shows

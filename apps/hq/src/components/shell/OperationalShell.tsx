@@ -6,6 +6,7 @@ import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
 import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { formatChord } from '@/application/keybinds/match';
+import { t } from '@/application/localization/locale';
 import { ModuleRenderer } from '@/components/modules/ModuleRenderer';
 import { RuntimeProvider, useRuntime } from '@/components/runtime/RuntimeProvider';
 import { SceneControl } from '@/components/operator/SceneControl';
@@ -242,7 +243,7 @@ function StatusBar() {
         {Object.keys(sources).length}
       </span>
       <span>BUS:V1</span>
-      <span>UTF-8</span>
+      <span>{t('token.utf8')}</span>
       <span>HQ-V3-LOCAL</span>
     </footer>
   );

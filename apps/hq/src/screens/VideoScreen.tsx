@@ -21,6 +21,7 @@ import {
 } from '@vidstack/react';
 import { TerminalButton, TerminalSelect, TerminalSlider } from '@gremuchaya/ui/primitives';
 
+import { t } from '@/application/localization/locale';
 import {
   useBooleanSetting,
   useNumberSetting,
@@ -1622,7 +1623,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 <dd>СИСТЕМА</dd>
               </div>
               <div>
-                <dt>PTZ</dt>
+                <dt>{t('token.ptz')}</dt>
                 <dd>{selected.ptz ? 'AVAILABLE' : 'FIXED'}</dd>
               </div>
             </dl>

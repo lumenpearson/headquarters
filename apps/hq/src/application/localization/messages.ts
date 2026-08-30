@@ -57,13 +57,18 @@ export type MessageParams = Readonly<Record<string, string | number>>;
  *
  * Not an oversight list and not "not translated yet": these name a protocol, a
  * unit or a machine state, and translating `UTC` into Russian would produce a
- * word no operator is looking for. Slice two of F11 routes the screens'
- * `BUS:BROADCAST`, `RPC:GRPC-WEB`, `UTF-8` and `PTZ` through here as it
- * converts them; the namespace exists now so that conversion is a lookup
- * rather than a fresh decision each time.
+ * word no operator is looking for. The screens' bare `BUS:BROADCAST`,
+ * `RPC:GRPC-WEB`, `UTF-8` and `PTZ` readouts call through here now instead of
+ * repeating the literal at each site, so the decision that they stay Latin is
+ * encoded once rather than taken again for each string.
  */
 export const tokens = {
   'token.utc': 'UTC',
+  'token.ptz': 'PTZ',
+  'token.utf8': 'UTF-8',
+  'token.rpcGrpcWeb': 'RPC:GRPC-WEB',
+  'token.busBroadcast': 'BROADCAST',
+  'token.busFallback': 'FALLBACK',
 } as const satisfies Readonly<Record<`token.${string}`, string>>;
 
 export type TokenId = keyof typeof tokens;
@@ -267,6 +272,193 @@ const ru = {
   'titlebarElement.minimize': 'СВЕРНУТЬ',
   'titlebarElement.maximize': 'РАЗВЕРНУТЬ',
   'titlebarElement.close': 'ЗАКРЫТЬ',
+
+  /*
+   * A setting's own `description`, in the operator's language.
+   *
+   * `packages/settings-schema` is a trust boundary and stays English-only
+   * (`apps/control-plane/src/settings/schema.ts` sends no localization key for
+   * the same reason); this table is where a translation is authored instead,
+   * read by `settingLocalization.ts` and keyed by the definition's own id so a
+   * label moving between settings files still finds its text. Not every
+   * definition has an entry: `localizedSettingDescription` falls back to the
+   * schema's own English line for one that does not, which is what a session
+   * in either language showed for all seventy of these before this batch and
+   * still shows for the rest -- an intentional, documented gap, not a second
+   * silent default the way a missing chrome string would be.
+   */
+  'settingDescription.general.localOnly': 'Клиент остаётся работоспособным без группы.',
+  'settingDescription.general.brandTagline': 'Показывать слоган под маркой операции.',
+  'settingDescription.general.secureLinkBadge': 'Показывать значок защищённого канала в шапке.',
+  'settingDescription.dateTime.showSeconds': 'Показывать секунды на часах шапки и в нижней панели.',
+  'settingDescription.dateTime.showModeLabel':
+    'Показывать в нижней панели, какой режим часов сейчас показан.',
+  'settingDescription.dateTime.showClockRate':
+    'Показывать скорость хода часов рядом с часами шапки.',
+  'settingDescription.dateTime.showHeaderDate': 'Показывать дату в метаданных шапки.',
+  'settingDescription.dateTime.mode':
+    'Показывать оперативное или системное время, не трогая часы ОС.',
+  'settingDescription.diagnostics.showTransportProbe':
+    'Показывать индикатор транспорта в нижней панели.',
+  'settingDescription.diagnostics.showKeybindHints':
+    'Показывать подсказку сочетаний клавиш в нижней панели.',
+  'settingDescription.information.showOperationalContext':
+    'Показывать контекст операции и сектора на панелях.',
+  'settingDescription.tiles.presentation':
+    'Верхняя граница подробности отрисовки плитки; «как у группы» оставляет выбор макету.',
+  /*
+   * The dropdown options of `dateTime.mode`, as full words: the 4-character
+   * status-line markers (`dateTime.ts`'s `dateTimeModeLabel`) belong to a
+   * surface that is paying for every character, and a settings dropdown is
+   * not. `utc` has no entry on purpose -- the uppercase fallback already
+   * spells it `UTC` in every locale.
+   */
+  'settingOption.dateTime.mode.operation': 'ОПЕРАТИВНОЕ',
+  'settingOption.dateTime.mode.system': 'СИСТЕМНОЕ',
+
+  /*
+   * `OperationsShell`: the header, the primary nav, the status line's
+   * transport popover, the record drawer and the production panel. The
+   * biggest single sweep of F11's chrome pass, so the ids below split into
+   * the areas that draw them rather than one flat list.
+   */
+  'topbar.brand': 'ГРЕМУЧАЯ//MESH',
+  'topbar.phase': '{code} / ФАЗА {phase}',
+  'topbar.date': 'ДАТА',
+  'topbar.session': 'СЕССИЯ',
+  'topbar.operatorCode': 'ОП-01',
+  'topbar.link': 'СВЯЗЬ',
+  'topbar.openActiveAlert': 'Открыть активную тревогу',
+  'topbar.commandsLabel': 'КОМАНДЫ',
+
+  'nav.primaryLabel': 'Основная навигация',
+  'nav.toggleCompact': 'Переключить компактную навигацию',
+
+  'shell.openSystemStatus': 'Открыть состояние системы',
+  'shell.openLoadAnalytics': 'Открыть аналитику нагрузки',
+  'shell.openNewAlert': 'Открыть новую тревогу',
+  'shell.toggleClockMode': 'Переключить режим часов',
+
+  'transport.description': 'Чем этот экран синхронизируется с остальными',
+  'transport.detailsLabel': 'Подробности транспорта',
+  'transport.busLabel': 'ШИНА ЭКРАНОВ',
+  'transport.busBroadcastDetail': 'BroadcastChannel — вкладки одного браузера',
+  'transport.busFallbackDetail': 'storage-события — BroadcastChannel недоступен',
+  'transport.rpcDetail': 'ConnectRPC поверх бинарного gRPC-Web',
+  'transport.screenLabel': 'ЭКРАН',
+  'transport.groupSyncLabel': 'ГРУППОВАЯ СИНХРОНИЗАЦИЯ',
+  'transport.authorityLabel': 'АВТОРИТЕТ',
+  'transport.noGroupAssigned': 'Группа не назначена',
+  'transport.eventChannelLabel': 'КАНАЛ СОБЫТИЙ',
+  'transport.linkPrimary': 'СВЯЗЬ · ОСНОВНАЯ',
+  'transport.linkSecondary': 'СВЯЗЬ · ЗАПАСНАЯ',
+  'transport.otherPlaneUnused': 'ДРУГАЯ БАЗА CONTROL PLANE — НЕ ИСПОЛЬЗУЕТСЯ',
+  'transport.eventMarker': ' — событие {sequence}',
+  'transport.resyncMarker': ', пересинхронизаций {count}',
+  'transport.groupClockLabel': 'ЧАСЫ ГРУППЫ',
+  'transport.notMeasured': 'Не измерены',
+  'transport.clockOffset': 'Сдвиг {offset} мс, задержка {latency} мс',
+  'transport.localMirrorLabel': 'ЛОКАЛЬНАЯ КОПИЯ',
+  'transport.mirrorNotPresent': 'Нет — значения берутся из сборки',
+  'transport.mirrorUpdated': 'Обновлена {at}, ревизия {revision}',
+
+  // Generic definition-list field names, reused wherever the record drawer
+  // (or the topbar) names the same field on a different kind of record.
+  'field.sector': 'СЕКТОР',
+  'field.clearance': 'ДОПУСК',
+  'field.source': 'ИСТОЧНИК',
+  'field.object': 'ОБЪЕКТ',
+  'field.status': 'СТАТУС',
+  'field.coordinates': 'КООРДИНАТЫ',
+  'field.name': 'НАЗВАНИЕ',
+  'field.time': 'ВРЕМЯ',
+  'field.objects': 'ОБЪЕКТЫ',
+  'field.cases': 'ДЕЛА',
+  'field.signal': 'СИГНАЛ',
+  'field.stream': 'ПОТОК',
+  'field.codec': 'КОДЕК',
+  'field.length': 'ДЛИНА',
+  'field.risk': 'РИСК',
+  'field.encryption': 'ШИФРОВАНИЕ',
+  'field.latency': 'ЗАДЕРЖКА',
+  'field.size': 'РАЗМЕР',
+  'field.tags': 'ТЕГИ',
+
+  'unit.km': 'КМ',
+  'unit.min': 'МИН',
+
+  'drawer.confirmAlert': '[A] ПОДТВЕРДИТЬ ТРЕВОГУ',
+  'drawer.completeTask': '[X] ОТМЕТИТЬ ВЫПОЛНЕННЫМ',
+  'drawer.attachToCase': '[+] ПРИКРЕПИТЬ К ДЕЛУ',
+  'drawer.signalLevel': 'УРОВЕНЬ СИГНАЛА',
+  'drawer.progression': 'ПРОХОЖДЕНИЕ',
+  'drawer.linkedObjects': 'Связанные объекты: {list}',
+
+  'production.panelLabel': 'Панель съёмочного режима',
+  'production.heading': 'УПРАВЛЕНИЕ СЪЁМОЧНЫМ СОСТОЯНИЕМ',
+  'production.presetLabel': 'Сценарный preset',
+  'production.fixedTimeLabel': 'Фиксированное время production',
+  'production.clockSpeedLabel': 'Скорость часов',
+  'production.saveSnapshot': '[S] СОХРАНИТЬ СОСТОЯНИЕ СЦЕНЫ',
+
+  /*
+   * `UiGalleryScreen`: the `/dev/ui` component catalogue. The typography
+   * panel's own demonstration text -- the Cyrillic alphabet and the sample
+   * headings under it -- stays out of this table on purpose: it exists to
+   * show what the glyphs look like, and translating it would defeat the one
+   * thing that panel demonstrates.
+   */
+  'gallery.menuInspect': 'ПРОВЕРИТЬ КОНТУР',
+  'gallery.menuInspectedTitle': 'КОНТУР ПРОВЕРЕН',
+  'gallery.menuInspectedDescription': 'ARIA И KEYBOARD-КОНТРАКТ АКТИВЕН',
+  'gallery.menuIsolate': 'ИЗОЛИРОВАТЬ УЗЕЛ',
+  'gallery.menuIsolatedTitle': 'УЗЕЛ ИЗОЛИРОВАН',
+  'gallery.menuIsolatedDescription': 'ДЕМО-ОПЕРАЦИЯ UI-КАТАЛОГА',
+  'gallery.screenTitle': 'UI КАТАЛОГ ТЕРМИНАЛЬНОГО КОНТУРА',
+  'gallery.statusesPanel': 'СТАТУСЫ',
+  'gallery.metricsPanel': 'МЕТРИКИ',
+  'gallery.progressPanel': 'ПРОГРЕСС И ГРАФИКИ',
+  'gallery.demoChart': 'Демо график',
+  'gallery.gaugePanel': 'ДАТЧИК',
+  'gallery.actionsPanel': 'ДЕЙСТВИЯ',
+  'gallery.tooltipDemo': 'Терминальная подсказка без скруглений',
+  'gallery.dialogTitle': 'ПРОВЕРКА КОНТУРА',
+  'gallery.dialogDescription': 'Поведенческий слой Base UI, визуальный слой оперативного штаба.',
+  'gallery.confirm': '[ENTER] ПОДТВЕРДИТЬ',
+  'gallery.menuLabel': 'Действия контура',
+  'gallery.contextMenuLabel': 'Контекстные действия контура',
+  'gallery.toastReadyTitle': 'СИСТЕМА ГОТОВА',
+  'gallery.formPanel': 'ПОЛЯ И ВЫБОР',
+  'gallery.sectorFieldDescription': 'Текстовое поле с общим Field-контрактом',
+  'gallery.secureChannelLabel': 'Защищённый канал',
+  'gallery.secureChannelSpan': 'ЗАЩИЩЁННЫЙ КАНАЛ',
+  'gallery.accessGroupLabel': 'Группа доступа',
+  'gallery.optionAlpha': 'АЛЬФА',
+  'gallery.optionBravo': 'БРАВО',
+  'gallery.loadLabel': 'Нагрузка',
+  'gallery.intensityLabel': 'Интенсивность',
+  'gallery.observedObjectLabel': 'Объект наблюдения',
+  'gallery.objectK17': 'K-17 / АЛЬФА',
+  'gallery.objectDmc12': 'DMC-12 / ДРОН',
+  'gallery.objectFp2': 'FP-2 / РУБЕЖ',
+  'gallery.compositePanel': 'КОМПОЗИТНЫЕ ЭЛЕМЕНТЫ',
+  'gallery.diagnosticsLabel': 'Диагностика',
+  'gallery.statusTab': 'СТАТУС',
+  'gallery.historyTab': 'ИСТОРИЯ',
+  'gallery.syncProgressLabel': 'СИНХРОНИЗАЦИЯ',
+  'gallery.standCommandsLabel': 'Команды стенда',
+  'gallery.scanCompleteToast': 'СКАНИРОВАНИЕ ЗАВЕРШЕНО',
+  'gallery.contourLockedToast': 'КОНТУР ЗАБЛОКИРОВАН',
+  'gallery.popoverTitle': 'СОСТОЯНИЕ УЗЛА',
+  'gallery.popoverDescription': 'Всплывающая панель с управлением фокусом',
+  'gallery.confirmOperationTitle': 'ПОДТВЕРДИТЬ ОПЕРАЦИЮ',
+  'gallery.confirmOperationDescription':
+    'Демонстрация безопасного подтверждения критического действия.',
+  'gallery.operationConfirmedToast': 'ОПЕРАЦИЯ ПОДТВЕРЖДЕНА',
+  'gallery.emptyStatePanel': 'ПУСТОЕ СОСТОЯНИЕ',
+  'gallery.emptyStateText': 'ДАННЫЕ В ЭТОМ СЕКТОРЕ ОТСУТСТВУЮТ',
+  'gallery.openExample': '[D] ОТКРЫТЬ ПРИМЕР',
+  'gallery.typographyPanel': 'ТИПОГРАФИКА',
 } as const satisfies Readonly<Record<string, string>>;
 
 export type MessageId = keyof typeof ru | TokenId;
@@ -431,6 +623,156 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
   'titlebarElement.minimize': 'MINIMIZE',
   'titlebarElement.maximize': 'MAXIMIZE',
   'titlebarElement.close': 'CLOSE',
+
+  // The English catalogue reprints the schema's own words rather than
+  // paraphrasing them: for this locale the schema and the catalogue would
+  // otherwise disagree about the same setting's description for no reason.
+  'settingDescription.general.localOnly': 'Keep this client usable without a group.',
+  'settingDescription.general.brandTagline': 'Show the tagline under the operation mark.',
+  'settingDescription.general.secureLinkBadge': 'Show the secure-link badge in the header.',
+  'settingDescription.dateTime.showSeconds': 'Show seconds in the shell clock and the status line.',
+  'settingDescription.dateTime.showModeLabel': 'Show which clock mode the status line is reading.',
+  'settingDescription.dateTime.showClockRate': 'Show the clock rate beside the header clock.',
+  'settingDescription.dateTime.showHeaderDate': 'Show the date in the header metadata.',
+  'settingDescription.dateTime.mode':
+    'Display operation or system time without changing the OS clock.',
+  'settingDescription.diagnostics.showTransportProbe':
+    'Show the transport probe in the status line.',
+  'settingDescription.diagnostics.showKeybindHints': 'Show the keybind hint in the status line.',
+  'settingDescription.information.showOperationalContext':
+    'Show operation and sector context in panels.',
+  'settingDescription.tiles.presentation':
+    'Cap on how rich a tile may be drawn; auto leaves the choice to the layout.',
+  'settingOption.dateTime.mode.operation': 'OPERATION',
+  'settingOption.dateTime.mode.system': 'SYSTEM',
+
+  'topbar.brand': 'GREMUCHAYA//MESH',
+  'topbar.phase': '{code} / PHASE {phase}',
+  'topbar.date': 'DATE',
+  'topbar.session': 'SESSION',
+  'topbar.operatorCode': 'OP-01',
+  'topbar.link': 'LINK',
+  'topbar.openActiveAlert': 'Open the active alert',
+  'topbar.commandsLabel': 'COMMANDS',
+
+  'nav.primaryLabel': 'Primary navigation',
+  'nav.toggleCompact': 'Toggle compact navigation',
+
+  'shell.openSystemStatus': 'Open system status',
+  'shell.openLoadAnalytics': 'Open load analytics',
+  'shell.openNewAlert': 'Open the new alert',
+  'shell.toggleClockMode': 'Toggle clock mode',
+
+  'transport.description': 'What this screen synchronises with the rest',
+  'transport.detailsLabel': 'Transport details',
+  'transport.busLabel': 'SCREEN BUS',
+  'transport.busBroadcastDetail': 'BroadcastChannel — tabs of one browser',
+  'transport.busFallbackDetail': 'storage events — BroadcastChannel unavailable',
+  'transport.rpcDetail': 'ConnectRPC over binary gRPC-Web',
+  'transport.screenLabel': 'SCREEN',
+  'transport.groupSyncLabel': 'GROUP SYNCHRONISATION',
+  'transport.authorityLabel': 'AUTHORITY',
+  'transport.noGroupAssigned': 'No group assigned',
+  'transport.eventChannelLabel': 'EVENT CHANNEL',
+  'transport.linkPrimary': 'LINK · PRIMARY',
+  'transport.linkSecondary': 'LINK · SECONDARY',
+  'transport.otherPlaneUnused': 'ANOTHER CONTROL PLANE BASE — NOT USED',
+  'transport.eventMarker': ' — event {sequence}',
+  'transport.resyncMarker': ', {count} resyncs',
+  'transport.groupClockLabel': 'GROUP CLOCK',
+  'transport.notMeasured': 'Not measured',
+  'transport.clockOffset': '{offset} ms offset, {latency} ms latency',
+  'transport.localMirrorLabel': 'LOCAL MIRROR',
+  'transport.mirrorNotPresent': 'None — values come from the build',
+  'transport.mirrorUpdated': 'Updated {at}, revision {revision}',
+
+  'field.sector': 'SECTOR',
+  'field.clearance': 'CLEARANCE',
+  'field.source': 'SOURCE',
+  'field.object': 'OBJECT',
+  'field.status': 'STATUS',
+  'field.coordinates': 'COORDINATES',
+  'field.name': 'NAME',
+  'field.time': 'TIME',
+  'field.objects': 'OBJECTS',
+  'field.cases': 'CASES',
+  'field.signal': 'SIGNAL',
+  'field.stream': 'STREAM',
+  'field.codec': 'CODEC',
+  'field.length': 'LENGTH',
+  'field.risk': 'RISK',
+  'field.encryption': 'ENCRYPTION',
+  'field.latency': 'LATENCY',
+  'field.size': 'SIZE',
+  'field.tags': 'TAGS',
+
+  'unit.km': 'KM',
+  'unit.min': 'MIN',
+
+  'drawer.confirmAlert': '[A] ACKNOWLEDGE ALERT',
+  'drawer.completeTask': '[X] MARK COMPLETE',
+  'drawer.attachToCase': '[+] ATTACH TO CASE',
+  'drawer.signalLevel': 'SIGNAL LEVEL',
+  'drawer.progression': 'PROGRESSION',
+  'drawer.linkedObjects': 'Linked objects: {list}',
+
+  'production.panelLabel': 'Production panel',
+  'production.heading': 'PRODUCTION STATE CONTROL',
+  'production.presetLabel': 'Scene preset',
+  'production.fixedTimeLabel': 'Production fixed time',
+  'production.clockSpeedLabel': 'Clock speed',
+  'production.saveSnapshot': '[S] SAVE SCENE STATE',
+
+  'gallery.menuInspect': 'INSPECT CONTOUR',
+  'gallery.menuInspectedTitle': 'CONTOUR INSPECTED',
+  'gallery.menuInspectedDescription': 'ARIA AND KEYBOARD CONTRACT ACTIVE',
+  'gallery.menuIsolate': 'ISOLATE NODE',
+  'gallery.menuIsolatedTitle': 'NODE ISOLATED',
+  'gallery.menuIsolatedDescription': 'UI CATALOG DEMO OPERATION',
+  'gallery.screenTitle': 'UI CATALOG OF THE TERMINAL CONTOUR',
+  'gallery.statusesPanel': 'STATUSES',
+  'gallery.metricsPanel': 'METRICS',
+  'gallery.progressPanel': 'PROGRESS AND CHARTS',
+  'gallery.demoChart': 'Demo chart',
+  'gallery.gaugePanel': 'GAUGE',
+  'gallery.actionsPanel': 'ACTIONS',
+  'gallery.tooltipDemo': 'A terminal tooltip with no rounded corners',
+  'gallery.dialogTitle': 'CONTOUR CHECK',
+  'gallery.dialogDescription': "Base UI's behaviour layer, headquarters' own visual layer.",
+  'gallery.confirm': '[ENTER] CONFIRM',
+  'gallery.menuLabel': 'Contour actions',
+  'gallery.contextMenuLabel': 'Contour context actions',
+  'gallery.toastReadyTitle': 'SYSTEM READY',
+  'gallery.formPanel': 'FIELDS AND CHOICE',
+  'gallery.sectorFieldDescription': 'A text field under the shared Field contract',
+  'gallery.secureChannelLabel': 'Secure channel',
+  'gallery.secureChannelSpan': 'SECURE CHANNEL',
+  'gallery.accessGroupLabel': 'Access group',
+  'gallery.optionAlpha': 'ALPHA',
+  'gallery.optionBravo': 'BRAVO',
+  'gallery.loadLabel': 'Load',
+  'gallery.intensityLabel': 'Intensity',
+  'gallery.observedObjectLabel': 'Observed object',
+  'gallery.objectK17': 'K-17 / ALPHA',
+  'gallery.objectDmc12': 'DMC-12 / DRONE',
+  'gallery.objectFp2': 'FP-2 / PERIMETER',
+  'gallery.compositePanel': 'COMPOSITE ELEMENTS',
+  'gallery.diagnosticsLabel': 'Diagnostics',
+  'gallery.statusTab': 'STATUS',
+  'gallery.historyTab': 'HISTORY',
+  'gallery.syncProgressLabel': 'SYNCHRONISATION',
+  'gallery.standCommandsLabel': 'Stand commands',
+  'gallery.scanCompleteToast': 'SCAN COMPLETE',
+  'gallery.contourLockedToast': 'CONTOUR LOCKED',
+  'gallery.popoverTitle': 'NODE STATE',
+  'gallery.popoverDescription': 'A popover with focus management',
+  'gallery.confirmOperationTitle': 'CONFIRM THE OPERATION',
+  'gallery.confirmOperationDescription': 'A demonstration of safely confirming a critical action.',
+  'gallery.operationConfirmedToast': 'OPERATION CONFIRMED',
+  'gallery.emptyStatePanel': 'EMPTY STATE',
+  'gallery.emptyStateText': 'NO DATA IN THIS SECTOR',
+  'gallery.openExample': '[D] OPEN EXAMPLE',
+  'gallery.typographyPanel': 'TYPOGRAPHY',
 };
 
 /**

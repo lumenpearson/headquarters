@@ -24,6 +24,7 @@ import {
 } from '@gremuchaya/ui/primitives';
 import { useState } from 'react';
 
+import { t } from '@/application/localization/locale';
 import {
   Drawer,
   EmptyState,
@@ -52,24 +53,24 @@ export function UiGalleryScreen() {
   const primitiveMenuItems = [
     {
       id: 'inspect',
-      label: 'ПРОВЕРИТЬ КОНТУР',
+      label: t('gallery.menuInspect'),
       shortcut: 'ENTER',
       onSelect: () =>
         toast.notify({
-          title: 'КОНТУР ПРОВЕРЕН',
-          description: 'ARIA И KEYBOARD-КОНТРАКТ АКТИВЕН',
+          title: t('gallery.menuInspectedTitle'),
+          description: t('gallery.menuInspectedDescription'),
           tone: 'success',
         }),
     },
     {
       id: 'isolate',
-      label: 'ИЗОЛИРОВАТЬ УЗЕЛ',
+      label: t('gallery.menuIsolate'),
       shortcut: 'CTRL+I',
       tone: 'critical' as const,
       onSelect: () =>
         toast.notify({
-          title: 'УЗЕЛ ИЗОЛИРОВАН',
-          description: 'ДЕМО-ОПЕРАЦИЯ UI-КАТАЛОГА',
+          title: t('gallery.menuIsolatedTitle'),
+          description: t('gallery.menuIsolatedDescription'),
           tone: 'critical',
           priority: 'high',
         }),
@@ -81,12 +82,12 @@ export function UiGalleryScreen() {
       <header className="ops-screen__title">
         <div>
           <span>INTERNAL / COMPONENT CATALOG</span>
-          <h1>UI КАТАЛОГ ТЕРМИНАЛЬНОГО КОНТУРА</h1>
+          <h1>{t('gallery.screenTitle')}</h1>
         </div>
         <StatusBadge status="READY" />
       </header>
       <div className="ui-gallery-layout">
-        <Panel title="СТАТУСЫ" eyebrow="TOKENS / DOMAIN">
+        <Panel title={t('gallery.statusesPanel')} eyebrow="TOKENS / DOMAIN">
           <div className="gallery-row">
             {(
               [
@@ -109,7 +110,7 @@ export function UiGalleryScreen() {
             ))}
           </div>
         </Panel>
-        <Panel title="МЕТРИКИ" eyebrow="DATA / READOUT">
+        <Panel title={t('gallery.metricsPanel')} eyebrow="DATA / READOUT">
           <div className="metric-grid metric-grid--four">
             <Metric label="OBJECTS" value="32" />
             <Metric label="READY" value="87%" tone="ok" />
@@ -117,15 +118,15 @@ export function UiGalleryScreen() {
             <Metric label="CRITICAL" value="01" tone="critical" />
           </div>
         </Panel>
-        <Panel title="ПРОГРЕСС И ГРАФИКИ" eyebrow="VISUAL / ASCII">
+        <Panel title={t('gallery.progressPanel')} eyebrow="VISUAL / ASCII">
           <ProgressBar value={72} label="OPERATION" tone="warning" />
           <ProgressBar value={91} label="SIGNAL" tone="ok" />
-          <Sparkline values={[20, 42, 31, 56, 49, 78, 63, 91]} label="Демо график" />
+          <Sparkline values={[20, 42, 31, 56, 49, 78, 63, 91]} label={t('gallery.demoChart')} />
         </Panel>
-        <Panel title="ДАТЧИК" eyebrow="GAUGE / SVG">
+        <Panel title={t('gallery.gaugePanel')} eyebrow="GAUGE / SVG">
           <Gauge value={87} label="READINESS" detail="THRESHOLD 80%" />
         </Panel>
-        <Panel title="ДЕЙСТВИЯ" eyebrow="CONTROLS / STATES">
+        <Panel title={t('gallery.actionsPanel')} eyebrow="CONTROLS / STATES">
           <div className="gallery-actions">
             <TerminalButton className="ops-action">[N] NORMAL</TerminalButton>
             <TerminalButton className="ops-action ops-action--primary" tone="primary">
@@ -137,7 +138,7 @@ export function UiGalleryScreen() {
             <TerminalButton className="ops-action" disabled>
               [X] DISABLED
             </TerminalButton>
-            <Tooltip label="Терминальная подсказка без скруглений">
+            <Tooltip label={t('gallery.tooltipDemo')}>
               <TerminalButton className="ops-action">[?] TOOLTIP</TerminalButton>
             </Tooltip>
           </div>
@@ -145,21 +146,21 @@ export function UiGalleryScreen() {
         <Panel title="BASE UI PRIMITIVES" eyebrow="HEADLESS / TERMINAL CONTRACT">
           <div className="gallery-actions">
             <TerminalDialog
-              title="ПРОВЕРКА КОНТУРА"
+              title={t('gallery.dialogTitle')}
               eyebrow="DIALOG / BASE UI"
-              description="Поведенческий слой Base UI, визуальный слой оперативного штаба."
+              description={t('gallery.dialogDescription')}
               trigger={<TerminalButton className="ops-action">[DIALOG] OPEN</TerminalButton>}
-              footer={<TerminalButton tone="primary">[ENTER] ПОДТВЕРДИТЬ</TerminalButton>}
+              footer={<TerminalButton tone="primary">{t('gallery.confirm')}</TerminalButton>}
             >
               <p>FOCUS TRAP / ESCAPE / RESTORE / PORTAL: READY</p>
             </TerminalDialog>
             <TerminalMenu
-              label="Действия контура"
+              label={t('gallery.menuLabel')}
               trigger={<TerminalButton className="ops-action">[MENU] ACTIONS</TerminalButton>}
               items={primitiveMenuItems}
             />
             <TerminalContextMenu
-              label="Контекстные действия контура"
+              label={t('gallery.contextMenuLabel')}
               trigger={<TerminalButton className="ops-action">[CONTEXT] TARGET</TerminalButton>}
               items={primitiveMenuItems}
             />
@@ -168,7 +169,7 @@ export function UiGalleryScreen() {
               tone="primary"
               onClick={() =>
                 toast.notify({
-                  title: 'СИСТЕМА ГОТОВА',
+                  title: t('gallery.toastReadyTitle'),
                   description: 'TOAST VIEWPORT / F6 / DISMISS',
                   tone: 'success',
                 })
@@ -178,57 +179,64 @@ export function UiGalleryScreen() {
             </TerminalButton>
           </div>
         </Panel>
-        <Panel title="ПОЛЯ И ВЫБОР" eyebrow="FORM / COMPOSITE" className="gallery-form-panel">
+        <Panel
+          title={t('gallery.formPanel')}
+          eyebrow="FORM / COMPOSITE"
+          className="gallery-form-panel"
+        >
           <TerminalScrollArea
             className="gallery-panel-scroll"
             contentClassName="gallery-primitives"
           >
-            <TerminalField label="СЕКТОР" description="Текстовое поле с общим Field-контрактом">
+            <TerminalField
+              label={t('field.sector')}
+              description={t('gallery.sectorFieldDescription')}
+            >
               <TerminalInput value={fieldValue} onValueChange={setFieldValue} />
             </TerminalField>
             <div className="gallery-inline-control">
               <TerminalCheckbox
-                label="Защищённый канал"
+                label={t('gallery.secureChannelLabel')}
                 checked={checkboxValue}
                 onCheckedChange={setCheckboxValue}
               />
-              <span>ЗАЩИЩЁННЫЙ КАНАЛ</span>
+              <span>{t('gallery.secureChannelSpan')}</span>
             </div>
             <TerminalRadioGroup
-              label="Группа доступа"
+              label={t('gallery.accessGroupLabel')}
               value={radioValue}
               onValueChange={setRadioValue}
               options={[
-                { value: 'alpha', label: 'АЛЬФА' },
-                { value: 'bravo', label: 'БРАВО' },
+                { value: 'alpha', label: t('gallery.optionAlpha') },
+                { value: 'bravo', label: t('gallery.optionBravo') },
               ]}
             />
             <TerminalNumberField
-              label="Нагрузка"
+              label={t('gallery.loadLabel')}
               value={numberValue}
               min={0}
               max={100}
               onValueChange={setNumberValue}
             />
             <TerminalSlider
-              label="Интенсивность"
+              label={t('gallery.intensityLabel')}
               value={sliderValue}
               onValueChange={setSliderValue}
             />
             <TerminalCombobox
-              label="Объект наблюдения"
+              label={t('gallery.observedObjectLabel')}
               value={comboboxValue}
               onValueChange={setComboboxValue}
               options={[
-                { value: 'k17', label: 'K-17 / АЛЬФА' },
-                { value: 'dmc12', label: 'DMC-12 / ДРОН' },
-                { value: 'fp2', label: 'FP-2 / РУБЕЖ' },
+                { value: 'k17', label: t('gallery.objectK17') },
+                { value: 'dmc12', label: t('gallery.objectDmc12') },
+                { value: 'fp2', label: t('gallery.objectFp2') },
               ]}
             />
           </TerminalScrollArea>
         </Panel>
         <Panel
-          title="КОМПОЗИТНЫЕ ЭЛЕМЕНТЫ"
+          title={t('gallery.compositePanel')}
           eyebrow="TABS / TOOLBAR / OVERLAY"
           className="gallery-composite-panel"
         >
@@ -237,29 +245,43 @@ export function UiGalleryScreen() {
             contentClassName="gallery-composites"
           >
             <TerminalTabs
-              label="Диагностика"
+              label={t('gallery.diagnosticsLabel')}
               value={tabValue}
               onValueChange={setTabValue}
               tabs={[
-                { value: 'status', label: 'СТАТУС', content: 'STATUS / READY / 100%' },
-                { value: 'history', label: 'ИСТОРИЯ', content: 'EVENTS / 24 / SYNCED' },
+                {
+                  value: 'status',
+                  label: t('gallery.statusTab'),
+                  content: 'STATUS / READY / 100%',
+                },
+                {
+                  value: 'history',
+                  label: t('gallery.historyTab'),
+                  content: 'EVENTS / 24 / SYNCED',
+                },
               ]}
             />
-            <TerminalProgress label="СИНХРОНИЗАЦИЯ" value={sliderValue} tone="success" />
+            <TerminalProgress
+              label={t('gallery.syncProgressLabel')}
+              value={sliderValue}
+              tone="success"
+            />
             <TerminalToolbar
-              label="Команды стенда"
+              label={t('gallery.standCommandsLabel')}
               actions={[
                 {
                   id: 'scan',
                   label: 'SCAN',
                   shortcut: 'S',
-                  onPress: () => toast.notify({ title: 'СКАНИРОВАНИЕ ЗАВЕРШЕНО', tone: 'success' }),
+                  onPress: () =>
+                    toast.notify({ title: t('gallery.scanCompleteToast'), tone: 'success' }),
                 },
                 {
                   id: 'lock',
                   label: 'LOCK',
                   shortcut: 'L',
-                  onPress: () => toast.notify({ title: 'КОНТУР ЗАБЛОКИРОВАН', tone: 'warning' }),
+                  onPress: () =>
+                    toast.notify({ title: t('gallery.contourLockedToast'), tone: 'warning' }),
                 },
               ]}
             />
@@ -270,17 +292,19 @@ export function UiGalleryScreen() {
                 onPressedChange={setToggleValue}
               />
               <TerminalPopover
-                title="СОСТОЯНИЕ УЗЛА"
-                description="Всплывающая панель с управлением фокусом"
+                title={t('gallery.popoverTitle')}
+                description={t('gallery.popoverDescription')}
                 trigger={<TerminalButton className="ops-action">[POPOVER] NODE</TerminalButton>}
               >
                 SIGNAL 92% / LATENCY 18 MS
               </TerminalPopover>
               <TerminalAlertDialog
-                title="ПОДТВЕРДИТЬ ОПЕРАЦИЮ"
-                description="Демонстрация безопасного подтверждения критического действия."
-                confirmLabel="[ENTER] ПОДТВЕРДИТЬ"
-                onConfirm={() => toast.notify({ title: 'ОПЕРАЦИЯ ПОДТВЕРЖДЕНА', tone: 'critical' })}
+                title={t('gallery.confirmOperationTitle')}
+                description={t('gallery.confirmOperationDescription')}
+                confirmLabel={t('gallery.confirm')}
+                onConfirm={() =>
+                  toast.notify({ title: t('gallery.operationConfirmedToast'), tone: 'critical' })
+                }
                 trigger={
                   <TerminalButton className="ops-action ops-action--danger">
                     [ALERT] OPEN
@@ -296,8 +320,8 @@ export function UiGalleryScreen() {
             </TerminalScrollArea>
           </TerminalScrollArea>
         </Panel>
-        <Panel title="ПУСТОЕ СОСТОЯНИЕ" eyebrow="EMPTY / FALLBACK">
-          <EmptyState>ДАННЫЕ В ЭТОМ СЕКТОРЕ ОТСУТСТВУЮТ</EmptyState>
+        <Panel title={t('gallery.emptyStatePanel')} eyebrow="EMPTY / FALLBACK">
+          <EmptyState>{t('gallery.emptyStateText')}</EmptyState>
         </Panel>
         <Panel title="DRAWER" eyebrow="OVERLAY / LOCAL">
           <TerminalButton
@@ -305,7 +329,7 @@ export function UiGalleryScreen() {
             className="ops-action ops-action--primary"
             onClick={() => state.openDrawer('alert', 'AL-101')}
           >
-            [D] ОТКРЫТЬ ПРИМЕР
+            {t('gallery.openExample')}
           </TerminalButton>
           {state.ui.drawer === null ? null : (
             <small>
@@ -313,7 +337,7 @@ export function UiGalleryScreen() {
             </small>
           )}
         </Panel>
-        <Panel title="ТИПОГРАФИКА" eyebrow="MONO / CYRILLIC">
+        <Panel title={t('gallery.typographyPanel')} eyebrow="MONO / CYRILLIC">
           <div className="gallery-type">
             <h1>ОПЕРАТИВНЫЙ ШТАБ</h1>
             <h2>ЗАЩИЩЁННЫЙ КОНТУР</h2>

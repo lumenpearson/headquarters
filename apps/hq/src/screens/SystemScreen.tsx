@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { TilePresentation } from '@gremuchaya/layout-engine';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { dateTimeFormat } from '@/application/localization/intl';
 import {
   useBooleanSetting,
   useNumberSetting,
@@ -20,6 +21,8 @@ import {
 import { useOperationsStore, type OperationsState } from '@/state/operationsStore';
 
 const storageAreas = ['CORE', 'EVENTS', 'VIDEO', 'EVIDENCE', 'ARCHIVE', 'SNAPSHOTS'] as const;
+
+const clockParts = { timeStyle: 'medium' } as const;
 
 /**
  * How far a storage area's reading may scatter from the contour's own
@@ -549,7 +552,7 @@ export function SystemScreen() {
             <div className="audit-log">
               {state.audit.slice(0, presentation === 'full' ? auditRows : 6).map((entry) => (
                 <div key={entry.id}>
-                  <time>{new Date(entry.timestamp).toLocaleTimeString('ru-RU')}</time>
+                  <time>{dateTimeFormat(clockParts).format(new Date(entry.timestamp))}</time>
                   <i>{entry.operator}</i>
                   <strong>{entry.action}</strong>
                   <span>{entry.entityId}</span>

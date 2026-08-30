@@ -3,10 +3,13 @@
 import { useMemo, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { dateTimeFormat } from '@/application/localization/intl';
 import { channelDomain } from '@/application/simulation/simulationCurves';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import { useOperationsStore } from '@/state/operationsStore';
+
+const clockParts = { timeStyle: 'medium' } as const;
 
 export function CommunicationsScreen() {
   const state = useOperationsStore((value) => value);
@@ -258,7 +261,7 @@ export function CommunicationsScreen() {
                     key={event.id}
                     onClick={() => state.openDrawer('event', event.id)}
                   >
-                    <time>{new Date(event.timestamp).toLocaleTimeString('ru-RU')}</time>
+                    <time>{dateTimeFormat(clockParts).format(new Date(event.timestamp))}</time>
                     <i className={`severity-dot severity-dot--${event.severity}`} />
                     <span>
                       <strong>{event.title}</strong>
