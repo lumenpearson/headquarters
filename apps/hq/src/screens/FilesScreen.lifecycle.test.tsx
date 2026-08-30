@@ -246,7 +246,16 @@ describe('the group trash inside the import dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '[R] ВОССТАНОВИТЬ' }));
 
     await waitFor(() => expect(restoreMaterial).toHaveBeenCalledWith(materialId));
-    await waitFor(() => expect(screen.queryByText('trashed.mp4')).toBeNull());
+    // The trash listing lets go of the entry; the name still on screen is the
+    // file browser's, because restoring also writes the store record back --
+    // without it the material stayed invisible outside this dialog until a
+    // reload (`recordImportedMaterial` in `restoreFromTrash`).
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => expect(within(dialog).queryByText('trashed.mp4')).toBeNull());
+    expect(operationsStore.getState().materials.imported[materialId]).toMatchObject({
+      displayName: 'trashed.mp4',
+      origin: 'group-library',
+    });
   });
 
   it('purges a trashed material with its own id as confirmation', async () => {

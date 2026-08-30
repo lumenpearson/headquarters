@@ -281,6 +281,21 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
         target,
         ...current.filter((entry) => entry.materialId !== target.materialId),
       ]);
+      /*
+       * Trash forgot the store's record (`applyLifecycleTrash`), so without a
+       * new one the restored material exists only in this dialog's own React
+       * state -- invisible to the file browser until a reload. The original
+       * category went down with the forgotten record and the wire carries no
+       * category back, so the restored record re-enters under the default
+       * category rather than an invented recollection.
+       */
+      state.recordImportedMaterial(
+        toImportedMaterial(target, {
+          category: defaultCategory,
+          origin: materialClient.origin === 'group-library' ? 'group-library' : 'local-mirror',
+          importedAt: new Date().toISOString(),
+        }),
+      );
       setTrashMessage(`ВОССТАНОВЛЕНО: ${target.displayName}`);
     } catch (error: unknown) {
       setTrashStatus('unavailable');
