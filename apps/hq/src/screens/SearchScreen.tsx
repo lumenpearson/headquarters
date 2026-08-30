@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
 import { dateTimeFormat, foldCase } from '@/application/localization/intl';
+import { t } from '@/application/localization/locale';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, SeverityBadge, StatusBadge } from '@/components/operations/OpsUi';
@@ -278,7 +279,9 @@ export function SearchScreen() {
         <small>
           {/* The whole match set, not the page: the count is what the index
               holds, and the footer says which slice of it is on screen. */}
-          {query.length === 0 ? 'ВВЕДИТЕ ЗАПРОС' : `${hitPage.total} СОВПАДЕНИЙ / LOCAL INDEX`}
+          {query.length === 0
+            ? 'ВВЕДИТЕ ЗАПРОС'
+            : `${t('search.matchCount', { count: hitPage.total })} / LOCAL INDEX`}
         </small>
       </header>
       <TileGrid tiles={tiles} columns={12} className="search-layout" screen="search" />

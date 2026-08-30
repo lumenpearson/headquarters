@@ -29,6 +29,7 @@ import { intlTag } from './locale';
 
 const dateTimeFormats = new Map<string, Intl.DateTimeFormat>();
 const collators = new Map<string, Intl.Collator>();
+const pluralRules = new Map<string, Intl.PluralRules>();
 
 function cacheKey(tag: string, options: object | undefined): string {
   // `Intl` options are flat records of primitives, so their own serialisation
@@ -90,8 +91,31 @@ export function foldCase(text: string): string {
   return text.toLocaleLowerCase(intlTag());
 }
 
+/**
+ * The plural category `Intl.PluralRules` resolves `count` to, for the current
+ * locale by default -- the same "default to the operator's locale, cache by
+ * tag" shape as {@link dateTimeFormat} and {@link collator}.
+ *
+ * `messages.ts`'s `translateWith` needs the same selection for a locale it is
+ * given as an argument, which may not be the one this module's `intlTag()`
+ * default would read from the store; it keeps a cache of its own next to this
+ * one instead of calling through here, because importing this module would
+ * pull in `./locale`, which imports `./messages` back, and `translateWith` has
+ * to stay a leaf `locale.ts` can build on without a cycle. The two caches
+ * never disagree; this one exists for a caller that already depends on this
+ * module and wants the operator's own locale, the way every other function
+ * here does.
+ */
+export function pluralCategory(count: number, tag: string = intlTag()): Intl.LDMLPluralRule {
+  const existing = pluralRules.get(tag);
+  const rules = existing ?? new Intl.PluralRules(tag);
+  if (existing === undefined) pluralRules.set(tag, rules);
+  return rules.select(count);
+}
+
 /** Test seam. The caches key on the locale tag, so they are never stale in use. */
 export function forgetIntlCaches(): void {
   dateTimeFormats.clear();
   collators.clear();
+  pluralRules.clear();
 }

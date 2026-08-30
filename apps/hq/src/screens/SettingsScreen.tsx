@@ -634,7 +634,7 @@ export function SettingsScreen() {
                 {isSectionVisible('personalization') ? (
                   <Panel
                     title="ПЕРСОНАЛИЗАЦИЯ / КАТАЛОГ"
-                    eyebrow={`SAFE DRAFT / ${draft.changedIds.length} ИЗМЕНЕНИЙ / REV ${state.personalization.published.revision}`}
+                    eyebrow={`SAFE DRAFT / ${t('settings.draftChangeCount', { count: draft.changedIds.length })} / REV ${state.personalization.published.revision}`}
                     className="settings-personalization"
                   >
                     <div className="settings-catalog-toolbar">
