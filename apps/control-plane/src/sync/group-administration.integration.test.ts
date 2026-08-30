@@ -357,6 +357,55 @@ describeIntegration('durable group administration against real PostgreSQL', () =
   );
 
   it(
+    'stores a publication whose document id is a name rather than a UUID',
+    async () => {
+      /*
+       * The one document the application actually publishes is
+       * `settings.live-edit` (`GroupLiveEditTransport`), and every other test
+       * here mints `crypto.randomUUID()` -- which is exactly why the uuid
+       * column type behind `document_id` (migration 0014 widens it to text)
+       * held for so long: against real PostgreSQL every real publication
+       * failed `invalid input syntax for type uuid` while every test passed.
+       */
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const events = new DurableRealtimeEventStore({ database });
+      const documentId = 'settings.live-edit';
+
+      const appended = await events.appendAuthorized({
+        groupId: owner.groupId,
+        actorDeviceId: owner.authenticated.device.id,
+        kind: syncV1.GroupEventKind.DOCUMENT_DELTA,
+        documentId,
+        documentType: syncV1.SynchronizedDocumentType.SETTINGS,
+        documentDelta: Uint8Array.from([1, 2, 3]),
+        stateVector: Uint8Array.from([4, 5]),
+      });
+      expect(appended.event.sequence).toBe(1n);
+
+      const snapshot = await events.readDocumentSnapshot(owner.groupId, documentId);
+      expect(snapshot?.sequence).toBe(1n);
+      expect(snapshot?.documentType).toBe(syncV1.SynchronizedDocumentType.SETTINGS);
+      // A document nobody published stays a miss, not an error: the client
+      // maps NOT_FOUND to null and `GroupSnapshotDownloader.absorb` keeps the
+      // sequence it holds. An error here is what kept the group mirror from
+      // ever being written.
+      expect(await events.readDocumentSnapshot(owner.groupId, 'settings.never-published')).toBe(
+        undefined,
+      );
+      // The unauthorized append path binds the same column without a cast
+      // and must take the column's own type.
+      const plain = await events.append({
+        groupId: owner.groupId,
+        kind: syncV1.GroupEventKind.DOCUMENT_DELTA,
+        documentId,
+      });
+      expect(plain.sequence).toBe(2n);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'refuses a publication from a viewer and writes nothing',
     async () => {
       const runtime = createRuntime();

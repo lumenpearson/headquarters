@@ -61,6 +61,7 @@ describe('control-plane migrations', () => {
         '0011_telemetry_data_sources_and_samples',
         '0012_material_renditions',
         '0013_layout_document_receipt_scope',
+        '0014_symbolic_document_ids',
       ],
       skipped: [],
     });
@@ -166,6 +167,7 @@ describe('control-plane migrations', () => {
       '0011_telemetry_data_sources_and_samples',
       '0012_material_renditions',
       '0013_layout_document_receipt_scope',
+      '0014_symbolic_document_ids',
     ]);
     const authenticationSql = requireAt(migrations, 1)
       .statements.map((statement) => statement.text)
@@ -203,6 +205,7 @@ describe('control-plane migrations', () => {
           { id: requireAt(migrations, 10).id, applied: true },
           { id: requireAt(migrations, 11).id, applied: true },
           { id: requireAt(migrations, 12).id, applied: true },
+          { id: requireAt(migrations, 13).id, applied: true },
         ]);
       },
     };
@@ -221,6 +224,7 @@ describe('control-plane migrations', () => {
         '0011_telemetry_data_sources_and_samples',
         '0012_material_renditions',
         '0013_layout_document_receipt_scope',
+        '0014_symbolic_document_ids',
       ],
       skipped: ['0001_control_plane_foundation'],
     });

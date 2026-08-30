@@ -1073,6 +1073,35 @@ const layoutDocumentReceiptScope: Migration = {
   ],
 };
 
+/**
+ * The group log's document ids become text.
+ *
+ * `sync_events.document_id` and `sync_snapshots.document_id` were declared
+ * `uuid`, and the one document the application actually publishes is
+ * `settings.live-edit` (`GroupLiveEditTransport`), which is not a UUID. The
+ * wire type is `gremuchaya.common.v1.ResourceId`, whose value the contract
+ * leaves an opaque string, so against a PostgreSQL-backed deployment every
+ * `PublishDocumentDelta` and every `GetDocumentSnapshot` naming that document
+ * failed with `invalid input syntax for type uuid`, surfaced as INTERNAL --
+ * which `GroupSnapshotDownloader.absorb` reads as unreachable, so the local
+ * group mirror was never written. The in-memory runtime enforces no column
+ * type, which is why the first live run found it and no fake ever had.
+ *
+ * `uuid` casts to `text` losslessly, so existing rows keep their value; the
+ * columns' meaning was always "the id the publication named". What does
+ * change is comparison semantics: `uuid` normalized case and braces, `text`
+ * is byte-exact, so a client that spells one UUID two ways now has two
+ * documents. This repository's one publisher sends the one constant above,
+ * and an id is a name, not a number -- byte-exact is the honest reading.
+ */
+const symbolicDocumentIds: Migration = {
+  id: '0014_symbolic_document_ids',
+  statements: [
+    sql('ALTER TABLE sync_events ALTER COLUMN document_id TYPE text USING document_id::text'),
+    sql('ALTER TABLE sync_snapshots ALTER COLUMN document_id TYPE text USING document_id::text'),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -1087,6 +1116,7 @@ export const migrations: readonly Migration[] = [
   telemetryDataSourcesAndSamples,
   materialRenditions,
   layoutDocumentReceiptScope,
+  symbolicDocumentIds,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';
