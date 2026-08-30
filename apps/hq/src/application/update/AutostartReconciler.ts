@@ -63,12 +63,27 @@ const resting: AutostartReading = { enabled: false, error: null, pending: false 
  * A request that arrives while another is in flight supersedes it: the last
  * value the operator asked for is the one the machine should end up with, and
  * the earlier answer is discarded rather than allowed to overwrite the later.
+ *
+ * The rule for when a request actually writes: the first `request()` call
+ * after construction -- the surface mounting -- only reads. It never calls
+ * `setAutostart`, however `desired` compares to what it finds, because a
+ * mount is not the operator asking for anything; it is a settings card
+ * opening (or reopening) and finding out what is already true. Writing on
+ * mount would let opening the card silently register or unregister an
+ * autostart entry -- including one a person set up outside the app -- purely
+ * because `startup.launchOnLogin`'s persisted value happens to disagree with
+ * the machine. Every call after the first writes only when `desired` itself
+ * has changed since the previous call: the operator flipping the switch,
+ * which is the one event this coordinator treats as an instruction rather
+ * than an observation.
  */
 export class AutostartCoordinator {
   readonly #port: AppUpdatePort | null;
   readonly #listeners = new Set<() => void>();
   #reading: AutostartReading = resting;
   #generation = 0;
+  /** `desired` from the previous `request()`, or `undefined` before the first one. */
+  #lastRequestedDesired: boolean | undefined;
 
   constructor(port: AppUpdatePort | null) {
     this.#port = port;
@@ -84,10 +99,17 @@ export class AutostartCoordinator {
   }
 
   request(desired: boolean): void {
-    if (this.#port === null) return;
+    const port = this.#port;
+    if (port === null) return;
+    const isMount = this.#lastRequestedDesired === undefined;
+    const intentChanged = !isMount && desired !== this.#lastRequestedDesired;
+    this.#lastRequestedDesired = desired;
+    if (!isMount && !intentChanged) return;
+
     const generation = (this.#generation += 1);
     this.#publish({ ...this.#reading, pending: true });
-    void reconcileAutostart(this.#port, desired).then((result) => {
+    const settle = isMount ? readCurrentRegistration(port) : reconcileAutostart(port, desired);
+    void settle.then((result) => {
       if (generation !== this.#generation) return;
       this.#publish({ ...result, pending: false });
     });
@@ -96,5 +118,19 @@ export class AutostartCoordinator {
   #publish(reading: AutostartReading): void {
     this.#reading = reading;
     for (const listener of this.#listeners) listener();
+  }
+}
+
+/**
+ * The mount-time half of reconciliation: what the machine already has
+ * registered, with no write. Failures report the same shape a write's
+ * follow-up read would (`enabled: false`, the message as `error`), so a
+ * mount-time read failure renders the same way a write's does.
+ */
+async function readCurrentRegistration(port: AppUpdatePort): Promise<AutostartReconciliation> {
+  try {
+    return { enabled: await port.isAutostartEnabled(), error: null };
+  } catch (thrown) {
+    return { enabled: false, error: messageOf(thrown) };
   }
 }

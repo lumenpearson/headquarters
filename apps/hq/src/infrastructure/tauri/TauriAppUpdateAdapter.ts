@@ -1,7 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
-import { check } from '@tauri-apps/plugin-updater';
 
 import type { AppUpdatePort, CheckedUpdate } from '@/application/update/appUpdatePort';
 
@@ -43,6 +41,14 @@ function isProgressPayload(value: unknown): value is ProgressPayload {
  * own constructor/`close()` pattern for the same reason: without an explicit teardown,
  * the native `listen()` subscription (and the closure it holds) outlives whatever created
  * this adapter for as long as the process runs.
+ *
+ * `@tauri-apps/plugin-updater` and `@tauri-apps/plugin-autostart` are imported dynamically,
+ * inside the methods that need them, rather than at module scope: `createTauriAppUpdateAdapter`
+ * is reachable from every route (`RuntimeProvider` -> `appUpdateRuntime` -> here), including
+ * the web build, and a static import bundles a package into a route's chunk whether or not
+ * `isTauri()` ever turns out true. The core `@tauri-apps/api` imports above stay static --
+ * `createScreenBus.ts` makes the same choice for `TauriScreenBus`, and unlike the two plugins
+ * they are small enough, and used widely enough, that splitting them buys nothing.
  */
 export class TauriAppUpdateAdapter implements AppUpdatePort {
   #rid: number | null = null;
@@ -56,6 +62,7 @@ export class TauriAppUpdateAdapter implements AppUpdatePort {
   }
 
   async checkForUpdate(): Promise<CheckedUpdate | null> {
+    const { check } = await import('@tauri-apps/plugin-updater');
     const update = await check();
     if (!update) {
       this.#rid = null;
@@ -99,10 +106,12 @@ export class TauriAppUpdateAdapter implements AppUpdatePort {
   }
 
   async isAutostartEnabled(): Promise<boolean> {
+    const { isEnabled } = await import('@tauri-apps/plugin-autostart');
     return isEnabled();
   }
 
   async setAutostart(enabled: boolean): Promise<void> {
+    const { disable, enable } = await import('@tauri-apps/plugin-autostart');
     if (enabled) {
       await enable();
     } else {

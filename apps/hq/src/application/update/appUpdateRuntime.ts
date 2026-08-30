@@ -16,7 +16,7 @@ import type { AppUpdatePort } from './appUpdatePort';
  * a download already at 80% became a download at 0%.
  *
  * A process-lived service fixes both. The launch check runs once, from the
- * runtime provider, whether or not anyone opens settings; and the surface, when
+ * shell root, whether or not anyone opens settings; and the surface, when
  * it does open, subscribes to the transfer already in flight and shows it where
  * it actually is.
  *
@@ -36,11 +36,15 @@ export function appUpdateService(): AppUpdateService {
 /**
  * The check `startup.autoUpdate` names, run once per launch.
  *
- * Called from the runtime provider rather than from any screen, so the promise
- * the setting makes -- check on launch, download without being asked -- does
- * not depend on where the operator happens to navigate. A second call is a
- * no-op: React's Strict Mode replays the provider's mount effect, and a replay
- * is not a second launch.
+ * Called from `OperationalShell` (via `RuntimeProvider`'s `LaunchUpdateCheck`)
+ * rather than from any screen, so the promise the setting makes -- check on
+ * launch, download without being asked -- does not depend on where the
+ * operator happens to navigate. `ScreenView`, `WallView` and `DeveloperGate`
+ * mount `RuntimeProvider` too, as separate Tauri windows onto the same
+ * session, and deliberately do not render `LaunchUpdateCheck`: they are not a
+ * second launch, and a launch is what this guards against. A second call is
+ * also a no-op for the ordinary reason: React's Strict Mode replays a mount
+ * effect, and a replay is not a second launch either.
  *
  * On a browser build the port is absent, the service reports `unavailable`, and
  * this returns having done nothing -- no request, no error line for a feature

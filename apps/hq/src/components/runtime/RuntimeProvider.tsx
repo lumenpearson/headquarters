@@ -51,18 +51,6 @@ export function RuntimeProvider({ children }: { readonly children: ReactNode }) 
     };
   }, []);
 
-  /*
-   * `startup.autoUpdate` says "at launch", so it is read here rather than by
-   * the settings surface: an operator who never opens settings still gets the
-   * update they asked to be fetched without being asked. The call is a no-op
-   * after the first, so a Strict Mode replay is not a second launch, and it
-   * runs after the personalization state has hydrated for the same reason
-   * every other setting reader does.
-   */
-  useEffect(() => {
-    if (value.status === 'ready') startLaunchUpdateCheck();
-  }, [value.status]);
-
   useKeybind('developer.toggle', () => value.controller?.toggleDeveloper());
 
   return <RuntimeContext value={value}>{children}</RuntimeContext>;
@@ -70,4 +58,32 @@ export function RuntimeProvider({ children }: { readonly children: ReactNode }) 
 
 export function useRuntime(): RuntimeContextValue {
   return use(RuntimeContext);
+}
+
+/**
+ * Runs the `startup.autoUpdate` launch check, once, for whichever tree
+ * renders it -- and only `OperationalShell` does.
+ *
+ * `RuntimeProvider` itself is mounted by four roots (`OperationalShell`,
+ * `ScreenView`, `WallView`, `DeveloperGate`); the latter three are separate
+ * Tauri windows onto the *same* running session, not separate launches. If
+ * the check lived in `RuntimeProvider`, opening a wall or screen window
+ * alongside the shell would fire it again in that window's own JS context
+ * (`launchCheckStarted` is module state, one per webview), racing the
+ * shell's own check/download and, on the losing windows, landing in
+ * `status: 'error'` where nothing renders an update surface to show it.
+ * `startLaunchUpdateCheck` is idempotent regardless, so mounting this
+ * component more than once is harmless -- it simply isn't mounted more than
+ * once, because only `OperationalShell` renders it.
+ *
+ * Must be rendered inside a `RuntimeProvider` (it reads `useRuntime`), and
+ * after personalization has hydrated, for the same reason every other
+ * setting reader waits for that.
+ */
+export function LaunchUpdateCheck(): null {
+  const { status } = useRuntime();
+  useEffect(() => {
+    if (status === 'ready') startLaunchUpdateCheck();
+  }, [status]);
+  return null;
 }

@@ -74,9 +74,11 @@ export function useAppUpdate(portOverride?: AppUpdatePort | null): AppUpdateCont
   }, [portOverride]);
 
   useEffect(() => {
-    // The effect asks the coordinator to reconcile and nothing else: what the
-    // shell answers, and whether an answer is still outstanding, are the
-    // coordinator's to publish.
+    // The effect asks and nothing else: whether that turns into a write, and
+    // what the shell answers, are the coordinator's to decide and publish --
+    // see `AutostartCoordinator.request`'s doc. In particular, this firing on
+    // mount is not itself a reason to write: the coordinator only writes for
+    // a `desired` that actually changed after its first call.
     coordinator.request(desiredAutostart);
   }, [coordinator, desiredAutostart]);
 

@@ -123,12 +123,17 @@ export function UpdateSection({ port }: { readonly port?: AppUpdatePort | null }
         )}
       </dl>
       {stateLine(update.state) === null ? null : (
-        <p className="settings-update__state">{stateLine(update.state)}</p>
+        <p className="settings-update__state" aria-live="polite">
+          {stateLine(update.state)}
+        </p>
       )}
       {progressLine(update.state) === null ? null : (
-        <p className="settings-update__progress" aria-live="polite">
-          {progressLine(update.state)}
-        </p>
+        // Not `aria-live`: a percent updates far more often than the state
+        // line above changes, and announcing every chunk would drown out
+        // the transitions (checking / available / ready / error) that
+        // actually matter. The percent is still on screen for anyone
+        // reading visually.
+        <p className="settings-update__progress">{progressLine(update.state)}</p>
       )}
       {notes === undefined ? null : (
         <p className="settings-update__notes">

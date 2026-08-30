@@ -7,10 +7,13 @@ import { TauriAppUpdateAdapter } from './TauriAppUpdateAdapter';
  * directly rather than through `mockIPC` (as `TauriScreenBus.test.ts` uses): these tests
  * are about whether *this adapter* calls the `UnlistenFn` it was handed, not about Tauri's
  * own event delivery -- which `mockIPC` would exercise, but which nothing here needs to
- * re-prove. `@tauri-apps/plugin-autostart` and `@tauri-apps/plugin-updater` are mocked only
- * so the module graph resolves; none of their exports are exercised below. Vitest hoists
- * every `vi.mock` call above the imports above, so the mocked modules are what
- * `TauriAppUpdateAdapter` itself resolves against.
+ * re-prove. `@tauri-apps/plugin-autostart` and `@tauri-apps/plugin-updater` are mocked so
+ * the dynamic `import()`s inside `checkForUpdate`/`isAutostartEnabled`/`setAutostart`
+ * resolve against a fake rather than the real plugin; `checkMock` is exercised by the test
+ * below that calls `checkForUpdate`, the autostart exports by none of these (autostart has
+ * its own coverage in `AutostartReconciler.test.ts`). Vitest intercepts a dynamic import the
+ * same way it intercepts a static one, so hoisting order does not matter here the way it
+ * does for the imports above.
  */
 const listenMock = vi.fn();
 const invokeMock = vi.fn();
