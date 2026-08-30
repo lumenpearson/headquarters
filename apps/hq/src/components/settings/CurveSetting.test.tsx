@@ -3,6 +3,7 @@ import { getSettingDefinition, type SettingDefinition } from '@gremuchaya/settin
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { localizedSettingLabel } from '../../application/localization/settingLocalization';
 import { operationsStore } from '../../state/operationsStore';
 import { SchemaSetting } from './SchemaSetting';
 
@@ -63,14 +64,18 @@ describe('CurveSetting', () => {
   });
 
   it('names the channel it is drawing, and follows simulation.channel', () => {
+    // Asserted through the catalogue rather than against a pasted literal: the
+    // label is translated now, so a hard-coded string would prove only that
+    // somebody kept two copies of it in step.
+    const curveLabel = localizedSettingLabel(definitionFor('simulation.valueCurve'), 'ru');
     renderCurve('simulation.valueCurve');
-    expect(screen.getByRole('group', { name: /SIMULATION \/ VALUE CURVE · CPU/ })).toBeTruthy();
+    expect(screen.getByRole('group', { name: new RegExp(`${curveLabel} · CPU`) })).toBeTruthy();
 
     act(() => {
       operationsStore.getState().applySettingsPatch([{ id: 'simulation.channel', value: 'ram' }]);
     });
 
-    expect(screen.getByRole('group', { name: /SIMULATION \/ VALUE CURVE · RAM/ })).toBeTruthy();
+    expect(screen.getByRole('group', { name: new RegExp(`${curveLabel} · RAM`) })).toBeTruthy();
   });
 
   it('opens an undrawn channel on the flat resting line the schema declares', () => {

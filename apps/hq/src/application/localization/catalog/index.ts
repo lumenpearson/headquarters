@@ -4,6 +4,8 @@ import { galleryMessages } from './galleryMessages';
 import { keybindMessages } from './keybindMessages';
 import { materialMessages } from './materialMessages';
 import { pluralMessages } from './pluralMessages';
+import { settingLabelMessages } from './settingLabelMessages';
+import { settingOptionMessages } from './settingOptionMessages';
 import { settingsMessages } from './settingsMessages';
 import { tileMessages } from './tileMessages';
 import { updateMessages } from './updateMessages';
@@ -44,6 +46,12 @@ export {
  *   surface whose text never appears on a shoot-day route.
  * - `pluralMessages` -- every message whose text depends on a count, grouped
  *   by the mechanism they share rather than by the surface that draws them.
+ * - `settingLabelMessages` -- a label and a description for every setting
+ *   definition, plus the `settingScope.*` vocabulary the detail line draws
+ *   from. Totality is a compile error, not a convention: `settingLocalization`
+ *   declares `Record<SettingId, MessageId>` over the schema's own id union.
+ * - `settingOptionMessages` -- the option labels an enum setting's dropdown
+ *   shows.
  *
  * A wave translating a surface with no module of its own adds one here rather
  * than appending to an existing file: `<area>Messages.ts`, exporting
@@ -70,6 +78,8 @@ const catalogModulesByName = {
   chrome: chromeMessages,
   keybind: keybindMessages,
   settings: settingsMessages,
+  settingLabel: settingLabelMessages,
+  settingOption: settingOptionMessages,
   tile: tileMessages,
   edit: editMessages,
   update: updateMessages,
@@ -86,6 +96,8 @@ export const catalog = {
   ...chromeMessages,
   ...keybindMessages,
   ...settingsMessages,
+  ...settingLabelMessages,
+  ...settingOptionMessages,
   ...tileMessages,
   ...editMessages,
   ...updateMessages,

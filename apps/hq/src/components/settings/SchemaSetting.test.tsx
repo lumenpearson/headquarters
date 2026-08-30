@@ -3,7 +3,12 @@ import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SchemaSetting, settingLabel } from './SchemaSetting';
+import {
+  localizedEnumOptionLabel,
+  localizedSettingLabel,
+} from '@/application/localization/settingLocalization';
+
+import { SchemaSetting } from './SchemaSetting';
 
 /*
  * The `control` member of a number editor decides the control, and the row is
@@ -23,8 +28,9 @@ describe('SchemaSetting number editors', () => {
       <SchemaSetting definition={definition} value={4} changed={false} onValueChange={() => {}} />,
     );
 
-    expect(screen.getByRole('slider', { name: settingLabel('sizes.tileGap') })).toBeTruthy();
-    expect(screen.getAllByText(settingLabel('sizes.tileGap'))).toHaveLength(1);
+    const label = localizedSettingLabel(definition, 'ru');
+    expect(screen.getByRole('slider', { name: label })).toBeTruthy();
+    expect(screen.getAllByText(label)).toHaveLength(1);
   });
 
   it('keeps the typed field for a number no definition marked as a slider', () => {
@@ -35,7 +41,9 @@ describe('SchemaSetting number editors', () => {
       <SchemaSetting definition={definition} value={42} changed={false} onValueChange={() => {}} />,
     );
 
-    expect(screen.getByRole('textbox', { name: settingLabel('sizes.panelHeader') })).toBeTruthy();
+    expect(
+      screen.getByRole('textbox', { name: localizedSettingLabel(definition, 'ru') }),
+    ).toBeTruthy();
     expect(screen.queryByRole('slider')).toBeNull();
   });
 });
@@ -221,6 +229,8 @@ describe('SchemaSetting draws colors.accent as swatches', () => {
     const swatches = container.querySelectorAll('.terminal-color-swatch');
     expect(swatches).toHaveLength(definition.editor.options.length);
     const checked = container.querySelector('.terminal-color-swatch[aria-checked="true"]');
-    expect(checked?.getAttribute('aria-label')).toBe('GREEN');
+    expect(checked?.getAttribute('aria-label')).toBe(
+      localizedEnumOptionLabel(definition, 'green', 'ru'),
+    );
   });
 });
