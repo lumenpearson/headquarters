@@ -71,14 +71,18 @@ jobs:
       - name: Formatting
         run: pnpm format:check
 
-      # Both boundaries are enforced by scripts, not convention: no direct Base UI
-      # imports or raw interactive controls outside packages/ui, and no stale
-      # generated Protobuf bindings.
+      # All three boundaries are enforced by scripts, not convention: no direct
+      # Base UI imports or raw interactive controls outside packages/ui, no stale
+      # generated Protobuf bindings, and no operator-visible string added outside
+      # the message catalogue.
       - name: UI boundary
         run: pnpm check:ui-boundary
 
       - name: Protocol generation freshness
         run: pnpm check:protocol-generation
+
+      - name: Localization ratchet
+        run: pnpm check:localization
 
       - name: Lint
         run: pnpm lint
