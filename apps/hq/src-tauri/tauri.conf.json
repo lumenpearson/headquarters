@@ -36,6 +36,18 @@
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "category": "Productivity",
     "shortDescription": "Offline operational monitor system",
-    "longDescription": "Local-first multi-screen production system for Gremuchaya Smes"
+    "longDescription": "Local-first multi-screen production system for Gremuchaya Smes",
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/lumenpearson/headquarters/releases/latest/download/latest.json"
+      ],
+      "pubkey": "PLACEHOLDER-NOT-A-REAL-MINISIGN-KEY-SEE-apps/hq/src-tauri/src/app_updater.rs",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

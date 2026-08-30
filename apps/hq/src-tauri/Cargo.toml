@@ -17,7 +17,14 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+# `base64` and `minisign-verify` decode and check the same minisign signature format
+# `tauri-plugin-updater` verifies internally in `Update::download`. `app_updater`'s
+# pause/resume downloader bypasses that method (see the module doc for why), which
+# means it must redo that verification itself before ever handing bytes to
+# `Update::install` -- an install path that trusts its input completely.
+base64 = "=0.22.1"
 bytes = "=1.12.1"
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
 getrandom = "=0.4.3"
 hex = "=0.4.3"
 http-body-util = "=0.1.5"
@@ -28,14 +35,35 @@ http-body-util = "=0.1.5"
 # shape `axum`'s own HTTP1 server side already uses elsewhere in this crate.
 hyper = { version = "=1.11.0", features = ["client", "http1"] }
 hyper-util = { version = "=0.1.20", features = ["client-legacy", "http1", "tokio"] }
+minisign-verify = "=0.2.5"
 notify = "8.2.0"
 prost = "0.14.4"
 prost-types = "0.14.4"
+# `rustls-no-provider` is named explicitly rather than left to arrive transitively:
+# `tauri-plugin-updater`'s own default feature set happens to build `reqwest` with this
+# same backend today (its `rustls-tls` feature turns on `reqwest/rustls-no-provider`),
+# and Cargo unifies features for one resolved version of a crate across the whole
+# dependency graph -- so leaving this entry bare would still compile, but a future
+# `tauri-plugin-updater` release that changed its own default features (or was built
+# with `default-features = false` here) could silently flip this crate's TLS backend,
+# or drop TLS support altogether, with no signal at this call site. Naming the same
+# feature `tauri-plugin-updater` already selects keeps today's behaviour exactly as it
+# is while making it this crate's own choice instead of an inherited one. The crypto
+# provider `rustls-no-provider` still needs is installed as a side effect of the first
+# `tauri_plugin_updater::Updater::check` call, which is why every custom command in
+# `app_updater` requires a resource id `check` already produced -- by construction,
+# this crate never makes a `reqwest` HTTPS call before that provider exists.
+reqwest = { version = "=0.13.4", default-features = false, features = ["stream", "rustls-no-provider"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tauri = { version = "2.11.5", features = [] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-updater = "2.10.1"
 thiserror = "2.0.20"
-tokio = { version = "=1.53.1", features = ["fs", "net", "process", "sync", "time"] }
+# `io-util` is added over the module's original set purely for `app_updater`'s
+# temp-file writes (`AsyncWriteExt`/`AsyncSeekExt`); nothing else in this crate
+# needed it, which is why it was absent before this file's downloader.
+tokio = { version = "=1.53.1", features = ["fs", "io-util", "net", "process", "sync", "time"] }
 tower-http = { version = "=0.7.0", features = ["cors"] }
 url = "=2.5.8"
 
@@ -46,3 +74,14 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_Graphics_Dwm",
   "Win32_System_SystemInformation",
 ] }
+
+[dev-dependencies]
+# `app_updater`'s `run_download` tests exercise a real `reqwest::Client` against a local
+# loopback HTTP server. `reqwest`'s `rustls-no-provider` feature (see the `[dependencies]`
+# entry above) means `ClientBuilder::build` panics unless a `rustls` crypto provider was
+# installed first -- normally a side effect of `tauri_plugin_updater::Updater::check`, which
+# nothing in a unit test ever calls. Pinning the same version and the same `ring` feature
+# `tauri-plugin-updater` itself requests (see its `Cargo.toml`) reuses the crypto backend
+# already in this graph rather than resolving a second one; `ensure_crypto_provider` in the
+# test module installs it once, before the first server-backed test runs.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
