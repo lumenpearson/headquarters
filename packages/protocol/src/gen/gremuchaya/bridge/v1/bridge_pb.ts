@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gremuchaya/bridge/v1/bridge.proto.
  */
 export const file_gremuchaya_bridge_v1_bridge: GenFile = /*@__PURE__*/
-  fileDesc("CiFncmVtdWNoYXlhL2JyaWRnZS92MS9icmlkZ2UucHJvdG8SFGdyZW11Y2hheWEuYnJpZGdlLnYxIg8KDUhlYWx0aFJlcXVlc3QicgoOSGVhbHRoUmVzcG9uc2USDwoHc2VydmljZRgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgNEg4KBnN0YXR1cxgDIAEoCRISCgpzdGFydGVkX2F0GAQgASgJEhEKCXRyYW5zcG9ydBgFIAEoCSItCgtMaXN0UmVxdWVzdBIQCghtb3VudF9pZBgBIAEoCRIMCgRwYXRoGAIgASgJIpMBCgtCcmlkZ2VFbnRyeRIMCgRuYW1lGAEgASgJEgwKBHBhdGgYAiABKAkSLQoEa2luZBgDIAEoDjIfLmdyZW11Y2hheWEuYnJpZGdlLnYxLkVudHJ5S2luZBIRCgltaW1lX3R5cGUYBCABKAkSEQoJYnl0ZV9zaXplGAUgASgEEhMKC21vZGlmaWVkX2F0GAYgASgJIkIKDExpc3RSZXNwb25zZRIyCgdlbnRyaWVzGAEgAygLMiEuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQnJpZGdlRW50cnkiMQoPUmVhZEZpbGVSZXF1ZXN0EhAKCG1vdW50X2lkGAEgASgJEgwKBHBhdGgYAiABKAkiZwoQUmVhZEZpbGVSZXNwb25zZRIMCgRkYXRhGAEgASgMEgwKBG5hbWUYAiABKAkSEQoJbWltZV90eXBlGAMgASgJEhIKCnRvdGFsX3NpemUYBCABKAQSEAoIc2VxdWVuY2UYBSABKA0iIQoMV2F0Y2hSZXF1ZXN0EhEKCW1vdW50X2lkcxgBIAMoCSJ4Cg1XYXRjaFJlc3BvbnNlEjEKBGtpbmQYASABKA4yIy5ncmVtdWNoYXlhLmJyaWRnZS52MS5GaWxlRXZlbnRLaW5kEhAKCG1vdW50X2lkGAIgASgJEgwKBHBhdGgYAyABKAkSFAoMaXNzdWVkX2F0X21zGAQgASgEIooBChpCZWdpbk1hdGVyaWFsSW1wb3J0UmVxdWVzdBIQCghtb3VudF9pZBgBIAEoCRIRCglmaWxlX25hbWUYAiABKAkSGgoSZGVjbGFyZWRfbWltZV90eXBlGAMgASgJEhIKCnRvdGFsX3NpemUYBCABKAQSFwoPZXhwZWN0ZWRfYmxha2UzGAUgASgJIngKFU1hdGVyaWFsSW1wb3J0U2Vzc2lvbhIRCgl1cGxvYWRfaWQYASABKAkSEgoKdG90YWxfc2l6ZRgCIAEoBBIVCg1yZWNlaXZlZF9zaXplGAMgASgEEhIKCmNodW5rX3NpemUYBCABKA0SDQoFc3RhdGUYBSABKAkiWwobQmVnaW5NYXRlcmlhbEltcG9ydFJlc3BvbnNlEjwKB3Nlc3Npb24YASABKAsyKy5ncmVtdWNoYXlhLmJyaWRnZS52MS5NYXRlcmlhbEltcG9ydFNlc3Npb24iTQoaVXBsb2FkTWF0ZXJpYWxDaHVua1JlcXVlc3QSEQoJdXBsb2FkX2lkGAEgASgJEg4KBm9mZnNldBgCIAEoBBIMCgRkYXRhGAMgASgMIlsKG1VwbG9hZE1hdGVyaWFsQ2h1bmtSZXNwb25zZRI8CgdzZXNzaW9uGAEgASgLMisuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRTZXNzaW9uIjMKHkdldE1hdGVyaWFsSW1wb3J0U3RhdHVzUmVxdWVzdBIRCgl1cGxvYWRfaWQYASABKAkiXwofR2V0TWF0ZXJpYWxJbXBvcnRTdGF0dXNSZXNwb25zZRI8CgdzZXNzaW9uGAEgASgLMisuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRTZXNzaW9uIjIKHUNvbXBsZXRlTWF0ZXJpYWxJbXBvcnRSZXF1ZXN0EhEKCXVwbG9hZF9pZBgBIAEoCSKQAQoTTWF0ZXJpYWxJbXBvcnRFbnRyeRITCgttYXRlcmlhbF9pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSEQoJbWltZV90eXBlGAMgASgJEhEKCWJ5dGVfc2l6ZRgEIAEoBBIUCgxjb250ZW50X2hhc2gYBSABKAkSEgoKY3JlYXRlZF9hdBgGIAEoCSJzCh5Db21wbGV0ZU1hdGVyaWFsSW1wb3J0UmVzcG9uc2USOwoIbWF0ZXJpYWwYASABKAsyKS5ncmVtdWNoYXlhLmJyaWRnZS52MS5NYXRlcmlhbEltcG9ydEVudHJ5EhQKDGRlZHVwbGljYXRlZBgCIAEoCCIwChtDYW5jZWxNYXRlcmlhbEltcG9ydFJlcXVlc3QSEQoJdXBsb2FkX2lkGAEgASgJIlwKHENhbmNlbE1hdGVyaWFsSW1wb3J0UmVzcG9uc2USPAoHc2Vzc2lvbhgBIAEoCzIrLmdyZW11Y2hheWEuYnJpZGdlLnYxLk1hdGVyaWFsSW1wb3J0U2Vzc2lvbiJTChxMaXN0SW1wb3J0ZWRNYXRlcmlhbHNSZXF1ZXN0EhAKCG1vdW50X2lkGAEgASgJEhEKCXBhZ2Vfc2l6ZRgCIAEoDRIOCgZjdXJzb3IYAyABKAkicgodTGlzdEltcG9ydGVkTWF0ZXJpYWxzUmVzcG9uc2USPAoJbWF0ZXJpYWxzGAEgAygLMikuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRFbnRyeRITCgtuZXh0X2N1cnNvchgCIAEoCSJEChtSZWFkSW1wb3J0ZWRNYXRlcmlhbFJlcXVlc3QSEAoIbW91bnRfaWQYASABKAkSEwoLbWF0ZXJpYWxfaWQYAiABKAkiewocUmVhZEltcG9ydGVkTWF0ZXJpYWxSZXNwb25zZRIMCgRkYXRhGAEgASgMEjsKCG1hdGVyaWFsGAIgASgLMikuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRFbnRyeRIQCghzZXF1ZW5jZRgDIAEoDSJICh9HZXRNYXRlcmlhbFBsYXliYWNrR3JhbnRSZXF1ZXN0EhAKCG1vdW50X2lkGAEgASgJEhMKC21hdGVyaWFsX2lkGAIgASgJInMKFU1hdGVyaWFsUGxheWJhY2tHcmFudBIQCghncmFudF9pZBgBIAEoCRILCgN1cmwYAiABKAkSFQoNZXhwaXJlc19hdF9tcxgDIAEoBBIRCgltaW1lX3R5cGUYBCABKAkSEQoJYnl0ZV9zaXplGAUgASgEIl4KIEdldE1hdGVyaWFsUGxheWJhY2tHcmFudFJlc3BvbnNlEjoKBWdyYW50GAEgASgLMisuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxQbGF5YmFja0dyYW50IjYKIlJldm9rZU1hdGVyaWFsUGxheWJhY2tHcmFudFJlcXVlc3QSEAoIZ3JhbnRfaWQYASABKAkiNgojUmV2b2tlTWF0ZXJpYWxQbGF5YmFja0dyYW50UmVzcG9uc2USDwoHcmV2b2tlZBgBIAEoCCpWCglFbnRyeUtpbmQSGgoWRU5UUllfS0lORF9VTlNQRUNJRklFRBAAEhMKD0VOVFJZX0tJTkRfRklMRRABEhgKFEVOVFJZX0tJTkRfRElSRUNUT1JZEAIqxwEKDUZpbGVFdmVudEtpbmQSHwobRklMRV9FVkVOVF9LSU5EX1VOU1BFQ0lGSUVEEAASGQoVRklMRV9FVkVOVF9LSU5EX0FEREVEEAESGwoXRklMRV9FVkVOVF9LSU5EX0NIQU5HRUQQAhIbChdGSUxFX0VWRU5UX0tJTkRfUkVNT1ZFRBADEiUKIUZJTEVfRVZFTlRfS0lORF9ESVJFQ1RPUllfQ0hBTkdFRBAEEhkKFUZJTEVfRVZFTlRfS0lORF9SRUFEWRAFMpMMChFGaWxlQnJpZGdlU2VydmljZRJTCgZIZWFsdGgSIy5ncmVtdWNoYXlhLmJyaWRnZS52MS5IZWFsdGhSZXF1ZXN0GiQuZ3JlbXVjaGF5YS5icmlkZ2UudjEuSGVhbHRoUmVzcG9uc2USTQoETGlzdBIhLmdyZW11Y2hheWEuYnJpZGdlLnYxLkxpc3RSZXF1ZXN0GiIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTGlzdFJlc3BvbnNlElsKCFJlYWRGaWxlEiUuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEZpbGVSZXF1ZXN0GiYuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEZpbGVSZXNwb25zZTABElIKBVdhdGNoEiIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuV2F0Y2hSZXF1ZXN0GiMuZ3JlbXVjaGF5YS5icmlkZ2UudjEuV2F0Y2hSZXNwb25zZTABEnoKE0JlZ2luTWF0ZXJpYWxJbXBvcnQSMC5ncmVtdWNoYXlhLmJyaWRnZS52MS5CZWdpbk1hdGVyaWFsSW1wb3J0UmVxdWVzdBoxLmdyZW11Y2hheWEuYnJpZGdlLnYxLkJlZ2luTWF0ZXJpYWxJbXBvcnRSZXNwb25zZRJ6ChNVcGxvYWRNYXRlcmlhbENodW5rEjAuZ3JlbXVjaGF5YS5icmlkZ2UudjEuVXBsb2FkTWF0ZXJpYWxDaHVua1JlcXVlc3QaMS5ncmVtdWNoYXlhLmJyaWRnZS52MS5VcGxvYWRNYXRlcmlhbENodW5rUmVzcG9uc2UShgEKF0dldE1hdGVyaWFsSW1wb3J0U3RhdHVzEjQuZ3JlbXVjaGF5YS5icmlkZ2UudjEuR2V0TWF0ZXJpYWxJbXBvcnRTdGF0dXNSZXF1ZXN0GjUuZ3JlbXVjaGF5YS5icmlkZ2UudjEuR2V0TWF0ZXJpYWxJbXBvcnRTdGF0dXNSZXNwb25zZRKDAQoWQ29tcGxldGVNYXRlcmlhbEltcG9ydBIzLmdyZW11Y2hheWEuYnJpZGdlLnYxLkNvbXBsZXRlTWF0ZXJpYWxJbXBvcnRSZXF1ZXN0GjQuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQ29tcGxldGVNYXRlcmlhbEltcG9ydFJlc3BvbnNlEn0KFENhbmNlbE1hdGVyaWFsSW1wb3J0EjEuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQ2FuY2VsTWF0ZXJpYWxJbXBvcnRSZXF1ZXN0GjIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQ2FuY2VsTWF0ZXJpYWxJbXBvcnRSZXNwb25zZRKAAQoVTGlzdEltcG9ydGVkTWF0ZXJpYWxzEjIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTGlzdEltcG9ydGVkTWF0ZXJpYWxzUmVxdWVzdBozLmdyZW11Y2hheWEuYnJpZGdlLnYxLkxpc3RJbXBvcnRlZE1hdGVyaWFsc1Jlc3BvbnNlEn8KFFJlYWRJbXBvcnRlZE1hdGVyaWFsEjEuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEltcG9ydGVkTWF0ZXJpYWxSZXF1ZXN0GjIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEltcG9ydGVkTWF0ZXJpYWxSZXNwb25zZTABEokBChhHZXRNYXRlcmlhbFBsYXliYWNrR3JhbnQSNS5ncmVtdWNoYXlhLmJyaWRnZS52MS5HZXRNYXRlcmlhbFBsYXliYWNrR3JhbnRSZXF1ZXN0GjYuZ3JlbXVjaGF5YS5icmlkZ2UudjEuR2V0TWF0ZXJpYWxQbGF5YmFja0dyYW50UmVzcG9uc2USkgEKG1Jldm9rZU1hdGVyaWFsUGxheWJhY2tHcmFudBI4LmdyZW11Y2hheWEuYnJpZGdlLnYxLlJldm9rZU1hdGVyaWFsUGxheWJhY2tHcmFudFJlcXVlc3QaOS5ncmVtdWNoYXlhLmJyaWRnZS52MS5SZXZva2VNYXRlcmlhbFBsYXliYWNrR3JhbnRSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("CiFncmVtdWNoYXlhL2JyaWRnZS92MS9icmlkZ2UucHJvdG8SFGdyZW11Y2hheWEuYnJpZGdlLnYxIg8KDUhlYWx0aFJlcXVlc3QicgoOSGVhbHRoUmVzcG9uc2USDwoHc2VydmljZRgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgNEg4KBnN0YXR1cxgDIAEoCRISCgpzdGFydGVkX2F0GAQgASgJEhEKCXRyYW5zcG9ydBgFIAEoCSItCgtMaXN0UmVxdWVzdBIQCghtb3VudF9pZBgBIAEoCRIMCgRwYXRoGAIgASgJIpMBCgtCcmlkZ2VFbnRyeRIMCgRuYW1lGAEgASgJEgwKBHBhdGgYAiABKAkSLQoEa2luZBgDIAEoDjIfLmdyZW11Y2hheWEuYnJpZGdlLnYxLkVudHJ5S2luZBIRCgltaW1lX3R5cGUYBCABKAkSEQoJYnl0ZV9zaXplGAUgASgEEhMKC21vZGlmaWVkX2F0GAYgASgJIkIKDExpc3RSZXNwb25zZRIyCgdlbnRyaWVzGAEgAygLMiEuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQnJpZGdlRW50cnkiMQoPUmVhZEZpbGVSZXF1ZXN0EhAKCG1vdW50X2lkGAEgASgJEgwKBHBhdGgYAiABKAkiZwoQUmVhZEZpbGVSZXNwb25zZRIMCgRkYXRhGAEgASgMEgwKBG5hbWUYAiABKAkSEQoJbWltZV90eXBlGAMgASgJEhIKCnRvdGFsX3NpemUYBCABKAQSEAoIc2VxdWVuY2UYBSABKA0iIQoMV2F0Y2hSZXF1ZXN0EhEKCW1vdW50X2lkcxgBIAMoCSJ4Cg1XYXRjaFJlc3BvbnNlEjEKBGtpbmQYASABKA4yIy5ncmVtdWNoYXlhLmJyaWRnZS52MS5GaWxlRXZlbnRLaW5kEhAKCG1vdW50X2lkGAIgASgJEgwKBHBhdGgYAyABKAkSFAoMaXNzdWVkX2F0X21zGAQgASgEIooBChpCZWdpbk1hdGVyaWFsSW1wb3J0UmVxdWVzdBIQCghtb3VudF9pZBgBIAEoCRIRCglmaWxlX25hbWUYAiABKAkSGgoSZGVjbGFyZWRfbWltZV90eXBlGAMgASgJEhIKCnRvdGFsX3NpemUYBCABKAQSFwoPZXhwZWN0ZWRfYmxha2UzGAUgASgJIngKFU1hdGVyaWFsSW1wb3J0U2Vzc2lvbhIRCgl1cGxvYWRfaWQYASABKAkSEgoKdG90YWxfc2l6ZRgCIAEoBBIVCg1yZWNlaXZlZF9zaXplGAMgASgEEhIKCmNodW5rX3NpemUYBCABKA0SDQoFc3RhdGUYBSABKAkiWwobQmVnaW5NYXRlcmlhbEltcG9ydFJlc3BvbnNlEjwKB3Nlc3Npb24YASABKAsyKy5ncmVtdWNoYXlhLmJyaWRnZS52MS5NYXRlcmlhbEltcG9ydFNlc3Npb24iTQoaVXBsb2FkTWF0ZXJpYWxDaHVua1JlcXVlc3QSEQoJdXBsb2FkX2lkGAEgASgJEg4KBm9mZnNldBgCIAEoBBIMCgRkYXRhGAMgASgMIlsKG1VwbG9hZE1hdGVyaWFsQ2h1bmtSZXNwb25zZRI8CgdzZXNzaW9uGAEgASgLMisuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRTZXNzaW9uIjMKHkdldE1hdGVyaWFsSW1wb3J0U3RhdHVzUmVxdWVzdBIRCgl1cGxvYWRfaWQYASABKAkiXwofR2V0TWF0ZXJpYWxJbXBvcnRTdGF0dXNSZXNwb25zZRI8CgdzZXNzaW9uGAEgASgLMisuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRTZXNzaW9uIjIKHUNvbXBsZXRlTWF0ZXJpYWxJbXBvcnRSZXF1ZXN0EhEKCXVwbG9hZF9pZBgBIAEoCSKQAQoTTWF0ZXJpYWxJbXBvcnRFbnRyeRITCgttYXRlcmlhbF9pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSEQoJbWltZV90eXBlGAMgASgJEhEKCWJ5dGVfc2l6ZRgEIAEoBBIUCgxjb250ZW50X2hhc2gYBSABKAkSEgoKY3JlYXRlZF9hdBgGIAEoCSJzCh5Db21wbGV0ZU1hdGVyaWFsSW1wb3J0UmVzcG9uc2USOwoIbWF0ZXJpYWwYASABKAsyKS5ncmVtdWNoYXlhLmJyaWRnZS52MS5NYXRlcmlhbEltcG9ydEVudHJ5EhQKDGRlZHVwbGljYXRlZBgCIAEoCCIwChtDYW5jZWxNYXRlcmlhbEltcG9ydFJlcXVlc3QSEQoJdXBsb2FkX2lkGAEgASgJIlwKHENhbmNlbE1hdGVyaWFsSW1wb3J0UmVzcG9uc2USPAoHc2Vzc2lvbhgBIAEoCzIrLmdyZW11Y2hheWEuYnJpZGdlLnYxLk1hdGVyaWFsSW1wb3J0U2Vzc2lvbiJTChxMaXN0SW1wb3J0ZWRNYXRlcmlhbHNSZXF1ZXN0EhAKCG1vdW50X2lkGAEgASgJEhEKCXBhZ2Vfc2l6ZRgCIAEoDRIOCgZjdXJzb3IYAyABKAkicgodTGlzdEltcG9ydGVkTWF0ZXJpYWxzUmVzcG9uc2USPAoJbWF0ZXJpYWxzGAEgAygLMikuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRFbnRyeRITCgtuZXh0X2N1cnNvchgCIAEoCSJEChtSZWFkSW1wb3J0ZWRNYXRlcmlhbFJlcXVlc3QSEAoIbW91bnRfaWQYASABKAkSEwoLbWF0ZXJpYWxfaWQYAiABKAkiewocUmVhZEltcG9ydGVkTWF0ZXJpYWxSZXNwb25zZRIMCgRkYXRhGAEgASgMEjsKCG1hdGVyaWFsGAIgASgLMikuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxJbXBvcnRFbnRyeRIQCghzZXF1ZW5jZRgDIAEoDSJICh9HZXRNYXRlcmlhbFBsYXliYWNrR3JhbnRSZXF1ZXN0EhAKCG1vdW50X2lkGAEgASgJEhMKC21hdGVyaWFsX2lkGAIgASgJInMKFU1hdGVyaWFsUGxheWJhY2tHcmFudBIQCghncmFudF9pZBgBIAEoCRILCgN1cmwYAiABKAkSFQoNZXhwaXJlc19hdF9tcxgDIAEoBBIRCgltaW1lX3R5cGUYBCABKAkSEQoJYnl0ZV9zaXplGAUgASgEIl4KIEdldE1hdGVyaWFsUGxheWJhY2tHcmFudFJlc3BvbnNlEjoKBWdyYW50GAEgASgLMisuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTWF0ZXJpYWxQbGF5YmFja0dyYW50IjYKIlJldm9rZU1hdGVyaWFsUGxheWJhY2tHcmFudFJlcXVlc3QSEAoIZ3JhbnRfaWQYASABKAkiNgojUmV2b2tlTWF0ZXJpYWxQbGF5YmFja0dyYW50UmVzcG9uc2USDwoHcmV2b2tlZBgBIAEoCCJjChNCcmlkZ2VGYWlsdXJlRGV0YWlsEjEKBGNvZGUYASABKA4yIy5ncmVtdWNoYXlhLmJyaWRnZS52MS5CcmlkZ2VGYWlsdXJlEhkKEWRldmVsb3Blcl9tZXNzYWdlGAIgASgJKlYKCUVudHJ5S2luZBIaChZFTlRSWV9LSU5EX1VOU1BFQ0lGSUVEEAASEwoPRU5UUllfS0lORF9GSUxFEAESGAoURU5UUllfS0lORF9ESVJFQ1RPUlkQAirHAQoNRmlsZUV2ZW50S2luZBIfChtGSUxFX0VWRU5UX0tJTkRfVU5TUEVDSUZJRUQQABIZChVGSUxFX0VWRU5UX0tJTkRfQURERUQQARIbChdGSUxFX0VWRU5UX0tJTkRfQ0hBTkdFRBACEhsKF0ZJTEVfRVZFTlRfS0lORF9SRU1PVkVEEAMSJQohRklMRV9FVkVOVF9LSU5EX0RJUkVDVE9SWV9DSEFOR0VEEAQSGQoVRklMRV9FVkVOVF9LSU5EX1JFQURZEAUq9wcKDUJyaWRnZUZhaWx1cmUSHgoaQlJJREdFX0ZBSUxVUkVfVU5TUEVDSUZJRUQQABIbChdCUklER0VfRkFJTFVSRV9JTlRFUk5BTBABEiAKHEJSSURHRV9GQUlMVVJFX01JU1NJTkdfRklFTEQQAhIlCiFCUklER0VfRkFJTFVSRV9QQVRIX0VTQ0FQRVNfTU9VTlQQAxIiCh5CUklER0VfRkFJTFVSRV9TWU1MSU5LX1JFRlVTRUQQBBInCiNCUklER0VfRkFJTFVSRV9JTlRFUk5BTF9QQVRIX0hJRERFThAFEiAKHEJSSURHRV9GQUlMVVJFX01PVU5UX1VOS05PV04QBhIiCh5CUklER0VfRkFJTFVSRV9OT1RfQV9ESVJFQ1RPUlkQBxIdChlCUklER0VfRkFJTFVSRV9OT1RfQV9GSUxFEAgSIgoeQlJJREdFX0ZBSUxVUkVfRU5UUllfTk9UX0ZPVU5EEAkSKwonQlJJREdFX0ZBSUxVUkVfTUFURVJJQUxfSU1QT1JUX0RJU0FCTEVEEAoSJQohQlJJREdFX0ZBSUxVUkVfTUFURVJJQUxfVE9PX0xBUkdFEAsSJwojQlJJREdFX0ZBSUxVUkVfTUFURVJJQUxfTkFNRV9VTlNBRkUQDBIqCiZCUklER0VfRkFJTFVSRV9NQVRFUklBTF9DSFVOS19SRUpFQ1RFRBANEi0KKUJSSURHRV9GQUlMVVJFX01BVEVSSUFMX1VQTE9BRF9JTkNPTVBMRVRFEA4SKQolQlJJREdFX0ZBSUxVUkVfTUFURVJJQUxfSEFTSF9NSVNNQVRDSBAPEi0KKUJSSURHRV9GQUlMVVJFX01BVEVSSUFMX1NFU1NJT05fTk9UX0ZPVU5EEBASJQohQlJJREdFX0ZBSUxVUkVfTUFURVJJQUxfTk9UX0ZPVU5EEBESLQopQlJJREdFX0ZBSUxVUkVfTUFURVJJQUxfUkVDT1JEX1VOUkVBREFCTEUQEhItCilCUklER0VfRkFJTFVSRV9NQVRFUklBTF9NT1VOVF9VTkFWQUlMQUJMRRATEi0KKUJSSURHRV9GQUlMVVJFX1BMQVlCQUNLX1VOU1VQUE9SVEVEX01FRElBEBQSLAooQlJJREdFX0ZBSUxVUkVfUExBWUJBQ0tfQ0FQQUNJVFlfUkVBQ0hFRBAVEicKI0JSSURHRV9GQUlMVVJFX1BMQVlCQUNLX1VOQVZBSUxBQkxFEBYSKwonQlJJREdFX0ZBSUxVUkVfTUFURVJJQUxfUkVRVUVTVF9JTlZBTElEEBcSIAocQlJJREdFX0ZBSUxVUkVfUEFUSF9SRUpFQ1RFRBAYMpMMChFGaWxlQnJpZGdlU2VydmljZRJTCgZIZWFsdGgSIy5ncmVtdWNoYXlhLmJyaWRnZS52MS5IZWFsdGhSZXF1ZXN0GiQuZ3JlbXVjaGF5YS5icmlkZ2UudjEuSGVhbHRoUmVzcG9uc2USTQoETGlzdBIhLmdyZW11Y2hheWEuYnJpZGdlLnYxLkxpc3RSZXF1ZXN0GiIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTGlzdFJlc3BvbnNlElsKCFJlYWRGaWxlEiUuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEZpbGVSZXF1ZXN0GiYuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEZpbGVSZXNwb25zZTABElIKBVdhdGNoEiIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuV2F0Y2hSZXF1ZXN0GiMuZ3JlbXVjaGF5YS5icmlkZ2UudjEuV2F0Y2hSZXNwb25zZTABEnoKE0JlZ2luTWF0ZXJpYWxJbXBvcnQSMC5ncmVtdWNoYXlhLmJyaWRnZS52MS5CZWdpbk1hdGVyaWFsSW1wb3J0UmVxdWVzdBoxLmdyZW11Y2hheWEuYnJpZGdlLnYxLkJlZ2luTWF0ZXJpYWxJbXBvcnRSZXNwb25zZRJ6ChNVcGxvYWRNYXRlcmlhbENodW5rEjAuZ3JlbXVjaGF5YS5icmlkZ2UudjEuVXBsb2FkTWF0ZXJpYWxDaHVua1JlcXVlc3QaMS5ncmVtdWNoYXlhLmJyaWRnZS52MS5VcGxvYWRNYXRlcmlhbENodW5rUmVzcG9uc2UShgEKF0dldE1hdGVyaWFsSW1wb3J0U3RhdHVzEjQuZ3JlbXVjaGF5YS5icmlkZ2UudjEuR2V0TWF0ZXJpYWxJbXBvcnRTdGF0dXNSZXF1ZXN0GjUuZ3JlbXVjaGF5YS5icmlkZ2UudjEuR2V0TWF0ZXJpYWxJbXBvcnRTdGF0dXNSZXNwb25zZRKDAQoWQ29tcGxldGVNYXRlcmlhbEltcG9ydBIzLmdyZW11Y2hheWEuYnJpZGdlLnYxLkNvbXBsZXRlTWF0ZXJpYWxJbXBvcnRSZXF1ZXN0GjQuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQ29tcGxldGVNYXRlcmlhbEltcG9ydFJlc3BvbnNlEn0KFENhbmNlbE1hdGVyaWFsSW1wb3J0EjEuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQ2FuY2VsTWF0ZXJpYWxJbXBvcnRSZXF1ZXN0GjIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuQ2FuY2VsTWF0ZXJpYWxJbXBvcnRSZXNwb25zZRKAAQoVTGlzdEltcG9ydGVkTWF0ZXJpYWxzEjIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuTGlzdEltcG9ydGVkTWF0ZXJpYWxzUmVxdWVzdBozLmdyZW11Y2hheWEuYnJpZGdlLnYxLkxpc3RJbXBvcnRlZE1hdGVyaWFsc1Jlc3BvbnNlEn8KFFJlYWRJbXBvcnRlZE1hdGVyaWFsEjEuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEltcG9ydGVkTWF0ZXJpYWxSZXF1ZXN0GjIuZ3JlbXVjaGF5YS5icmlkZ2UudjEuUmVhZEltcG9ydGVkTWF0ZXJpYWxSZXNwb25zZTABEokBChhHZXRNYXRlcmlhbFBsYXliYWNrR3JhbnQSNS5ncmVtdWNoYXlhLmJyaWRnZS52MS5HZXRNYXRlcmlhbFBsYXliYWNrR3JhbnRSZXF1ZXN0GjYuZ3JlbXVjaGF5YS5icmlkZ2UudjEuR2V0TWF0ZXJpYWxQbGF5YmFja0dyYW50UmVzcG9uc2USkgEKG1Jldm9rZU1hdGVyaWFsUGxheWJhY2tHcmFudBI4LmdyZW11Y2hheWEuYnJpZGdlLnYxLlJldm9rZU1hdGVyaWFsUGxheWJhY2tHcmFudFJlcXVlc3QaOS5ncmVtdWNoYXlhLmJyaWRnZS52MS5SZXZva2VNYXRlcmlhbFBsYXliYWNrR3JhbnRSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message gremuchaya.bridge.v1.HealthRequest
@@ -751,6 +751,35 @@ export const RevokeMaterialPlaybackGrantResponseSchema: GenMessage<RevokeMateria
   messageDesc(file_gremuchaya_bridge_v1_bridge, 29);
 
 /**
+ * Attached to every ConnectError the file bridge returns, as a Connect error
+ * detail. See ControlPlaneFailureDetail for why a detail and not metadata.
+ *
+ * @generated from message gremuchaya.bridge.v1.BridgeFailureDetail
+ */
+export type BridgeFailureDetail = Message<"gremuchaya.bridge.v1.BridgeFailureDetail"> & {
+  /**
+   * @generated from field: gremuchaya.bridge.v1.BridgeFailure code = 1;
+   */
+  code: BridgeFailure;
+
+  /**
+   * English, developer-facing, and never displayed. Fixed per code, never the
+   * caught exception's own message -- that is what kept absolute paths off the
+   * wire.
+   *
+   * @generated from field: string developer_message = 2;
+   */
+  developerMessage: string;
+};
+
+/**
+ * Describes the message gremuchaya.bridge.v1.BridgeFailureDetail.
+ * Use `create(BridgeFailureDetailSchema)` to create a new message.
+ */
+export const BridgeFailureDetailSchema: GenMessage<BridgeFailureDetail> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_bridge_v1_bridge, 30);
+
+/**
  * @generated from enum gremuchaya.bridge.v1.EntryKind
  */
 export enum EntryKind {
@@ -816,6 +845,191 @@ export enum FileEventKind {
  */
 export const FileEventKindSchema: GenEnum<FileEventKind> = /*@__PURE__*/
   enumDesc(file_gremuchaya_bridge_v1_bridge, 1);
+
+/**
+ * Why every failure the file bridge returns carries one of these.
+ *
+ * Same mandate as ControlPlaneFailure -- a code can be translated, a sentence
+ * cannot -- and one extra constraint that is this server's alone. The bridge
+ * projects a physical tree behind virtual paths so that no physical path ever
+ * reaches the UI (ADR 0002). Before these codes existed, four branches of
+ * `toConnectError` rethrew the underlying exception's own message, and a Node
+ * fs error quotes the absolute path it failed on. A code carries no path by
+ * construction, and BridgeFailureDetail.developer_message is a fixed sentence
+ * chosen per code rather than the exception's text.
+ *
+ * The set is closed: `apps/file-bridge/src/errors.ts` keys an exhaustive table
+ * off it. Proto3 enums are open on the wire, so a bridge newer than the client
+ * sends numbers the client degrades to its generic kind; nothing here may be
+ * renumbered or removed.
+ *
+ * @generated from enum gremuchaya.bridge.v1.BridgeFailure
+ */
+export enum BridgeFailure {
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Nothing more specific survived the handler boundary. This is the branch
+   * that used to carry `error.message`, which is where a physical path escaped.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_INTERNAL = 1;
+   */
+  INTERNAL = 1,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MISSING_FIELD = 2;
+   */
+  MISSING_FIELD = 2,
+
+  /**
+   * The two refusals of pathSecurity.ts. Both mean the request named something
+   * outside the mount; neither says what, or where the mount is.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_PATH_ESCAPES_MOUNT = 3;
+   */
+  PATH_ESCAPES_MOUNT = 3,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_SYMLINK_REFUSED = 4;
+   */
+  SYMLINK_REFUSED = 4,
+
+  /**
+   * A request that reached into the bridge's own `.hq` tree.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_INTERNAL_PATH_HIDDEN = 5;
+   */
+  INTERNAL_PATH_HIDDEN = 5,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MOUNT_UNKNOWN = 6;
+   */
+  MOUNT_UNKNOWN = 6,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_NOT_A_DIRECTORY = 7;
+   */
+  NOT_A_DIRECTORY = 7,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_NOT_A_FILE = 8;
+   */
+  NOT_A_FILE = 8,
+
+  /**
+   * The entry named by a virtual path is gone. Replaces the ENOENT branch,
+   * whose message quoted the absolute path it could not open.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_ENTRY_NOT_FOUND = 9;
+   */
+  ENTRY_NOT_FOUND = 9,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_IMPORT_DISABLED = 10;
+   */
+  MATERIAL_IMPORT_DISABLED = 10,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_TOO_LARGE = 11;
+   */
+  MATERIAL_TOO_LARGE = 11,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_NAME_UNSAFE = 12;
+   */
+  MATERIAL_NAME_UNSAFE = 12,
+
+  /**
+   * Offset mismatch, empty chunk, oversized chunk, or a chunk that would run
+   * past the declared size. One code: every one of them means the caller must
+   * restart the transfer from the session's reported position.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_CHUNK_REJECTED = 13;
+   */
+  MATERIAL_CHUNK_REJECTED = 13,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_UPLOAD_INCOMPLETE = 14;
+   */
+  MATERIAL_UPLOAD_INCOMPLETE = 14,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_HASH_MISMATCH = 15;
+   */
+  MATERIAL_HASH_MISMATCH = 15,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_SESSION_NOT_FOUND = 16;
+   */
+  MATERIAL_SESSION_NOT_FOUND = 16,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_NOT_FOUND = 17;
+   */
+  MATERIAL_NOT_FOUND = 17,
+
+  /**
+   * The stored record exists and cannot be trusted: malformed JSON, a missing
+   * field, or an object that resolves outside the mirror. The last of those is
+   * a containment refusal, so it says nothing about where it resolved to.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_RECORD_UNREADABLE = 18;
+   */
+  MATERIAL_RECORD_UNREADABLE = 18,
+
+  /**
+   * This bridge has no `materials` mount, or the request named another one.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_MOUNT_UNAVAILABLE = 19;
+   */
+  MATERIAL_MOUNT_UNAVAILABLE = 19,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_PLAYBACK_UNSUPPORTED_MEDIA = 20;
+   */
+  PLAYBACK_UNSUPPORTED_MEDIA = 20,
+
+  /**
+   * @generated from enum value: BRIDGE_FAILURE_PLAYBACK_CAPACITY_REACHED = 21;
+   */
+  PLAYBACK_CAPACITY_REACHED = 21,
+
+  /**
+   * No grant can be minted right now: the bridge is not listening yet, or its
+   * origin is not the loopback address a grant URL must name.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_PLAYBACK_UNAVAILABLE = 22;
+   */
+  PLAYBACK_UNAVAILABLE = 22,
+
+  /**
+   * A material request the bridge will not begin: a declared size past the safe
+   * integer range, or an expected digest that is not a BLAKE3 digest.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_MATERIAL_REQUEST_INVALID = 23;
+   */
+  MATERIAL_REQUEST_INVALID = 23,
+
+  /**
+   * The request did not name a virtual path this bridge will resolve at all:
+   * parent-traversal syntax, a NUL byte, an over-long name, or an undecodable
+   * percent escape. Distinct from PATH_ESCAPES_MOUNT, which is the containment
+   * check further in -- this one refuses before any root is consulted, so it
+   * knows nothing about the filesystem and can say nothing about it.
+   *
+   * @generated from enum value: BRIDGE_FAILURE_PATH_REJECTED = 24;
+   */
+  PATH_REJECTED = 24,
+}
+
+/**
+ * Describes the enum gremuchaya.bridge.v1.BridgeFailure.
+ */
+export const BridgeFailureSchema: GenEnum<BridgeFailure> = /*@__PURE__*/
+  enumDesc(file_gremuchaya_bridge_v1_bridge, 2);
 
 /**
  * @generated from service gremuchaya.bridge.v1.FileBridgeService

@@ -1,8 +1,9 @@
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
-import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
-import { materialV1 } from '@gremuchaya/protocol';
+import type { HandlerContext, ServiceImpl } from '@connectrpc/connect';
+import { ControlPlaneFailure, materialV1 } from '@gremuchaya/protocol';
 import type { MaterialService } from '@gremuchaya/protocol';
 
+import { controlPlaneFailure, toControlPlaneConnectError, withRuntimeErrors } from '../errors.js';
 import { renditionLadderFor, renditionSpecFor } from '../conversion/ladder.js';
 import type { ConversionQueueOutcome, RenditionRecord } from '../conversion/store.js';
 import type { Awaitable, PairedDeviceLifecycle } from '../sync/lifecycle.js';
@@ -1005,7 +1006,7 @@ function readBearerToken(context: HandlerContext): string {
   const header = context.requestHeader.get('authorization');
   const match = header === null ? undefined : /^Bearer ([^\s]+)$/u.exec(header.trim());
   if (match?.[1] === undefined) {
-    throw new ConnectError('A bearer access token is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BEARER_TOKEN_REQUIRED);
   }
   return match[1];
 }
@@ -1061,30 +1062,13 @@ function requireResourceId(value: string | undefined, field: string): string {
   return value.trim();
 }
 
-async function withRuntimeErrors<T>(operation: () => Promise<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: unknown) {
-    return rethrowAsConnect(error);
-  }
-}
-
+/**
+ * The `.catch` form of the shared classifier, for the two call sites that
+ * classify one awaited step rather than a whole handler body. It has to throw
+ * rather than return, so it cannot simply be the classifier itself.
+ */
 function rethrowAsConnect(error: unknown): never {
-  if (error instanceof ConnectError) throw error;
-  if (error instanceof PairedDeviceRuntimeError) {
-    throw new ConnectError(error.message, toConnectCode(error.code));
-  }
-  throw error;
-}
-
-function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
-  if (code === 'ABORTED') return Code.Aborted;
-  if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
-  if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
-  if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;
-  if (code === 'NOT_FOUND') return Code.NotFound;
-  if (code === 'PERMISSION_DENIED') return Code.PermissionDenied;
-  return Code.Unauthenticated;
+  throw toControlPlaneConnectError(error);
 }
 
 /** Resolves on the interval or on abort, whichever comes first, and leaks no timer. */

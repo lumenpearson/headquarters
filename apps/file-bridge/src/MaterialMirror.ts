@@ -18,7 +18,9 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { blake3 } from '@noble/hashes/blake3.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import type { BridgeConfig } from '@gremuchaya/config';
+import { BridgeFailure } from '@gremuchaya/protocol';
 
+import { BridgeFailureError, type BridgeFailureCode } from './errors.js';
 import { mimeForPath } from './mime.js';
 
 const materialMountId = 'materials';
@@ -63,9 +65,18 @@ interface StoredMaterial extends MaterialImportEntry {
   readonly objectPath: string;
 }
 
-export class MaterialMirrorError extends Error {
-  constructor(message: string) {
-    super(message);
+/**
+ * A refusal from the mirror, carrying the code it crosses the wire with.
+ *
+ * The message stays for this process's logs and for the tests that read it; it
+ * is not what a device is shown. Several refusals deliberately share one code --
+ * the four chunk rejections, the five unreadable-record cases -- because they
+ * are one situation to whoever is looking at the screen, and a code exists to
+ * be translated, not to enumerate branches.
+ */
+export class MaterialMirrorError extends BridgeFailureError {
+  constructor(code: BridgeFailureCode, message: string) {
+    super(code, message);
     this.name = 'MaterialMirrorError';
   }
 }
@@ -102,7 +113,10 @@ export class MaterialMirror {
     const root = this.materialRoot(input.mountId);
     const totalSize = numberFromUint64(input.totalSize, 'total_size');
     if (totalSize > this.config.materialImport.maxFileBytes) {
-      throw new MaterialMirrorError('Material exceeds the configured maximum file size.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_TOO_LARGE,
+        'Material exceeds the configured maximum file size.',
+      );
     }
     assertSafeFileName(input.fileName);
     const expectedHash = normalizeHash(input.expectedBlake3);
@@ -131,16 +145,28 @@ export class MaterialMirror {
     const active = this.requireActive(uploadId);
     const expectedOffset = BigInt(active.receivedSize);
     if (offset !== expectedOffset) {
-      throw new MaterialMirrorError('Chunk offset does not match the resumable upload position.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_CHUNK_REJECTED,
+        'Chunk offset does not match the resumable upload position.',
+      );
     }
     if (data.byteLength === 0 && active.totalSize !== 0) {
-      throw new MaterialMirrorError('Empty chunks are not accepted for a non-empty material.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_CHUNK_REJECTED,
+        'Empty chunks are not accepted for a non-empty material.',
+      );
     }
     if (data.byteLength > active.chunkSize) {
-      throw new MaterialMirrorError('Chunk exceeds the configured import chunk size.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_CHUNK_REJECTED,
+        'Chunk exceeds the configured import chunk size.',
+      );
     }
     if (active.receivedSize + data.byteLength > active.totalSize) {
-      throw new MaterialMirrorError('Chunk would exceed the declared material size.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_CHUNK_REJECTED,
+        'Chunk would exceed the declared material size.',
+      );
     }
     const file = await open(active.temporaryPath, 'r+');
     try {
@@ -166,7 +192,10 @@ export class MaterialMirror {
   ): Promise<{ readonly material: MaterialImportEntry; readonly deduplicated: boolean }> {
     let active = this.requireActive(uploadId);
     if (active.receivedSize !== active.totalSize) {
-      throw new MaterialMirrorError('Material upload is incomplete.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_UPLOAD_INCOMPLETE,
+        'Material upload is incomplete.',
+      );
     }
     active = { ...active, state: importState.verifying };
     this.#imports.set(uploadId, active);
@@ -176,7 +205,10 @@ export class MaterialMirror {
         await this.quarantine(active);
         const failed = { ...active, state: importState.failed };
         this.#imports.set(uploadId, failed);
-        throw new MaterialMirrorError('BLAKE3 verification failed for the uploaded material.');
+        throw new MaterialMirrorError(
+          BridgeFailure.MATERIAL_HASH_MISMATCH,
+          'BLAKE3 verification failed for the uploaded material.',
+        );
       }
       const objectPath = join(
         active.mountRoot,
@@ -264,22 +296,45 @@ export class MaterialMirror {
     materialId: string,
   ): Promise<{ readonly material: MaterialImportEntry; readonly path: string }> {
     const root = this.materialRoot(mountId);
-    if (!isUuid(materialId)) throw new MaterialMirrorError('Material ID is malformed.');
+    if (!isUuid(materialId))
+      throw new MaterialMirrorError(BridgeFailure.MATERIAL_NOT_FOUND, 'Material ID is malformed.');
     const recordPath = join(root, internalDirectory, 'material-records', `${materialId}.json`);
-    const record = parseStoredMaterial(await readFile(recordPath, 'utf8'));
+    // The ENOENT `readFile` raises quotes the absolute record path. It is
+    // classified here, where the absence of the record is what the answer means,
+    // rather than left to the transport -- which would otherwise be deciding
+    // what to say from a Node message that names the mirror on disk.
+    const serialized = await readFile(recordPath, 'utf8').catch((error: unknown) => {
+      if (hasCode(error, 'ENOENT')) {
+        throw new MaterialMirrorError(
+          BridgeFailure.MATERIAL_NOT_FOUND,
+          'No material record answers that identifier.',
+        );
+      }
+      throw error;
+    });
+    const record = parseStoredMaterial(serialized);
     if (!isPathContained(root, record.objectPath)) {
-      throw new MaterialMirrorError('Material record points outside the configured mirror.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+        'Material record points outside the configured mirror.',
+      );
     }
     const [canonicalRoot, canonicalObject] = await Promise.all([
       realpath(root),
       realpath(record.objectPath),
     ]);
     if (!isPathContained(canonicalRoot, canonicalObject)) {
-      throw new MaterialMirrorError('Material object resolves outside the configured mirror.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+        'Material object resolves outside the configured mirror.',
+      );
     }
     const metadata = await stat(canonicalObject);
     if (!metadata.isFile() || metadata.size !== record.byteSize) {
-      throw new MaterialMirrorError('Material object is missing or has an unexpected size.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+        'Material object is missing or has an unexpected size.',
+      );
     }
     return { material: stripObjectPath(record), path: canonicalObject };
   }
@@ -287,25 +342,35 @@ export class MaterialMirror {
   private materialRoot(mountId = materialMountId): string {
     if (mountId !== materialMountId) {
       throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_MOUNT_UNAVAILABLE,
         `Material imports are restricted to the '${materialMountId}' mount.`,
       );
     }
     const mount = this.config.mounts.find((candidate) => candidate.id === mountId);
     if (mount === undefined)
-      throw new MaterialMirrorError(`Missing '${materialMountId}' bridge mount.`);
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_MOUNT_UNAVAILABLE,
+        `Missing '${materialMountId}' bridge mount.`,
+      );
     return resolve(mount.root);
   }
 
   private requireActive(uploadId: string): ActiveImport {
     const active = this.#imports.get(uploadId);
     if (active === undefined)
-      throw new MaterialMirrorError('Material import session was not found.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_SESSION_NOT_FOUND,
+        'Material import session was not found.',
+      );
     return active;
   }
 
   private assertEnabled(): void {
     if (this.config.readOnly || !this.config.materialImport.enabled) {
-      throw new MaterialMirrorError('Material imports are disabled for this bridge.');
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_IMPORT_DISABLED,
+        'Material imports are disabled for this bridge.',
+      );
     }
   }
 
@@ -353,23 +418,40 @@ async function writeStoredMaterial(root: string, record: StoredMaterial): Promis
 
 function parseStoredMaterial(serialized: string): StoredMaterial {
   const value: unknown = JSON.parse(serialized);
-  if (!isRecord(value)) throw new MaterialMirrorError('Material record is malformed.');
+  if (!isRecord(value))
+    throw new MaterialMirrorError(
+      BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+      'Material record is malformed.',
+    );
   const requiredString = (key: keyof StoredMaterial): string => {
     const candidate = value[key];
     if (typeof candidate !== 'string' || candidate.length === 0) {
-      throw new MaterialMirrorError(`Material record is missing '${key}'.`);
+      throw new MaterialMirrorError(
+        BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+        `Material record is missing '${key}'.`,
+      );
     }
     return candidate;
   };
   const byteSize = value.byteSize;
   if (typeof byteSize !== 'number' || !Number.isSafeInteger(byteSize) || byteSize < 0) {
-    throw new MaterialMirrorError('Material record has an invalid byte size.');
+    throw new MaterialMirrorError(
+      BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+      'Material record has an invalid byte size.',
+    );
   }
   const materialId = requiredString('materialId');
-  if (!isUuid(materialId)) throw new MaterialMirrorError('Material record has an invalid ID.');
+  if (!isUuid(materialId))
+    throw new MaterialMirrorError(
+      BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+      'Material record has an invalid ID.',
+    );
   const contentHash = requiredString('contentHash');
   if (!/^[a-f0-9]{64}$/u.test(contentHash)) {
-    throw new MaterialMirrorError('Material record has an invalid BLAKE3 hash.');
+    throw new MaterialMirrorError(
+      BridgeFailure.MATERIAL_RECORD_UNREADABLE,
+      'Material record has an invalid BLAKE3 hash.',
+    );
   }
   return {
     materialId,
@@ -391,7 +473,10 @@ function assertSafeFileName(fileName: string): void {
     fileName === '..' ||
     fileName.includes('\0')
   ) {
-    throw new MaterialMirrorError('Material file name is unsafe.');
+    throw new MaterialMirrorError(
+      BridgeFailure.MATERIAL_NAME_UNSAFE,
+      'Material file name is unsafe.',
+    );
   }
 }
 
@@ -399,14 +484,20 @@ function normalizeHash(value: string): string | undefined {
   if (value.length === 0) return undefined;
   const normalized = value.toLocaleLowerCase('en-US');
   if (!/^[a-f0-9]{64}$/u.test(normalized)) {
-    throw new MaterialMirrorError('Expected BLAKE3 must be a 32-byte hexadecimal digest.');
+    throw new MaterialMirrorError(
+      BridgeFailure.MATERIAL_REQUEST_INVALID,
+      'Expected BLAKE3 must be a 32-byte hexadecimal digest.',
+    );
   }
   return normalized;
 }
 
 function numberFromUint64(value: bigint, label: string): number {
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new MaterialMirrorError(`${label} exceeds the supported safe integer range.`);
+    throw new MaterialMirrorError(
+      BridgeFailure.MATERIAL_REQUEST_INVALID,
+      `${label} exceeds the supported safe integer range.`,
+    );
   }
   return Number(value);
 }

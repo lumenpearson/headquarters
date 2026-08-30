@@ -2,10 +2,11 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { create } from '@bufbuild/protobuf';
 import { timestampFromDate, timestampNow } from '@bufbuild/protobuf/wkt';
-import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
-import { syncV1 } from '@gremuchaya/protocol';
+import type { HandlerContext, ServiceImpl } from '@connectrpc/connect';
+import { ControlPlaneFailure, syncV1 } from '@gremuchaya/protocol';
 import type { SyncService } from '@gremuchaya/protocol';
 
+import { controlPlaneFailure, withRuntimeErrors } from '../errors.js';
 import { maxDocumentBodyBytes } from '../http-policy.js';
 import {
   defaultRealtimeReplayLimit,
@@ -695,12 +696,7 @@ export function createPairedDeviceSyncService(
             // A resume the log can no longer answer is reported in-band rather
             // than by silently starting from the oldest retained event, which
             // would look to the client like a complete history.
-            queue.fail(
-              new ConnectError(
-                'The requested resume point is no longer retained; request a snapshot.',
-                Code.OutOfRange,
-              ),
-            );
+            queue.fail(controlPlaneFailure(ControlPlaneFailure.REPLAY_WINDOW_EXCEEDED));
           }
         },
       });
@@ -782,7 +778,7 @@ function requireBootstrapAuthorization(
 ): void {
   const supplied = context.requestHeader.get('x-hq-bootstrap-secret');
   if (supplied === null || !verifyBootstrapSecret(supplied)) {
-    throw new ConnectError('Bootstrap authorization is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BOOTSTRAP_AUTHORIZATION_REQUIRED);
   }
 }
 
@@ -790,7 +786,7 @@ function readBearerToken(context: HandlerContext): string {
   const header = context.requestHeader.get('authorization');
   const match = header === null ? undefined : /^Bearer ([^\s]+)$/u.exec(header.trim());
   if (match?.[1] === undefined) {
-    throw new ConnectError('A bearer access token is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BEARER_TOKEN_REQUIRED);
   }
   return match[1];
 }
@@ -892,18 +888,6 @@ function requireResourceId(value: string | undefined, field: string): string {
   return value.trim();
 }
 
-async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: unknown) {
-    if (error instanceof ConnectError) throw error;
-    if (error instanceof PairedDeviceRuntimeError) {
-      throw new ConnectError(error.message, toConnectCode(error.code));
-    }
-    throw error;
-  }
-}
-
 function positiveInteger(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive safe integer`);
@@ -941,34 +925,18 @@ function assertDocumentBodyWithinCeiling(
   );
 }
 
-function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
-  if (code === 'ABORTED') return Code.Aborted;
-  if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
-  if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
-  if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;
-  if (code === 'NOT_FOUND') return Code.NotFound;
-  if (code === 'PERMISSION_DENIED') return Code.PermissionDenied;
-  return Code.Unauthenticated;
-}
-
 function requireAdministration(
   administration: GroupAdministration | undefined,
 ): GroupAdministration {
   if (administration === undefined) {
-    throw new ConnectError(
-      'This control plane was started without group administration.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.GROUP_ADMINISTRATION_UNAVAILABLE);
   }
   return administration;
 }
 
 function requirePresence(presence: PresenceStore | undefined): PresenceStore {
   if (presence === undefined) {
-    throw new ConnectError(
-      'This control plane was started without presence storage.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.PRESENCE_UNAVAILABLE);
   }
   return presence;
 }
@@ -977,20 +945,14 @@ function requireEventStore(
   eventStore: DurableRealtimeEventStore | undefined,
 ): DurableRealtimeEventStore {
   if (eventStore === undefined) {
-    throw new ConnectError(
-      'This control plane was started without a durable event log.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.EVENT_LOG_UNAVAILABLE);
   }
   return eventStore;
 }
 
 function requireHub(hub: RealtimeHub | undefined): RealtimeHub {
   if (hub === undefined) {
-    throw new ConnectError(
-      'This control plane was started without a realtime hub.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.REALTIME_HUB_UNAVAILABLE);
   }
   return hub;
 }
@@ -1052,10 +1014,7 @@ async function assertPublicationAllowed(
   if (coordination === undefined || !coordination.configured) return;
   const decision = await coordination.limitMutation(groupId, deviceId, category);
   if (decision.allowed) return;
-  throw new ConnectError(
-    'The group publication rate limit has been reached; retry after the window resets.',
-    Code.ResourceExhausted,
-  );
+  throw controlPlaneFailure(ControlPlaneFailure.RATE_LIMITED);
 }
 
 /**

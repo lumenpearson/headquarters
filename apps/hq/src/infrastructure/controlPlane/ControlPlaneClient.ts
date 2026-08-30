@@ -1,5 +1,11 @@
 import { Code, ConnectError, createClient, type Transport } from '@connectrpc/connect';
-import { ControlPlaneService, SyncService, syncV1 } from '@gremuchaya/protocol';
+import {
+  ControlPlaneFailure,
+  ControlPlaneFailureDetailSchema,
+  ControlPlaneService,
+  SyncService,
+  syncV1,
+} from '@gremuchaya/protocol';
 
 import {
   emptyPresenceDetail,
@@ -15,9 +21,10 @@ import {
 } from '@/application/sync/connection';
 import {
   ControlPlaneError,
+  controlPlaneErrorKinds,
   isControlPlaneError,
   type ClockSample,
-  type ControlPlaneErrorKind,
+  type ControlPlaneErrorCode,
   type ControlPlanePort,
   type CreateGroupRequest,
   type PairingCodeGrant,
@@ -1122,40 +1129,113 @@ async function call<Value>(operation: () => Promise<Value>): Promise<Value> {
   }
 }
 
+/**
+ * What each wire code is called on this side.
+ *
+ * Total over `ControlPlaneFailure` except its zero value, so a code added to
+ * `control.proto` and regenerated fails to compile here until this build knows
+ * what to call it. That is one half of the guarantee; the other half is that a
+ * code this build has *not* been rebuilt for still arrives safely, which is
+ * what `toFailureCode` is for.
+ */
+const wireFailureCodes: Readonly<
+  Record<Exclude<ControlPlaneFailure, ControlPlaneFailure.UNSPECIFIED>, ControlPlaneErrorCode>
+> = {
+  [ControlPlaneFailure.INTERNAL]: 'internal',
+  [ControlPlaneFailure.BEARER_TOKEN_REQUIRED]: 'bearer-token-required',
+  [ControlPlaneFailure.BOOTSTRAP_AUTHORIZATION_REQUIRED]: 'bootstrap-authorization-required',
+  [ControlPlaneFailure.SESSION_UNAUTHENTICATED]: 'session-unauthenticated',
+  [ControlPlaneFailure.PERMISSION_DENIED]: 'permission-denied',
+  [ControlPlaneFailure.NOT_FOUND]: 'not-found',
+  [ControlPlaneFailure.ALREADY_EXISTS]: 'already-exists',
+  [ControlPlaneFailure.INVALID_ARGUMENT]: 'invalid-argument',
+  [ControlPlaneFailure.FAILED_PRECONDITION]: 'failed-precondition',
+  [ControlPlaneFailure.CONCURRENT_MODIFICATION]: 'concurrent-modification',
+  [ControlPlaneFailure.RATE_LIMITED]: 'rate-limited',
+  [ControlPlaneFailure.REPLAY_WINDOW_EXCEEDED]: 'replay-window-exceeded',
+  [ControlPlaneFailure.GROUP_ADMINISTRATION_UNAVAILABLE]: 'group-administration-unavailable',
+  [ControlPlaneFailure.PRESENCE_UNAVAILABLE]: 'presence-unavailable',
+  [ControlPlaneFailure.EVENT_LOG_UNAVAILABLE]: 'event-log-unavailable',
+  [ControlPlaneFailure.REALTIME_HUB_UNAVAILABLE]: 'realtime-hub-unavailable',
+  [ControlPlaneFailure.SETTINGS_SCHEMA_UNAVAILABLE]: 'settings-schema-unavailable',
+  [ControlPlaneFailure.SETTINGS_STORAGE_UNAVAILABLE]: 'settings-storage-unavailable',
+  [ControlPlaneFailure.INTEGRATION_STORAGE_UNAVAILABLE]: 'integration-storage-unavailable',
+  [ControlPlaneFailure.INTEGRATION_GITHUB_UNAVAILABLE]: 'integration-github-unavailable',
+  [ControlPlaneFailure.INTEGRATION_GITHUB_UNREACHABLE]: 'integration-github-unreachable',
+};
+
+/**
+ * A `Map` rather than an index into the record above, because a lookup by a
+ * number this build has never seen must answer `undefined` and not throw. The
+ * record stays the source of truth and stays exhaustive; this is only how it is
+ * read.
+ */
+const wireFailureCodesByValue = new Map<number, ControlPlaneErrorCode>(
+  Object.entries(wireFailureCodes).map(([value, code]) => [Number(value), code]),
+);
+
+/** What a transport status means when the control plane attached no code. */
+const transportFailureCodes: Readonly<Record<Code, ControlPlaneErrorCode>> = {
+  [Code.Canceled]: 'canceled',
+  [Code.Unknown]: 'unknown',
+  [Code.InvalidArgument]: 'invalid-argument',
+  [Code.DeadlineExceeded]: 'deadline-exceeded',
+  [Code.NotFound]: 'not-found',
+  [Code.AlreadyExists]: 'already-exists',
+  [Code.PermissionDenied]: 'permission-denied',
+  [Code.ResourceExhausted]: 'rate-limited',
+  [Code.FailedPrecondition]: 'failed-precondition',
+  [Code.Aborted]: 'concurrent-modification',
+  [Code.OutOfRange]: 'invalid-argument',
+  [Code.Unimplemented]: 'unimplemented',
+  [Code.Internal]: 'internal',
+  [Code.Unavailable]: 'unavailable',
+  [Code.DataLoss]: 'internal',
+  [Code.Unauthenticated]: 'session-unauthenticated',
+};
+
 export function toControlPlaneError(error: unknown): ControlPlaneError {
   if (error instanceof ControlPlaneError) return error;
   if (error instanceof ConnectError) {
-    return new ControlPlaneError(toKind(error.code), error.rawMessage, { cause: error });
+    const code = toFailureCode(error);
+    /*
+     * `rawMessage` stays as the message, and stays developer-facing. It is what
+     * the diagnostics copy needs in order to name the exact refusal, and it is
+     * deliberately no longer the only thing this error carries: `code` is what a
+     * surface keys a Russian caption off, and rewording the server's English
+     * must not change what the operator reads.
+     */
+    return new ControlPlaneError(controlPlaneErrorKinds[code], error.rawMessage, {
+      cause: error,
+      code,
+    });
   }
   // A fetch that never reached the host arrives as a plain error; to the
   // session that is the same fact as an `Unavailable` code.
   return new ControlPlaneError(
     'unavailable',
     error instanceof Error ? error.message : 'Control plane unreachable.',
-    { cause: error },
+    { cause: error, code: 'unavailable' },
   );
 }
 
-function toKind(code: Code): ControlPlaneErrorKind {
-  switch (code) {
-    case Code.Unauthenticated:
-      return 'unauthenticated';
-    case Code.PermissionDenied:
-      return 'permission-denied';
-    case Code.Unimplemented:
-      return 'unimplemented';
-    case Code.Unavailable:
-    case Code.DeadlineExceeded:
-      return 'unavailable';
-    case Code.InvalidArgument:
-      return 'invalid-argument';
-    case Code.NotFound:
-      return 'not-found';
-    case Code.FailedPrecondition:
-      return 'failed-precondition';
-    default:
-      return 'unknown';
-  }
+/**
+ * The code a refusal carries, from its detail when it has one and from its
+ * transport status when it does not.
+ *
+ * Nothing in here may throw. This runs while an error is already being handled,
+ * on a path that ends at a screen an operator is watching during a take, and an
+ * exception raised here would replace a refused request with a blank surface.
+ * Three things are therefore true by construction: `findDetails` drops a detail
+ * it cannot decode rather than raising, an unrecognised code number misses the
+ * map and falls through, and the transport table is total over `Code` with a
+ * final `?? 'unknown'` for a status outside it -- which the gRPC-Web decoder can
+ * produce, since it parses `grpc-status` as an integer.
+ */
+function toFailureCode(error: ConnectError): ControlPlaneErrorCode {
+  const [detail] = error.findDetails(ControlPlaneFailureDetailSchema);
+  const declared = detail === undefined ? undefined : wireFailureCodesByValue.get(detail.code);
+  return declared ?? transportFailureCodes[error.code] ?? 'unknown';
 }
 
 function options(signal: AbortSignal | undefined): CallOptions {

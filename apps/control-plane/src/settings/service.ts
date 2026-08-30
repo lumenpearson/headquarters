@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 
 import { create, fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
-import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
-import { SettingValueSchema, settingsV1 } from '@gremuchaya/protocol';
+import type { HandlerContext, ServiceImpl } from '@connectrpc/connect';
+import { ControlPlaneFailure, SettingValueSchema, settingsV1 } from '@gremuchaya/protocol';
 import type { SettingValue, SettingsService } from '@gremuchaya/protocol';
+
+import { controlPlaneFailure, withRuntimeErrors } from '../errors.js';
 
 import type { Awaitable, PairedDeviceLifecycle } from '../sync/lifecycle.js';
 import {
@@ -150,10 +152,7 @@ export function createSettingsService(
       return withRuntimeErrors(() => {
         const schema = options.schema;
         if (schema === undefined) {
-          throw new ConnectError(
-            'This control plane was started without a settings schema.',
-            Code.Unimplemented,
-          );
+          throw controlPlaneFailure(ControlPlaneFailure.SETTINGS_SCHEMA_UNAVAILABLE);
         }
         const requested = request.version.trim();
         if (requested.length > 0 && requested !== schema.version) {
@@ -546,7 +545,7 @@ function readBearerToken(context: HandlerContext): string {
   const header = context.requestHeader.get('authorization');
   const match = header === null ? undefined : /^Bearer ([^\s]+)$/u.exec(header.trim());
   if (match?.[1] === undefined) {
-    throw new ConnectError('A bearer access token is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BEARER_TOKEN_REQUIRED);
   }
   return match[1];
 }
@@ -905,20 +904,20 @@ function requireText(value: string, field: string): string {
 
 function requireStore(store: SettingsStore | undefined): SettingsStore {
   if (store === undefined) {
-    throw new ConnectError(
-      'This control plane was started without durable settings storage.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.SETTINGS_STORAGE_UNAVAILABLE);
   }
   return store;
 }
 
 function requireLayouts(layouts: LayoutStore | undefined): LayoutStore {
   if (layouts === undefined) {
-    throw new ConnectError(
-      'This control plane was started without durable layout storage.',
-      Code.Unimplemented,
-    );
+    // Layouts share the settings-storage code because they are refused for the
+    // same reason and an operator acts on it the same way; the sentence stays
+    // specific so a developer reading the diagnostics copy knows which store
+    // was missing.
+    throw controlPlaneFailure(ControlPlaneFailure.SETTINGS_STORAGE_UNAVAILABLE, {
+      developerMessage: 'This control plane was started without durable layout storage.',
+    });
   }
   return layouts;
 }
@@ -1007,26 +1006,4 @@ function waitForNextPoll(intervalMs: number, signal: AbortSignal): Promise<void>
     timer.unref?.();
     signal.addEventListener('abort', onAbort, { once: true });
   });
-}
-
-async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: unknown) {
-    if (error instanceof ConnectError) throw error;
-    if (error instanceof PairedDeviceRuntimeError) {
-      throw new ConnectError(error.message, toConnectCode(error.code));
-    }
-    throw error;
-  }
-}
-
-function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
-  if (code === 'ABORTED') return Code.Aborted;
-  if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
-  if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
-  if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;
-  if (code === 'NOT_FOUND') return Code.NotFound;
-  if (code === 'PERMISSION_DENIED') return Code.PermissionDenied;
-  return Code.Unauthenticated;
 }

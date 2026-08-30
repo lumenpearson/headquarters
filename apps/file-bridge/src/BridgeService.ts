@@ -3,7 +3,9 @@ import { basename } from 'node:path';
 
 import type { BridgeConfig, BridgeEntry } from '@gremuchaya/config';
 import { createVirtualPath, joinVirtualPath, type VirtualPath } from '@gremuchaya/domain';
+import { BridgeFailure } from '@gremuchaya/protocol';
 
+import { BridgeFailureError } from './errors.js';
 import { mimeForPath } from './mime.js';
 import { PathSecurityError, resolveExistingSafePath } from './pathSecurity.js';
 
@@ -12,7 +14,10 @@ export class BridgeService {
 
   getMount(mountId: string) {
     const mount = this.config.mounts.find((candidate) => candidate.id === mountId);
-    if (mount === undefined) throw new Error(`Unknown mount: ${mountId}`);
+    // The requested id is kept out of the thrown message: it is echoed back to
+    // whoever asked, and a bridge that confirms which mount ids exist is a
+    // bridge that answers an enumeration probe.
+    if (mount === undefined) throw new BridgeFailureError(BridgeFailure.MOUNT_UNKNOWN);
     return mount;
   }
 
@@ -21,7 +26,7 @@ export class BridgeService {
     assertPublicPath(requestedPath);
     const safe = await resolveExistingSafePath(mount.root, requestedPath);
     const directory = await stat(safe.path);
-    if (!directory.isDirectory()) throw new Error('Requested path is not a directory.');
+    if (!directory.isDirectory()) throw new BridgeFailureError(BridgeFailure.NOT_A_DIRECTORY);
     const entries = await readdir(safe.path, { withFileTypes: true });
     const result: BridgeEntry[] = [];
     for (const entry of entries) {
@@ -65,7 +70,7 @@ export class BridgeService {
     assertPublicPath(requestedPath);
     const safe = await resolveExistingSafePath(mount.root, requestedPath);
     const metadata = await stat(safe.path);
-    if (!metadata.isFile()) throw new Error('Requested path is not a file.');
+    if (!metadata.isFile()) throw new BridgeFailureError(BridgeFailure.NOT_A_FILE);
     return {
       path: safe.path,
       name: basename(safe.path),
@@ -79,6 +84,9 @@ export class BridgeService {
 function assertPublicPath(requestedPath: string): void {
   const segments = requestedPath.replaceAll('\\', '/').split('/').filter(Boolean);
   if (segments.includes('.hq')) {
-    throw new PathSecurityError('Bridge internal material paths are not exposed.');
+    throw new PathSecurityError(
+      BridgeFailure.INTERNAL_PATH_HIDDEN,
+      'Bridge internal material paths are not exposed.',
+    );
   }
 }
