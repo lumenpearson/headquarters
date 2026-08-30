@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
 import { compareText, dateTimeFormat } from '@/application/localization/intl';
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EditableContent } from '@/components/edit/EditableContent';
@@ -16,9 +18,62 @@ import { useOperationsStore } from '@/state/operationsStore';
 /** What `toLocaleString()` printed, named rather than left implicit. */
 const stampParts = { dateStyle: 'short', timeStyle: 'medium' } as const;
 
+type ReportKindFilter =
+  | 'all'
+  | 'operation'
+  | 'object'
+  | 'sector'
+  | 'incident'
+  | 'communications'
+  | 'video'
+  | 'system'
+  | 'analytics';
+
+/** Keyed by the union rather than built with a template string, so a kind with no message is a compile error. */
+const reportKindLabelIds: Readonly<Record<ReportKindFilter, MessageId>> = {
+  all: 'reports.kindAll',
+  operation: 'reports.kindOperation',
+  object: 'reports.kindObject',
+  sector: 'reports.kindSector',
+  incident: 'reports.kindIncident',
+  communications: 'reports.kindCommunications',
+  video: 'reports.kindVideo',
+  system: 'reports.kindSystem',
+  analytics: 'reports.kindAnalytics',
+};
+
+const reportKindFilters = [
+  'all',
+  'operation',
+  'object',
+  'sector',
+  'incident',
+  'communications',
+  'video',
+  'system',
+  'analytics',
+] as const satisfies readonly ReportKindFilter[];
+
+type ReportSortKey = 'id' | 'title' | 'kind' | 'createdAt';
+
+/** Keyed by the union rather than built with a template string, so a column with no message is a compile error. */
+const reportSortColumnLabelIds: Readonly<Record<Exclude<ReportSortKey, 'id'>, MessageId>> = {
+  title: 'field.name',
+  kind: 'field.type',
+  createdAt: 'field.created',
+};
+
+const reportSortColumns = [
+  'id',
+  'title',
+  'kind',
+  'createdAt',
+] as const satisfies readonly ReportSortKey[];
+
 export function ReportsScreen() {
+  const translate = useTranslate();
   const state = useOperationsStore((value) => value);
-  const [kind, setKind] = useState('all');
+  const [kind, setKind] = useState<ReportKindFilter>('all');
   const [selectedId, setSelectedId] = useState('REP-01');
   // Only selection: this screen has no report card to open, so `record.open`
   // stays unclaimed and the menu draws it disabled rather than pretending.
@@ -26,7 +81,7 @@ export function ReportsScreen() {
     if (subject !== undefined) setSelectedId(subject);
   });
   const pageSize = useTablePageSize();
-  const [sortKey, setSortKey] = useState<'id' | 'title' | 'kind' | 'createdAt'>('createdAt');
+  const [sortKey, setSortKey] = useState<ReportSortKey>('createdAt');
   const [descending, setDescending] = useState(true);
   const allReports = useMemo(() => Object.values(state.reports), [state.reports]);
   // The question is the report type: it is the only thing that narrows this
@@ -59,7 +114,7 @@ export function ReportsScreen() {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'ТИПЫ ОТЧЁТОВ',
+        title: translate('reports.kindsTitle'),
         category: 'navigation',
         descriptor: {
           id: 'kinds',
@@ -72,25 +127,19 @@ export function ReportsScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="ТИПЫ ОТЧЁТОВ" eyebrow="INDEX / TEMPLATES" className="reports-kinds">
-            {[
-              'all',
-              'operation',
-              'object',
-              'sector',
-              'incident',
-              'communications',
-              'video',
-              'system',
-              'analytics',
-            ].map((item) => (
+          <Panel
+            title={translate('reports.kindsTitle')}
+            eyebrow={translate('reports.kindsEyebrow')}
+            className="reports-kinds"
+          >
+            {reportKindFilters.map((item) => (
               <TerminalButton
                 key={item}
                 className={kind === item ? 'is-active' : ''}
                 onClick={() => setKind(item)}
               >
                 <i>[{item === 'all' ? '*' : item.slice(0, 3).toUpperCase()}]</i>
-                <span>{item.toUpperCase()}</span>
+                <span>{translate(reportKindLabelIds[item])}</span>
                 <b>
                   {item === 'all'
                     ? Object.keys(state.reports).length
@@ -102,7 +151,7 @@ export function ReportsScreen() {
         ),
       },
       {
-        title: 'РЕЕСТР ОТЧЁТОВ',
+        title: translate('reports.registryTitle'),
         category: 'records',
         descriptor: {
           id: 'registry',
@@ -116,24 +165,17 @@ export function ReportsScreen() {
         },
         render: () => (
           <Panel
-            title="РЕЕСТР ОТЧЁТОВ"
-            eyebrow={`${reportPage.total} RECORDS / VERIFIED`}
+            title={translate('reports.registryTitle')}
+            eyebrow={translate('reports.registryEyebrow', { count: reportPage.total })}
             className="reports-registry"
           >
             {reports.length === 0 ? (
-              <EmptyState>ОТЧЁТЫ ЭТОГО ТИПА ОТСУТСТВУЮТ</EmptyState>
+              <EmptyState>{translate('reports.noReportsOfKind')}</EmptyState>
             ) : (
               <table className="ops-table">
                 <thead>
                   <tr>
-                    {(
-                      [
-                        ['id', 'ID'],
-                        ['title', 'NAME'],
-                        ['kind', 'TYPE'],
-                        ['createdAt', 'CREATED'],
-                      ] as const
-                    ).map(([column, caption]) => (
+                    {reportSortColumns.map((column) => (
                       <th key={column}>
                         <TerminalButton
                           onClick={() => {
@@ -143,11 +185,12 @@ export function ReportsScreen() {
                             setSortKey(column);
                           }}
                         >
-                          {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
+                          {column === 'id' ? 'ID' : translate(reportSortColumnLabelIds[column])}{' '}
+                          {sortKey === column ? (descending ? '▼' : '▲') : ''}
                         </TerminalButton>
                       </th>
                     ))}
-                    <th>STATUS</th>
+                    <th>{translate('field.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -182,14 +225,18 @@ export function ReportsScreen() {
                 </tbody>
               </table>
             )}
-            <RecordPagination page={reportPage} onPage={goToPage} label="Страницы реестра отчётов">
-              <span>SELECTED: {selected?.id ?? '—'}</span>
+            <RecordPagination
+              page={reportPage}
+              onPage={goToPage}
+              label={translate('reports.paginationLabel')}
+            >
+              <span>{translate('registry.selectedFooter', { id: selected?.id ?? '—' })}</span>
             </RecordPagination>
           </Panel>
         ),
       },
       {
-        title: 'ПРЕДПРОСМОТР ДОКУМЕНТА',
+        title: translate('reports.previewTitle'),
         category: 'detail',
         descriptor: {
           id: 'preview',
@@ -204,13 +251,17 @@ export function ReportsScreen() {
         },
         render: () => (
           <Panel
-            title="ПРЕДПРОСМОТР ДОКУМЕНТА"
-            eyebrow={selected?.id ?? 'NO SELECTION'}
+            title={translate('reports.previewTitle')}
+            eyebrow={selected?.id ?? translate('registry.noSelection')}
             className="report-preview"
           >
             {selected === undefined ? (
-              <EmptyState>ОТЧЁТ НЕ ВЫБРАН</EmptyState>
+              <EmptyState>{translate('reports.noReportSelected')}</EmptyState>
             ) : (
+              // The generated document below (letterhead, section headings, the
+              // three paragraphs, the classification and checksum footer) is
+              // the film's own report fiction, not chrome, and is left out of
+              // the catalogue -- see the wave's report for the file:line list.
               <article className="report-document">
                 <header>
                   <i>[ГС / HQ]</i>
@@ -247,31 +298,31 @@ export function ReportsScreen() {
               </article>
             )}
             <div className="report-actions">
-              <TerminalButton>[P] PRINT SIM</TerminalButton>
-              <TerminalButton>[D] EXPORT PDF SIM</TerminalButton>
-              <TerminalButton>[A] ARCHIVE</TerminalButton>
-              <TerminalButton>[S] SIGN LOCAL</TerminalButton>
+              <TerminalButton>{translate('reports.printSimButton')}</TerminalButton>
+              <TerminalButton>{translate('reports.exportPdfButton')}</TerminalButton>
+              <TerminalButton>{translate('reports.archiveButton')}</TerminalButton>
+              <TerminalButton>{translate('reports.signLocalButton')}</TerminalButton>
             </div>
           </Panel>
         ),
       },
     ],
-    [descending, goToPage, kind, reportPage, reports, selected, sortKey, state.reports],
+    [descending, goToPage, kind, reportPage, reports, selected, sortKey, state.reports, translate],
   );
 
   return (
     <div className="ops-screen reports-screen">
       <header className="ops-screen__title">
         <div>
-          <span>REPORTING / LOCAL GENERATOR</span>
-          <h1>ОТЧЁТЫ И СВОДКИ</h1>
+          <span>{translate('reports.headerEyebrow')}</span>
+          <h1>{translate('reports.headerTitle')}</h1>
         </div>
         <TerminalButton
           tone="primary"
           className="ops-action ops-action--primary"
           onClick={() => setSelectedId('REP-01')}
         >
-          [N] СФОРМИРОВАТЬ СВОДКУ
+          {translate('reports.generateSummaryButton')}
         </TerminalButton>
       </header>
       <TileGrid tiles={tiles} columns={12} className="reports-layout" screen="reports" />

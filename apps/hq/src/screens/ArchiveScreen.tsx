@@ -3,21 +3,25 @@
 import { useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
 import { FilesScreen } from './FilesScreen';
 
+const periods = ['24h', '7d', '30d', '90d', 'year'] as const;
+
 export function ArchiveScreen() {
-  const [period, setPeriod] = useState('30d');
+  const translate = useTranslate();
+  const [period, setPeriod] = useState<(typeof periods)[number]>('30d');
   return (
     <div className="archive-screen">
       <div className="archive-timeline">
-        <span>АРХИВНЫЙ ПЕРИОД</span>
-        {['24h', '7d', '30d', '90d', 'year'].map((value) => (
+        <span>{translate('archive.periodLabel')}</span>
+        {periods.map((value) => (
           <TerminalButton
             key={value}
             className={period === value ? 'is-active' : ''}
             onClick={() => setPeriod(value)}
           >
-            {value.toUpperCase()}
+            {value === 'year' ? translate('archive.periodYear') : value.toUpperCase()}
           </TerminalButton>
         ))}
         <i

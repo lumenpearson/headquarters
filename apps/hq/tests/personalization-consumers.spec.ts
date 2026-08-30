@@ -1,6 +1,7 @@
 import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import { expect, test, type Page } from '@playwright/test';
 
+import { messagesFor, type MessageId } from '../src/application/localization/messages';
 import { expandEditPanel } from './editPanelHelpers';
 
 /**
@@ -903,7 +904,7 @@ test('R6: the map zoom controls move by the step the operator sets', async ({ pa
 
   const readout = page.locator('.map-toolbar, .map-controls').first();
   await expect(readout).toBeVisible();
-  await page.getByRole('button', { name: '[R] RESET VIEW' }).click();
+  await page.getByRole('button', { name: catalogueText('ru', 'map.resetViewButton') }).click();
   // Reset first, so the step is measured from a level the setting decided.
   await expect.poll(() => zoomLevel(page)).toBe(7);
 
@@ -1491,6 +1492,13 @@ const shiftBrief = 'СВОДКА СМЕНЫ';
 const briefEntry = (locale: string): string =>
   `${locale}:overview:brief=${encodeURIComponent(shiftBrief)}`;
 
+/** The shipped Russian brief title, read from the catalogue rather than pasted. */
+const shippedBrief = ((): string => {
+  const value = messagesFor('ru')['overview.briefTitle'];
+  if (value === undefined) throw new Error('the catalogue has no ru text for overview.briefTitle');
+  return value;
+})();
+
 function briefHeading(page: Page) {
   return page.locator('.ops-panel.overview-brief .ops-panel__header h2');
 }
@@ -1502,7 +1510,7 @@ test('R28: a caption the operator wrote stands on the tile instead of the shippe
   await page.goto('/overview');
   // The shipped title first, so the assertion below is a change and not a
   // reading that was already true.
-  await expect(briefHeading(page)).toHaveText('ОБЗОР ОПЕРАЦИИ');
+  await expect(briefHeading(page)).toHaveText(shippedBrief);
 
   await seedSettings(page, { 'localization.elementOverrides': [briefEntry('ru')] });
   await page.reload();
@@ -1510,7 +1518,7 @@ test('R28: a caption the operator wrote stands on the tile instead of the shippe
   await expect(briefHeading(page)).toHaveText(shiftBrief);
   // The heading, not a second element added beside it: a rename that left the
   // original standing would be two names for one panel.
-  await expect(page.getByText('ОБЗОР ОПЕРАЦИИ', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(shippedBrief, { exact: true })).toHaveCount(0);
 });
 
 test('R28: an empty list leaves every tile with the caption the application ships', async ({
@@ -1520,7 +1528,7 @@ test('R28: an empty list leaves every tile with the caption the application ship
   await seedSettings(page, { 'localization.elementOverrides': [] });
   await page.goto('/overview');
 
-  await expect(briefHeading(page)).toHaveText('ОБЗОР ОПЕРАЦИИ');
+  await expect(briefHeading(page)).toHaveText(shippedBrief);
 });
 
 test('R28: a caption written in the other language does not reach this one', async ({ page }) => {
@@ -1531,7 +1539,7 @@ test('R28: a caption written in the other language does not reach this one', asy
   await seedSettings(page, { 'localization.elementOverrides': [briefEntry('en')] });
   await page.goto('/overview');
 
-  await expect(briefHeading(page)).toHaveText('ОБЗОР ОПЕРАЦИИ');
+  await expect(briefHeading(page)).toHaveText(shippedBrief);
 
   // The same entry, once the session is in the language it was written for.
   await seedSettings(page, {
@@ -1559,6 +1567,46 @@ test('R28: a caption belongs to the screen it was written on, not to the tile na
   await page.goto('/objects');
   await expect(page.locator('.ops-panel[data-panel] .ops-panel__header h2').first()).toBeVisible();
   await expect(page.getByText('ДОСЬЕ СМЕНЫ', { exact: true })).toHaveCount(0);
+});
+
+/** A catalogue id's text in a locale, or a test failure that names the hole rather than reading `undefined`. */
+function catalogueText(locale: 'ru' | 'en', id: MessageId): string {
+  const value = messagesFor(locale)[id];
+  if (value === undefined) throw new Error(`the catalogue has no ${locale} text for ${id}`);
+  return value;
+}
+
+/**
+ * `localization.locale` had a default and a resolver since the catalogue
+ * split, and nothing yet asked whether setting it actually moved a screen off
+ * Russian -- every record screen was typed straight into its JSX until this
+ * wave, so the setting had no chrome to reach. This is that assertion, on the
+ * same overview brief tile R28 already reads, so a regression in either the
+ * override tier or the locale tier below it fails a test next to the one that
+ * would explain why.
+ */
+test('R at last: localization.locale set to en changes the screen the operator reads', async ({
+  page,
+}) => {
+  await page.setViewportSize(wide);
+  await page.goto('/overview');
+  // Default locale first, so the assertion below is a change and not a
+  // reading that was already true.
+  await expect(briefHeading(page)).toHaveText(shippedBrief);
+
+  await seedSettings(page, { 'localization.locale': 'en' });
+  await page.reload();
+
+  await expect(briefHeading(page)).toHaveText(catalogueText('en', 'overview.briefTitle'));
+  await expect(briefHeading(page)).not.toHaveText(shippedBrief);
+
+  // A second screen and a second surface -- the header eyebrow, not the tile
+  // heading -- so this is the locale resolver moving every reader, not one
+  // tile's title happening to be seeded from the setting directly.
+  await page.goto('/cases');
+  await expect(page.locator('.ops-screen__title span').first()).toHaveText(
+    catalogueText('en', 'cases.headerEyebrow'),
+  );
 });
 
 /** The declared default, read from the schema rather than repeated here. */

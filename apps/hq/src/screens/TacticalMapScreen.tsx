@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalCheckbox } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useNumberSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
@@ -36,10 +38,11 @@ const representations = ['tactical', 'map', 'satellite'] as const satisfies read
   ...MapRepresentation[],
 ];
 
-const representationLabels: Readonly<Record<MapRepresentation, string>> = {
-  tactical: 'ТАКТИКА',
-  map: 'КАРТА',
-  satellite: 'СПУТНИК',
+/** `nav.map` already carries "КАРТА" / "MAP" for the representation named after the whole screen. */
+const representationLabelIds: Readonly<Record<MapRepresentation, MessageId>> = {
+  tactical: 'map.representationTactical',
+  map: 'nav.map',
+  satellite: 'map.representationSatellite',
 };
 
 /*
@@ -66,28 +69,52 @@ const representationHiddenLayers: Readonly<Record<MapRepresentation, readonly Ma
   satellite: ['restricted', 'sensors', 'routes'],
 };
 
-const channelColumns = [
-  ['id', 'КАНАЛ'],
-  ['encryption', 'ENC'],
-  ['load', 'LOAD'],
-  ['packetLoss', 'LOSS'],
-  ['latency', 'LAT'],
-] as const satisfies ReadonlyArray<readonly [ChannelSort, string]>;
-
-const layerLabels: Readonly<Record<MapLayer, string>> = {
-  friendly: 'СВОИ ПОДРАЗДЕЛЕНИЯ',
-  hostile: 'ПРОТИВНИК',
-  neutral: 'НЕЙТРАЛЬНЫЕ',
-  infrastructure: 'ИНФРАСТРУКТУРА',
-  restricted: 'ЗОНЫ ОГРАНИЧЕНИЙ',
-  tasks: 'МАРКЕРЫ И ЗАДАЧИ',
-  routes: 'МАРШРУТЫ',
-  alerts: 'ТРЕВОГИ',
-  communications: 'СВЯЗЬ',
-  sensors: 'ДАТЧИКИ',
+/** Keyed by `ChannelSort` rather than built with a template string, so a column with no message is a compile error. */
+const channelColumnLabelIds: Readonly<Record<ChannelSort, MessageId>> = {
+  id: 'field.channel',
+  encryption: 'map.channelColumnEncryption',
+  load: 'field.load',
+  packetLoss: 'field.packetLoss',
+  latency: 'field.latency',
 };
 
+const channelColumns = [
+  'id',
+  'encryption',
+  'load',
+  'packetLoss',
+  'latency',
+] as const satisfies readonly ChannelSort[];
+
+/** Keyed by `MapLayer` rather than built with a template string, so a layer with no message is a compile error. */
+const layerLabelIds: Readonly<Record<MapLayer, MessageId>> = {
+  friendly: 'map.layerFriendly',
+  hostile: 'map.layerHostile',
+  neutral: 'map.layerNeutral',
+  infrastructure: 'map.layerInfrastructure',
+  restricted: 'map.layerRestricted',
+  tasks: 'map.layerTasks',
+  routes: 'map.layerRoutes',
+  alerts: 'field.alerts',
+  communications: 'nav.comms',
+  sensors: 'map.layerSensors',
+};
+
+const layerOrder = [
+  'friendly',
+  'hostile',
+  'neutral',
+  'infrastructure',
+  'restricted',
+  'tasks',
+  'routes',
+  'alerts',
+  'communications',
+  'sensors',
+] as const satisfies readonly MapLayer[];
+
 export function TacticalMapScreen() {
+  const translate = useTranslate();
   const router = useRouter();
   const state = useOperationsStore((value) => value);
   useContextMenuAction('record.open', (subject) => {
@@ -190,7 +217,7 @@ export function TacticalMapScreen() {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'ТАКТИЧЕСКАЯ КАРТА',
+        title: translate('map.surfaceTitle'),
         category: 'geo',
         descriptor: {
           id: 'surface',
@@ -229,7 +256,7 @@ export function TacticalMapScreen() {
         ),
       },
       {
-        title: 'ВЫБРАННЫЙ ОБЪЕКТ',
+        title: translate('map.selectedTitle'),
         category: 'detail',
         descriptor: {
           id: 'selected',
@@ -242,7 +269,11 @@ export function TacticalMapScreen() {
           relocationRoute: '/objects',
         },
         render: () => (
-          <Panel title="ВЫБРАННЫЙ ОБЪЕКТ" eyebrow="TRACK / CURRENT" className="map-selected-object">
+          <Panel
+            title={translate('map.selectedTitle')}
+            eyebrow={translate('map.selectedEyebrow')}
+            className="map-selected-object"
+          >
             {selected === undefined ? null : (
               <>
                 <header>
@@ -253,45 +284,49 @@ export function TacticalMapScreen() {
                 </header>
                 <dl className="ops-definition-list">
                   <div>
-                    <dt>ТИП</dt>
+                    <dt>{translate('field.type')}</dt>
                     <dd>{selected.kind.toUpperCase()}</dd>
                   </div>
                   <div>
-                    <dt>КООРДИНАТЫ</dt>
+                    <dt>{translate('field.coordinates')}</dt>
                     <dd>
                       {selected.position.lat}, {selected.position.lng}
                     </dd>
                   </div>
                   <div>
-                    <dt>СКОРОСТЬ</dt>
-                    <dd>{selected.speed} КМ/Ч</dd>
+                    <dt>{translate('field.speed')}</dt>
+                    <dd>
+                      {selected.speed} {translate('unit.kmh')}
+                    </dd>
                   </div>
                   <div>
-                    <dt>ВЫСОТА</dt>
-                    <dd>{selected.altitude} М</dd>
+                    <dt>{translate('field.altitude')}</dt>
+                    <dd>
+                      {selected.altitude} {translate('unit.m')}
+                    </dd>
                   </div>
                   <div>
-                    <dt>КАНАЛ</dt>
+                    <dt>{translate('field.channel')}</dt>
                     <dd>{selected.channelId}</dd>
                   </div>
                   <div>
-                    <dt>ИСТОЧНИК</dt>
+                    <dt>{translate('field.source')}</dt>
                     <dd>{selected.source}</dd>
                   </div>
                   <div>
-                    <dt>СИГНАЛ</dt>
+                    <dt>{translate('field.signal')}</dt>
                     <dd>{selected.signal}%</dd>
                   </div>
                 </dl>
                 <div className="map-object-actions">
                   <TerminalButton onClick={() => router.push(`/objects/${selected.id}`)}>
-                    [O] ОБЪЕКТ
+                    {translate('map.viewObjectButton')}
                   </TerminalButton>
                   <TerminalButton onClick={() => state.selectRoute('RT-01')}>
-                    [T] СОПРОВОЖДАТЬ
+                    {translate('map.trackButton')}
                   </TerminalButton>
                   <TerminalButton onClick={() => router.push('/video/cameras')}>
-                    [V] ВИДЕО
+                    {translate('map.openVideoButton')}
                   </TerminalButton>
                   <TerminalButton
                     onClick={() =>
@@ -302,7 +337,7 @@ export function TacticalMapScreen() {
                       )
                     }
                   >
-                    [H] ИСТОРИЯ
+                    {translate('map.historyButton')}
                   </TerminalButton>
                 </div>
               </>
@@ -311,7 +346,7 @@ export function TacticalMapScreen() {
         ),
       },
       {
-        title: 'АКТИВНЫЕ ТРЕВОГИ',
+        title: translate('map.alertsTitle'),
         category: 'events',
         descriptor: {
           id: 'alerts',
@@ -324,7 +359,11 @@ export function TacticalMapScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="АКТИВНЫЕ ТРЕВОГИ" eyebrow="ALERTS / CURRENT AREA" className="map-alerts">
+          <Panel
+            title={translate('map.alertsTitle')}
+            eyebrow={translate('map.alertsEyebrow')}
+            className="map-alerts"
+          >
             {/*
               A head, not a page. `map.alertRows` states how many alerts the
               operator wants beside the surface; the rest of them are on the
@@ -360,7 +399,7 @@ export function TacticalMapScreen() {
         ),
       },
       {
-        title: 'СЛОИ',
+        title: translate('map.layersTitle'),
         category: 'navigation',
         descriptor: {
           id: 'layers',
@@ -373,21 +412,25 @@ export function TacticalMapScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="СЛОИ" eyebrow="LAYER STACK / PERSISTED" className="map-layers">
+          <Panel
+            title={translate('map.layersTitle')}
+            eyebrow={translate('map.layersEyebrow')}
+            className="map-layers"
+          >
             <div className="layer-list">
-              {(Object.keys(layerLabels) as MapLayer[]).map((layer) => (
+              {layerOrder.map((layer) => (
                 <div className="layer-list__row" key={layer}>
                   <TerminalCheckbox
                     checked={state.ui.mapLayers[layer]}
                     onCheckedChange={() => state.toggleMapLayer(layer)}
-                    label={layerLabels[layer]}
+                    label={translate(layerLabelIds[layer])}
                   />
-                  <span>{layerLabels[layer]}</span>
+                  <span>{translate(layerLabelIds[layer])}</span>
                 </div>
               ))}
             </div>
             <footer>
-              <span>ЛЕГЕНДА</span>
+              <span>{translate('map.legendLabel')}</span>
               {/*
                * A checkbox that is on while nothing is drawn would be a lie,
                * so the representation says which of them it is holding back.
@@ -396,25 +439,30 @@ export function TacticalMapScreen() {
                */}
               {hiddenLayers.length === 0 ? null : (
                 <p>
-                  РЕЖИМ «{representationLabels[representation]}» НЕ ОТРИСОВЫВАЕТ:{' '}
-                  {hiddenLayers.map((layer) => layerLabels[layer]).join(', ')}
+                  {translate('map.representationHidesLabel', {
+                    mode: translate(representationLabelIds[representation]),
+                    list: hiddenLayers.map((layer) => translate(layerLabelIds[layer])).join(', '),
+                  })}
                 </p>
               )}
               <p>
-                <i className="legend-mark legend-mark--friendly" /> СВОЙ
+                <i className="legend-mark legend-mark--friendly" />{' '}
+                {translate('map.legendFriendlyShort')}
               </p>
               <p>
-                <i className="legend-mark legend-mark--hostile" /> УГРОЗА
+                <i className="legend-mark legend-mark--hostile" />{' '}
+                {translate('map.legendHostileShort')}
               </p>
               <p>
-                <i className="legend-mark legend-mark--neutral" /> НЕЙТРАЛЬНЫЙ
+                <i className="legend-mark legend-mark--neutral" />{' '}
+                {translate('map.legendNeutralShort')}
               </p>
             </footer>
           </Panel>
         ),
       },
       {
-        title: 'МАРШРУТЫ И КОРИДОРЫ',
+        title: translate('map.routesTitle'),
         category: 'geo',
         descriptor: {
           id: 'routes',
@@ -427,7 +475,11 @@ export function TacticalMapScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="МАРШРУТЫ И КОРИДОРЫ" eyebrow="ROUTES / 08" className="map-routes-panel">
+          <Panel
+            title={translate('map.routesTitle')}
+            eyebrow={translate('map.routesEyebrow')}
+            className="map-routes-panel"
+          >
             <div className="route-list">
               {Object.values(state.routes).map((route) => (
                 <TerminalButton
@@ -443,7 +495,8 @@ export function TacticalMapScreen() {
                       {route.id} / {route.name}
                     </strong>
                     <small>
-                      {route.lengthKm} КМ / ETA {route.etaMinutes} МИН / RISK {route.risk}
+                      {route.lengthKm} {translate('unit.km')} / ETA {route.etaMinutes}{' '}
+                      {translate('unit.min')} / {translate('field.risk')} {route.risk}
                     </small>
                   </span>
                   <ProgressBar
@@ -457,7 +510,7 @@ export function TacticalMapScreen() {
         ),
       },
       {
-        title: 'СИГНАЛЫ И ДАТЧИКИ',
+        title: translate('map.sensorsTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'sensors',
@@ -470,7 +523,11 @@ export function TacticalMapScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="СИГНАЛЫ И ДАТЧИКИ" eyebrow="SENSORS / LIVE" className="map-sensors-panel">
+          <Panel
+            title={translate('map.sensorsTitle')}
+            eyebrow={translate('map.sensorsEyebrow')}
+            className="map-sensors-panel"
+          >
             {/*
               A head, not a page, for the same reason as the alert tile: every
               sensor is drawn on the surface under the `sensors` layer, and
@@ -497,7 +554,7 @@ export function TacticalMapScreen() {
         ),
       },
       {
-        title: 'КАНАЛЫ СВЯЗИ',
+        title: translate('map.channelsTitle'),
         category: 'records',
         descriptor: {
           id: 'channels',
@@ -510,11 +567,15 @@ export function TacticalMapScreen() {
           relocationRoute: '/communications',
         },
         render: () => (
-          <Panel title="КАНАЛЫ СВЯЗИ" eyebrow="COMMS / ENCRYPTED" className="map-channels-panel">
+          <Panel
+            title={translate('map.channelsTitle')}
+            eyebrow={translate('map.channelsEyebrow')}
+            className="map-channels-panel"
+          >
             <table className="ops-table">
               <thead>
                 <tr>
-                  {channelColumns.map(([column, caption]) => (
+                  {channelColumns.map((column) => (
                     <th key={column}>
                       <TerminalButton
                         onClick={() => {
@@ -522,7 +583,8 @@ export function TacticalMapScreen() {
                           setChannelSort(column);
                         }}
                       >
-                        {caption} {channelSort === column ? (channelDescending ? '▼' : '▲') : ''}
+                        {translate(channelColumnLabelIds[column])}{' '}
+                        {channelSort === column ? (channelDescending ? '▼' : '▲') : ''}
                       </TerminalButton>
                     </th>
                   ))}
@@ -555,7 +617,7 @@ export function TacticalMapScreen() {
               <RecordPagination
                 page={channelPage}
                 onPage={goToChannelPage}
-                label="Страницы таблицы каналов связи"
+                label={translate('map.channelsPaginationLabel')}
               />
             ) : null}
           </Panel>
@@ -575,6 +637,7 @@ export function TacticalMapScreen() {
       selected,
       state,
       surfaceLayers,
+      translate,
       visibleObjects,
     ],
   );
@@ -590,8 +653,12 @@ export function TacticalMapScreen() {
            * wraps nor scrolls is how a narrow window starts pushing the
            * workspace sideways (R26).
            */}
-          <span>GEO / {representationLabels[representation]} / LOCAL VECTOR LAYER</span>
-          <h1>ТАКТИЧЕСКАЯ КАРТА</h1>
+          <span>
+            {translate('map.headerRepresentationLabel', {
+              mode: translate(representationLabelIds[representation]),
+            })}
+          </span>
+          <h1>{translate('map.surfaceTitle')}</h1>
         </div>
         <div className="map-toolbar">
           {representations.map((mode) => (
@@ -601,23 +668,25 @@ export function TacticalMapScreen() {
               aria-pressed={mode === representation}
               onClick={() => setChosenRepresentation(mode)}
             >
-              {representationLabels[mode]}
+              {translate(representationLabelIds[mode])}
             </TerminalButton>
           ))}
-          {representation === 'satellite' ? <span>СНИМКИ НЕДОСТУПНЫ</span> : null}
+          {representation === 'satellite' ? (
+            <span>{translate('map.satelliteUnavailableLabel')}</span>
+          ) : null}
           <TerminalButton onClick={() => state.setMapView(MOSCOW_OPERATION_CENTER, mapResetZoom)}>
-            [R] RESET VIEW
+            {translate('map.resetViewButton')}
           </TerminalButton>
           <TerminalButton
             onClick={() => state.setMapView(state.ui.mapCenter, state.ui.mapZoom - mapZoomStep)}
           >
-            [-] ZOOM
+            {translate('map.zoomOutButton')}
           </TerminalButton>
           <strong>Z{state.ui.mapZoom.toFixed(1)}</strong>
           <TerminalButton
             onClick={() => state.setMapView(state.ui.mapCenter, state.ui.mapZoom + mapZoomStep)}
           >
-            [+] ZOOM
+            {translate('map.zoomInButton')}
           </TerminalButton>
           <span>{state.ui.mapCenter.map((value) => value.toFixed(5)).join(' / ')}</span>
         </div>

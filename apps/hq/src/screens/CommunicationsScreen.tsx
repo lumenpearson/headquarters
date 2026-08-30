@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
 import { dateTimeFormat } from '@/application/localization/intl';
+import { useTranslate } from '@/application/localization/locale';
 import { channelDomain } from '@/application/simulation/simulationCurves';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
@@ -12,6 +13,7 @@ import { useOperationsStore } from '@/state/operationsStore';
 const clockParts = { timeStyle: 'medium' } as const;
 
 export function CommunicationsScreen() {
+  const translate = useTranslate();
   const state = useOperationsStore((value) => value);
   const [muted, setMuted] = useState<readonly string[]>([]);
   const [solo, setSolo] = useState<string | null>(null);
@@ -27,7 +29,7 @@ export function CommunicationsScreen() {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'АКТИВНЫЕ КАНАЛЫ',
+        title: translate('comms.channelsTitle'),
         category: 'records',
         descriptor: {
           id: 'channels',
@@ -39,7 +41,11 @@ export function CommunicationsScreen() {
           canStretchVertically: true,
         },
         render: () => (
-          <Panel title="АКТИВНЫЕ КАНАЛЫ" eyebrow="CHANNEL MATRIX / LIVE" className="channel-matrix">
+          <Panel
+            title={translate('comms.channelsTitle')}
+            eyebrow={translate('comms.channelsEyebrow')}
+            className="channel-matrix"
+          >
             <div className="channel-list">
               {Object.values(state.channels).map((channel) => (
                 <TerminalButton
@@ -65,7 +71,7 @@ export function CommunicationsScreen() {
         ),
       },
       {
-        title: 'АКТИВНЫЙ КАНАЛ',
+        title: translate('comms.activeChannelTitle'),
         category: 'detail',
         descriptor: {
           id: 'active',
@@ -81,8 +87,8 @@ export function CommunicationsScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="АКТИВНЫЙ КАНАЛ"
-            eyebrow={selected?.id ?? 'NO CHANNEL'}
+            title={translate('comms.activeChannelTitle')}
+            eyebrow={selected?.id ?? translate('comms.noChannelEyebrow')}
             className="active-channel-panel"
           >
             {selected === undefined ? null : (
@@ -99,7 +105,7 @@ export function CommunicationsScreen() {
                     <svg viewBox="0 0 900 180" preserveAspectRatio="none">
                       <path d="M0 90L20 65 40 118 60 38 80 142 100 79 120 102 140 54 160 127 180 69 200 98 220 31 240 151 260 84 280 106 300 48 320 132 340 73 360 113 380 35 400 145 420 81 440 99 460 42 480 136 500 68 520 116 540 51 560 128 580 77 600 103 620 28 640 154 660 86 680 108 700 45 720 139 740 71 760 119 780 57 800 125 820 76 840 106 860 39 880 141 900 90" />
                     </svg>
-                    <span>LIVE AUDIO / BUFFER 00:00:18.420</span>
+                    <span>{translate('comms.liveAudioBufferLabel')}</span>
                   </div>
                 ) : null}
                 <div className="channel-actions">
@@ -112,46 +118,52 @@ export function CommunicationsScreen() {
                       )
                     }
                   >
-                    [{muted.includes(selected.id) ? 'MUTED' : 'MUTE'}]
+                    {muted.includes(selected.id)
+                      ? translate('comms.mutedButton')
+                      : translate('comms.muteButton')}
                   </TerminalButton>
                   <TerminalButton
                     className={solo === selected.id ? 'is-active' : ''}
                     onClick={() => setSolo((id) => (id === selected.id ? null : selected.id))}
                   >
-                    [SOLO]
+                    {translate('comms.soloButton')}
                   </TerminalButton>
                   <TerminalButton onClick={() => state.toggleVideo()}>
-                    [{state.ui.videoPlaying ? 'Ⅱ' : '▶'}] SAMPLE
+                    {translate('comms.sampleButton', {
+                      icon: state.ui.videoPlaying ? 'Ⅱ' : '▶',
+                    })}
                   </TerminalButton>
                   <TerminalButton onClick={() => state.openDrawer('channel', selected.id)}>
-                    [T] TRANSCRIPT
+                    {translate('comms.transcriptButton')}
                   </TerminalButton>
-                  <TerminalButton>[M] MARK EVENT</TerminalButton>
-                  <TerminalButton>[+] ATTACH TO CASE</TerminalButton>
+                  <TerminalButton>{translate('comms.markEventButton')}</TerminalButton>
+                  <TerminalButton>{translate('drawer.attachToCase')}</TerminalButton>
                 </div>
                 <dl className="ops-definition-list">
                   <div>
-                    <dt>ШИФРОВАНИЕ</dt>
+                    <dt>{translate('field.encryption')}</dt>
                     <dd>{selected.encryption}</dd>
                   </div>
                   <div>
-                    <dt>ОПЕРАТОР</dt>
+                    <dt>{translate('field.operator')}</dt>
                     <dd>{selected.operator}</dd>
                   </div>
                   <div>
-                    <dt>LOAD</dt>
+                    <dt>{translate('field.load')}</dt>
                     <dd>{selected.load}%</dd>
                   </div>
                   <div>
-                    <dt>PACKET LOSS</dt>
+                    <dt>{translate('field.packetLoss')}</dt>
                     <dd>{selected.packetLoss}%</dd>
                   </div>
                   <div>
-                    <dt>LATENCY</dt>
-                    <dd>{selected.latency} MS</dd>
+                    <dt>{translate('field.latency')}</dt>
+                    <dd>
+                      {selected.latency} {translate('unit.ms')}
+                    </dd>
                   </div>
                   <div>
-                    <dt>SIGNAL</dt>
+                    <dt>{translate('field.signal')}</dt>
                     <dd>{selected.signal}%</dd>
                   </div>
                 </dl>
@@ -161,7 +173,7 @@ export function CommunicationsScreen() {
         ),
       },
       {
-        title: 'ТРАНСКРИПТ',
+        title: translate('comms.transcriptTitle'),
         category: 'detail',
         descriptor: {
           id: 'transcript',
@@ -175,17 +187,17 @@ export function CommunicationsScreen() {
         },
         render: () => (
           <Panel
-            title="ТРАНСКРИПТ"
-            eyebrow="VOICE TO TEXT / LOCAL"
+            title={translate('comms.transcriptTitle')}
+            eyebrow={translate('comms.transcriptEyebrow')}
             className="communications-transcript"
           >
-            <pre>{selected?.transcript.join('\n\n') ?? 'КАНАЛ НЕ НАЗНАЧЕН'}</pre>
-            <footer>LANG: RU / CONFIDENCE 96.2% / LOCAL MODEL</footer>
+            <pre>{selected?.transcript.join('\n\n') ?? translate('comms.noChannelAssigned')}</pre>
+            <footer>{translate('comms.transcriptFooterLabel')}</footer>
           </Panel>
         ),
       },
       {
-        title: 'ТРАФИК / ЗАДЕРЖКА',
+        title: translate('comms.trafficTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'traffic',
@@ -197,31 +209,35 @@ export function CommunicationsScreen() {
         },
         render: () => (
           <Panel
-            title="ТРАФИК / ЗАДЕРЖКА"
-            eyebrow="NETWORK / 60 MIN"
+            title={translate('comms.trafficTitle')}
+            eyebrow={translate('comms.trafficEyebrow')}
             className="communications-traffic"
           >
             <div className="traffic-metrics">
               <span>
-                <small>IN</small>
-                <strong>{state.metrics.networkIn} MB/S</strong>
+                <small>{translate('comms.inLabel')}</small>
+                <strong>
+                  {state.metrics.networkIn} {translate('unit.mbps')}
+                </strong>
                 <Sparkline
                   values={state.metricsHistory.networkIn}
                   domain={channelDomain('network-in')}
-                  label="Входящий трафик"
+                  label={translate('comms.inboundTrafficLabel')}
                 />
               </span>
               <span>
-                <small>OUT</small>
-                <strong>{state.metrics.networkOut} MB/S</strong>
+                <small>{translate('comms.outLabel')}</small>
+                <strong>
+                  {state.metrics.networkOut} {translate('unit.mbps')}
+                </strong>
                 <Sparkline
                   values={state.metricsHistory.networkOut}
                   domain={channelDomain('network-out')}
-                  label="Исходящий трафик"
+                  label={translate('comms.outboundTrafficLabel')}
                 />
               </span>
               <span>
-                <small>AVG LATENCY</small>
+                <small>{translate('comms.avgLatencyLabel')}</small>
                 <strong>
                   {Math.round(
                     Object.values(state.channels).reduce(
@@ -229,7 +245,7 @@ export function CommunicationsScreen() {
                       0,
                     ) / Object.values(state.channels).length,
                   )}{' '}
-                  MS
+                  {translate('unit.ms')}
                 </strong>
                 <ProgressBar value={68} tone="ok" />
               </span>
@@ -238,7 +254,7 @@ export function CommunicationsScreen() {
         ),
       },
       {
-        title: 'ЖУРНАЛ СООБЩЕНИЙ',
+        title: translate('comms.logTitle'),
         category: 'events',
         descriptor: {
           id: 'log',
@@ -251,7 +267,11 @@ export function CommunicationsScreen() {
           relocationRoute: '/analytics',
         },
         render: (presentation) => (
-          <Panel title="ЖУРНАЛ СООБЩЕНИЙ" eyebrow="MESSAGE LOG / AUDIT" className="message-log">
+          <Panel
+            title={translate('comms.logTitle')}
+            eyebrow={translate('comms.logEyebrow')}
+            className="message-log"
+          >
             <div className="event-feed">
               {state.events
                 .filter((event) => event.type.startsWith('communication'))
@@ -274,23 +294,23 @@ export function CommunicationsScreen() {
         ),
       },
     ],
-    [muted, selected, solo, state],
+    [muted, selected, solo, state, translate],
   );
 
   return (
     <div className="ops-screen communications-screen">
       <header className="ops-screen__title">
         <div>
-          <span>COMMS / ENCRYPTED / LOCAL</span>
-          <h1>ЦЕНТР ЗАЩИЩЁННОЙ СВЯЗИ</h1>
+          <span>{translate('comms.headerEyebrow')}</span>
+          <h1>{translate('comms.headerTitle')}</h1>
         </div>
         <div className="comms-summary">
           <span>
-            <small>CHANNELS</small>
+            <small>{translate('comms.channelsCountLabel')}</small>
             <strong>{Object.keys(state.channels).length}</strong>
           </span>
           <span>
-            <small>SECURED</small>
+            <small>{translate('comms.securedCountLabel')}</small>
             <strong>
               {
                 Object.values(state.channels).filter((channel) => channel.status === 'SECURED')
@@ -299,7 +319,7 @@ export function CommunicationsScreen() {
             </strong>
           </span>
           <span>
-            <small>INTERCEPTS</small>
+            <small>{translate('comms.interceptsCountLabel')}</small>
             <strong>
               {
                 Object.values(state.channels).filter((channel) => channel.kind === 'intercept')
