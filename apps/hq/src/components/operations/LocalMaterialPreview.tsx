@@ -240,6 +240,7 @@ export function LocalMaterialPreview({
         <LocalMaterialPlayer
           ref={playerHandleRef}
           sourceUrl={state.url}
+          mimeType={material.mimeType}
           title={material.displayName}
           tracks={subtitleTracks}
           autoPlay={autoplayPreview}
@@ -250,6 +251,18 @@ export function LocalMaterialPreview({
           onTimeUpdate={(seconds) => {
             setPlayerTime(seconds);
             if (rememberPosition) rememberedPreviewPositions.set(material.materialId, seconds);
+          }}
+          /*
+           * A clip watched to its end reopens at the start, not on its
+           * frozen last frame: `onTimeUpdate`'s last tick before completion
+           * is still within a fraction of a second of `duration` and would
+           * otherwise be the position remembered for next time. Vidstack's
+           * `end` (not `ended`) fires this even while `loop` is on, so a
+           * looping preview does not leave a near-`duration` remnant behind
+           * either.
+           */
+          onEnd={() => {
+            if (rememberPosition) rememberedPreviewPositions.delete(material.materialId);
           }}
           quality={
             <MaterialRenditionMenu

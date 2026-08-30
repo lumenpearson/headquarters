@@ -831,6 +831,12 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                         className={`material-import-dialog__entry ${
                           previewMaterial?.materialId === entry.materialId ? 'is-active' : ''
                         }`}
+                        // aria-current, not aria-pressed: clicking this row
+                        // selects it as the previewed entry within the list --
+                        // one current selection among many, not an
+                        // independent per-row toggle state -- which is what
+                        // aria-current names.
+                        aria-current={previewMaterial?.materialId === entry.materialId}
                         onClick={() => setPreviewMaterial(entry)}
                       >
                         <strong>{entry.displayName}</strong>
@@ -897,6 +903,10 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                         className={`material-import-dialog__entry ${
                           previewMaterial?.materialId === material.materialId ? 'is-active' : ''
                         }`}
+                        // aria-current, not aria-pressed: see the trash list's
+                        // row above -- one current selection among many, not
+                        // an independent per-row toggle state.
+                        aria-current={previewMaterial?.materialId === material.materialId}
                         onClick={() => setPreviewMaterial(material)}
                       >
                         <strong>{material.displayName}</strong>

@@ -2602,10 +2602,22 @@ button.is-active {
   padding: 4px 6px;
   background: linear-gradient(0deg, rgb(2 3 2 / 88%), transparent);
   opacity: 0;
-  transition: opacity 140ms ease;
+  /*
+   * Hit-testable only once revealed: `Controls.Group` (the parent) force-sets
+   * `pointer-events: auto` on itself via an inline style on attach
+   * (Vidstack's `ControlsGroup.onAttach`), which `opacity: 0` alone does not
+   * override -- a coarse pointer's reveal gesture would otherwise also land
+   * on whichever button sits under it. Setting `pointer-events` on this row
+   * itself (a descendant) overrides that inherited `auto` regardless of how
+   * the ancestor's value was set; keyboard focus is unaffected either way,
+   * since `pointer-events` only gates pointer hit-testing.
+   */
+  pointer-events: none;
+  transition: opacity var(--motion-standard, 240ms) ease;
 }
 .local-material-player__hover-row[data-revealed='true'] {
   opacity: 1;
+  pointer-events: auto;
 }
 .local-material-player__hover-row button {
   min-width: 0;
@@ -3304,6 +3316,22 @@ button.is-active {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* The card landing's own cross-group search (item 5, H3 review): a search
+   box above the grid, so a setting is findable before the operator has
+   guessed which of sixteen cards holds it. */
+.settings-landing {
+  display: grid;
+  gap: var(--ops-content-gap, 6px);
+}
+
+.settings-landing-search {
+  width: 100%;
+}
+
+.settings-landing-results .settings-row:last-child {
+  border-bottom: 0;
+}
+
 .settings-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -3885,8 +3913,24 @@ button.is-active {
   text-align: left;
 }
 
-.material-import-dialog__entry.is-active {
-  background: #17140d;
+/*
+ * `button.material-import-dialog__entry.is-active`, not the plain two-class
+ * selector this replaces: `body.terminal-theme .hq-button` (operations.css's
+ * own terminal skin) sets this row's background/color at (0,2,1), a class
+ * selector alone here is (0,2,0) and always loses to it, so the row never
+ * actually left its unselected chrome under the terminal style regardless of
+ * what colour this rule named. `.channel-list button.is-selected` and
+ * `.camera-grid > button.is-selected` already carry the same element
+ * selector for the same reason.
+ *
+ * `--ops-bg-2` is the same theme-aware token `.ops-table`'s zebra striping
+ * reads, so the row keeps `--ops-orange-bright`'s contrast on every theme
+ * once it does apply -- the hard-coded `#17140d` this replaced paired a fixed
+ * dark background with `light-operations`'s own dark `--ops-orange-bright`
+ * (tuned for a light surface), which measured roughly 1.5:1.
+ */
+button.material-import-dialog__entry.is-active {
+  background: var(--ops-bg-2);
   color: var(--ops-orange-bright);
 }
 

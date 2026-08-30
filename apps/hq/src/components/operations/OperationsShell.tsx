@@ -1102,8 +1102,13 @@ function OperationsDrawer() {
  * `FilesScreen`. `OperationsDrawer`'s file branch used to read `attachments`
  * only, so `[ENTER] FILE VIEWER` on an import opened nothing at all
  * (t5-player-rework).
+ *
+ * Exported (unlike the rest of this file's internal components) so
+ * `OperationsShell.test.tsx` can hold it to the re-render resilience
+ * `OperationsDrawer`'s broad `useOperationsStore((value) => value)`
+ * subscription demands of it, without mounting the whole shell.
  */
-function ImportedMaterialDrawer({
+export function ImportedMaterialDrawer({
   materialId,
   onClose,
 }: {
@@ -1112,8 +1117,18 @@ function ImportedMaterialDrawer({
 }) {
   const imported = useOperationsStore((state) => state.materials.imported[materialId]);
   const materialClient = useMaterialLibrary();
-  if (imported === undefined) return null;
-  const material = toMaterialEntry(imported);
+  // `imported` is a stable reference from the store unless the record itself
+  // changes; memoizing against it (rather than recomputing every render) is
+  // what keeps `material`'s identity stable across the unrelated store
+  // mutations `OperationsDrawer`'s broad subscription re-renders this on --
+  // an unstable identity here re-triggers LocalMaterialPreview's source
+  // effect, which revokes the object URL / playback grant it is still
+  // serving (t5-player-rework regression).
+  const material = useMemo(
+    () => (imported === undefined ? undefined : toMaterialEntry(imported)),
+    [imported],
+  );
+  if (material === undefined) return null;
   return (
     <Drawer
       title={material.displayName}
@@ -1121,7 +1136,10 @@ function ImportedMaterialDrawer({
       onClose={onClose}
       variant="card"
     >
-      <LocalMaterialPreview material={material} client={materialClient} />
+      {/* Keyed by materialId the same way FilesScreen.tsx keys the registry's
+          preview, so a switch between two imports remounts cleanly instead of
+          reusing an instance mid-load. */}
+      <LocalMaterialPreview key={material.materialId} material={material} client={materialClient} />
     </Drawer>
   );
 }

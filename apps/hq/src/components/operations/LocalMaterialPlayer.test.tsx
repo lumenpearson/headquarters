@@ -65,11 +65,24 @@ vi.mock('@vidstack/react', async () => {
         readonly onBlur?: () => void;
         readonly onCanPlay?: (detail: { duration: number }) => void;
         readonly onTimeUpdate?: (detail: { currentTime: number }) => void;
+        readonly volume?: number;
+        readonly playbackRate?: number;
+        readonly muted?: boolean;
       },
       ref: unknown,
     ) {
       mockCallbacks.onCanPlay = props.onCanPlay;
       mockCallbacks.onTimeUpdate = props.onTimeUpdate;
+      // `volume`/`playbackRate`/`muted` are controlled `<MediaPlayer>` props,
+      // not written onto the instance imperatively -- the real player
+      // re-applies them from its own props on every render (and, in
+      // particular, re-applies its own 1/1/false defaults on every can-play
+      // if a caller never passes them). Mirroring that here is what makes a
+      // source change that leaves an imperative-only assignment stranded show
+      // up as a failure instead of passing by construction.
+      mockPlayer.volume = props.volume ?? 1;
+      mockPlayer.playbackRate = props.playbackRate ?? 1;
+      mockPlayer.muted = props.muted ?? false;
       useImperativeHandle(ref as never, () => mockPlayer, []);
       return createElement(
         'div',
@@ -140,6 +153,12 @@ function hoverRow(): HTMLElement {
   const row = document.querySelector('.local-material-player__hover-row');
   if (row === null) throw new Error('hover row not rendered');
   return row as HTMLElement;
+}
+
+function patchSetting(id: string, value: number | boolean | string): void {
+  act(() => {
+    operationsStore.getState().applySettingsPatch([{ id, value }]);
+  });
 }
 
 beforeEach(() => {
@@ -236,22 +255,40 @@ describe('LocalMaterialPlayer control-layer reveal', () => {
 });
 
 describe('LocalMaterialPlayer settings wiring', () => {
-  it('applies player.startMuted, player.defaultRate and player.defaultVolume on mount', () => {
-    render(<LocalMaterialPlayer sourceUrl="blob:video" title="clip.mp4" />);
-
-    // Factory defaults: player.startMuted=true, player.defaultRate=1,
-    // player.defaultVolume=35.
-    expect(mockPlayer.muted).toBe(true);
-    expect(mockPlayer.playbackRate).toBe(1);
-    expect(mockPlayer.volume).toBeCloseTo(0.35);
-  });
-
   it('lets a mute toggle on the surface outlive the configured default', () => {
     render(<LocalMaterialPlayer sourceUrl="blob:video" title="clip.mp4" />);
 
     expect(mockPlayer.muted).toBe(true);
     fireEvent.click(screen.getByText('[M] MUTED'));
     expect(mockPlayer.muted).toBe(false);
+  });
+
+  /*
+   * A rendition swap through the quality popover changes `sourceUrl` and
+   * re-renders the surface without touching player.defaultRate/defaultVolume
+   * themselves -- the exact source change Vidstack's own `ready()`
+   * re-applies its `<MediaPlayer>` props on, defaulting to 1 when a caller
+   * never passes them as props. An imperative `player.volume = x` assignment
+   * whose effect dependency list does not include the source loses this
+   * race: the effect does not re-run just because the rendition changed, so
+   * the value Vidstack's reset leaves behind (1) stands unless the value
+   * reaches the provider as a controlled prop instead (t5-player-rework).
+   */
+  it('keeps the configured rate and volume through a rendition swap instead of resetting to the Vidstack default', () => {
+    patchSetting('player.defaultRate', 1.5);
+    const { rerender } = render(
+      <LocalMaterialPlayer sourceUrl="blob:variant-original" title="clip.mp4" />,
+    );
+    expect(mockPlayer.playbackRate).toBe(1.5);
+    expect(mockPlayer.volume).toBeCloseTo(0.35);
+
+    rerender(<LocalMaterialPlayer sourceUrl="blob:variant-720p" title="clip.mp4" />);
+    act(() => {
+      mockCallbacks.onCanPlay?.({ duration: 120 });
+    });
+
+    expect(mockPlayer.playbackRate).toBe(1.5);
+    expect(mockPlayer.volume).toBeCloseTo(0.35);
   });
 });
 

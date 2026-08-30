@@ -4,6 +4,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -14,7 +15,9 @@ import {
   MediaProvider,
   TimeSlider,
   Track,
+  type AudioSrc,
   type MediaPlayerInstance,
+  type VideoSrc,
 } from '@vidstack/react';
 import {
   TerminalButton,
@@ -48,6 +51,17 @@ export const LocalMaterialPlayer = forwardRef<
   LocalMaterialPlayerHandle,
   {
     readonly sourceUrl: string;
+    /**
+     * The material's own media type.
+     *
+     * A `blob:` URL carries no extension, so a player handed the bare string
+     * guesses -- and the guess is `video/mp4` for everything, which means an
+     * imported `.webm` never finds a loader and the surface sits empty. The
+     * caller knows the type the library recorded; naming it here is the
+     * difference between a preview that plays and one that reports nothing at
+     * all. `VideoScreen` already states it the same way for camera sources.
+     */
+    readonly mimeType?: string;
     readonly title: string;
     /**
      * The quality menu, passed in rather than built here: which renditions exist
@@ -58,6 +72,14 @@ export const LocalMaterialPlayer = forwardRef<
     readonly tracks?: readonly MaterialSubtitleTrack[];
     /** Mirrors the player's own `currentTime` state, for a caller that annotates by timestamp. */
     readonly onTimeUpdate?: (currentTime: number) => void;
+    /**
+     * Vidstack's `end` event, not `ended` and not a `currentTime` reading
+     * close to `duration`: `end` is the one of the two that still fires when
+     * `loop` is on, so a caller that remembers position by timestamp gets one
+     * "watched to completion" signal regardless of the loop setting, without
+     * guessing how close to `duration` counts as close enough.
+     */
+    readonly onEnd?: () => void;
     readonly autoPlay?: boolean;
     readonly loop?: boolean;
     /**
@@ -71,10 +93,12 @@ export const LocalMaterialPlayer = forwardRef<
 >(function LocalMaterialPlayer(
   {
     sourceUrl,
+    mimeType,
     title,
     quality,
     tracks = [],
     onTimeUpdate,
+    onEnd,
     autoPlay = false,
     loop = false,
     initialTime = 0,
@@ -105,17 +129,6 @@ export const LocalMaterialPlayer = forwardRef<
   const volume = chosenVolume ?? configuredVolumePercent / 100;
   const [chosenMuted, setChosenMuted] = useState<boolean | null>(null);
   const muted = chosenMuted ?? configuredMuted;
-
-  // This is where the settings reach the media element: pushed on mount and on
-  // every later change, so a source starts at the configured rate/volume/mute
-  // instead of at whatever the provider defaults to.
-  useEffect(() => {
-    const player = playerRef.current;
-    if (player === null) return;
-    player.playbackRate = playbackRate;
-    player.volume = volume;
-    player.muted = muted;
-  }, [muted, playbackRate, volume]);
 
   /*
    * Playback position across a rendition swap: the caller keeps this instance
@@ -195,15 +208,38 @@ export const LocalMaterialPlayer = forwardRef<
     [],
   );
 
+  /*
+   * A `blob:` URL states no type, so Vidstack is told one. Without it the
+   * player assumes `video/mp4` for every source and an imported `.webm`
+   * finds no loader at all; with it, the library's own recorded type is what
+   * chooses the loader. A caller that names no type keeps the bare string,
+   * which is the right behaviour for an `http://127.0.0.1:` range URL whose
+   * extension the provider can read for itself.
+   */
+  const mediaSource = useMemo((): string | AudioSrc | VideoSrc => {
+    if (mimeType === undefined) return sourceUrl;
+    return mimeType.startsWith('audio/')
+      ? ({ src: sourceUrl, type: mimeType } as AudioSrc)
+      : ({ src: sourceUrl, type: mimeType } as VideoSrc);
+  }, [mimeType, sourceUrl]);
+
   return (
     <section className="local-material-player">
       <MediaPlayer
         ref={playerRef}
         className="local-material-player__surface"
-        src={sourceUrl}
+        src={mediaSource}
         title={title}
         playsInline
         muted={muted}
+        // `volume`/`playbackRate` reach the provider the same way `muted`
+        // already did: as controlled `<MediaPlayer>` props, not an imperative
+        // assignment. Vidstack's own `ready()` re-applies its `$props` after
+        // every can-play (a rendition swap included), so setting
+        // `player.volume`/`player.playbackRate` directly loses that race back
+        // to the provider's 1/1 defaults the instant a new source resolves.
+        volume={volume}
+        playbackRate={playbackRate}
         autoPlay={autoPlay}
         loop={loop}
         preload="metadata"
@@ -223,6 +259,7 @@ export const LocalMaterialPlayer = forwardRef<
           setCurrentTime(detail.currentTime);
           onTimeUpdate?.(detail.currentTime);
         }}
+        onEnd={() => onEnd?.()}
         onPlay={() => setPaused(false)}
         onPause={() => setPaused(true)}
         onPointerEnter={() => {
@@ -302,7 +339,13 @@ export const LocalMaterialPlayer = forwardRef<
             </div>
           </Controls.Group>
 
-          <Controls.Group className="local-material-player__controls-group local-material-player__controls-group--persistent">
+          {/*
+            No `--persistent` modifier here: unlike the group above, this
+            one's content (`.local-material-player__persistent-row`) is never
+            gated behind `data-revealed`, so it needs no group-level class of
+            its own -- one existed here once with no matching CSS rule.
+          */}
+          <Controls.Group className="local-material-player__controls-group">
             <div className="local-material-player__persistent-row">
               <TimeSlider.Root
                 className="local-material-player__time-slider"

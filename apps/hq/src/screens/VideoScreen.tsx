@@ -983,17 +983,6 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     void player.enterPictureInPicture().catch(() => undefined);
   }, []);
 
-  // This is where `player.defaultRate` reaches the media element: the rate is
-  // pushed on mount as well as on every later change, so a stream starts at the
-  // configured speed instead of at whatever the provider defaults to.
-  useEffect(() => {
-    const player = playerRef.current;
-    if (player === null) return;
-    player.playbackRate = playbackRate;
-    player.volume = volume;
-    player.muted = muted;
-  }, [muted, playbackRate, volume]);
-
   useEffect(() => {
     const player = playerRef.current;
     if (player === null || mediaError || selected === undefined) return;
@@ -1152,6 +1141,14 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             autoPlay={!decodeSuspended}
             loop={!isWebcamSelected && loopDemoSource}
             muted={muted}
+            // `volume`/`playbackRate` reach the provider the same way `muted`
+            // already did: as controlled `<MediaPlayer>` props. Vidstack's own
+            // `ready()` re-applies its `$props` after every can-play (a
+            // rendition swap included), so an imperative
+            // `player.volume = volume` assignment loses that race back to the
+            // provider's 1/1 defaults the instant a new source resolves.
+            volume={volume}
+            playbackRate={playbackRate}
             playsInline
             preload="auto"
             crossOrigin={
