@@ -1,13 +1,15 @@
 'use client';
 
-import { TerminalIconButton } from '@gremuchaya/ui/primitives';
+import { TerminalIcon, TerminalIconButton } from '@gremuchaya/ui/primitives';
 
+import { useStringSetting } from '@/application/personalization/useSetting';
 import { appStore, useAppStore } from '@/state/appStore';
 import { AssetSurface } from '@/components/modules/AssetSurface';
 
 export function WindowLayer() {
   const windows = useAppStore((state) => state.workspace.windows);
   const documents = useAppStore((state) => state.workspace.documentsById);
+  const iconSet = useStringSetting('styles.iconSet');
   const visible = windows.filter((window) => window.state !== 'minimized');
   return (
     <div className="window-layer" aria-live="polite">
@@ -41,7 +43,7 @@ export function WindowLayer() {
                   label={`Свернуть ${window.title}`}
                   onClick={() => setWindowState(window.id, 'minimized')}
                 >
-                  —
+                  <TerminalIcon name="minimize" iconSet={iconSet} />
                 </TerminalIconButton>
                 <TerminalIconButton
                   label={
@@ -53,14 +55,14 @@ export function WindowLayer() {
                     setWindowState(window.id, window.state === 'maximized' ? 'normal' : 'maximized')
                   }
                 >
-                  □
+                  <TerminalIcon name="maximize" iconSet={iconSet} />
                 </TerminalIconButton>
                 <TerminalIconButton
                   label={`Закрыть ${window.title}`}
                   tone="critical"
                   onClick={() => closeWindow(window.id)}
                 >
-                  ×
+                  <TerminalIcon name="close" iconSet={iconSet} />
                 </TerminalIconButton>
               </nav>
             </header>

@@ -559,6 +559,10 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
     'Read by locale.ts, which every label, date and collation in the application goes through.',
   'localization.elementOverrides':
     'Read by elementCaption, which every tile header on every screen is drawn through.',
+  'styles.iconSet':
+    'Read by TerminalIcon call sites across the shell -- TitleBar, WindowLayer, ' +
+    'OpsNavigation, ShellCommandsMenu and settingsCardIcons -- which each pick that ' +
+    "library's mark for the name they render.",
   'titlebar.elements': 'Read by TitleBar, which draws exactly the elements it names, in order.',
   'titlebar.information': 'Read by TitleBar, which picks the reading its information slot shows.',
   'titlebar.dragRegion': 'Read by TitleBar, which marks that much of the bar as a drag region.',

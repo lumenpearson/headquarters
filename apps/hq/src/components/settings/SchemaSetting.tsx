@@ -10,6 +10,7 @@ import {
 import {
   TerminalColorPicker,
   TerminalElementsConstructor,
+  TerminalIcon,
   TerminalInput,
   TerminalNumberField,
   TerminalSelect,
@@ -112,6 +113,39 @@ export function SchemaSetting({
                 swatch: accentSwatches[option] ?? option,
               }))}
             />
+          );
+        }
+        // `styles.iconSet`: the operator has no reason to recognise a
+        // library's name, only what it draws, so this row gets a preview
+        // strip beside the dropdown -- each option's own close/system/menu
+        // marks, read from that option's adapter regardless of which one is
+        // currently active.
+        if (definition.id === 'styles.iconSet') {
+          return (
+            <span className="settings-iconset-setting">
+              <TerminalSelect
+                label={label}
+                value={String(value)}
+                onValueChange={onValueChange}
+                options={editor.options.map((option) => ({
+                  value: option,
+                  label: localizedEnumOptionLabel(definition, option, locale),
+                }))}
+              />
+              <span className="settings-iconset-preview" aria-hidden="true">
+                {editor.options.map((option) => (
+                  <span
+                    key={option}
+                    className="settings-iconset-preview__option"
+                    data-selected={option === String(value)}
+                  >
+                    <TerminalIcon name="close" iconSet={option} size={16} />
+                    <TerminalIcon name="system" iconSet={option} size={16} />
+                    <TerminalIcon name="menu" iconSet={option} size={16} />
+                  </span>
+                ))}
+              </span>
+            </span>
           );
         }
         return (

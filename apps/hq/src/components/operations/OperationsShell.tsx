@@ -10,6 +10,7 @@ import {
 } from '@gremuchaya/settings-schema';
 import {
   TerminalButton,
+  TerminalIcon,
   TerminalInput,
   TerminalMenu,
   TerminalPopover,
@@ -33,7 +34,7 @@ import {
   numberSetting,
   stringSetting,
 } from '@/application/personalization/settingValue';
-import { useStringListSetting } from '@/application/personalization/useSetting';
+import { useStringListSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { contextMenuFor } from '@/application/contextMenus/registry';
 import {
   buildContextMenuItems,
@@ -454,6 +455,7 @@ function ShellCommandsMenu() {
   // Same reason as `OpsNavigation`: the trigger button's own text needs a
   // subscription nothing else here provides.
   useAppLocale();
+  const iconSet = useStringSetting('styles.iconSet');
   // Subscribed, not read during render: claims are made in effects, so a list
   // built from a plain table read is the list from the first render, when
   // nothing is claimed and every command draws itself disabled.
@@ -470,7 +472,7 @@ function ShellCommandsMenu() {
       trigger={
         <TerminalButton className="ops-topbar__commands" aria-label={t('menu.shell')}>
           <small>{t('topbar.commandsLabel')}</small>
-          <b>[≡]</b>
+          <TerminalIcon name="menu" iconSet={iconSet} />
         </TerminalButton>
       }
     />
@@ -484,6 +486,7 @@ function OpsNavigation({ route }: { readonly route: OperationsRoute }) {
   useAppLocale();
   const compact = useOperationsStore((state) => state.ui.navCompact);
   const hiddenRoutes = useStringListSetting('general.hiddenRoutes');
+  const iconSet = useStringSetting('styles.iconSet');
   const toggle = useOperationsStore((state) => state.toggleNavCompact);
   const screenId = useOperationsStore((state) => state.production.screenId);
   return (
@@ -493,7 +496,7 @@ function OpsNavigation({ route }: { readonly route: OperationsRoute }) {
         onClick={toggle}
         aria-label={t('nav.toggleCompact')}
       >
-        {compact ? '[+]' : '[−]'}
+        <TerminalIcon name={compact ? 'expand' : 'collapse'} iconSet={iconSet} />
       </TerminalButton>
       <div>
         {primaryNavigation

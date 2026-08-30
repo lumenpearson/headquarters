@@ -738,6 +738,14 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     oneOf(['hover', 'always', 'never']),
   ),
   definition(
+    'styles.iconSet',
+    'styles',
+    'terminal',
+    'device',
+    "Which library draws the shell's icons.",
+    oneOf(['terminal', 'lucide', 'hugeicons', 'tabler']),
+  ),
+  definition(
     'styles.cornerLength',
     'styles',
     10,
