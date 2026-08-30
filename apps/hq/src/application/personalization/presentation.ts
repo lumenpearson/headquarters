@@ -453,6 +453,11 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'startup.stageHold': 'Read by resolveStartupPlan, which holds each stage that much longer.',
   'startup.restoreWorld': 'Read by hydratePersistedState from the blob it is restoring.',
   'startup.productionPanel': 'Read by OperationsShell, which opens the panel on launch.',
+  'startup.launchOnLogin':
+    'Read by the maintenance surface, which reconciles it against the desktop shell’s own autostart registration.',
+  'startup.autoUpdate':
+    'Read by the maintenance surface, which decides on launch whether to check and download without being asked.',
+  'layout.settingsLanding': 'Read by SettingsScreen, which opens as cards or as one list.',
   'keybinds.prefixWindow': 'Read by the keybind runtime when a prefix key opens a sequence.',
   'keybinds.firedHighlight': 'Read by KeybindList, which holds the fired mark that long.',
   'keybinds.introOnLaunch':

@@ -957,6 +957,37 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'Show the optimized startup sequence.',
     isBoolean,
   ),
+  /*
+   * Two device-scoped switches the maintenance surface owns, both off by
+   * default on purpose: a shoot machine decides for itself when it restarts
+   * for an update and whether it comes back on its own after a reboot.
+   * Neither is a group setting -- one operator's machine cannot volunteer
+   * another's for an install mid-take.
+   */
+  definition(
+    'startup.launchOnLogin',
+    'startup',
+    false,
+    'device',
+    'Start the application when this machine signs in. Desktop only.',
+    isBoolean,
+  ),
+  definition(
+    'startup.autoUpdate',
+    'startup',
+    false,
+    'device',
+    'Check for an update on launch and download it without being asked. Desktop only.',
+    isBoolean,
+  ),
+  definition(
+    'layout.settingsLanding',
+    'layout',
+    'cards',
+    'device',
+    'Whether the settings screen opens as category cards or as one continuous list.',
+    oneOf(['cards', 'unified']),
+  ),
   definition(
     'player.defaultRate',
     'player',

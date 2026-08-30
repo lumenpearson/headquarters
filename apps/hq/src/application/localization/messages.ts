@@ -308,6 +308,42 @@ const ru = {
     'Верхняя граница подробности отрисовки плитки; «как у группы» оставляет выбор макету.',
   'settingDescription.popups.overlayBlur':
     'Размытие фона за диалогом, шторкой или панелью, в пикселях; 0 отключает его.',
+  'settingDescription.startup.launchOnLogin':
+    'Запускать приложение при входе в систему. Только на десктопе.',
+  'settingDescription.startup.autoUpdate':
+    'Проверять обновление при запуске и скачивать его без запроса. Только на десктопе.',
+  'settingDescription.layout.settingsLanding':
+    'Чем открываются настройки: карточками разделов или единым списком.',
+  'settingOption.layout.settingsLanding.cards': 'КАРТОЧКИ',
+  'settingOption.layout.settingsLanding.unified': 'ЕДИНЫЙ СПИСОК',
+
+  /*
+   * The maintenance surface: the update section at the end of settings, and
+   * the states its download can be in. `update.state.*` are the operator's
+   * reading of `AppUpdateService`'s own statuses, one for one.
+   */
+  'update.heading': 'ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ',
+  'update.currentVersion': 'ТЕКУЩАЯ ВЕРСИЯ',
+  'update.availableVersion': 'ДОСТУПНА ВЕРСИЯ',
+  'update.check': '[U] ПРОВЕРИТЬ ОБНОВЛЕНИЕ',
+  'update.download': '[D] СКАЧАТЬ',
+  'update.pause': '[P] ПАУЗА',
+  'update.resume': '[R] ПРОДОЛЖИТЬ',
+  'update.cancel': '[C] ОТМЕНИТЬ',
+  'update.install': '[I] УСТАНОВИТЬ И ПЕРЕЗАПУСТИТЬ',
+  'update.notes': 'ЧТО ИЗМЕНИЛОСЬ',
+  'update.progress': 'СКАЧАНО {percent}%',
+  'update.progressUnknown': 'СКАЧИВАНИЕ, РАЗМЕР НЕИЗВЕСТЕН',
+  'update.state.idle': 'ПРОВЕРКА НЕ ВЫПОЛНЯЛАСЬ',
+  'update.state.checking': 'ПРОВЕРКА…',
+  'update.state.upToDate': 'УСТАНОВЛЕНА ПОСЛЕДНЯЯ ВЕРСИЯ',
+  'update.state.available': 'ОБНОВЛЕНИЕ ДОСТУПНО',
+  'update.state.paused': 'СКАЧИВАНИЕ ПРИОСТАНОВЛЕНО',
+  'update.state.ready': 'ГОТОВО К УСТАНОВКЕ',
+  'update.state.installing': 'УСТАНОВКА…',
+  'update.state.error': 'ОШИБКА: {message}',
+  'update.unavailable': 'ОБНОВЛЕНИЕ ИЗНУТРИ ДОСТУПНО ТОЛЬКО В ДЕСКТОПНОЙ СБОРКЕ',
+
   /*
    * The dropdown options of `dateTime.mode`, as full words: the 4-character
    * status-line markers (`dateTime.ts`'s `dateTimeModeLabel`) belong to a
@@ -647,8 +683,38 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
     'Cap on how rich a tile may be drawn; auto leaves the choice to the layout.',
   'settingDescription.popups.overlayBlur':
     'Backdrop blur behind a dialog, drawer or panel scrim, in pixels; 0 disables it.',
+  'settingDescription.startup.launchOnLogin':
+    'Start the application when this machine signs in. Desktop only.',
+  'settingDescription.startup.autoUpdate':
+    'Check for an update on launch and download it without being asked. Desktop only.',
+  'settingDescription.layout.settingsLanding':
+    'Whether the settings screen opens as category cards or as one continuous list.',
+  'settingOption.layout.settingsLanding.cards': 'CARDS',
+  'settingOption.layout.settingsLanding.unified': 'ONE LIST',
   'settingOption.dateTime.mode.operation': 'OPERATION',
   'settingOption.dateTime.mode.system': 'SYSTEM',
+
+  'update.heading': 'APPLICATION UPDATE',
+  'update.currentVersion': 'CURRENT VERSION',
+  'update.availableVersion': 'VERSION AVAILABLE',
+  'update.check': '[U] CHECK FOR UPDATE',
+  'update.download': '[D] DOWNLOAD',
+  'update.pause': '[P] PAUSE',
+  'update.resume': '[R] RESUME',
+  'update.cancel': '[C] CANCEL',
+  'update.install': '[I] INSTALL AND RESTART',
+  'update.notes': 'WHAT CHANGED',
+  'update.progress': '{percent}% DOWNLOADED',
+  'update.progressUnknown': 'DOWNLOADING, SIZE UNKNOWN',
+  'update.state.idle': 'NOT CHECKED YET',
+  'update.state.checking': 'CHECKING…',
+  'update.state.upToDate': 'RUNNING THE LATEST VERSION',
+  'update.state.available': 'UPDATE AVAILABLE',
+  'update.state.paused': 'DOWNLOAD PAUSED',
+  'update.state.ready': 'READY TO INSTALL',
+  'update.state.installing': 'INSTALLING…',
+  'update.state.error': 'ERROR: {message}',
+  'update.unavailable': 'IN-APP UPDATES ARE A DESKTOP-BUILD FEATURE',
 
   'topbar.brand': 'GREMUCHAYA//MESH',
   'topbar.phase': '{code} / PHASE {phase}',
