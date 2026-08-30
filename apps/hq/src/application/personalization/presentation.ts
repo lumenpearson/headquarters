@@ -414,6 +414,19 @@ export const presentationBindings: readonly PresentationBinding[] = [
   // margin on the first control -- a layout the stylesheet already expresses
   // and a component would only re-express as inline styles.
   { kind: 'attribute', setting: 'titlebar.alignment', attribute: 'data-titlebar-alignment' },
+
+  // How strongly a dialog/drawer/panel scrim blurs the viewport behind it (0
+  // disables it). A custom property rather than a class hook like
+  // `popups.drawerWidth`/`popups.drawerScrim` below: the backdrop elements
+  // that read it include ones `packages/ui` portals straight to
+  // `document.body`, which may see only `--ops-*` values through `var()`
+  // with a literal fallback, never a class this app defines.
+  {
+    kind: 'custom-property',
+    setting: 'popups.overlayBlur',
+    property: '--ops-overlay-blur',
+    toCss: px,
+  },
 ];
 
 /**

@@ -1134,6 +1134,14 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     oneOf(['clear', 'standard', 'opaque']),
   ),
   definition(
+    'popups.overlayBlur',
+    'popups',
+    16,
+    'device',
+    'Backdrop blur behind a dialog, drawer or panel scrim, in pixels; 0 disables it.',
+    sliderWithin(0, 24),
+  ),
+  definition(
     'materials.defaultSort',
     'materials',
     'createdAt',

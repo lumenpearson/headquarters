@@ -306,6 +306,8 @@ const ru = {
     'Показывать контекст операции и сектора на панелях.',
   'settingDescription.tiles.presentation':
     'Верхняя граница подробности отрисовки плитки; «как у группы» оставляет выбор макету.',
+  'settingDescription.popups.overlayBlur':
+    'Размытие фона за диалогом, шторкой или панелью, в пикселях; 0 отключает его.',
   /*
    * The dropdown options of `dateTime.mode`, as full words: the 4-character
    * status-line markers (`dateTime.ts`'s `dateTimeModeLabel`) belong to a
@@ -643,6 +645,8 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
     'Show operation and sector context in panels.',
   'settingDescription.tiles.presentation':
     'Cap on how rich a tile may be drawn; auto leaves the choice to the layout.',
+  'settingDescription.popups.overlayBlur':
+    'Backdrop blur behind a dialog, drawer or panel scrim, in pixels; 0 disables it.',
   'settingOption.dateTime.mode.operation': 'OPERATION',
   'settingOption.dateTime.mode.system': 'SYSTEM',
 

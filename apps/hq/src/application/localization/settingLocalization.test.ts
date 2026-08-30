@@ -23,6 +23,15 @@ describe('setting description localization', () => {
     );
   });
 
+  it('translates popups.overlayBlur', () => {
+    const definition = definitionOrThrow('popups.overlayBlur');
+
+    expect(localizedSettingDescription(definition, 'ru')).toBe(
+      'Размытие фона за диалогом, шторкой или панелью, в пикселях; 0 отключает его.',
+    );
+    expect(localizedSettingDescription(definition, 'en')).toBe(definition.description);
+  });
+
   it('falls back to the schema English for a definition nobody has translated yet', () => {
     // `styles.cornerLength` carries no `settingDescription.*` entry: this is
     // the documented fallback, not the bracketed missing-id marker the main

@@ -1102,16 +1102,40 @@ button.is-active {
 }
 
 /*
- * The scrim blurs the workspace behind the drawer rather than only darkening
- * it. Its inset deliberately stops at the chrome: the title bar, top bar and
- * status line stay sharp and usable while a record card or preview is open,
- * and toasts paint above the drawer's stacking context and are never blurred.
+ * The scrim blurs the whole viewport behind the drawer, the same as the
+ * portalled dialog/drawer backdrops (`TERMINAL_DRAWER_BACKDROP_UTILITY`):
+ * this pseudo-element is `position: fixed` with no transformed ancestor (see
+ * the no-transform comment on `.ops-drawer` above), so `inset: 0` is exactly
+ * the viewport. It used to stop short at the chrome band, which only worked
+ * while that band's own height matched the `54px`/`24px` here -- the fluid
+ * layout below moved without these, leaving a seam of un-blurred chrome that
+ * drifted with the viewport instead of a deliberate gap.
+ *
+ * The strength reads `--ops-overlay-blur` (`popups.overlayBlur`) with a
+ * literal `16px` fallback, matching `popups.overlayBlur`'s own default: the
+ * whole scrim family -- this pseudo, `.production-panel::before` below,
+ * `TERMINAL_DIALOG_BACKDROP_UTILITY`/`TERMINAL_DRAWER_BACKDROP_UTILITY`, the
+ * keybind intro, the command palette and the settings-nav overlay -- now
+ * reads the same variable with the same fallback. It used to read `14px`
+ * here, two pixels under the setting's actual default of 16, so at the
+ * slider's own displayed default this scrim rendered weaker than the drawer
+ * chrome's own backdrop, and dragging the slider *down* toward 15 made it
+ * stronger rather than weaker. At 0 the radius is zero, which is visually no
+ * blur at all -- the same reading `--ops-background-blur` already gives
+ * `backgrounds.blur` below.
+ *
+ * `pointer-events: none`: this pseudo is decoration behind the drawer's own
+ * `Dialog.Backdrop` (`TERMINAL_DRAWER_BACKDROP_UTILITY`), which already owns
+ * the actual dismiss-on-click hit target -- this element never carried that
+ * semantic and must not compete with it or with the drawer's own content for
+ * pointer events.
  */
 .ops-drawer::before {
   position: fixed;
   z-index: -1;
-  inset: calc(54px + var(--ops-titlebar-height)) 0 24px;
-  backdrop-filter: blur(14px) saturate(90%);
+  inset: 0;
+  pointer-events: none;
+  backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(90%);
   background: rgb(0 0 0 / 26%);
   content: '';
 }
@@ -1133,8 +1157,14 @@ button.is-active {
   background: transparent;
 }
 
+/* The opaque variant keeps its own stronger tint (64% vs. the standard 26%)
+   but obeys the operator's blur strength the same as the rest of the family
+   now does, rather than a blur hard-coded past the setting's reach. That
+   changes this variant's own *default* rendering from a fixed 20px to
+   `--ops-overlay-blur`'s 16px fallback -- named here rather than left silent,
+   since it is a visible behaviour change, not only a unification. */
 .ops-drawer--scrim-opaque::before {
-  backdrop-filter: blur(20px) saturate(85%);
+  backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(85%);
   background: rgb(0 0 0 / 64%);
 }
 
@@ -1198,13 +1228,35 @@ button.is-active {
   }
 }
 
-/* The modal production panel gets the same chrome-sparing blur as the drawer:
-   the workspace it covers is blurred, the bars around it are not. */
+/* The modal production panel gets the same full-viewport blur as the drawer
+   scrim above, for the same reason: `position: fixed` with no transformed
+   ancestor (see the no-transform comment on `.production-panel` above) makes
+   `inset: 0` exactly the viewport, and `--ops-overlay-blur` is the same
+   operator-controlled strength (`popups.overlayBlur`), with a literal `16px`
+   fallback matching the setting's own default -- see the drawer scrim's
+   comment above for why this used to read `14px` and what that got wrong.
+
+   `pointer-events: none` matters more here than on the drawer: `.ops-drawer`
+   is a real Base UI dialog whose own `Dialog.Backdrop` already owns pointer
+   handling, but `.production-panel` is a plain `<aside role="dialog">` with
+   no separate backdrop element -- this pseudo is its only scrim. Unlike a
+   normal browser chrome, `tauri.conf.json`'s `decorations: false` makes
+   `.ops-titlebar` the only minimize/maximize/close and drag region, and it
+   shares a stacking context with `.production-panel` (`.ops-shell` sets
+   `isolation: isolate`). At `inset: 0` with no `pointer-events: none`, this
+   scrim out-hit-tests the titlebar, topbar and statusline underneath it --
+   an operator who launches with `startup.productionPanel` on gets a window
+   whose close/minimize/topbar/statusline do nothing until the panel closes.
+   The panel's own content, above this pseudo in paint order, keeps its
+   events; dismissal already has an explicit target (the header's `[ESC]
+   CLOSE` button and the `shell.productionPanel` keybind), so nothing here
+   ever depended on the scrim itself being clickable. */
 .production-panel::before {
   position: fixed;
   z-index: -1;
-  inset: calc(54px + var(--ops-titlebar-height)) 0 24px;
-  backdrop-filter: blur(14px) saturate(90%);
+  inset: 0;
+  pointer-events: none;
+  backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(90%);
   background: rgb(0 0 0 / 26%);
   content: '';
 }
@@ -3171,14 +3223,17 @@ button.is-active {
     display: none;
   }
 
-  /* The vercel.com idiom: the section menu covers the settings screen. */
+  /* The vercel.com idiom: the section menu covers the settings screen. Blur
+     reads `--ops-overlay-blur` (`popups.overlayBlur`) like the rest of the
+     scrim family, rather than a literal that ignored the operator's
+     setting; the `16px` fallback matches the setting's own default. */
   .settings-screen[data-nav-side][data-nav-open='true'] .settings-docs__nav {
     position: absolute;
     inset: 0;
     z-index: 30;
     display: flex;
     padding: 20px;
-    backdrop-filter: blur(16px) saturate(90%);
+    backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(90%);
     background: color-mix(in srgb, #050706 78%, transparent);
     animation: settings-nav-in var(--motion-standard, 240ms) ease-out both;
   }
