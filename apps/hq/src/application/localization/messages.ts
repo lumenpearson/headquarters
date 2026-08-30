@@ -316,6 +316,14 @@ const ru = {
     'Чем открываются настройки: карточками разделов или единым списком.',
   'settingOption.layout.settingsLanding.cards': 'КАРТОЧКИ',
   'settingOption.layout.settingsLanding.unified': 'ЕДИНЫЙ СПИСОК',
+  'settingDescription.player.controlsHideDelayMs':
+    'Сколько ждать после ухода курсора и потери фокуса, прежде чем скрыть элементы управления плеера.',
+  'settingDescription.materials.autoplayPreview':
+    'Запускать воспроизведение материала сразу при открытии его предпросмотра.',
+  'settingDescription.materials.loopPreview':
+    'Повторять просматриваемый материал с начала по его окончании.',
+  'settingDescription.materials.rememberPreviewPosition':
+    'Возобновлять материал с той позиции, на которой воспроизведение было прервано, в рамках сессии.',
 
   /*
    * The maintenance surface: the update section at the end of settings, and
@@ -691,6 +699,14 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
     'Whether the settings screen opens as category cards or as one continuous list.',
   'settingOption.layout.settingsLanding.cards': 'CARDS',
   'settingOption.layout.settingsLanding.unified': 'ONE LIST',
+  'settingDescription.player.controlsHideDelayMs':
+    'How long to wait, after the pointer leaves and no control holds focus, before hiding the player controls.',
+  'settingDescription.materials.autoplayPreview':
+    'Start a material playing as soon as its preview opens.',
+  'settingDescription.materials.loopPreview':
+    'Repeat a previewed material from the start once it ends.',
+  'settingDescription.materials.rememberPreviewPosition':
+    'Resume a material where playback last left it, for this session.',
   'settingOption.dateTime.mode.operation': 'OPERATION',
   'settingOption.dateTime.mode.system': 'SYSTEM',
 

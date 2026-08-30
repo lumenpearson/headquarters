@@ -3,6 +3,7 @@
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 
 import { RuntimeController } from '@/application/RuntimeController';
+import { startLaunchUpdateCheck } from '@/application/update/appUpdateRuntime';
 import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 
 interface RuntimeContextValue {
@@ -49,6 +50,18 @@ export function RuntimeProvider({ children }: { readonly children: ReactNode }) 
       activeController?.close();
     };
   }, []);
+
+  /*
+   * `startup.autoUpdate` says "at launch", so it is read here rather than by
+   * the settings surface: an operator who never opens settings still gets the
+   * update they asked to be fetched without being asked. The call is a no-op
+   * after the first, so a Strict Mode replay is not a second launch, and it
+   * runs after the personalization state has hydrated for the same reason
+   * every other setting reader does.
+   */
+  useEffect(() => {
+    if (value.status === 'ready') startLaunchUpdateCheck();
+  }, [value.status]);
 
   useKeybind('developer.toggle', () => value.controller?.toggleDeveloper());
 

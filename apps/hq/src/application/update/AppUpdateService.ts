@@ -69,6 +69,16 @@ export class AppUpdateService {
     return this.#state;
   }
 
+  /**
+   * The port this service drives, for the one caller that needs the port
+   * itself rather than the state: autostart is a property of the shell, not
+   * of an update, and it is reconciled against the same adapter rather than a
+   * second one.
+   */
+  get port(): AppUpdatePort | null {
+    return this.#port;
+  }
+
   subscribe(listener: Listener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);

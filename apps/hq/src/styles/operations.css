@@ -2495,8 +2495,15 @@ button.is-active {
 .local-material-preview {
   position: relative;
   display: grid;
-  min-height: 170px;
-  max-height: 230px;
+  min-height: 190px;
+  /*
+   * Was a flat 230px, sized for the old always-on footer bar. The control
+   * layer now overlays the surface instead of sitting beneath it (t5-player-
+   * rework), so the surface itself can take more of the panel; it still stops
+   * well short of the panel's own height so the metadata and footer below it
+   * in `FilesScreen`'s preview tile stay in view without scrolling.
+   */
+  max-height: min(46dvh, 420px);
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--ops-line);
@@ -2549,11 +2556,21 @@ button.is-active {
   font-weight: 400;
   line-height: 1.6;
 }
+/*
+ * t5-player-rework: the control layer moved from a footer sibling of
+ * `<MediaPlayer>` to an overlay inside its own subtree
+ * (`.local-material-player__controls-root`), because `enterFullscreen()`
+ * fullscreens only `.local-material-player__surface` -- a sibling footer
+ * simply disappears the moment fullscreen starts. Every control except the
+ * progress bar and the settings button hides until the pointer is over the
+ * surface or a control inside it holds focus; see `LocalMaterialPlayer.tsx`
+ * for the reveal state (`data-revealed`) and the delay it is held on
+ * (`player.controlsHideDelayMs`).
+ */
 .local-material-player {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  min-height: 170px;
-  max-height: 230px;
+  min-height: 190px;
+  max-height: min(46dvh, 420px);
   overflow: hidden;
   border: 1px solid var(--ops-line);
   background: #050705;
@@ -2571,33 +2588,95 @@ button.is-active {
   object-fit: contain;
   filter: grayscale(1) contrast(1.14) brightness(0.8);
 }
-.local-material-player__controls {
-  display: grid;
-  /*
-   * Column count is a custom property, not a literal 5: the [CC] toggle is a
-   * sixth button that only renders when the material has subtitle tracks, and
-   * a fixed `repeat(5, ...)` would either overflow it onto a second row or
-   * leave the trailing wide column empty when it is absent. `LocalMaterialPlayer`
-   * sets `--local-player-buttons` to match how many button-columns it rendered.
-   */
-  grid-template-columns: repeat(var(--local-player-buttons, 5), minmax(0, 1fr)) minmax(72px, auto);
-  gap: 3px;
-  padding: 4px;
-  border-top: 1px solid var(--ops-line);
-  background: #090d09;
+.local-material-player__controls-root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
-.local-material-player__controls button {
+.local-material-player__hover-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  background: linear-gradient(0deg, rgb(2 3 2 / 88%), transparent);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.local-material-player__hover-row[data-revealed='true'] {
+  opacity: 1;
+}
+.local-material-player__hover-row button {
   min-width: 0;
-  min-height: 24px;
+  min-height: 22px;
   padding-inline: 3px;
   font-size: 7px;
 }
-.local-material-player__controls span {
-  align-self: center;
+.local-material-player__time-readout {
   color: var(--ops-muted);
   font-size: 7px;
-  text-align: right;
   white-space: nowrap;
+}
+.local-material-player__persistent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px;
+  background: linear-gradient(0deg, rgb(2 3 2 / 70%), transparent 92%);
+}
+.local-material-player__time-slider {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 14px;
+  cursor: pointer;
+  touch-action: none;
+}
+.local-material-player__time-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: var(--ops-line-strong);
+}
+.local-material-player__time-buffered {
+  position: absolute;
+  inset: 0;
+  width: var(--slider-progress, 0%);
+  background: rgb(115 184 133 / 30%);
+}
+.local-material-player__time-fill {
+  position: absolute;
+  inset: 0;
+  width: var(--slider-fill, 0%);
+  background: var(--ops-orange);
+}
+.local-material-player__time-thumb {
+  position: absolute;
+  top: 50%;
+  left: var(--slider-fill, 0%);
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-left: -4px;
+  border: 1px solid var(--ops-orange-bright);
+  background: #050705;
+}
+.local-material-player__settings-panel {
+  display: grid;
+  min-width: 200px;
+  gap: 8px;
+}
+.local-material-player__settings-row {
+  display: grid;
+  gap: 4px;
+}
+.local-material-player__settings-row > span {
+  color: var(--ops-muted);
+  font-size: 7px;
+  letter-spacing: 0.08em;
 }
 .file-preview-panel .ops-panel__body > header {
   display: flex;
@@ -3195,13 +3274,99 @@ button.is-active {
   display: grid;
   gap: var(--ops-content-gap, 6px);
   align-content: start;
-  width: min(940px, 100%);
+  /*
+   * 60% of this column's own container, not of the viewport:
+   * `.settings-docs__content` already excludes the section nav rail in
+   * `unified` mode (`clamp(180px, 16vw, 240px)` plus the grid gap), so a
+   * percentage here reads as "60% of what the settings area actually has,"
+   * the way the request names it, rather than 60% of chrome the column never
+   * occupied. Floored at 680px, below which the catalogue toolbar's two
+   * columns (`minmax(190px, 0.9fr)` + `minmax(0, 1.1fr)`) and a
+   * `.settings-row`'s `minmax(110px, 0.45fr)` control column start crowding
+   * each other; capped at 1040px, the width this file already treats as the
+   * shell's own floor (`.ops-screen { min-width: 1040px }` under
+   * `@media (max-width: 1180px)` below), so the column never grows past the
+   * narrowest width the shell itself still commits to filling.
+   */
+  width: clamp(680px, 60%, 1040px);
   margin-inline: auto;
   padding-bottom: 24px;
 }
 
 .settings-nav-toggle {
   display: none;
+}
+
+/* `layout.settingsLanding='cards'`: no nav rail is rendered (the card grid
+   is the navigation), so the rail's own grid track collapses rather than
+   sitting empty. */
+.settings-screen[data-landing='cards'] .settings-docs {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--ops-content-gap, 6px);
+}
+
+.ops-panel.settings-card {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 10px;
+  min-height: 108px;
+  padding: 16px 10px;
+  text-align: center;
+  transition:
+    box-shadow var(--motion-standard, 240ms) ease,
+    border-color var(--motion-standard, 240ms) ease,
+    background var(--motion-standard, 240ms) ease;
+}
+
+.settings-card__icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  color: var(--ops-orange-bright);
+}
+
+.settings-card__icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+
+/*
+ * The glow the operator's brief asks a card carry, keyed to `--ops-orange`
+ * rather than a fixed hue: that token is already the accent `colors.accent`
+ * repaints (`SchemaSetting.tsx`'s own comment on the swatch picker), so a
+ * card glowing under a green or cyan accent glows green or cyan, not always
+ * orange. The extra class gives this rule more specificity than the base
+ * `.ops-panel--clickable:hover` (operations.css, "search-hit-list" region),
+ * so it wins regardless of where in the file it sits.
+ */
+.ops-panel.settings-card:hover,
+.ops-panel.settings-card:focus-visible {
+  border-color: var(--ops-orange);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ops-orange) 12%, transparent),
+    #070707 46%
+  );
+  box-shadow:
+    0 0 0 1px var(--ops-orange),
+    0 0 18px color-mix(in srgb, var(--ops-orange) 32%, transparent);
+}
+
+.settings-card-back {
+  margin-bottom: var(--ops-content-gap, 6px);
+}
+
+.settings-landing-toggle {
+  max-width: 190px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3348,6 +3513,30 @@ button.is-active {
   clip-path: inset(50%);
   opacity: 0;
   pointer-events: none;
+}
+
+/* The maintenance panel (`UpdateSection`), last in `settingsSections`. */
+.settings-update__unavailable {
+  margin: 0 0 9px;
+  color: var(--ops-muted);
+  font-size: 9px;
+}
+.settings-update__state {
+  margin: 4px 0;
+  color: var(--ops-text-strong);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+.settings-update__progress {
+  margin: 0 0 6px;
+  color: var(--ops-orange-bright);
+  font-size: 9px;
+}
+.settings-update__notes {
+  margin: 0 0 9px;
+  color: var(--ops-muted);
+  font-size: 8px;
+  line-height: 1.5;
 }
 .ui-gallery-layout {
   display: grid;
@@ -3671,13 +3860,34 @@ button.is-active {
 
 .material-import-dialog__recent > ul > li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) minmax(100px, auto);
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
   padding: 8px 9px;
   border-bottom: 1px dotted var(--ops-line);
+}
+
+/*
+ * A row is a `TerminalButton` now, not a plain `<li>` -- it is what opens the
+ * preview panel below, the `.channel-list button` idiom already uses for "a
+ * button styled to read as a list row" (border-0, transparent, its own grid).
+ */
+.material-import-dialog__entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) minmax(100px, auto);
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font-family: var(--ops-mono);
   font-size: 9px;
+  text-align: left;
+}
+
+.material-import-dialog__entry.is-active {
+  background: #17140d;
+  color: var(--ops-orange-bright);
 }
 
 .material-import-dialog__recent strong,
@@ -3694,7 +3904,7 @@ button.is-active {
 }
 
 @media (max-width: 720px) {
-  .material-import-dialog__recent > ul > li {
+  .material-import-dialog__entry {
     grid-template-columns: minmax(0, 1fr);
     gap: 3px;
   }
@@ -3720,6 +3930,24 @@ button.is-active {
   grid-column: 1 / -1;
   gap: 8px;
   padding-top: 6px;
+}
+
+.material-import-dialog__preview {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.material-import-dialog__preview > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
 }
 
 .material-lifecycle-panel {
@@ -7066,13 +7294,13 @@ body {
   color: var(--ops-orange-bright);
 }
 
-.local-material-player__controls .material-rendition-menu,
-.local-material-player__controls .material-rendition-menu__single {
-  grid-column: 1 / -1;
+.local-material-player__settings-panel .material-rendition-menu,
+.local-material-player__settings-panel .material-rendition-menu__single {
+  width: 100%;
   text-align: left;
 }
 
-.local-material-player__controls .material-rendition-menu .terminal-select {
+.local-material-player__settings-panel .material-rendition-menu .terminal-select {
   min-height: 24px;
   font-size: 7px;
 }

@@ -473,18 +473,29 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'materials.rememberImportCategory': 'Read by FilesScreen when the import dialog opens.',
   'materials.previewLimitMb': 'Passed to the preview reader, which refuses a larger binary.',
   'materials.textPreviewLimitMb': 'Passed to the preview reader, which refuses a larger text.',
+  'materials.autoplayPreview':
+    'Read by LocalMaterialPreview, which passes it to LocalMaterialPlayer as its autoplay prop.',
+  'materials.loopPreview':
+    'Read by LocalMaterialPreview, which passes it to LocalMaterialPlayer as its loop prop.',
+  'materials.rememberPreviewPosition':
+    'Read by LocalMaterialPreview, which seeds and records the in-session position cache by it.',
   'performance.playbackLeadMs': 'Passed to PlaybackSyncCoordinator as its execution delay.',
   'performance.streamRetryBackoff': 'Read by VideoScreen, which picks the native retry ladder.',
-  'player.defaultRate': 'Read by VideoScreen, which starts the media player at this rate.',
+  'player.defaultRate':
+    'Read by VideoScreen and LocalMaterialPlayer, which start their media player at this rate.',
   'player.seekStep': 'Read by VideoScreen and LocalMaterialPlayer, whose skip controls move by it.',
-  'player.defaultVolume': 'Read by VideoScreen, which opens the media surface at this volume.',
+  'player.defaultVolume':
+    'Read by VideoScreen and LocalMaterialPlayer, which open their media surface at this volume.',
   'player.loopDemo': 'Read by VideoScreen, which repeats a finite source when it ends.',
   'player.snapshotGrayscale':
     'Read by VideoScreen, which grades the canvas a snapshot is drawn on.',
+  'player.controlsHideDelayMs':
+    'Read by LocalMaterialPlayer, which waits that long before hiding its overlay controls.',
   'cameras.gridPageSize': 'Read by VideoScreen, which pages the camera registry by it.',
   'cameras.defaultFilter': 'Read by VideoScreen, which seeds the registry filter from it.',
   'cameras.ptzStep': 'Read by PtzPanel, whose pad moves pan and tilt by it.',
-  'player.startMuted': 'Read by VideoScreen, which opens a camera feed muted or not.',
+  'player.startMuted':
+    'Read by VideoScreen, which opens a camera feed muted or not, and by LocalMaterialPlayer for a local material.',
   'privacy.webcamCapture': 'Read inside toggleWebcam, which refuses the machine camera without it.',
   'privacy.frameCapture': 'Read inside takeSnapshot, which refuses to write a frame without it.',
   'performance.webcamResolution': 'Read by VideoScreen, which asks getUserMedia for that size.',
