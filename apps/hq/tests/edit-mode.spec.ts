@@ -1,7 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { messagesFor } from '../src/application/localization/messages';
 import { expandEditPanel } from './editPanelHelpers';
 import { gotoSettingsUnified } from './settingsHelpers';
+
+/** The shipped Russian text a test needs to prove an override replaced, read from the catalogue rather than pasted. */
+const ru = messagesFor('ru');
+
+function shippedText(id: keyof ReturnType<typeof messagesFor>): string {
+  const value = ru[id];
+  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
+  return value;
+}
 
 test('an operator opens edit mode, docks the panel and edits without the page scrolling', async ({
   page,
@@ -404,7 +414,12 @@ async function openSection(page: Page, section: string): Promise<void> {
  */
 const routesNamedAfterNoScreen = [
   { route: '/archive', screen: 'files', tile: 'categories', shipped: 'КАТЕГОРИИ' },
-  { route: '/cases/CASE-01', screen: 'cases', tile: 'registry', shipped: 'РЕЕСТР ДЕЛ' },
+  {
+    route: '/cases/CASE-01',
+    screen: 'cases',
+    tile: 'registry',
+    shipped: shippedText('cases.registryTitle'),
+  },
 ] as const;
 
 for (const subject of routesNamedAfterNoScreen) {
@@ -459,7 +474,7 @@ test('R28: the same gesture still lands on a route that shares its name with the
   // Reading the address off the tile registry must not cost them anything.
   await page.goto('/overview');
   const heading = page.locator('[data-tile="brief"] .ops-panel__header h2');
-  await expect(heading).toHaveText('ОБЗОР ОПЕРАЦИИ');
+  await expect(heading).toHaveText(shippedText('overview.briefTitle'));
 
   await selectTile(page, 'brief');
   await openSection(page, 'ИНФОРМАЦИЯ');

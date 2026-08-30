@@ -10,8 +10,16 @@ import type { BridgeConfig } from '@gremuchaya/config';
 import { createVirtualPath } from '@gremuchaya/domain';
 import { FileBridgeService } from '@gremuchaya/protocol';
 
+import { messagesFor, type MessageId } from '../src/application/localization/messages';
 import { startBridge } from '../../file-bridge/src/server.js';
 import { gotoSettingsUnified } from './settingsHelpers';
+
+/** The shipped Russian text a selector needs, read from the catalogue rather than pasted. */
+function shippedText(id: MessageId): string {
+  const value = messagesFor('ru')[id];
+  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
+  return value;
+}
 
 test('boots the unified operational world and opens a linked object', async ({ page }) => {
   await page.goto('/');
@@ -27,7 +35,7 @@ test('keeps map, camera and drawer interactions connected', async ({ page }) => 
   await page.goto('/map');
   await expect(page.locator('.yandex-tactical-map')).toBeVisible();
   await expect(page.getByLabel('Ключ Yandex Maps API v3')).toHaveClass(/terminal-input/);
-  await expect(page.getByText('[ YANDEX MAPS API V3 // KEY REQUIRED ]')).toBeVisible();
+  await expect(page.getByText(shippedText('yandexMap.keyRequiredHeading'))).toBeVisible();
   await expect(page.getByRole('button', { name: '[APPLY] ПОДКЛЮЧИТЬ' })).toHaveClass(
     /terminal-button/,
   );
@@ -59,7 +67,7 @@ test('loads the Yandex Maps JavaScript API v3 endpoint and retains its no-provid
     /api-maps\.yandex\.ru\/v3\/\?apikey=test-v3-key&lang=ru_RU/,
   );
   await expect(page.locator('.yandex-tactical-map__fallback')).toBeVisible();
-  await expect(page.getByText('[ MAP PROVIDER V3 UNAVAILABLE ]')).toBeVisible();
+  await expect(page.getByText(shippedText('yandexMap.providerUnavailableHeading'))).toBeVisible();
 });
 
 test('runs the Vidstack surveillance player and keeps the 720p matrix horizontal-scroll free', async ({
@@ -765,7 +773,7 @@ test('uses terminal Base UI controls across the first feature-screen migration w
 
   await page.goto('/analytics');
   const collectionFilter = page.locator('.ops-segmented .terminal-button').filter({
-    hasText: 'COLLECTION',
+    hasText: shippedText('overview.directionCollection'),
   });
   await collectionFilter.click();
   await expect(collectionFilter).toHaveClass(/is-active/);
@@ -773,7 +781,7 @@ test('uses terminal Base UI controls across the first feature-screen migration w
 
   await page.goto('/reports');
   const systemReports = page.locator('.reports-kinds .terminal-button').filter({
-    hasText: 'SYSTEM',
+    hasText: shippedText('reports.kindSystem'),
   });
   await systemReports.click();
   await expect(systemReports).toHaveClass(/is-active/);
@@ -813,7 +821,7 @@ test('migrates registry filters and actions to typed terminal controls', async (
   await page.getByRole('option', { name: 'ЛИЦА', exact: true }).click();
   await expect(objectKind).toContainText('ЛИЦА');
   await expect(page.getByRole('textbox', { name: 'Поиск объектов' })).toHaveClass(/terminal-input/);
-  await page.getByRole('button', { name: 'ACTIVITY', exact: true }).click();
+  await page.getByRole('button', { name: shippedText('objects.tabActivity'), exact: true }).click();
   await expect(page.locator('.event-feed')).toBeVisible();
   await expect(
     page.locator('.objects-screen button:not(.terminal-button):not(.terminal-select)'),
@@ -1105,7 +1113,7 @@ test('keeps overview, communications and tactical layers interactive through wra
 }) => {
   await page.goto('/overview');
   await expect(page.locator('.overview-screen .terminal-button').first()).toBeVisible();
-  const schematic = page.getByRole('button', { name: /СЕКТОР S-03.*TARGET K-17/ });
+  const schematic = page.getByRole('button', { name: /СЕКТОР S-03.*ЦЕЛЬ K-17/ });
   await schematic.click();
   await expect(page).toHaveURL(/\/map/);
 
@@ -1124,7 +1132,7 @@ test('keeps overview, communications and tactical layers interactive through wra
   await firstChannel.click();
   const mute = page.locator('.channel-actions .terminal-button').first();
   await mute.click();
-  await expect(mute).toContainText('MUTED');
+  await expect(mute).toContainText(shippedText('comms.mutedButton'));
   await expect(page.locator('.message-log .terminal-button').first()).toBeVisible();
 });
 

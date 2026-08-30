@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
 import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EditableContent } from '@/components/edit/EditableContent';
@@ -14,6 +16,13 @@ import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { useContextMenuAction } from '@/components/contextMenus/ContextMenuRuntime';
 import { useOperationsStore } from '@/state/operationsStore';
 
+/**
+ * The storage tree's folder names, and the project path they hang under, are
+ * the film's own fiction -- the production's in-universe archive, not chrome
+ * this catalogue is the source of. They stay written in Russian exactly as
+ * the fiction has them, in both locales; see `LocalizedText` in
+ * `@gremuchaya/domain` for where that population is meant to be translated.
+ */
 const folders = [
   ['01_Досье', 20],
   ['02_Операции', 12],
@@ -27,18 +36,42 @@ const folders = [
 
 type CaseStatusFilter = 'all' | 'ACTIVE' | 'IN_PROGRESS' | 'RESTRICTED' | 'ARCHIVED';
 
-const caseStatusOptions = [
-  { value: 'all', label: 'ВСЕ СТАТУСЫ' },
-  { value: 'ACTIVE', label: 'АКТИВЕН' },
-  { value: 'IN_PROGRESS', label: 'В РАБОТЕ' },
-  { value: 'RESTRICTED', label: 'ОГРАНИЧЕН' },
-  { value: 'ARCHIVED', label: 'АРХИВ' },
-] as const satisfies ReadonlyArray<{
-  readonly value: CaseStatusFilter;
-  readonly label: string;
-}>;
+type CaseSortKey = 'code' | 'title' | 'createdAt' | 'priority';
+
+/** `field.name` already carries the case title's column, `field.created` and `field.priority` the other two. */
+const caseSortColumnLabelIds: Readonly<Record<CaseSortKey, MessageId>> = {
+  code: 'cases.columnCode',
+  title: 'field.name',
+  createdAt: 'field.created',
+  priority: 'field.priority',
+};
+
+const caseSortColumns = [
+  'code',
+  'title',
+  'createdAt',
+  'priority',
+] as const satisfies readonly CaseSortKey[];
+
+/** `nav.archive` already carries "АРХИВ" / "ARCHIVE" for the archived status option. */
+const caseStatusLabelIds: Readonly<Record<CaseStatusFilter, MessageId>> = {
+  all: 'cases.statusAll',
+  ACTIVE: 'cases.statusActive',
+  IN_PROGRESS: 'cases.statusInProgress',
+  RESTRICTED: 'cases.statusRestricted',
+  ARCHIVED: 'nav.archive',
+};
+
+const caseStatusFilters = [
+  'all',
+  'ACTIVE',
+  'IN_PROGRESS',
+  'RESTRICTED',
+  'ARCHIVED',
+] as const satisfies readonly CaseStatusFilter[];
 
 export function CasesScreen({ detailId }: { readonly detailId?: string }) {
+  const translate = useTranslate();
   const router = useRouter();
   const state = useOperationsStore((value) => value);
   useContextMenuAction('record.open', (subject) => {
@@ -49,7 +82,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
   });
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<CaseStatusFilter>('all');
-  const [sortKey, setSortKey] = useState<'code' | 'title' | 'createdAt' | 'priority'>('priority');
+  const [sortKey, setSortKey] = useState<CaseSortKey>('priority');
   const [descending, setDescending] = useState(true);
   const [selectedFolder, setSelectedFolder] = useState('01_Досье');
   const activeId = detailId ?? state.ui.selectedCaseId;
@@ -70,6 +103,11 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
   const pageSize = useTablePageSize();
   const allCases = useMemo(() => Object.values(state.cases), [state.cases]);
   const normalizedQuery = foldCase(query.trim());
+  const caseStatusOptions = useMemo(
+    () =>
+      caseStatusFilters.map((value) => ({ value, label: translate(caseStatusLabelIds[value]) })),
+    [translate],
+  );
   // The question is the status filter plus the search text: either one
   // narrows the registry, and without this the operator kept whatever page
   // the previous filter had left them on.
@@ -111,7 +149,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'СТРУКТУРА ХРАНИЛИЩА',
+        title: translate('cases.treeTitle'),
         category: 'navigation',
         descriptor: {
           id: 'tree',
@@ -125,8 +163,8 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
         },
         render: () => (
           <Panel
-            title="СТРУКТУРА ХРАНИЛИЩА"
-            eyebrow="CASE TREE / LOCAL"
+            title={translate('cases.treeTitle')}
+            eyebrow={translate('cases.treeEyebrow')}
             className="case-tree-panel"
           >
             <div className="case-tree">
@@ -154,7 +192,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
         ),
       },
       {
-        title: 'РЕЕСТР ДЕЛ',
+        title: translate('cases.registryTitle'),
         category: 'records',
         descriptor: {
           id: 'registry',
@@ -168,8 +206,11 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
         },
         render: () => (
           <Panel
-            title="РЕЕСТР ДЕЛ"
-            eyebrow={`${selectedFolder} / ${casePage.total} RECORDS`}
+            title={translate('cases.registryTitle')}
+            eyebrow={translate('cases.registryEyebrow', {
+              folder: selectedFolder,
+              count: casePage.total,
+            })}
             className="case-registry"
           >
             <div className="ops-filterbar">
@@ -178,39 +219,39 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                 <TerminalInput
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  aria-label="Поиск по реестру дел"
-                  placeholder="ПОИСК ПО РЕЕСТРУ"
+                  aria-label={translate('cases.searchAriaLabel')}
+                  placeholder={translate('cases.searchPlaceholder')}
                 />
               </label>
               <TerminalSelect
                 value={statusFilter}
                 options={caseStatusOptions}
                 onValueChange={setStatusFilter}
-                label="Статус дела"
+                label={translate('cases.statusSelectLabel')}
               />
               <TerminalButton onClick={() => setDescending((value) => !value)}>
-                [{descending ? '↓' : '↑'}] SORT
+                {translate('cases.sortLabel', { arrow: descending ? '↓' : '↑' })}
               </TerminalButton>
             </div>
             {cases.length === 0 ? (
-              <EmptyState>ДЕЛА НЕ ОБНАРУЖЕНЫ</EmptyState>
+              <EmptyState>{translate('cases.noCasesFound')}</EmptyState>
             ) : (
               <div className="ops-table-wrap">
                 <table className="ops-table cases-table">
                   <thead>
                     <tr>
-                      <th>ТИП</th>
-                      {(['code', 'title', 'createdAt', 'priority'] as const).map((column) => (
+                      <th>{translate('field.type')}</th>
+                      {caseSortColumns.map((column) => (
                         <th key={column}>
                           <TerminalButton onClick={() => setSortKey(column)}>
-                            {column.toUpperCase()}{' '}
+                            {translate(caseSortColumnLabelIds[column])}{' '}
                             {sortKey === column ? (descending ? '▼' : '▲') : ''}
                           </TerminalButton>
                         </th>
                       ))}
-                      <th>СТАТУС</th>
-                      <th>ИСТОЧНИК</th>
-                      <th>ДОСЬЕ</th>
+                      <th>{translate('field.status')}</th>
+                      <th>{translate('field.source')}</th>
+                      <th>{translate('cases.columnDossier')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -250,14 +291,18 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                 </table>
               </div>
             )}
-            <RecordPagination page={casePage} onPage={goToPage} label="Страницы реестра дел">
-              <span>SELECTED: {selectedCase?.id ?? '—'}</span>
+            <RecordPagination
+              page={casePage}
+              onPage={goToPage}
+              label={translate('cases.paginationLabel')}
+            >
+              <span>{translate('registry.selectedFooter', { id: selectedCase?.id ?? '—' })}</span>
             </RecordPagination>
           </Panel>
         ),
       },
       {
-        title: 'КАРТОЧКА ДОСЬЕ',
+        title: translate('cases.dossierTitle'),
         category: 'detail',
         descriptor: {
           id: 'dossier',
@@ -272,17 +317,17 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
         },
         render: () => (
           <Panel
-            title="КАРТОЧКА ДОСЬЕ"
-            eyebrow={selectedCase?.dossierCode ?? 'NO SELECTION'}
+            title={translate('cases.dossierTitle')}
+            eyebrow={selectedCase?.dossierCode ?? translate('registry.noSelection')}
             className="dossier-panel"
           >
             {selectedCase === undefined || selectedPerson === undefined ? (
-              <EmptyState>ДОСЬЕ НЕ ВЫБРАНО</EmptyState>
+              <EmptyState>{translate('cases.noDossierSelected')}</EmptyState>
             ) : (
               <>
                 <header className="dossier-header">
                   <div className="dossier-photo">
-                    <span>[ PERSON / {selectedPerson.id} ]</span>
+                    <span>{translate('cases.personMarker', { id: selectedPerson.id })}</span>
                     <i />
                   </div>
                   <div>
@@ -291,14 +336,14 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                     <StatusBadge status={selectedPerson.status} />
                   </div>
                   <b>
-                    RISK
+                    {translate('field.risk')}
                     <br />
                     <strong>{selectedPerson.riskScore}</strong>
                   </b>
                 </header>
                 <dl className="ops-definition-list">
                   <div>
-                    <dt>ДАТА РОЖДЕНИЯ</dt>
+                    <dt>{translate('field.birthDate')}</dt>
                     <dd>
                       <EditableContent field="person.birthDate" entityId={selectedPerson.id}>
                         {selectedPerson.birthDate}
@@ -306,37 +351,37 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                     </dd>
                   </div>
                   <div>
-                    <dt>ГРАЖДАНСТВО</dt>
+                    <dt>{translate('field.citizenship')}</dt>
                     <dd>{selectedPerson.citizenship}</dd>
                   </div>
                   <div>
-                    <dt>РОЛЬ</dt>
+                    <dt>{translate('field.role')}</dt>
                     <dd>{selectedPerson.role}</dd>
                   </div>
                   <div>
-                    <dt>ДОКУМЕНТ</dt>
+                    <dt>{translate('field.document')}</dt>
                     <dd>{selectedPerson.documentCode}</dd>
                   </div>
                   <div>
-                    <dt>ДЕЛО</dt>
+                    <dt>{translate('field.case')}</dt>
                     <dd>{selectedCase.code}</dd>
                   </div>
                   <div>
-                    <dt>ПРИОРИТЕТ</dt>
+                    <dt>{translate('field.priority')}</dt>
                     <dd>P{selectedCase.priority}</dd>
                   </div>
                 </dl>
                 <section className="dossier-addresses">
-                  <h3>АДРЕСА</h3>
+                  <h3>{translate('cases.addressesHeading')}</h3>
                   {selectedPerson.addresses.map((address) => (
                     <TerminalButton key={address} onClick={() => router.push('/map')}>
                       <span>{address}</span>
-                      <b>[MAP]</b>
+                      <b>{translate('cases.mapMarker')}</b>
                     </TerminalButton>
                   ))}
                 </section>
                 <section className="dossier-tags">
-                  <h3>ТЕГИ</h3>
+                  <h3>{translate('field.tags')}</h3>
                   {selectedPerson.tags.map((tag) => (
                     <TerminalButton key={tag} onClick={() => setQuery(tag)}>
                       [{tag}]
@@ -344,7 +389,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                   ))}
                 </section>
                 <section className="dossier-files">
-                  <h3>ПРИКРЕПЛЁННЫЕ МАТЕРИАЛЫ</h3>
+                  <h3>{translate('cases.attachedMaterialsHeading')}</h3>
                   <div>
                     {selectedFiles.map((file) => (
                       <TerminalButton
@@ -365,12 +410,12 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
                 </section>
                 <footer>
                   <TerminalButton onClick={() => router.push(`/cases/${selectedCase.id}`)}>
-                    [ENTER] ОТКРЫТЬ ПОЛНУЮ КАРТОЧКУ
+                    {translate('cases.openFullCardButton')}
                   </TerminalButton>
                   <TerminalButton
                     onClick={() => state.openDrawer('file', selectedFiles[0]?.id ?? 'FILE-01')}
                   >
-                    [V] FILE VIEWER
+                    {translate('cases.fileViewerButton')}
                   </TerminalButton>
                 </footer>
               </>
@@ -380,6 +425,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
       },
     ],
     [
+      caseStatusOptions,
       casePage,
       cases,
       descending,
@@ -393,6 +439,7 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
       state,
       statusFilter,
       router,
+      translate,
     ],
   );
 
@@ -400,22 +447,22 @@ export function CasesScreen({ detailId }: { readonly detailId?: string }) {
     <div className="ops-screen cases-screen">
       <header className="ops-screen__title">
         <div>
-          <span>REGISTRY / DOSSIER / LOCAL</span>
-          <h1>ДЕЛА И ДОСЬЕ</h1>
+          <span>{translate('cases.headerEyebrow')}</span>
+          <h1>{translate('cases.headerTitle')}</h1>
         </div>
         <div className="case-summary">
           <span>
-            <small>РЕЕСТР</small>
+            <small>{translate('cases.registryCountLabel')}</small>
             <strong>{Object.keys(state.cases).length}</strong>
           </span>
           <span>
-            <small>ОГРАНИЧЕНО</small>
+            <small>{translate('cases.restrictedCountLabel')}</small>
             <strong>
               {Object.values(state.cases).filter((item) => item.status === 'RESTRICTED').length}
             </strong>
           </span>
           <span>
-            <small>МАТЕРИАЛЫ</small>
+            <small>{translate('field.materials')}</small>
             <strong>{Object.keys(state.attachments).length}</strong>
           </span>
         </div>

@@ -5,6 +5,7 @@ import Script from 'next/script';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
 import type { MapLayer } from '@/state/operationsStore';
 
 /**
@@ -270,6 +271,7 @@ export function YandexTacticalMap({
   onOpenAlert,
   onMapViewChange,
 }: YandexTacticalMapProps) {
+  const translate = useTranslate();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<YandexMapInstance | null>(null);
   const overlayRef = useRef<YandexMapCollection | null>(null);
@@ -593,26 +595,29 @@ export function YandexTacticalMap({
   }, []);
 
   const providerFallback = (
-    <aside className="yandex-tactical-map__fallback" aria-label="Резервные данные карты">
+    <aside
+      className="yandex-tactical-map__fallback"
+      aria-label={translate('yandexMap.fallbackAriaLabel')}
+    >
       <header>
-        <strong>[ MAP DATA / LOCAL FALLBACK ]</strong>
-        <span>YANDEX MAPS API V3 OFFLINE</span>
+        <strong>{translate('yandexMap.fallbackHeading')}</strong>
+        <span>{translate('yandexMap.offlineStatus')}</span>
       </header>
       <dl>
         <div>
-          <dt>ЦЕНТР</dt>
+          <dt>{translate('yandexMap.centerLabel')}</dt>
           <dd>{center.map((value) => value.toFixed(5)).join(' / ')}</dd>
         </div>
         <div>
-          <dt>МАСШТАБ</dt>
+          <dt>{translate('yandexMap.scaleLabel')}</dt>
           <dd>Z{zoom.toFixed(1)}</dd>
         </div>
         <div>
-          <dt>ОБЪЕКТЫ</dt>
+          <dt>{translate('field.objects')}</dt>
           <dd>{objects.length}</dd>
         </div>
         <div>
-          <dt>МАРШРУТЫ</dt>
+          <dt>{translate('map.layerRoutes')}</dt>
           <dd>{routes.length}</dd>
         </div>
       </dl>
@@ -630,7 +635,7 @@ export function YandexTacticalMap({
   );
 
   return (
-    <section className="yandex-tactical-map" aria-label="Тактическая карта Yandex Maps API v3">
+    <section className="yandex-tactical-map" aria-label={translate('yandexMap.sectionAriaLabel')}>
       {scriptSource === null ? null : (
         <Script
           id={yandexMapsScriptId}
@@ -646,10 +651,8 @@ export function YandexTacticalMap({
       {effectiveLoadState !== 'ready' ? providerFallback : null}
       {effectiveLoadState === 'awaiting-key' ? (
         <div className="yandex-tactical-map__status">
-          <strong>[ YANDEX MAPS API V3 // KEY REQUIRED ]</strong>
-          <span>
-            Введите JavaScript API-ключ v3 с ограничением HTTP Referer для этого устройства
-          </span>
+          <strong>{translate('yandexMap.keyRequiredHeading')}</strong>
+          <span>{translate('yandexMap.keyRequiredHint')}</span>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -665,26 +668,23 @@ export function YandexTacticalMap({
               type="password"
               value={keyInput}
               onChange={(event) => setKeyInput(event.target.value)}
-              placeholder="JavaScript API v3 key"
+              placeholder={translate('yandexMap.keyInputPlaceholder')}
               autoComplete="off"
               spellCheck={false}
-              aria-label="Ключ Yandex Maps API v3"
+              aria-label={translate('yandexMap.keyInputAriaLabel')}
             />
             <TerminalButton tone="primary" type="submit">
-              [APPLY] ПОДКЛЮЧИТЬ
+              {translate('yandexMap.applyKeyButton')}
             </TerminalButton>
           </form>
           <small>
-            Ключ хранится только на устройстве. Для production-сборки используйте{' '}
-            NEXT_PUBLIC_YANDEX_MAPS_API_KEY.
+            {translate('yandexMap.keyStorageHint', { envVar: 'NEXT_PUBLIC_YANDEX_MAPS_API_KEY' })}
           </small>
         </div>
       ) : effectiveLoadState === 'error' ? (
         <div className="yandex-tactical-map__status is-error">
-          <strong>[ MAP PROVIDER V3 UNAVAILABLE ]</strong>
-          <span>
-            Проверьте ключ v3, HTTP Referer, доступ к api-maps.yandex.ru и лимиты проекта.
-          </span>
+          <strong>{translate('yandexMap.providerUnavailableHeading')}</strong>
+          <span>{translate('yandexMap.providerUnavailableHint')}</span>
           {buildTimeApiKey === '' ? (
             <TerminalButton
               onClick={() => {
@@ -695,13 +695,14 @@ export function YandexTacticalMap({
                 setLoadState('awaiting-key');
               }}
             >
-              [R] ЗАМЕНИТЬ КЛЮЧ
+              {translate('yandexMap.replaceKeyButton')}
             </TerminalButton>
           ) : null}
         </div>
       ) : effectiveLoadState === 'loading' ? (
         <div className="yandex-tactical-map__status">
-          <strong>[ INITIALIZING YANDEX VECTOR LAYER... ]</strong>
+          <strong>{translate('yandexMap.initializingHeading')}</strong>
+          {/* A fixed protocol/version readout, not chrome -- see the wave's report. */}
           <span>JAVASCRIPT API V3 / WEBGL / VECTOR MODE / RU_RU</span>
         </div>
       ) : null}
@@ -709,6 +710,7 @@ export function YandexTacticalMap({
         <span className="map-north">
           N<br />↑
         </span>
+        {/* A fixed protocol/version readout, not chrome -- see the wave's report. */}
         <span className="map-scale">YANDEX V3 ├───┼───┤</span>
         <i>+</i>
       </div>

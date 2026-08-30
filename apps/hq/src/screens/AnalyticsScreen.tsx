@@ -4,6 +4,8 @@ import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { channelDomain } from '@/application/simulation/simulationCurves';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import {
@@ -17,21 +19,46 @@ import {
 import { useOperationsStore } from '@/state/operationsStore';
 
 const riskForecast = [
-  ['ПОТЕРЯ СИГНАЛА K-17', 82, 'critical'],
-  ['ПЕРЕГРУЗКА CH-03', 64, 'warning'],
-  ['ПЕРЕСЕЧЕНИЕ S-03', 47, 'warning'],
-  ['ДЕГРАДАЦИЯ STORAGE-02', 21, 'normal'],
-] as const;
+  { id: 'analytics.forecastSignalLoss', code: 'K-17', value: 82, tone: 'critical' },
+  { id: 'analytics.forecastOverload', code: 'CH-03', value: 64, tone: 'warning' },
+  { id: 'analytics.forecastIntersection', code: 'S-03', value: 47, tone: 'warning' },
+  { id: 'analytics.forecastDegradation', code: 'STORAGE-02', value: 21, tone: 'normal' },
+] as const satisfies ReadonlyArray<{
+  readonly id: MessageId;
+  readonly code: string;
+  readonly value: number;
+  readonly tone: 'critical' | 'warning' | 'normal';
+}>;
 
 const sourceConfidence = [
-  ['ВИДЕО', 94],
-  ['РАДИОПЕРЕХВАТ', 78],
-  ['ПОЛЕВЫЕ ГРУППЫ', 88],
-  ['СЕНСОРЫ', 91],
-  ['ОТКРЫТЫЕ ИСТОЧНИКИ', 63],
-] as const;
+  { id: 'field.kindVideo', value: 94 },
+  { id: 'analytics.sourceRadioIntercept', value: 78 },
+  { id: 'analytics.sourceFieldTeams', value: 88 },
+  { id: 'analytics.sourceSensors', value: 91 },
+  { id: 'analytics.sourceOpenSources', value: 63 },
+] as const satisfies ReadonlyArray<{ readonly id: MessageId; readonly value: number }>;
+
+type AnalyticsFilter = 'all' | 'intelligence' | 'collection' | 'analysis' | 'operations';
+
+/** `overview.direction*` already carries three of these five words for the overview screen's own filter. */
+const analyticsFilterLabelIds: Readonly<Record<AnalyticsFilter, MessageId>> = {
+  all: 'analytics.filterAll',
+  intelligence: 'overview.directionIntelligence',
+  collection: 'overview.directionCollection',
+  analysis: 'overview.directionAnalysis',
+  operations: 'overview.directionOperations',
+};
+
+const analyticsFilters = [
+  'all',
+  'intelligence',
+  'collection',
+  'analysis',
+  'operations',
+] as const satisfies readonly AnalyticsFilter[];
 
 export function AnalyticsScreen() {
+  const translate = useTranslate();
   const state = useOperationsStore((value) => value);
   const objects = useMemo(() => Object.values(state.objects), [state.objects]);
   const sectors = useMemo(() => Object.values(state.sectors), [state.sectors]);
@@ -55,7 +82,7 @@ export function AnalyticsScreen() {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'ИНДЕКС ОПЕРАЦИОННОЙ ОБСТАНОВКИ',
+        title: translate('analytics.indexTitle'),
         category: 'summary',
         descriptor: {
           id: 'index',
@@ -68,33 +95,50 @@ export function AnalyticsScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ИНДЕКС ОПЕРАЦИОННОЙ ОБСТАНОВКИ"
-            eyebrow="COMPOSITE SCORE / T+07:42"
+            title={translate('analytics.indexTitle')}
+            eyebrow={translate('analytics.indexEyebrow')}
             className="analytics-index"
           >
-            <Gauge value={state.metrics.readiness} label="ГОТОВНОСТЬ КОНТУРА" detail="ПОРОГ: 80%" />
+            <Gauge
+              value={state.metrics.readiness}
+              label={translate('analytics.circuitReadinessLabel')}
+              detail={translate('analytics.thresholdDetail')}
+            />
             <div className="analytics-index__readout">
-              <Metric label="АКТИВНЫЕ ОБЪЕКТЫ" value={activeObjects.length} tone="warning" />
               <Metric
-                label="СРЕДНЯЯ УГРОЗА"
+                label={translate('analytics.metricActiveObjects')}
+                value={activeObjects.length}
+                tone="warning"
+              />
+              <Metric
+                label={translate('analytics.metricAverageThreat')}
                 value={`${averageThreat}%`}
                 tone={averageThreat > 55 ? 'warning' : 'normal'}
               />
-              <Metric label="КАЧЕСТВО СИГНАЛА" value={`${averageSignal}%`} tone="ok" />
-              <Metric label="ПРОГНОЗ" value="STABLE+" detail="ГОРИЗОНТ 45 МИН" tone="ok" />
+              <Metric
+                label={translate('analytics.metricSignalQuality')}
+                value={`${averageSignal}%`}
+                tone="ok"
+              />
+              <Metric
+                label={translate('analytics.metricForecast')}
+                value={translate('analytics.forecastStableValue')}
+                detail={translate('analytics.forecastHorizonDetail')}
+                tone="ok"
+              />
             </div>
             {presentation === 'full' ? (
               <Sparkline
                 values={state.metricsHistory.readiness}
                 domain={channelDomain('readiness')}
-                label="Динамика индекса оперативной обстановки"
+                label={translate('analytics.indexSparklineLabel')}
               />
             ) : null}
           </Panel>
         ),
       },
       {
-        title: 'КЛЮЧЕВЫЕ ВЫВОДЫ',
+        title: translate('analytics.insightsTitle'),
         category: 'summary',
         descriptor: {
           id: 'insights',
@@ -108,8 +152,8 @@ export function AnalyticsScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="КЛЮЧЕВЫЕ ВЫВОДЫ"
-            eyebrow="INSIGHTS / MACHINE ASSISTED"
+            title={translate('analytics.insightsTitle')}
+            eyebrow={translate('analytics.insightsEyebrow')}
             className="analytics-insights"
           >
             {insights.slice(0, presentation === 'full' ? insights.length : 2).map((insight) => (
@@ -129,7 +173,7 @@ export function AnalyticsScreen() {
         ),
       },
       {
-        title: 'МАТРИЦА СЕКТОРОВ',
+        title: translate('analytics.matrixTitle'),
         category: 'geo',
         descriptor: {
           id: 'matrix',
@@ -140,7 +184,11 @@ export function AnalyticsScreen() {
           relocationRoute: '/map',
         },
         render: () => (
-          <Panel title="МАТРИЦА СЕКТОРОВ" eyebrow="THREAT × READINESS" className="analytics-matrix">
+          <Panel
+            title={translate('analytics.matrixTitle')}
+            eyebrow={translate('analytics.matrixEyebrow')}
+            className="analytics-matrix"
+          >
             <div className="sector-matrix">
               {sectors.map((sector) => (
                 <TerminalButton
@@ -157,10 +205,14 @@ export function AnalyticsScreen() {
                   <span>{sector.name}</span>
                   <ProgressBar
                     value={sector.threat}
-                    label="THREAT"
+                    label={translate('field.threat')}
                     tone={sector.threat > 65 ? 'critical' : 'warning'}
                   />
-                  <ProgressBar value={sector.readiness} label="READY" tone="ok" />
+                  <ProgressBar
+                    value={sector.readiness}
+                    label={translate('analytics.readyLabel')}
+                    tone="ok"
+                  />
                 </TerminalButton>
               ))}
             </div>
@@ -168,7 +220,7 @@ export function AnalyticsScreen() {
         ),
       },
       {
-        title: 'КОРРЕЛЯЦИЯ СОБЫТИЙ',
+        title: translate('analytics.correlationTitle'),
         category: 'events',
         descriptor: {
           id: 'correlation',
@@ -182,11 +234,14 @@ export function AnalyticsScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="КОРРЕЛЯЦИЯ СОБЫТИЙ"
-            eyebrow="EVENT BUS / LAST 120"
+            title={translate('analytics.correlationTitle')}
+            eyebrow={translate('analytics.correlationEyebrow')}
             className="analytics-correlation"
           >
-            <div className="correlation-chart" aria-label="График корреляции событий">
+            <div
+              className="correlation-chart"
+              aria-label={translate('analytics.correlationChartAriaLabel')}
+            >
               {state.events.slice(0, 48).map((event, index) => (
                 <i
                   key={event.id}
@@ -204,15 +259,15 @@ export function AnalyticsScreen() {
               <div className="analytics-legend">
                 <span>
                   <i className="is-normal" />
-                  НОРМА
+                  {translate('analytics.legendNormal')}
                 </span>
                 <span>
                   <i className="is-warning" />
-                  ОТКЛОНЕНИЕ
+                  {translate('analytics.legendDeviation')}
                 </span>
                 <span>
                   <i className="is-critical" />
-                  КРИТИЧЕСКОЕ
+                  {translate('analytics.legendCritical')}
                 </span>
               </div>
             ) : null}
@@ -220,7 +275,7 @@ export function AnalyticsScreen() {
         ),
       },
       {
-        title: 'ПРОГНОЗ РИСКОВ',
+        title: translate('analytics.forecastTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'forecast',
@@ -232,22 +287,22 @@ export function AnalyticsScreen() {
         },
         render: () => (
           <Panel
-            title="ПРОГНОЗ РИСКОВ"
-            eyebrow="LOCAL HEURISTIC / 45 MIN"
+            title={translate('analytics.forecastTitle')}
+            eyebrow={translate('analytics.forecastEyebrow')}
             className="analytics-forecast"
           >
-            {riskForecast.map(([label, value, tone]) => (
-              <div key={label}>
-                <span>{label}</span>
-                <ProgressBar value={value} tone={tone} />
-                <b>{value}%</b>
+            {riskForecast.map((item) => (
+              <div key={item.id}>
+                <span>{translate(item.id, { code: item.code })}</span>
+                <ProgressBar value={item.value} tone={item.tone} />
+                <b>{item.value}%</b>
               </div>
             ))}
           </Panel>
         ),
       },
       {
-        title: 'НАДЁЖНОСТЬ ДАННЫХ',
+        title: translate('analytics.confidenceTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'confidence',
@@ -259,38 +314,39 @@ export function AnalyticsScreen() {
         },
         render: () => (
           <Panel
-            title="НАДЁЖНОСТЬ ДАННЫХ"
-            eyebrow="SOURCES / CONFIDENCE"
+            title={translate('analytics.confidenceTitle')}
+            eyebrow={translate('analytics.confidenceEyebrow')}
             className="analytics-confidence"
           >
-            {sourceConfidence.map(([label, value]) => (
-              <div key={label}>
-                <span>{label}</span>
-                <ProgressBar value={value} tone={value > 80 ? 'ok' : 'warning'} />
+            {sourceConfidence.map((item) => (
+              <div key={item.id}>
+                <span>{translate(item.id)}</span>
+                <ProgressBar value={item.value} tone={item.value > 80 ? 'ok' : 'warning'} />
               </div>
             ))}
           </Panel>
         ),
       },
     ],
-    [activeObjects.length, averageSignal, averageThreat, insights, sectors, state],
+    [activeObjects.length, averageSignal, averageThreat, insights, sectors, state, translate],
   );
 
   return (
     <div className="ops-screen analytics-screen">
       <header className="ops-screen__title">
         <div>
-          <span>ANALYTICAL CORE / LOCAL MODEL</span>
-          <h1>ОПЕРАТИВНАЯ АНАЛИТИКА</h1>
+          <span>{translate('analytics.headerEyebrow')}</span>
+          <h1>{translate('analytics.headerTitle')}</h1>
         </div>
         <div className="ops-segmented">
-          {['all', 'intelligence', 'collection', 'analysis', 'operations'].map((filter) => (
+          {analyticsFilters.map((filter) => (
             <TerminalButton
               key={filter}
               className={state.ui.analyticsFilter === filter ? 'is-active' : ''}
               onClick={() => state.setAnalyticsFilter(filter)}
             >
-              [{filter === 'all' ? '*' : filter.slice(0, 3).toUpperCase()}] {filter.toUpperCase()}
+              [{filter === 'all' ? '*' : filter.slice(0, 3).toUpperCase()}]{' '}
+              {translate(analyticsFilterLabelIds[filter])}
             </TerminalButton>
           ))}
         </div>

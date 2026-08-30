@@ -6,7 +6,8 @@ import { useMemo } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
 import { dateTimeFormat } from '@/application/localization/intl';
-import { useAppLocale } from '@/application/localization/locale';
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { EditableContent } from '@/components/edit/EditableContent';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import {
@@ -33,25 +34,45 @@ const listLength: Readonly<Record<TilePresentation, number>> = {
   minimal: 2,
 };
 
-const readinessRows = [
-  ['ЛИЧНЫЙ СОСТАВ', 94, '/objects'],
-  ['РАЗВЕДДАННЫЕ', 87, '/analytics'],
-  ['ТЕХНИЧЕСКИЕ СРЕДСТВА', 82, '/system'],
-  ['ПОДДЕРЖКА', 76, '/communications'],
-  ['ЛОГИСТИКА', 91, '/map'],
-] as const;
+const readinessRows: ReadonlyArray<readonly [MessageId, number, string]> = [
+  ['overview.readinessPersonnel', 94, '/objects'],
+  ['overview.readinessIntel', 87, '/analytics'],
+  ['overview.readinessTechnical', 82, '/system'],
+  ['overview.directionSupport', 76, '/communications'],
+  ['overview.readinessLogistics', 91, '/map'],
+];
 
 const directions = ['intelligence', 'collection', 'analysis', 'operations', 'support'] as const;
 
+/** Keyed by the union rather than built with a template string, so a direction with no message is a compile error. */
+const directionLabelIds: Readonly<Record<(typeof directions)[number], MessageId>> = {
+  intelligence: 'overview.directionIntelligence',
+  collection: 'overview.directionCollection',
+  analysis: 'overview.directionAnalysis',
+  operations: 'overview.directionOperations',
+  support: 'overview.directionSupport',
+};
+
 const evidenceKinds = ['video', 'audio', 'document', 'report', 'map', 'image'] as const;
+
+/** Keyed by the union rather than built with a template string, so a kind with no message is a compile error. */
+const evidenceKindLabelIds: Readonly<Record<(typeof evidenceKinds)[number], MessageId>> = {
+  video: 'field.kindVideo',
+  audio: 'field.kindAudio',
+  document: 'field.document',
+  report: 'field.kindReport',
+  map: 'nav.map',
+  image: 'field.kindImage',
+};
 
 /** What `toLocaleTimeString()` printed, named rather than left implicit. */
 const clockParts = { timeStyle: 'medium' } as const;
 
 export function OverviewScreen() {
-  // The subscription behind the three event stamps below. This screen selects
-  // narrowly, so nothing else here would notice the locale moving.
-  useAppLocale();
+  // Read at call time everywhere in this screen's tiles, subscribed here so a
+  // locale change re-renders it: the tiles array below is memoised, and
+  // without this the memo would keep the language it was first built in.
+  const translate = useTranslate();
   const router = useRouter();
   const operation = useOperationsStore((state) => state.operation);
   const sectors = useOperationsStore((state) => Object.values(state.sectors));
@@ -92,7 +113,7 @@ export function OverviewScreen() {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'ОБЗОР ОПЕРАЦИИ',
+        title: translate('overview.briefTitle'),
         category: 'summary',
         descriptor: {
           id: 'brief',
@@ -107,15 +128,15 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ОБЗОР ОПЕРАЦИИ"
-            eyebrow="BRIEF / CURRENT PHASE"
+            title={translate('overview.briefTitle')}
+            eyebrow={translate('overview.briefEyebrow')}
             className="overview-brief"
             actions={
               <TerminalButton
                 className="ops-link-button"
                 onClick={() => openDrawer('event', events[0]?.id ?? 'EV-01')}
               >
-                [ENTER] ПОЛНАЯ КАРТОЧКА
+                {translate('overview.openFullCardButton')}
               </TerminalButton>
             }
           >
@@ -126,7 +147,7 @@ export function OverviewScreen() {
             </p>
             {presentation === 'full' ? (
               <TerminalButton className="operation-schematic" onClick={() => router.push('/map')}>
-                <svg viewBox="0 0 600 220" aria-label="Схема сектора операции">
+                <svg viewBox="0 0 600 220" aria-label={translate('overview.sectorSchemeAlt')}>
                   {Array.from({ length: 9 }, (_, row) =>
                     Array.from({ length: 23 }, (_, column) => (
                       <circle
@@ -141,14 +162,16 @@ export function OverviewScreen() {
                   <circle className="is-target" cx="385" cy="61" r="8" />
                   <circle className="is-target-ring" cx="385" cy="61" r="20" />
                 </svg>
-                <span>СЕКТОР S-03 / TARGET K-17 / ФАЗА {operation.currentPhase}</span>
+                <span>
+                  {translate('overview.sectorPhaseLabel', { phase: operation.currentPhase })}
+                </span>
               </TerminalButton>
             ) : null}
           </Panel>
         ),
       },
       {
-        title: 'ХРОНОЛОГИЯ ОПЕРАЦИИ',
+        title: translate('overview.timelineTitle'),
         category: 'events',
         descriptor: {
           id: 'timeline',
@@ -163,8 +186,8 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ХРОНОЛОГИЯ ОПЕРАЦИИ"
-            eyebrow="TIMELINE / 09–19 SEP"
+            title={translate('overview.timelineTitle')}
+            eyebrow={translate('overview.timelineEyebrow')}
             className="overview-timeline"
           >
             <div className="operation-timeline">
@@ -193,7 +216,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'ГОТОВНОСТЬ К МИССИИ',
+        title: translate('overview.readinessTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'readiness',
@@ -207,15 +230,19 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ГОТОВНОСТЬ К МИССИИ"
-            eyebrow="MISSION / READINESS"
+            title={translate('overview.readinessTitle')}
+            eyebrow={translate('overview.readinessEyebrow')}
             className="overview-readiness"
           >
-            <Gauge value={metrics.readiness} label="ОБЩАЯ ГОТОВНОСТЬ" detail="ПОРOГ ДОПУСКА 80%" />
+            <Gauge
+              value={metrics.readiness}
+              label={translate('overview.readinessGaugeLabel')}
+              detail={translate('overview.readinessGaugeDetail')}
+            />
             <div className="readiness-list">
-              {readinessRows.slice(0, listLength[presentation]).map(([label, value, href]) => (
-                <TerminalButton key={label} onClick={() => router.push(href)}>
-                  <span>{label}</span>
+              {readinessRows.slice(0, listLength[presentation]).map(([labelId, value, href]) => (
+                <TerminalButton key={labelId} onClick={() => router.push(href)}>
+                  <span>{translate(labelId)}</span>
                   <ProgressBar value={value} />
                 </TerminalButton>
               ))}
@@ -224,7 +251,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'УРОВЕНЬ УГРОЗЫ ПО СЕКТОРАМ',
+        title: translate('overview.threatsTitle'),
         category: 'geo',
         descriptor: {
           id: 'threats',
@@ -238,8 +265,8 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="УРОВЕНЬ УГРОЗЫ ПО СЕКТОРАМ"
-            eyebrow="THREAT / SECTORS"
+            title={translate('overview.threatsTitle')}
+            eyebrow={translate('overview.threatsEyebrow')}
             className="overview-threats"
           >
             <div className="threat-list">
@@ -261,7 +288,7 @@ export function OverviewScreen() {
               ))}
             </div>
             <footer>
-              <span>АКТИВНЫХ ТРЕВОГ</span>
+              <span>{translate('overview.activeAlertsLabel')}</span>
               <strong>{alerts.filter((alert) => alert.lifecycle !== 'RESOLVED').length}</strong>
               <TerminalButton
                 onClick={() =>
@@ -271,14 +298,14 @@ export function OverviewScreen() {
                   )
                 }
               >
-                [ENTER] ПЕРВАЯ ТРЕВОГА
+                {translate('overview.firstAlertButton')}
               </TerminalButton>
             </footer>
           </Panel>
         ),
       },
       {
-        title: 'ПОСЛЕДНИЕ ОБНОВЛЕНИЯ',
+        title: translate('overview.eventsTitle'),
         category: 'events',
         descriptor: {
           id: 'events',
@@ -292,8 +319,8 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ПОСЛЕДНИЕ ОБНОВЛЕНИЯ"
-            eyebrow="EVENT BUS / LIVE"
+            title={translate('overview.eventsTitle')}
+            eyebrow={translate('overview.eventsEyebrow')}
             className="overview-events"
           >
             <div className="event-feed">
@@ -314,7 +341,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'ЦЕЛИ ОПЕРАЦИИ',
+        title: translate('overview.objectivesTitle'),
         category: 'records',
         descriptor: {
           id: 'objectives',
@@ -328,8 +355,8 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ЦЕЛИ ОПЕРАЦИИ"
-            eyebrow="OBJECTIVES / CHECKLIST"
+            title={translate('overview.objectivesTitle')}
+            eyebrow={translate('overview.objectivesEyebrow')}
             className="overview-objectives"
           >
             <ol className="objective-list">
@@ -355,7 +382,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'КЛЮЧЕВЫЕ ВЕХИ',
+        title: translate('overview.milestonesTitle'),
         category: 'events',
         descriptor: {
           id: 'milestones',
@@ -369,8 +396,8 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="КЛЮЧЕВЫЕ ВЕХИ"
-            eyebrow="MILESTONES / VERIFIED"
+            title={translate('overview.milestonesTitle')}
+            eyebrow={translate('overview.milestonesEyebrow')}
             className="overview-milestones"
           >
             <div className="milestone-list">
@@ -392,7 +419,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'СЕКТОР ОПЕРАЦИИ',
+        title: translate('overview.sectorTitle'),
         category: 'geo',
         descriptor: {
           id: 'sector',
@@ -406,12 +433,12 @@ export function OverviewScreen() {
         },
         render: () => (
           <Panel
-            title="СЕКТОР ОПЕРАЦИИ"
-            eyebrow="GEO / S-03"
+            title={translate('overview.sectorTitle')}
+            eyebrow={translate('overview.sectorEyebrow')}
             className="overview-sector"
             actions={
               <TerminalButton className="ops-link-button" onClick={() => router.push('/map')}>
-                [04] ОТКРЫТЬ КАРТУ
+                {translate('overview.openMapButton')}
               </TerminalButton>
             }
           >
@@ -424,13 +451,13 @@ export function OverviewScreen() {
             <div className="sector-readout">
               <span>55.755812 N</span>
               <span>37.617298 E</span>
-              <strong>ПРОМЫШЛЕННАЯ ЗОНА / КОНТУР 3</strong>
+              <strong>{translate('overview.sectorReadoutLabel')}</strong>
             </div>
           </Panel>
         ),
       },
       {
-        title: 'ПРОГРЕСС ПО НАПРАВЛЕНИЯМ',
+        title: translate('overview.directionsTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'directions',
@@ -444,8 +471,8 @@ export function OverviewScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ПРОГРЕСС ПО НАПРАВЛЕНИЯМ"
-            eyebrow="DIRECTIONS / ANALYTICS"
+            title={translate('overview.directionsTitle')}
+            eyebrow={translate('overview.directionsEyebrow')}
             className="overview-directions"
           >
             <div className="direction-list">
@@ -463,7 +490,7 @@ export function OverviewScreen() {
                       router.push('/analytics');
                     }}
                   >
-                    <span>{direction.toUpperCase()}</span>
+                    <span>{translate(directionLabelIds[direction])}</span>
                     <ProgressBar value={progress} />
                   </TerminalButton>
                 );
@@ -473,7 +500,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'СОБРАННЫЕ ДОКАЗАТЕЛЬСТВА',
+        title: translate('overview.evidenceTitle'),
         category: 'records',
         descriptor: {
           id: 'evidence',
@@ -487,8 +514,8 @@ export function OverviewScreen() {
         },
         render: () => (
           <Panel
-            title="СОБРАННЫЕ ДОКАЗАТЕЛЬСТВА"
-            eyebrow="EVIDENCE / LOCAL"
+            title={translate('overview.evidenceTitle')}
+            eyebrow={translate('overview.evidenceEyebrow')}
             className="overview-evidence"
           >
             <div className="evidence-grid">
@@ -502,7 +529,7 @@ export function OverviewScreen() {
                 >
                   <i>[{item.kind.slice(0, 3).toUpperCase()}]</i>
                   <strong>{String(item.count).padStart(2, '0')}</strong>
-                  <span>{item.kind.toUpperCase()}</span>
+                  <span>{translate(evidenceKindLabelIds[item.kind])}</span>
                 </TerminalButton>
               ))}
             </div>
@@ -510,7 +537,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'ЦЕЛИ',
+        title: translate('overview.targetsTitle'),
         category: 'records',
         descriptor: {
           id: 'targets',
@@ -523,21 +550,25 @@ export function OverviewScreen() {
           relocationRoute: '/objects',
         },
         render: () => (
-          <Panel title="ЦЕЛИ" eyebrow="TARGETS / LINKED" className="overview-targets">
+          <Panel
+            title={translate('overview.targetsTitle')}
+            eyebrow={translate('overview.targetsEyebrow')}
+            className="overview-targets"
+          >
             <div className="metric-grid metric-grid--four">
               <Metric
-                label="ВСЕГО"
+                label={translate('overview.metricTotal')}
                 value={objects.length}
                 onClick={() => router.push('/objects')}
               />
               <Metric
-                label="НЕЙТРАЛИЗОВАНО"
+                label={translate('overview.metricNeutralized')}
                 value={objects.filter((object) => object.status === 'NEUTRALIZED').length}
                 tone="ok"
                 onClick={() => router.push('/objects')}
               />
               <Metric
-                label="В РАБОТЕ"
+                label={translate('overview.metricUnderway')}
                 value={
                   objects.filter(
                     (object) => object.status === 'ACTIVE' || object.status === 'WATCHED',
@@ -547,7 +578,7 @@ export function OverviewScreen() {
                 onClick={() => router.push('/objects')}
               />
               <Metric
-                label="ПОТЕРЯ СИГНАЛА"
+                label={translate('overview.metricSignalLost')}
                 value={objects.filter((object) => object.status === 'SIGNAL_LOST').length}
                 tone="critical"
                 onClick={() => {
@@ -560,7 +591,7 @@ export function OverviewScreen() {
         ),
       },
       {
-        title: 'АКТИВНЫЕ ЗАДАЧИ',
+        title: translate('overview.tasksTitle'),
         category: 'records',
         descriptor: {
           id: 'tasks',
@@ -570,12 +601,27 @@ export function OverviewScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="АКТИВНЫЕ ЗАДАЧИ" eyebrow="TASKS / LIVE" className="overview-tasks">
+          <Panel
+            title={translate('overview.tasksTitle')}
+            eyebrow={translate('overview.tasksEyebrow')}
+            className="overview-tasks"
+          >
             <div className="metric-grid metric-grid--four">
-              <Metric label="ВСЕГО" value={tasks.length} />
-              <Metric label="ВЫПОЛНЕНО" value={completedTasks} tone="ok" />
-              <Metric label="В ПРОЦЕССЕ" value={activeTasks} tone="warning" />
-              <Metric label="ОЖИДАЕТ" value={tasks.length - completedTasks - activeTasks} />
+              <Metric label={translate('overview.metricTotal')} value={tasks.length} />
+              <Metric
+                label={translate('overview.metricCompleted')}
+                value={completedTasks}
+                tone="ok"
+              />
+              <Metric
+                label={translate('overview.metricInProgress')}
+                value={activeTasks}
+                tone="warning"
+              />
+              <Metric
+                label={translate('overview.metricPending')}
+                value={tasks.length - completedTasks - activeTasks}
+              />
             </div>
           </Panel>
         ),
@@ -599,6 +645,7 @@ export function OverviewScreen() {
       setAnalyticsFilter,
       setFileFilter,
       tasks,
+      translate,
     ],
   );
 
@@ -606,32 +653,36 @@ export function OverviewScreen() {
     <div className="ops-screen overview-screen">
       <header className="ops-screen__title operation-titlebar">
         <div>
-          <span>OPERATION / {operation.code}</span>
+          <span>{translate('overview.operationCodeLabel', { code: operation.code })}</span>
           <h1>
-            СВОДКА ОПЕРАЦИИ «
+            {translate('overview.summaryPrefix')}
             <EditableContent field="operation.title" entityId={operation.id}>
               {operation.title}
             </EditableContent>
-            »
+            {translate('overview.summarySuffix')}
           </h1>
         </div>
         <div className="operation-titlebar__metrics">
           <StatusBadge status={operation.status} />
           <span>
-            <small>ПРИОРИТЕТ</small>
+            <small>{translate('field.priority')}</small>
             <strong>{operation.priority}</strong>
           </span>
           <span>
-            <small>УГРОЗА</small>
+            <small>{translate('field.threat')}</small>
             <strong className="is-critical">{operation.threatLevel}</strong>
           </span>
           <span>
-            <small>ПЕРИОД</small>
+            <small>{translate('overview.periodLabel')}</small>
             <strong>09–19.09.2026</strong>
           </span>
         </div>
         <div className="operation-progress">
-          <ProgressBar value={operation.progress} label="ОБЩИЙ ПРОГРЕСС" tone="warning" />
+          <ProgressBar
+            value={operation.progress}
+            label={translate('overview.overallProgressLabel')}
+            tone="warning"
+          />
         </div>
       </header>
 

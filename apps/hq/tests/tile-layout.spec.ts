@@ -1,7 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { messagesFor, type MessageId } from '../src/application/localization/messages';
 import { expandEditPanel } from './editPanelHelpers';
 import { gotoSettingsUnified } from './settingsHelpers';
+
+/** The shipped Russian text a selector needs to find a tile by its title, read from the catalogue rather than pasted. */
+function shippedText(id: MessageId): string {
+  const value = messagesFor('ru')[id];
+  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
+  return value;
+}
 
 /**
  * Reads the grid back the way the resolver wrote it: every cell carries its
@@ -257,7 +265,7 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   const list = panel.locator('.edit-tiles');
   await expect(list).toBeVisible();
   // Named as the panel is titled, not as the setting keys it.
-  const objectives = list.getByRole('switch', { name: 'ЦЕЛИ ОПЕРАЦИИ' });
+  const objectives = list.getByRole('switch', { name: shippedText('overview.objectivesTitle') });
   await expect(objectives).toBeChecked();
 
   await objectives.click();
@@ -269,7 +277,9 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   const geo = list.getByRole('switch', { name: 'ГЕОГРАФИЯ' });
   await geo.click();
   await expect(page.locator('[data-tile="threats"]')).toHaveCount(0);
-  await expect(list.getByRole('switch', { name: 'УРОВЕНЬ УГРОЗЫ ПО СЕКТОРАМ' })).toBeDisabled();
+  await expect(
+    list.getByRole('switch', { name: shippedText('overview.threatsTitle') }),
+  ).toBeDisabled();
 });
 
 test('R10: a tile that does not fit goes to the screen of its own', async ({ page }) => {
@@ -282,7 +292,7 @@ test('R10: a tile that does not fit goes to the screen of its own', async ({ pag
 
   // `sector` shows the operation's ground, and `/map` shows the same ground in
   // full. The link is the claim: what left the overview is still reachable.
-  const relocated = notice.getByRole('button', { name: 'СЕКТОР ОПЕРАЦИИ' });
+  const relocated = notice.getByRole('button', { name: shippedText('overview.sectorTitle') });
   await expect(relocated).toBeVisible();
   await expect(page.locator('[data-tile="sector"]')).toHaveCount(0);
 
@@ -299,8 +309,10 @@ test('R10: a tile with no screen of its own is named rather than dropped', async
   // `state.tasks` is read by the overview alone, so there is no route to send
   // the operator to. It is listed without a link instead of pointing at a
   // screen that shows something else.
-  await expect(notice.locator('b', { hasText: 'АКТИВНЫЕ ЗАДАЧИ' })).toBeVisible();
-  await expect(notice.getByRole('button', { name: 'АКТИВНЫЕ ЗАДАЧИ' })).toHaveCount(0);
+  await expect(notice.locator('b', { hasText: shippedText('overview.tasksTitle') })).toBeVisible();
+  await expect(
+    notice.getByRole('button', { name: shippedText('overview.tasksTitle') }),
+  ).toHaveCount(0);
 });
 
 test('R10: a tile shows less at a smaller presentation, not the same list in a smaller box', async ({
@@ -360,7 +372,9 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
    * absence from a list that exists rather than the absence of the list.
    */
   await expect(page.locator('.tile-grid__displaced')).toBeVisible();
-  await expect(page.locator('.tile-grid__displaced', { hasText: 'ЦЕЛИ ОПЕРАЦИИ' })).toHaveCount(0);
+  await expect(
+    page.locator('.tile-grid__displaced', { hasText: shippedText('overview.objectivesTitle') }),
+  ).toHaveCount(0);
 });
 
 test('R10: layout.tileMinimumWidth changes which tiles fit, without emptying the screen', async ({
