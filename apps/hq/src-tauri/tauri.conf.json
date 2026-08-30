@@ -4,9 +4,9 @@
   "version": "0.5.0",
   "identifier": "ru.gremuchaya.hq",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm --workspace-root dev:hq",
     "devUrl": "http://127.0.0.1:3000",
-    "beforeBuildCommand": "pnpm build:desktop",
+    "beforeBuildCommand": "pnpm --workspace-root build:desktop:web",
     "frontendDist": "../out"
   },
   "app": {

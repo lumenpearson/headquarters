@@ -51,6 +51,14 @@ PostgreSQL-наборы: `apps/control-plane/vitest.config.ts` читает то
 `apps/hq/src-tauri/target/release/bundle/nsis/`. Сохранить версию commit, `buildId` и checksum
 установщика в съёмочный журнал.
 
+`beforeBuildCommand` и `beforeDevCommand` в `apps/hq/src-tauri/tauri.conf.json` вызывают
+корневые turbo-скрипты, а не `next build` внутри `apps/hq`. Разница видна только на машине,
+где рабочие пакеты ещё не собраны: `apps/hq` резолвит их через `dist/`, который лежит в
+`.gitignore`, а `next build` сам его не собирает — свежий клон падал на «Export … doesn't exist
+in target module» для каждого экспорта, добавленного после последней локальной сборки. CI этого
+не показывал: там desktop-сборка идёт корневым `build:desktop:web`, а `tauri:build` без
+Windows-раннера не выполняется вовсе.
+
 ## 3. Материалы
 
 1. Сверить каждый `requiredAssetIds` выбранных сцен с `assets_manifest.json`.
