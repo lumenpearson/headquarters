@@ -27,13 +27,30 @@ the code that makes it true, so the next reader can check rather than trust.
 
 ## The control plane is built, wired to a client, and local-only by default
 
-- **Both halves exist.** `apps/control-plane` implements the whole `SyncService` contract plus
-  four services, proved against live PostgreSQL, and since F10 `apps/hq` holds the client half:
-  `ControlPlaneClient`, `RealtimeClient`, `GroupEventPoller` and `GroupSettingsClient` under
+- **Both halves exist, and the two of them were first run together on 2026-08-30.**
+  `apps/control-plane` implements the whole `SyncService` contract plus four services, proved
+  against live PostgreSQL, and since F10 `apps/hq` holds the client half: `ControlPlaneClient`,
+  `RealtimeClient`, `GroupEventPoller` and `GroupSettingsClient` under
   `apps/hq/src/infrastructure/controlPlane/`, mounted by `ControlPlaneRuntime` in the root
   layout. An earlier version of this chapter said `apps/hq` holds no client, which stopped being
   true on 2026-08-26; corrections C43 and C49 in `docs/plans/actual_plan.md` record the same
-  claim's life inside the plan, and C59 records this one.
+  claim's life inside the plan, and C59 records this one. Until 2026-08-30 the two halves had
+  only ever met through test doubles. `apps/hq/tests/live-control-plane-proof.mjs` now drives
+  the production build in two real browser contexts against a running control plane and live
+  PostgreSQL: `CreateGroup`, `CreatePairingCode`, `PairDevice`, `TimeSync` and a group-scoped
+  setting travelling the `/realtime` socket from one window to the other, 14 assertions of 14.
+  **That first run found two defects the doubles could not produce, and both are release
+  business.** Pairing sent an empty `public_key`, which a control plane with durable auth
+  refuses, so no real pairing had ever succeeded anywhere; the client now presents a persistent
+  ECDSA P-256 device identity stored under `gremuchaya-hq:device-identity:v1`, and a browser
+  where WebCrypto refuses the curve falls back to 32 random bytes rather than a shared constant.
+  And `sync_events.document_id`/`sync_snapshots.document_id` were `uuid` columns while the one
+  published document id is the symbolic `settings.live-edit`, so against real PostgreSQL every
+  `PublishDocumentDelta` failed whole and the group mirror was never written; **migration 0014
+  is required** and widens both columns to `text`. Corrections C61 and C62 in
+  `docs/plans/history.md` carry the full account. The proof's own boundary, stated in its
+  header: one machine, two origins of one server process — LAN discovery and real network
+  latency stay unexercised, and no call has been made from the desktop build.
 - **Out of the box the application is local-only, by configuration rather than by gap.**
   `general.localOnly` defaults to `true` (`packages/settings-schema`), and `controlPlaneUrl`
   defaults to an empty list (`packages/config/src/projectSchemas.ts`), so no client is built
@@ -69,11 +86,17 @@ the code that makes it true, so the next reader can check rather than trust.
   digest — optionally prefixed `blake3:` or `sha256:` — is refused rather than accepted unchecked.
   A zero-byte upload is refused at `BeginUpload` and `CreateMaterialVersion` instead of producing
   a `READY` material with no object behind it; an empty file cannot be stored at all, because a
-  real empty object would need an upload path outside the multipart lifecycle. The remaining gap
-  is unchanged: every preview variant is the original object served inline, because no conversion
-  pipeline renders another. What no container can settle is a hosted store's own behaviour —
-  bucket policy, lifecycle rules, cross-region latency and a provider's multipart limits are
-  still unmeasured.
+  real empty object would need an upload path outside the multipart lifecycle. The third gap —
+  every preview variant being the original object served inline — closed on 2026-08-29 with the
+  conversion pipeline; see the rendition entry below. What no container can settle is a hosted
+  store's own behaviour — bucket policy, lifecycle rules, cross-region latency and a provider's
+  multipart limits are still unmeasured. The client half of the material lifecycle was run
+  against this same bucket for the first time on 2026-08-30
+  (`apps/hq/tests/live-materials-lifecycle-proof.mjs`): upload, new version, rename, trash, list
+  trash, restore, purge and the library event stream, 13 assertions of 13 on three consecutive
+  runs, driven through the real import dialog rather than a scripted client. One device in a
+  group it created for itself, so a second device being notified of the first one's upload stays
+  unexercised.
 - **The three outbound `IntegrationService` RPCs reach a GitHub nobody here can log in to.**
   `CreateIssue`, `CreateTranslationPullRequest` and `GetPullRequestStatus` are served by a REST
   gateway written directly over `fetch`, wired when `HQ_CONTROL_PLANE_GITHUB_TOKEN` and
@@ -137,15 +160,24 @@ the code that makes it true, so the next reader can check rather than trust.
 - **The container image builds, and no registry has ever held it.**
   `apps/control-plane/Dockerfile`, `compose.yaml` and `.github/workflows/container.yml` were
   written on a machine with no Docker installed. They have since been executed: the four-stage
-  build completes unchanged from the repository root, and the resulting image was run against a
+  build completes from the repository root, and the resulting image was run against a
   live PostgreSQL 18. All three entry points answer inside the image — `node dist/server.js`
   binds and serves, `node dist/migrate.js` applies every migration and then re-runs applying
   none, and `node dist/healthcheck.js` reports `SERVING`. `docker compose up -d --wait` brings
   both services to healthy, and the capability assertion `container.yml` makes — ten required
-  capabilities and `materials.storage-grants` refused — passes against the compose stack. What
-  is still unproved is everything downstream of the build: no image has been pushed to GHCR, so
-  the publish job, the tag rules and the by-hand package-visibility step in that workflow's
-  header remain unexecuted, and no deployment has run this image for longer than a smoke test.
+  capabilities and `materials.storage-grants` refused — passes against the compose stack.
+  **The Dockerfile did need one fix, found by the workflow's own first execution rather than by
+  a local build.** Serving the settings schema made `@gremuchaya/control-plane` depend on
+  `@gremuchaya/settings-schema`, and the build stage copied tsconfig and sources for domain and
+  protocol only, so `tsc -b` stopped at `TS5083` inside the image; the build stage now carries
+  settings-schema's tsconfig and sources and the runtime stage copies its `dist`. Adding a
+  workspace dependency to this package therefore means editing the Dockerfile, and nothing
+  checks that for you. What is still unproved is everything downstream of the build: no image
+  has been pushed to GHCR, so the publish job, the tag rules and the by-hand
+  package-visibility step in that workflow's header remain unexecuted; no deployment has run
+  this image for longer than a smoke test; and no successful run of `container.yml` itself is
+  on record — the fix above was verified locally by running the same sequence the workflow
+  runs.
 - **On a group fed by polling, a playback command executes six seconds after it is
   pressed — on every screen, including the one that issued it.** The lead has to
   exceed the poll interval or the screens diverge by however long the page took to
@@ -181,21 +213,41 @@ the code that makes it true, so the next reader can check rather than trust.
   session was checked against; a disagreement is two groups rather than two ways to
   one, so the link is left in the list with its address on show and carries and
   publishes nothing.
-- **The session state machine does not fail over between the planes.** Pairing,
-  refresh, join, presence and the clock all run on the first configured address. A
-  publication moves to the second plane while the first is not carrying, and both
-  planes feed the event channel, but if the first plane stops answering entirely
-  the session goes `offline` and the group is left through the local copy rather
-  than through the second plane. Nothing in this stage rebuilds the session on
-  another address.
+- **The session state machine fails over between the planes, and the failover is
+  unhurried.** Pairing, refresh, join, presence and the clock all run on the first
+  configured address; a publication moves to the second plane while the first is not
+  carrying, and both planes feed the event channel. Since 2026-08-30 a session that goes
+  `offline` with two or more configured links no longer waits for the operator:
+  `attemptPlaneFailover` (`apps/hq/src/components/sync/ControlPlaneRuntime.tsx`) probes the
+  other configured planes, promotes the first that answers with device-lifecycle support to
+  primary and owner, demotes the old primary to secondary and reader, and rebuilds the session
+  against the promoted client — which re-checks the installation identity on connect, so a
+  plane answering for a different database lands on `installation-changed` rather than
+  joining the wrong group. `ControlPlaneClient.asOwner()`/`.asReader()` build the sibling
+  client rather than mutating credentials in place, which keeps exactly one owner of the
+  refresh-token rotation. Two limits stand: the retry cadence is the presence interval and
+  nothing shortens it, so failover takes up to fifteen seconds; and if no plane answers at
+  all the behaviour is unchanged — the group is left through the local copy.
 - **Without Upstash, presence cannot report a device gone** and publications are unbounded. The
   service still runs; `Health` says which of the two modes is in force.
-- `conversion_jobs` is created by migrations and reached by no code. No RPC in the current
-  contract can fill it. `layout_documents` and `layout_versions` were in the same position
-  until `SettingsService.PutLayoutDocument`, `GetLayoutDocument` and `ListLayoutHistory`
-  filled them: a screen's whole arrangement, written with an expected revision, and the
-  version log that put appends to. The client does not call them yet, so no surface in
-  `apps/hq` stores a layout on the control plane.
+- **Every migrated table is now reached by code, and two of them by no client.**
+  `conversion_jobs`, created by migration 0001 and reached by nothing for as long as it
+  existed, has both a producer and a consumer since 2026-08-29: `completeUpload` queues the
+  declared quality ladder, `getPreviewGrant` queues a rung nobody has built, and
+  `MaterialConversionWorker` (`apps/control-plane/src/conversion/`) claims a job with
+  `FOR UPDATE OF job SKIP LOCKED`, renders it with ffmpeg, writes the object before the row
+  that names it, and records the result against migration 0012's `material_renditions`. A
+  preview variant is a rendered object wherever the deployment runs the worker: proved against
+  live PostgreSQL 18, live MinIO and real ffmpeg, where a 1280x720 source serves an 854x480
+  preview whose BLAKE3 differs from the material's `content_hash`. Without a worker the ladder
+  accumulates in `conversion_jobs`, nothing consumes it, and every variant is still the
+  original — which `Health`'s `conversion` dependency and `GetCapabilities`'
+  `materials.rendition-pipeline` both report, so an operator does not have to guess.
+  `layout_documents` and `layout_versions` were in the same position until
+  `SettingsService.PutLayoutDocument`, `GetLayoutDocument` and `ListLayoutHistory` filled them:
+  a screen's whole arrangement, written with an expected revision, and the version log that put
+  appends to. The client does not call those three yet, so no surface in `apps/hq` stores a
+  layout on the control plane.
 - **A document body above 4 MB is refused, and above 4.5 MB the platform would refuse it first.**
   The Fetch adapter (`apps/control-plane/src/fetch-adapter.ts`) is mounted at
   `apps/hq/app/api/[[...rpc]]/route.web.ts` in the web target, and Vercel caps a Function's request
@@ -218,17 +270,24 @@ the code that makes it true, so the next reader can check rather than trust.
 
 ## Personalization
 
-- **Two settings are declared and read by nothing, and the settings screen does not say so.**
-  `simulation.preset` (nothing maps a preset name onto the set of values it stands for) and
-  `layout.tileMinimumWidth` (the layout resolver takes no minimum-width input, and capping the
-  column count instead emptied eleven routes). Both are listed by name in
-  `apps/hq/src/application/personalization/presentation.ts` (`settingsAwaitingTheirFeature`),
-  where a test refuses to let a third join them silently — but an operator moving either gets no
-  warning. An earlier version of this entry named four; `localization.locale`,
-  `groups.authority` and `titlebar.alignment` have since gained readers — the locale runtime in
-  `apps/hq/src/application/localization/locale.ts`, the authority reconciliation in
-  `ControlPlaneRuntime` over `SetAuthorityMode`, and the `TitleBar` component with its
-  `data-titlebar-alignment` attribute.
+- **No setting is declared and read by nothing, and the settings screen would say so if one
+  were.** `settingsAwaitingTheirFeature` in
+  `apps/hq/src/application/personalization/presentation.ts` is empty as of 2026-08-29. The last
+  two members left it that day: `simulation.preset` now supplies the criticality baseline under
+  a channel with no operator-drawn curve (`application/simulation/simulationCurves.ts`), and
+  `layout.tileMinimumWidth` is read by `resolveGridLayout`, which takes an optional
+  `containerWidth`/`minimumTileWidth` pair and checks each candidate variant against the
+  measured pixel width — capping the column count instead is what emptied eleven routes, and
+  that approach was not taken. Its default is 160, the floor of the range: at 240 the setting
+  displaced a map-layer checkbox and a report kind from stock screens at 1440x900 the day the
+  resolver gained its reader. The accounting test still refuses to let a definition join the
+  list silently, and `SchemaSetting` now prints a `ПОКА НЕ ДЕЙСТВУЕТ` notice beside any member
+  of it, tracking the list rather than any hardcoded id — so an operator moving a future
+  unwired setting is warned. Two earlier versions of this entry named four settings and then
+  two; `localization.locale`, `groups.authority` and `titlebar.alignment` gained readers before
+  these — the locale runtime in `apps/hq/src/application/localization/locale.ts`, the authority
+  reconciliation in `ControlPlaneRuntime` over `SetAuthorityMode`, and the `TitleBar` component
+  with its `data-titlebar-alignment` attribute.
 
 ## Local access and the shoot machine
 
@@ -251,7 +310,12 @@ the code that makes it true, so the next reader can check rather than trust.
   the rest of the app down with it.
 - Local production mount paths are intentionally uncommitted and configured per shoot machine.
 - `FREEZE` and `BLACKOUT` are one-way in the interface. `resetScene` is the only exit, which is
-  what the runbook prescribes — but an operator reaching for a toggle will not find one.
+  what the runbook prescribes, and no toggle was added because adding one would contradict the
+  recorded shoot-day rule. What changed on 2026-08-29 is that the state is now visible rather
+  than inferred: `TopBar` reads the screens slice and reflects an active freeze or blackout on
+  the existing buttons through `aria-pressed`, an `is-active` class and a Russian tooltip
+  naming `RESET` as the exit. An operator reaching for a toggle still will not find one, but no
+  longer has to guess whether the command took.
 - **The desktop CSP cannot name an arbitrary LAN control plane, so the R18-aligned answer routes
   that traffic through a Tauri command instead.** `tauri.conf.json`'s `connect-src` admits
   loopback, `https://*.vercel.app` and `wss://*.vercel.app`, which covers the deployed control
