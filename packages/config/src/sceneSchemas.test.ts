@@ -68,4 +68,23 @@ describe('scene schema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('accepts title, description, notes and cue labels once they carry an English side', () => {
+    const result = sceneDefinitionSchema.safeParse({
+      ...validScene,
+      title: { ru: 'Липатов на мосту', en: 'Lipatov on the bridge' },
+      description: { ru: validScene.description, en: 'The red dot crosses the bridge.' },
+      notes: [{ ru: 'Съёмка на месте', en: 'Shot on location' }],
+      cues: [{ ...validScene.cues[0], label: { ru: 'Показать карту', en: 'Show the map' } }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a localized record for the scene number, which stays a plain slate identifier', () => {
+    const result = sceneDefinitionSchema.safeParse({
+      ...validScene,
+      scene: { ru: '44', en: '44' },
+    });
+    expect(result.success).toBe(false);
+  });
 });

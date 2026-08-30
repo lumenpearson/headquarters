@@ -4,6 +4,7 @@ export * from './explorer.js';
 export * from './explorerTree.js';
 export * from './ids.js';
 export * from './informationStates.js';
+export * from './localizedText.js';
 export * from './logging.js';
 export * from './operations.js';
 export * from './scene.js';
