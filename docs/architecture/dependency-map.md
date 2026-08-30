@@ -36,8 +36,8 @@ Package ownership:
   on direct Base UI imports and raw JSX controls.
 - `@gremuchaya/layout-engine`: deterministic bounded tile packing, relocation and overflow policy.
   It depends on nothing.
-- `@gremuchaya/settings-schema`: the 71 personalization `SettingDefinition`s, their validators and
-  the draft/checkpoint types the personalization state is built from.
+- `@gremuchaya/settings-schema`: the 168 personalization `SettingDefinition`s across 33 categories,
+  their validators and the draft/checkpoint types the personalization state is built from.
 - `@gremuchaya/test-fixtures`: deterministic data that is excluded from production imports.
 - `@gremuchaya/hq`: composition root, application services, adapters, Zustand runtime and UI.
 - `@gremuchaya/file-bridge`: localhost-only gRPC-Web file projection and server-streaming watcher.
@@ -81,14 +81,18 @@ State ownership:
   `apps/hq/src/application/personalization/presentation.ts`. A setting is bound there to a
   `data-*` attribute or an `--ops-*` custom property, or it is listed as read by a named consumer;
   a test fails on a definition that is neither.
-- `localStorage` owns everything the browser persists, under nine keys:
+- `localStorage` owns everything the browser persists, under eleven keys:
   `gremuchaya-hq:operations:v3`, `gremuchaya-hq:production-snapshots:v3`,
   `gremuchaya-hq:snapshots:v1`, `gremuchaya-hq:device-session:v3` (the paired control-plane session,
   refresh token included, with the installation id it was minted against),
-  `gremuchaya-hq:group-mirror:v1` (the last group state the device downloaded, plus a draft
-  companion that lives for one download), `gremuchaya-hq:control-plane-address:v1` (the operator's
-  in-app control-plane address list, scoped to the device), `hq.camera-material-assignments.v1`,
-  `hq.keybinds-intro-seen.v1`, and the Yandex Maps key. There is no IndexedDB and no Tauri store
-  plugin in this repository. Media and timer handles are never persisted.
+  `gremuchaya-hq:device-identity:v1` (the device's ECDSA P-256 identity keypair, whose public half
+  is what pairing presents as `public_key`), `gremuchaya-hq:group-mirror:v1` (the last group state
+  the device downloaded, plus a draft companion that lives for one download),
+  `gremuchaya-hq:control-plane-address:v1` (the operator's in-app control-plane address list, scoped
+  to the device), `hq.camera-material-assignments.v1`, `hq.keybinds-intro-seen.v1`,
+  `hq.material-annotations.v1` (timestamped notes on a material in the local player surface, local
+  to this browser), and the Yandex Maps key. There is no IndexedDB and no Tauri store
+  plugin in this repository. Media and timer handles are never persisted. The three bus keys are
+  written and removed in the same statement pair and persist nothing.
 - Application services perform cross-slice transitions and all IO. React components dispatch use
   cases and select narrow state only.
