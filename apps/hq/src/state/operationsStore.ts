@@ -174,6 +174,14 @@ interface OperationsUiState {
   readonly analyticsFilter: string;
   readonly navCompact: boolean;
   readonly productionPanelOpen: boolean;
+  /**
+   * True once {@link StartupSequence} has finished its readout for this
+   * process launch (or plays none at all). Gates the first-launch keybind
+   * intro (R11) so it never paints over the boot readout -- a process-scoped
+   * signal, not a preference, so it is reset on hydrate and pinned against
+   * `advanced.worldSync` the same way `productionPanelOpen`/`drawer` are.
+   */
+  readonly startupComplete: boolean;
 }
 
 /**
@@ -192,6 +200,16 @@ interface EditModeState {
   /** Empty string rather than undefined, matching the other selections here. */
   readonly selectedElementId: string;
   readonly dockEdge: EditDockEdge;
+  /**
+   * Whether the floating panel shows its full body (nav, settings, content
+   * editor, footer) or only its compact button row. Lives here rather than as
+   * a `useState` in `EditPanel` so that selecting an element on screen can
+   * expand it as one store transition -- see `selectEditElement` -- instead
+   * of a component-local reaction to a prop change. Collapsed by default:
+   * `enterEditMode` always resets it to `false`, matching the panel's own
+   * unpersisted, session-scoped defaults below.
+   */
+  readonly panelExpanded: boolean;
 }
 
 export type EditDockEdge = 'left' | 'right' | 'top' | 'bottom';
@@ -407,6 +425,7 @@ export interface OperationsState {
   readonly setAnalyticsFilter: (filter: string) => void;
   readonly toggleNavCompact: () => void;
   readonly toggleProductionPanel: (force?: boolean) => void;
+  readonly markStartupComplete: () => void;
   readonly setProductionOption: <Key extends keyof Omit<ProductionState, 'snapshots'>>(
     key: Key,
     value: ProductionState[Key],
@@ -418,6 +437,7 @@ export interface OperationsState {
   readonly exitEditMode: () => void;
   readonly selectEditElement: (id: string) => void;
   readonly dockEditPanel: (edge: EditDockEdge) => void;
+  readonly setEditPanelExpanded: (expanded: boolean) => void;
   readonly applyContentPatch: (patches: readonly ContentPatch[]) => void;
   readonly resetContentEdits: () => void;
   readonly applySettingsPatch: (patches: readonly SettingsPatch[]) => void;
@@ -587,6 +607,7 @@ function createBaseState() {
       analyticsFilter: 'all',
       navCompact: false,
       productionPanelOpen: false,
+      startupComplete: false,
     },
     materials: { imported: {} as Readonly<Record<string, ImportedMaterial>> },
     production: {
@@ -616,6 +637,7 @@ function createBaseState() {
       // createBaseState has no declared return type, so a bare literal widens
       // to string and stops satisfying EditDockEdge.
       dockEdge: 'right' as const,
+      panelExpanded: false,
     },
     content: { overrides: {} as ContentOverrides },
     connection: initialConnectionState,
@@ -881,6 +903,10 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     set((state) => ({
       ui: { ...state.ui, productionPanelOpen: force ?? !state.ui.productionPanelOpen },
     })),
+  markStartupComplete: () =>
+    set((state) =>
+      state.ui.startupComplete ? state : { ui: { ...state.ui, startupComplete: true } },
+    ),
   setProductionOption: (key, value) =>
     set((state) => ({ production: { ...state.production, [key]: value } })),
   applyPreset: (preset) =>
@@ -951,16 +977,34 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         audit: [auditEntry('ВОССТАНОВЛЕНО СОСТОЯНИЕ СЦЕНЫ', id), ...state.audit].slice(0, 100),
       };
     }),
-  enterEditMode: () => set((state) => ({ edit: { ...state.edit, active: true } })),
+  enterEditMode: () =>
+    // Collapsed every time, regardless of how the panel was left before: a
+    // reopened session starts as a pill, the same way it starts on `right`
+    // and with no selection.
+    set((state) => ({ edit: { ...state.edit, active: true, panelExpanded: false } })),
 
   exitEditMode: () =>
     // The selection belongs to one editing pass and is dropped with it. The
     // dock edge is where the operator parked the panel, so it survives.
     set((state) => ({ edit: { ...state.edit, active: false, selectedElementId: '' } })),
 
-  selectEditElement: (id) => set((state) => ({ edit: { ...state.edit, selectedElementId: id } })),
+  selectEditElement: (id) =>
+    set((state) => ({
+      edit: {
+        ...state.edit,
+        selectedElementId: id,
+        // Pointing at a value on screen is a request to edit it; a collapsed
+        // pill answering that with nothing would make the selection look
+        // ignored. Deselecting (`id === ''`) leaves the panel exactly where
+        // the operator put it rather than collapsing it back.
+        panelExpanded: id === '' ? state.edit.panelExpanded : true,
+      },
+    })),
 
   dockEditPanel: (edge) => set((state) => ({ edit: { ...state.edit, dockEdge: edge } })),
+
+  setEditPanelExpanded: (expanded) =>
+    set((state) => ({ edit: { ...state.edit, panelExpanded: expanded } })),
 
   applyContentPatch: (patches) => {
     set((state) => {
@@ -1726,7 +1770,16 @@ function hydratePersistedState(): void {
         'startup.restoreWorld',
       );
       operationsStore.setState((state) => ({
-        ui: { ...state.ui, ...parsed.ui, productionPanelOpen: false, drawer: null },
+        ui: {
+          ...state.ui,
+          ...parsed.ui,
+          productionPanelOpen: false,
+          drawer: null,
+          // Process-scoped, like the two fields above: a launch that restores
+          // the world must still play its own startup sequence and gate its
+          // own keybind intro, not inherit "already finished" from the blob.
+          startupComplete: false,
+        },
         production: { ...state.production, ...parsed.production },
         alerts: restoreWorld ? (parsed.alerts ?? state.alerts) : state.alerts,
         tasks: restoreWorld ? (parsed.tasks ?? state.tasks) : state.tasks,
@@ -1810,6 +1863,9 @@ export function initializeOperationsClient(): () => void {
           ...remoteUi,
           productionPanelOpen: state.ui.productionPanelOpen,
           drawer: state.ui.drawer,
+          // This window's own startup sequence and keybind-intro gate, not a
+          // fact about the peer's window: see the hydrate reset above.
+          startupComplete: state.ui.startupComplete,
         },
         production: { ...state.production, ...event.data.production },
         alerts: event.data.alerts,

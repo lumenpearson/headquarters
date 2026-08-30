@@ -362,4 +362,67 @@ describe('initializeOperationsClient', () => {
       );
     });
   }
+
+  /*
+   * `startupComplete` gates the first-launch keybind intro (R11) off the boot
+   * readout. It is process-scoped like `productionPanelOpen`/`drawer`: a
+   * second launch that restores everything else must still play its own
+   * startup sequence and gate its own intro, not resume with last session's
+   * "already finished".
+   */
+  it('resets startupComplete on hydrate even when the stored blob says it finished', () => {
+    const state = operationsStore.getState();
+    const { snapshots: _snapshots, ...production } = state.production;
+    localStorage.setItem(
+      persistedStateKey,
+      JSON.stringify({
+        version: 5,
+        // `globalFilter` rides in the same `ui` merge as `startupComplete` --
+        // a neighbouring field with no special-cased reset, distinct from its
+        // own default ('all'). Asserting it below proves the blob's `ui` was
+        // actually merged rather than the whole hydrate call being a no-op
+        // that happens to leave `startupComplete` at its own default of
+        // `false` regardless of what this test does.
+        ui: { ...state.ui, startupComplete: true, globalFilter: 'flagged' },
+        production,
+        personalization: state.personalization,
+      }),
+    );
+
+    dispose = initializeOperationsClient();
+
+    expect(operationsStore.getState().ui.startupComplete).toBe(false);
+    expect(operationsStore.getState().ui.globalFilter).toBe('flagged');
+  });
+
+  it('keeps this session startupComplete local when a peer says it already finished', () => {
+    const channel = installChannel();
+    try {
+      dispose = initializeOperationsClient();
+      expect(operationsStore.getState().ui.startupComplete).toBe(false);
+
+      // A harmless local change to obtain a real world snapshot in the shape
+      // the broadcast handler expects, the same way the content-sync cases
+      // above do.
+      operationsStore.getState().setGlobalFilter('all');
+      const world = channel.posted.at(-1) ?? {};
+      channel.deliver({
+        ...world,
+        // `searchQuery` rides in `remoteUi` next to `startupComplete`, at a
+        // value distinct from this session's own default (''). Asserting it
+        // below proves the peer's `ui` was actually applied through this
+        // handler, rather than the assertion on `startupComplete` passing
+        // because the handler discarded the whole message.
+        ui: { ...operationsStore.getState().ui, startupComplete: true, searchQuery: 'peer-marker' },
+      });
+    } finally {
+      channel.restore();
+    }
+
+    expect(operationsStore.getState().ui.searchQuery).toBe('peer-marker');
+    // The peer's own startup readout finishing is not a fact about this
+    // window's; adopting it would let a sibling window silently skip the
+    // gate here.
+    expect(operationsStore.getState().ui.startupComplete).toBe(false);
+  });
 });

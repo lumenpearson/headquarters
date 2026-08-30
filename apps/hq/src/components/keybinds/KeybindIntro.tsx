@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
 import { useBooleanSetting } from '@/application/personalization/useSetting';
+import { useOperationsStore } from '@/state/operationsStore';
 
 import { KeybindList } from './KeybindList';
 import { useKeybind } from './KeybindRuntime';
@@ -53,9 +54,35 @@ export function KeybindIntro() {
   );
   const [overridden, setOverridden] = useState<boolean | null>(null);
   const introOnLaunch = useBooleanSetting('keybinds.introOnLaunch');
+  const startupComplete = useOperationsStore((state) => state.ui.startupComplete);
   // Ctrl+/ still opens it either way: this decides the automatic offer on a
-  // first launch, not whether the card exists.
-  const open = overridden ?? (introOnLaunch && !seen);
+  // first launch, not whether the card exists. `startupComplete` keeps the
+  // automatic offer off the boot readout -- without it, a first-ever launch
+  // opens this card at the same instant StartupSequence starts painting.
+  const open = overridden ?? (introOnLaunch && !seen && startupComplete);
+
+  const cardRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * The card now appears asynchronously -- gated on `startupComplete`, which
+   * fires off an arbitrary timer -- rather than always being present at first
+   * paint, so an operator can already be focused somewhere else when it
+   * mounts. Move focus onto the card the way any modal dialog would, and hand
+   * it back to whatever held it beforehand once the card closes.
+   * `document.contains` guards the previously-focused element having left the
+   * document in the meantime (a screen change while the card was open).
+   */
+  useEffect(() => {
+    if (!open) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    cardRef.current?.focus();
+    return () => {
+      if (previouslyFocused !== null && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+  }, [open]);
 
   useKeybind(
     'keybinds.list',
@@ -75,11 +102,25 @@ export function KeybindIntro() {
 
   return (
     <div
-      className="keybind-intro fixed inset-0 z-[var(--z-dialog)] grid place-items-center backdrop-blur-[16px] backdrop-saturate-[90%] bg-[color-mix(in_srgb,var(--bg-0)_62%,transparent)]"
+      // Blur reads `--ops-overlay-blur` (`popups.overlayBlur`) through the same
+      // compound arbitrary-value form `terminalOverlayStyles.ts` uses for the
+      // dialog/drawer backdrops, rather than a literal Tailwind utility the
+      // setting could never reach; the `16px` fallback matches the setting's
+      // own default.
+      // Overscroll containment on the backdrop: a card taller than the
+      // viewport must not chain its scroll into the page underneath it.
+      className="keybind-intro fixed inset-0 z-[var(--z-dialog)] grid place-items-center overscroll-contain [backdrop-filter:blur(var(--ops-overlay-blur,16px))_saturate(90%)] bg-[color-mix(in_srgb,var(--bg-0)_62%,transparent)]"
       role="dialog"
+      aria-modal="true"
       aria-label="Сочетания клавиш"
     >
-      <div className="keybind-intro__card grid grid-rows-[auto_minmax(0,1fr)_auto] gap-hq-3 w-[min(760px,92vw)] max-h-[82dvh] p-hq-4 border border-hq-accent bg-hq-panel-raised">
+      <div
+        ref={cardRef}
+        // Programmatic focus target, not a tab stop of its own: `-1` keeps it
+        // out of the normal tab order while still letting `.focus()` land here.
+        tabIndex={-1}
+        className="keybind-intro__card grid grid-rows-[auto_minmax(0,1fr)_auto] gap-hq-3 w-[min(760px,92vw)] max-h-[82dvh] p-hq-4 border border-hq-accent bg-hq-panel-raised outline-none"
+      >
         <header className="flex gap-hq-2 items-baseline justify-between text-hq-accent text-hq-xs tracking-[0.12em]">
           <strong>СОЧЕТАНИЯ КЛАВИШ</strong>
           <span className="text-hq-text-2 tracking-[0.04em]">
