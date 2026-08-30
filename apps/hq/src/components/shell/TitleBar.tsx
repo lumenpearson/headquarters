@@ -1,6 +1,6 @@
 'use client';
 
-import { TerminalButton } from '@gremuchaya/ui/primitives';
+import { TerminalButton, TerminalIcon, type IconName } from '@gremuchaya/ui/primitives';
 import { titlebarElements, type TitlebarElement } from '@gremuchaya/settings-schema';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -62,6 +62,7 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
   const elements = useStringListSetting('titlebar.elements');
   const information = useStringSetting('titlebar.information');
   const dragRegion = useStringSetting('titlebar.dragRegion');
+  const iconSet = useStringSetting('styles.iconSet');
 
   // `full` drags from the bar itself and from everything that is not a control;
   // `title` narrows the region to the name alone, which is what an operator who
@@ -107,7 +108,8 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
                 key={element}
                 element="minimize"
                 label="Свернуть окно"
-                glyph="—"
+                icon="minimize"
+                iconSet={iconSet}
                 onActivate={minimizeWindow}
               />
             );
@@ -117,7 +119,8 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
                 key={element}
                 element="maximize"
                 label={maximized ? 'Восстановить окно' : 'Развернуть окно'}
-                glyph={maximized ? '❐' : '□'}
+                icon={maximized ? 'restore' : 'maximize'}
+                iconSet={iconSet}
                 onActivate={toggleMaximizeWindow}
               />
             );
@@ -127,7 +130,8 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
                 key={element}
                 element="close"
                 label="Закрыть окно"
-                glyph="✕"
+                icon="close"
+                iconSet={iconSet}
                 onActivate={closeWindow}
               />
             );
@@ -176,6 +180,7 @@ export function ManagedWindowFrame({
   readonly label: string;
   readonly children: ReactNode;
 }) {
+  const iconSet = useStringSetting('styles.iconSet');
   return (
     <div className="managed-window">
       <header className="ops-titlebar ops-titlebar--managed" data-tauri-drag-region>
@@ -185,10 +190,17 @@ export function ManagedWindowFrame({
         <WindowControl
           element="minimize"
           label="Свернуть окно"
-          glyph="—"
+          icon="minimize"
+          iconSet={iconSet}
           onActivate={minimizeWindow}
         />
-        <WindowControl element="close" label="Закрыть окно" glyph="✕" onActivate={closeWindow} />
+        <WindowControl
+          element="close"
+          label="Закрыть окно"
+          icon="close"
+          iconSet={iconSet}
+          onActivate={closeWindow}
+        />
       </header>
       {children}
     </div>
@@ -221,12 +233,14 @@ function orderedElements(elements: readonly string[]): readonly TitlebarElement[
 function WindowControl({
   element,
   label,
-  glyph,
+  icon,
+  iconSet,
   onActivate,
 }: {
   readonly element: TitlebarElement;
   readonly label: string;
-  readonly glyph: string;
+  readonly icon: IconName;
+  readonly iconSet: string;
   readonly onActivate: () => Promise<void>;
 }) {
   return (
@@ -244,7 +258,7 @@ function WindowControl({
         });
       }}
     >
-      <b aria-hidden="true">{glyph}</b>
+      <TerminalIcon name={icon} iconSet={iconSet} />
     </TerminalButton>
   );
 }

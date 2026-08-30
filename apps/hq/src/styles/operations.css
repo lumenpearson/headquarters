@@ -258,10 +258,10 @@ body {
   background: transparent;
 }
 
-.ops-titlebar .ops-titlebar__control b {
+.ops-titlebar .ops-titlebar__control svg {
   color: var(--ops-text);
-  font-size: 11px;
-  font-weight: 400;
+  width: 12px;
+  height: 12px;
 }
 
 .ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover {
@@ -269,7 +269,7 @@ body {
   background: var(--ops-red);
 }
 
-.ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover b {
+.ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover svg {
   color: #0b0504;
 }
 
@@ -470,6 +470,14 @@ body {
   font-size: 8px;
 }
 
+/* `ShellCommandsMenu`'s trigger: the same right-click roster, reachable by a
+   button. `<small>{...}</small>` beside it already carries the button's own
+   font-size; the icon only needs its own. */
+.ops-topbar__commands svg {
+  width: 12px;
+  height: 12px;
+}
+
 .ops-nav {
   z-index: 20;
   grid-area: 3 / 1 / 4 / 2;
@@ -485,6 +493,11 @@ body {
   border-bottom: 1px solid var(--ops-line) !important;
   color: var(--ops-muted) !important;
   text-align: right;
+}
+
+.ops-nav__compact svg {
+  width: 12px;
+  height: 12px;
 }
 
 .ops-nav > div {
@@ -3365,6 +3378,45 @@ button.is-active {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
+}
+
+/*
+ * `styles.iconSet`'s preview (`SchemaSetting.tsx`): every library's
+ * close/system/menu marks, laid out under the select rather than beside it --
+ * the row's own second column is `minmax(110px, 0.45fr)` (`.settings-row`
+ * below), too narrow for four option strips side by side with the dropdown.
+ */
+.settings-iconset-setting {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+
+.settings-iconset-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.settings-iconset-preview__option {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 5px;
+  border: 1px solid var(--ops-line);
+  color: var(--ops-muted);
+  opacity: 0.55;
+}
+
+.settings-iconset-preview__option[data-selected='true'] {
+  border-color: var(--ops-orange);
+  color: var(--ops-orange-bright);
+  opacity: 1;
+}
+
+.settings-iconset-preview__option svg {
+  width: 13px;
+  height: 13px;
 }
 
 /*

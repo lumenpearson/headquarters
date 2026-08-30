@@ -26,6 +26,11 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   experimental: {
     cpus: 2,
+    // `lucide-react` and `@tabler/icons-react` are already in Next's own
+    // default list; `@hugeicons/core-free-icons` is the one adapter
+    // (`packages/ui/src/icons/hugeicons.ts`) that imports its icons by name
+    // from that package's barrel rather than by a per-icon path, and is not.
+    optimizePackageImports: ['@hugeicons/core-free-icons'],
   },
   pageExtensions,
   ...(target === 'desktop'

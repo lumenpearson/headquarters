@@ -8,6 +8,7 @@ export * from './TerminalCurveEditor.js';
 export * from './TerminalDialog.js';
 export * from './TerminalElementsConstructor.js';
 export * from './TerminalField.js';
+export * from './TerminalIcon.js';
 export * from './TerminalIconButton.js';
 export * from './TerminalInput.js';
 export * from './TerminalMenu.js';
