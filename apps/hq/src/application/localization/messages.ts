@@ -316,6 +316,20 @@ const ru = {
     'Чем открываются настройки: карточками разделов или единым списком.',
   'settingOption.layout.settingsLanding.cards': 'КАРТОЧКИ',
   'settingOption.layout.settingsLanding.unified': 'ЕДИНЫЙ СПИСОК',
+  /*
+   * The card landing's own cross-group search (item 5 of the H3 review): a
+   * card names one section or one personalization group, and an operator who
+   * does not know which one holds a setting needs to search before they can
+   * even pick a card. `searchLabel`/`searchPlaceholder` match the wording the
+   * open personalization panel's own search box already uses, so the same
+   * control reads the same way whether the operator meets it on the landing
+   * or inside a card.
+   */
+  'settingsLanding.searchLabel': 'Поиск по настройкам',
+  'settingsLanding.searchPlaceholder': 'ИМЯ ИЛИ ОПИСАНИЕ',
+  'settingsLanding.resultsHeading': 'РЕЗУЛЬТАТЫ ПОИСКА',
+  'settingsLanding.resultsCount': '{count} НАЙДЕНО',
+  'settingsLanding.noResults': 'НИЧЕГО НЕ НАЙДЕНО',
   'settingDescription.player.controlsHideDelayMs':
     'Сколько ждать после ухода курсора и потери фокуса, прежде чем скрыть элементы управления плеера.',
   'settingDescription.materials.autoplayPreview':
@@ -699,6 +713,11 @@ const en: Readonly<Record<Exclude<MessageId, TokenId>, string>> = {
     'Whether the settings screen opens as category cards or as one continuous list.',
   'settingOption.layout.settingsLanding.cards': 'CARDS',
   'settingOption.layout.settingsLanding.unified': 'ONE LIST',
+  'settingsLanding.searchLabel': 'Search settings',
+  'settingsLanding.searchPlaceholder': 'NAME OR DESCRIPTION',
+  'settingsLanding.resultsHeading': 'SEARCH RESULTS',
+  'settingsLanding.resultsCount': '{count} FOUND',
+  'settingsLanding.noResults': 'NOTHING FOUND',
   'settingDescription.player.controlsHideDelayMs':
     'How long to wait, after the pointer leaves and no control holds focus, before hiding the player controls.',
   'settingDescription.materials.autoplayPreview':

@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+
 import type { SettingGroup } from '@/application/personalization/catalog';
 import { settingGroups } from '@/application/personalization/catalog';
 import { Panel } from '@/components/operations/OpsUi';
@@ -101,11 +103,52 @@ export function settingsCardTargets(): readonly SettingsCard[] {
 
 export function SettingsCardGrid({
   onOpen,
+  focusTarget = null,
+  onFocused,
 }: {
   readonly onOpen: (target: SettingsCardTarget) => void;
+  /**
+   * The card to hand keyboard focus back to as soon as the grid mounts, or
+   * `null` for none -- the caller sets it to whichever card the operator
+   * just closed. Without this, closing a card drops focus to `<body>`: the
+   * button that had it leaves the DOM the instant the grid replaces the
+   * open section (item 6, H3 review). Read once, at mount, through a ref
+   * rather than a `focusTarget` dependency -- the grid itself remounts
+   * fresh every time it reappears, so "at mount" already means "when this
+   * card should regain focus."
+   */
+  readonly focusTarget?: SettingsCardTarget | null;
+  /**
+   * Fires once, right after `focusTarget` has been consumed (whether or not
+   * a matching card was found to focus). Lets the caller clear its own
+   * `focusTarget` state so an unrelated remount of this grid -- toggling
+   * `layout.settingsLanding` back to `cards` with no card having closed in
+   * between -- does not replay the same focus jump.
+   */
+  readonly onFocused?: () => void;
 }) {
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const initialFocusTarget = useRef(focusTarget);
+  const onFocusedRef = useRef(onFocused);
+  useEffect(() => {
+    onFocusedRef.current = onFocused;
+  });
+  useEffect(() => {
+    const target = initialFocusTarget.current;
+    if (target !== null) {
+      const card = settingsCardTargets().find((candidate) => sameTarget(candidate.target, target));
+      if (card !== undefined) {
+        gridRef.current?.querySelector<HTMLElement>(`[data-panel="${card.label}"]`)?.focus();
+      }
+    }
+    onFocusedRef.current?.();
+    // Mount-only: `initialFocusTarget`/`onFocusedRef` are refs, and
+    // `settingsCardTargets`/`sameTarget` are module-level functions, so
+    // nothing reactive is missing from this dependency list.
+  }, []);
+
   return (
-    <div className="settings-card-grid">
+    <div className="settings-card-grid" ref={gridRef}>
       {settingsCardTargets().map((card) => (
         <Panel
           key={cardKey(card.target)}
@@ -124,4 +167,12 @@ export function SettingsCardGrid({
 
 function cardKey(target: SettingsCardTarget): string {
   return target.kind === 'group' ? `group:${target.group}` : `section:${target.id}`;
+}
+
+function sameTarget(a: SettingsCardTarget, b: SettingsCardTarget): boolean {
+  return a.kind === 'group' && b.kind === 'group'
+    ? a.group === b.group
+    : a.kind === 'section' && b.kind === 'section'
+      ? a.id === b.id
+      : false;
 }

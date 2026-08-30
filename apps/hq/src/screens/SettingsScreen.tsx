@@ -125,6 +125,26 @@ export function SettingsScreen() {
   const settingsLanding = useStringSetting('layout.settingsLanding');
   const [openTarget, setOpenTarget] = useState<SettingsCardTarget | null>(null);
   const backButtonRef = useRef<HTMLElement | null>(null);
+  // Item 6 (H3 review), the way in: focus enters the back button exactly
+  // when `openTarget` itself transitions from closed to open, tracked
+  // through a ref rather than through `settingsLanding` in the dependency
+  // list. Depending on `settingsLanding` fired this same effect merely for
+  // switching `layout.settingsLanding` back and forth while a card was
+  // already open, stealing focus from whatever the operator was actually
+  // using (the landing select itself, most often) even though no card had
+  // opened or closed.
+  const wasCardOpenRef = useRef(false);
+  useEffect(() => {
+    const isOpen = openTarget !== null;
+    if (!wasCardOpenRef.current && isOpen) backButtonRef.current?.focus();
+    wasCardOpenRef.current = isOpen;
+  }, [openTarget]);
+  // Item 6, the way back: which card to return focus to once the grid
+  // remounts, set by the back button below at the moment it closes one and
+  // cleared by `SettingsCardGrid` once it has consumed it -- see that
+  // component's own doc for why a stale value here would misfire on an
+  // unrelated remount.
+  const [returnFocusTarget, setReturnFocusTarget] = useState<SettingsCardTarget | null>(null);
   const openCard = (target: SettingsCardTarget) => {
     if (target.kind === 'group') {
       setCatalogGroup(target.group);
@@ -132,13 +152,23 @@ export function SettingsScreen() {
     }
     setOpenTarget(target);
   };
-  // The card that opened a section is gone the instant it does (the grid
-  // unmounts with it), which would otherwise drop keyboard focus to
-  // `<body>`. The back button is the one element every opened section has in
-  // common, so it is where focus lands instead.
-  useEffect(() => {
-    if (settingsLanding === 'cards' && openTarget !== null) backButtonRef.current?.focus();
-  }, [openTarget, settingsLanding]);
+  const closeCard = () => {
+    setReturnFocusTarget(openTarget);
+    setOpenTarget(null);
+  };
+  // Item 5 (H3 review): the card landing's own cross-group search, so an
+  // operator who does not know which card holds a setting can find it
+  // without guessing one of sixteen cards first -- the same failure R6 (see
+  // `settings-catalog.spec.ts`) already named for the unified list before
+  // cards existed. `searchEverySetting` is the exact function the open
+  // personalization panel's own cross-group search already calls
+  // (`acrossGroups` below), so a landing search and a panel search reach
+  // the same results for the same query.
+  const [landingSearch, setLandingSearch] = useState('');
+  const landingResults = useMemo(
+    () => searchEverySetting(landingSearch, draft.changedIds),
+    [landingSearch, draft.changedIds],
+  );
   // Whether a section mounts at all. In `unified` mode every section always
   // does, as it always has; in `cards` mode only the open one does -- the
   // grid renders instead of the personalization panel while nothing is open,
@@ -322,14 +352,51 @@ export function SettingsScreen() {
         <div className="settings-docs__content" ref={contentRef}>
           <div className="settings-docs__column">
             {settingsLanding === 'cards' && openTarget === null ? (
-              <SettingsCardGrid onOpen={openCard} />
+              <div className="settings-landing">
+                <TerminalInput
+                  aria-label={t('settingsLanding.searchLabel')}
+                  placeholder={t('settingsLanding.searchPlaceholder')}
+                  className="settings-landing-search"
+                  value={landingSearch}
+                  onValueChange={setLandingSearch}
+                />
+                {landingSearch.trim().length === 0 ? (
+                  <SettingsCardGrid
+                    onOpen={openCard}
+                    focusTarget={returnFocusTarget}
+                    onFocused={() => setReturnFocusTarget(null)}
+                  />
+                ) : (
+                  <Panel
+                    title={t('settingsLanding.resultsHeading')}
+                    eyebrow={t('settingsLanding.resultsCount', { count: landingResults.length })}
+                    className="settings-landing-results"
+                  >
+                    {landingResults.length === 0 ? (
+                      <p className="settings-history-empty">{t('settingsLanding.noResults')}</p>
+                    ) : (
+                      landingResults.map((definition) => (
+                        <SchemaSetting
+                          key={definition.id}
+                          definition={definition}
+                          value={draft.values[definition.id] ?? definition.defaultValue}
+                          changed={draft.changedIds.includes(definition.id)}
+                          onValueChange={(value) =>
+                            state.applySettingsPatch([{ id: definition.id, value }])
+                          }
+                        />
+                      ))
+                    )}
+                  </Panel>
+                )}
+              </div>
             ) : (
               <>
                 {settingsLanding === 'cards' ? (
                   <TerminalButton
                     ref={backButtonRef}
                     className="ops-action settings-card-back"
-                    onClick={() => setOpenTarget(null)}
+                    onClick={closeCard}
                   >
                     [←] К РАЗДЕЛАМ
                   </TerminalButton>

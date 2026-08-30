@@ -937,6 +937,88 @@ test('previews a selected library entry inside the import dialog', async ({ page
   });
 });
 
+test('keeps the selected import-dialog row legible and announced under light-operations', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'gremuchaya-hq:operations:v3',
+      JSON.stringify({
+        version: 5,
+        ui: {},
+        production: {},
+        personalization: {
+          published: { revision: 0, values: {} },
+          draft: {
+            baseRevision: 0,
+            values: { 'themes.id': 'light-operations' },
+            changedIds: ['themes.id'],
+            history: [],
+          },
+          history: [],
+          undoStack: [],
+          redoStack: [],
+        },
+      }),
+    );
+  });
+
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await expect(page.locator('.ops-shell')).toHaveAttribute('data-theme', 'light-operations');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    const dialog = page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' });
+    await expect(dialog).toBeVisible();
+
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'svetlaya-tema.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('LIGHT THEME ROW', 'utf-8'),
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+
+    const row = page.locator('.material-import-dialog__entry', { hasText: 'svetlaya-tema.txt' });
+    // aria-current, not colour alone: a screen reader has to be told which
+    // row is the one currently previewed the same way `.is-active` shows it
+    // sighted.
+    await expect(row).toHaveAttribute('aria-current', 'false');
+    await row.click();
+    await expect(row).toHaveAttribute('aria-current', 'true');
+
+    const contrast = async (): Promise<number> =>
+      row.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const luminance = (colour: string): number => {
+          const parts = colour.match(/[\d.]+/gu)?.map(Number) ?? [];
+          const [red = 0, green = 0, blue = 0] = parts;
+          const channel = (value: number): number => {
+            const scaled = value / 255;
+            return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4;
+          };
+          return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
+        };
+        const front = luminance(style.color);
+        const back = luminance(style.backgroundColor);
+        return (Math.max(front, back) + 0.05) / (Math.min(front, back) + 0.05);
+      });
+
+    // Polled, not read once: `.hq-button`'s own `transition: … background
+    // var(--motion-micro) ease, color var(--motion-micro) ease` (packages/ui)
+    // means a `getComputedStyle` read taken the instant `is-active` lands
+    // still reports a value mid-interpolation from whatever the row showed
+    // before, not the settled one -- `expect.poll` outlasts that transition
+    // the way a single `evaluate` cannot.
+    //
+    // WCAG's floor for normal-sized text (this row's is 9px) is 4.5:1 -- the
+    // hard-coded `#17140d` background this replaces measured roughly 1.5:1
+    // against `light-operations`'s own dark `--ops-orange-bright`, tuned for
+    // a light surface rather than a near-black one.
+    await expect.poll(contrast).toBeGreaterThan(4.5);
+  });
+});
+
 test('opens the file drawer for an imported material and shows its preview', async ({ page }) => {
   await withMaterialsBridge(page, async () => {
     await page.goto('/files');
@@ -959,6 +1041,62 @@ test('opens the file drawer for an imported material and shows its preview', asy
     const drawer = page.locator('.ops-drawer--card');
     await expect(drawer).toBeVisible();
     await expect(drawer.locator('.local-material-preview--text pre')).toHaveText(importPreviewNote);
+  });
+});
+
+test('keeps the hidden transport row out of the browser hit-test until it is revealed', async ({
+  page,
+}) => {
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    const dialog = page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' });
+    await expect(dialog).toBeVisible();
+
+    const videoBytes = await readFile(
+      join(process.cwd(), 'public', 'assets', 'video', 'surveillance-k17.webm'),
+    );
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'hover-row-video.webm',
+      mimeType: 'video/webm',
+      buffer: videoBytes,
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+
+    await page.getByRole('button', { name: '[ENTER] FILE VIEWER' }).click();
+    const drawer = page.locator('.ops-drawer--card');
+    await expect(drawer).toBeVisible();
+
+    const hoverRow = drawer.locator('.local-material-player__hover-row');
+    const muteButton = hoverRow.getByText(/^\[M\]/);
+    await expect(muteButton).toHaveText('[M] MUTED');
+    await expect(hoverRow).toHaveAttribute('data-revealed', 'false');
+
+    // The property that actually decides whether a click -- a real pointer's,
+    // or the same touch tap that reveals the row -- reaches [M] MUTED: the
+    // browser's own computed `pointer-events`, not a simulated gesture racing
+    // against React's own reveal. `opacity: 0` alone leaves this row
+    // hit-testable; `Controls.Group` (the parent) force-sets `pointer-events:
+    // auto` on itself via an inline style on attach, so the row must set its
+    // own value to override that inherited default.
+    await expect(hoverRow).toHaveCSS('pointer-events', 'none');
+
+    // Focus, not a pointer move: this surface's `<video>` never finishes
+    // loading over the file bridge's proxied blob URL in this harness (a
+    // separate, pre-existing gap in the type Vidstack is given for it), which
+    // leaves every element in `.local-material-player` laid out at zero size
+    // and unreachable by real screen coordinates. The keyboard path this
+    // reveal also serves does not depend on that layout at all.
+    await muteButton.focus();
+    await expect(hoverRow).toHaveAttribute('data-revealed', 'true');
+    await expect(hoverRow).not.toHaveCSS('pointer-events', 'none');
+
+    await muteButton.press('Enter');
+    await expect(muteButton).toHaveText('[M] AUDIO');
   });
 });
 
