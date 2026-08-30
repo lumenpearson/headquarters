@@ -1,6 +1,8 @@
 import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import { expect, test, type Page } from '@playwright/test';
 
+import { expandEditPanel } from './editPanelHelpers';
+
 /**
  * That choosing a setting changes the screen.
  *
@@ -682,6 +684,8 @@ test('R19: the edit panel gives a selected tile its own motion', async ({ page }
   await expect(page.locator('[data-tile="brief"]')).toBeVisible();
   await page.keyboard.press('Control+Shift+E');
   await expect(page.locator('.edit-mode-frame')).toBeVisible();
+  // The panel opens as a collapsed pill; its section select is in the body.
+  await expandEditPanel(page);
 
   // The animations category is a heading inside the `motion` section: the panel
   // shows a whole section at once rather than one category out of thirty-two.

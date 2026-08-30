@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { expandEditPanel } from './editPanelHelpers';
+
 test('an operator opens edit mode, docks the panel and edits without the page scrolling', async ({
   page,
 }) => {
@@ -16,6 +18,9 @@ test('an operator opens edit mode, docks the panel and edits without the page sc
   const panel = page.locator('.edit-panel');
   await expect(panel).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-edit-mode', 'on');
+  // The panel opens as the collapsed pill, the same way it opens docked
+  // right: both are pinned defaults, not incidental starting points.
+  await expect(panel).toHaveAttribute('data-expanded', 'false');
 
   // R26: opening edit mode must not make the document scrollable.
   await expect
@@ -51,8 +56,11 @@ test('an operator opens edit mode, docks the panel and edits without the page sc
   await expect(panel).toHaveAttribute('data-edge', 'left');
 
   // Undo is disabled until an edit exists, and the issue draft with it.
+  // ОТМЕНИТЬ sits in the header and is reachable collapsed; ЧЕРНОВИК ISSUE is
+  // in the body, so the panel has to be expanded before it can be asserted.
   const undo = page.getByRole('button', { name: 'ОТМЕНИТЬ' });
   await expect(undo).toBeDisabled();
+  await expandEditPanel(page);
   await expect(page.getByRole('button', { name: 'ЧЕРНОВИК ISSUE' })).toBeDisabled();
 
   await page.keyboard.press('Control+Shift+E');
@@ -78,6 +86,7 @@ test('R6: every section is reachable from the floating panel and shows its categ
   await page.keyboard.press('Control+Shift+E');
   const panel = page.locator('.edit-panel');
   await expect(panel).toBeVisible();
+  await expandEditPanel(page);
 
   const section = panel.getByRole('combobox', { name: 'Раздел' });
   const sections = [
@@ -118,6 +127,7 @@ test('R6/R26: the panel navigates and scrolls its own body on a short window', a
   await page.keyboard.press('Control+Shift+E');
   const panel = page.locator('.edit-panel');
   await expect(panel).toBeVisible();
+  await expandEditPanel(page);
 
   const search = panel.getByLabel('Поиск по настройкам');
   await search.fill('liveedit');

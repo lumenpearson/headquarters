@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { expandEditPanel } from './editPanelHelpers';
+
 /**
  * Reads the grid back the way the resolver wrote it: every cell carries its
  * own `grid-column`/`grid-row` inline, so the occupancy of the grid can be
@@ -243,6 +245,8 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   await expect(page.locator('.edit-mode-frame')).toBeVisible();
 
   const panel = page.locator('.edit-panel');
+  // The panel opens as a collapsed pill; its section select is in the body.
+  await expandEditPanel(page);
   // The panel navigates by section and shows the whole of one at once, so the
   // tiles category is a heading inside `layout` rather than an entry in a flat
   // list of all thirty-two categories.

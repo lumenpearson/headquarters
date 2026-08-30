@@ -36,14 +36,36 @@ describe('EditPanel', () => {
     expect(container.querySelector('.edit-panel')?.getAttribute('data-edge')).toBe('left');
   });
 
+  it('opens as the collapsed pill, and its own control expands it', () => {
+    operationsStore.getState().enterEditMode();
+    const { container } = render(<EditPanel />);
+    const panel = () => container.querySelector('.edit-panel');
+    expect(panel()?.getAttribute('data-expanded')).toBe('false');
+
+    const toggle = screen.getByRole('button', { name: 'Развернуть панель' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(toggle);
+
+    expect(operationsStore.getState().edit.panelExpanded).toBe(true);
+    expect(panel()?.getAttribute('data-expanded')).toBe('true');
+    expect(
+      screen.getByRole('button', { name: 'Свернуть панель' }).getAttribute('aria-expanded'),
+    ).toBe('true');
+  });
+
   it('docks to the next edge from the keyboard, alongside the pointer drag', () => {
     // The keyboard equivalent of the magnetic edge dragging snaps to: there is
     // no pointer release position to read, so the chord cycles the same four
-    // edges instead of picking one directly.
+    // edges instead of picking one directly. The panel starts collapsed here,
+    // which is the state this chord has to keep working in -- the docking
+    // machinery is on the one root shared with the expanded body, not on a
+    // second component.
     operationsStore.getState().enterEditMode();
     operationsStore.getState().dockEditPanel('left');
     const { container } = render(<EditPanel />);
     const panel = () => container.querySelector('.edit-panel');
+    expect(panel()?.getAttribute('data-expanded')).toBe('false');
     expect(panel()?.getAttribute('data-edge')).toBe('left');
 
     act(() => {
@@ -55,6 +77,21 @@ describe('EditPanel', () => {
       fireKeybind('edit.dockPanel');
     });
     expect(panel()?.getAttribute('data-edge')).toBe('right');
+  });
+
+  it('docks to the next edge from the keyboard while the panel is expanded too', () => {
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().dockEditPanel('left');
+    operationsStore.getState().setEditPanelExpanded(true);
+    const { container } = render(<EditPanel />);
+    const panel = () => container.querySelector('.edit-panel');
+    expect(panel()?.getAttribute('data-expanded')).toBe('true');
+    expect(panel()?.getAttribute('data-edge')).toBe('left');
+
+    act(() => {
+      fireKeybind('edit.dockPanel');
+    });
+    expect(panel()?.getAttribute('data-edge')).toBe('top');
   });
 
   it('does nothing while edit mode is off, though there is no panel to dock', () => {
@@ -218,6 +255,21 @@ describe('EditPanel content editing (R4)', () => {
     fireEvent.click(button(/отменить/i));
     expect(operationsStore.getState().content.overrides).toEqual({});
     expect(screen.getByText('0 ИЗМЕНЕНИЙ')).toBeTruthy();
+  });
+
+  it('expands the collapsed pill the moment an element is selected, not only before it mounts', () => {
+    operationsStore.getState().enterEditMode();
+    const { container } = render(<EditPanel />);
+    expect(container.querySelector('.edit-panel')?.getAttribute('data-expanded')).toBe('false');
+
+    act(() => {
+      operationsStore.getState().selectEditElement(contentElementId('case.title', 'CASE-01'));
+    });
+
+    // A collapsed pill answering a selection with nothing would make it look
+    // ignored; this is the live transition, not the panel mounting already
+    // expanded because the selection was made before it rendered.
+    expect(container.querySelector('.edit-panel')?.getAttribute('data-expanded')).toBe('true');
   });
 
   it('shows the editor for the content field selected on screen and applies a date at once', () => {
