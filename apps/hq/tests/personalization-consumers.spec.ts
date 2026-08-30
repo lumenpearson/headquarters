@@ -1225,13 +1225,19 @@ test('R6: the system screen takes its thresholds and its counts from the setting
 
 test('R6: keybinds.hiddenCategories drops a group from the shortcut list', async ({ page }) => {
   await page.setViewportSize(wide);
+  // Unified: this claim needs the keybinds section on screen the moment the
+  // route loads, not behind its card.
+  await seedSettings(page, { 'layout.settingsLanding': 'unified' });
   await page.goto('/settings');
   const list = page.locator('.keybind-list');
   await expect(list).toBeVisible();
   const atDefault = await list.locator('.keybind-list__group').count();
   expect(atDefault).toBeGreaterThan(1);
 
-  await seedSettings(page, { 'keybinds.hiddenCategories': ['navigation'] });
+  await seedSettings(page, {
+    'keybinds.hiddenCategories': ['navigation'],
+    'layout.settingsLanding': 'unified',
+  });
   await page.reload();
   await expect(page.locator('.keybind-list')).toBeVisible();
   await expect
@@ -1330,7 +1336,10 @@ test('R6: popups.fieldMenu decides whether a text field keeps the browser menu',
   page,
 }) => {
   await page.setViewportSize(wide);
-  await seedSettings(page, { 'popups.fieldMenu': 'application' });
+  await seedSettings(page, {
+    'popups.fieldMenu': 'application',
+    'layout.settingsLanding': 'unified',
+  });
   await page.goto('/settings');
 
   const field = page.getByLabel('Поиск по настройкам');

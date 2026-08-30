@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { gotoSettingsUnified } from './settingsHelpers';
+
 test('R16: the startup sequence plays on load and clears itself', async ({ page }) => {
   await page.goto('/');
 
@@ -84,7 +86,7 @@ test('R16: every launch of the process plays it, not only the first', async ({ p
 });
 
 test('R16: turning the sequence off in settings silences the next launch', async ({ page }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await expect(page.locator('.startup-sequence')).toHaveCount(0);
 
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });

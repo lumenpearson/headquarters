@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
+import { gotoSettingsUnified } from './settingsHelpers';
+
 /**
  * Drags the pointer across a line of text the way an operator would.
  *
@@ -41,7 +43,7 @@ test('R12: a drag across the interface selects nothing until edit mode is on', a
 });
 
 test('R12: the selection colour follows the theme the operator chose', async ({ page }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   const shell = page.locator('.ops-shell');
 
   const readSelection = () =>
@@ -205,7 +207,7 @@ test('R12: a long press reaches the same menu on touch, and the setting turns it
 
   // `popups.longPress` had been declared in the settings schema and read by
   // nothing at all; this is the consumer that makes it mean something.
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'POP-UP', exact: true }).click();
   await page.getByRole('switch', { name: 'POPUPS / LONG PRESS' }).click();
@@ -264,7 +266,7 @@ test('R12: the status line carries the transport detail behind a popover', async
 });
 
 test('R12: a destructive reset asks first and reports that it happened', async ({ page }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   // Nothing is reset by opening the question.
   await page.getByRole('button', { name: '[R] СБРОСИТЬ ОПЕРАТИВНЫЙ МИР' }).click();

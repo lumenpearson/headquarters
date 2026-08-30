@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { expandEditPanel } from './editPanelHelpers';
+import { gotoSettingsUnified } from './settingsHelpers';
 
 /**
  * Reads the grid back the way the resolver wrote it: every cell carries its
@@ -124,7 +125,7 @@ test('R10: no screen can be left blank by a size the operator is allowed to set'
   page.on('pageerror', (error) => failures.push(error.message));
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page
@@ -154,7 +155,7 @@ test('R3: a tile hidden on one screen stays on the screens that share its name',
   page,
 }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('cases:registry');
@@ -180,7 +181,7 @@ test('R3: switching a group off takes every tile in it, on every screen', async 
   await expect(page.locator('[data-tile="threats"]')).toBeVisible();
   await expect(page.locator('[data-tile="sector"]')).toBeVisible();
 
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('textbox', { name: 'TILES / HIDDEN CATEGORIES' }).fill('geo');
@@ -202,7 +203,7 @@ test('R3: the operator can cap how rich a tile is drawn', async ({ page }) => {
   await page.goto('/overview');
   await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-presentation', 'full');
 
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('combobox', { name: 'TILES / PRESENTATION' }).click();
@@ -337,7 +338,7 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
   // in the notice instead.
   await expect(page.locator('[data-tile="objectives"]')).toBeVisible();
 
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
   await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('overview:objectives');
@@ -387,7 +388,7 @@ test('R10: layout.tileMinimumWidth changes which tiles fit, without emptying the
     .evaluate((element) => element.getBoundingClientRect().width / 4);
   const target = Math.round(Math.min(480, Math.max(160, columnWidth * 1.5)));
 
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'МАКЕТ', exact: true }).click();
   await page.getByRole('textbox', { name: 'LAYOUT / TILE MINIMUM WIDTH' }).fill(String(target));

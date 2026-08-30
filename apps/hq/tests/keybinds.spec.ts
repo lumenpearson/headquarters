@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { gotoSettingsUnified } from './settingsHelpers';
+
 test('R11: the numbered navigation keys reach the routes their badges promise', async ({
   page,
 }) => {
@@ -31,7 +33,7 @@ test('R11: a numbered key typed into a field stays in the field', async ({ page 
 });
 
 test('R11: the list is in settings and lights up the keybind that fires', async ({ page }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const list = page.locator('.settings-keybinds .keybind-list');
   await expect(list).toBeVisible();

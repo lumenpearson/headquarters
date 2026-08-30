@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { expandEditPanel } from './editPanelHelpers';
+import { gotoSettingsUnified } from './settingsHelpers';
 
 test('an operator opens edit mode, docks the panel and edits without the page scrolling', async ({
   page,
@@ -279,7 +280,7 @@ for (const [option, attribute] of [
   ['SCAN', 'scan'],
 ] as const) {
   test(`R13: the ${attribute} focus pattern paints a focused control`, async ({ page }) => {
-    await page.goto('/settings');
+    await gotoSettingsUnified(page);
 
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
     await category.click();

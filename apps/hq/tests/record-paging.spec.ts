@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { gotoSettingsUnified } from './settingsHelpers';
+
 /**
  * Sets `tables.pageSize` the way an operator would.
  *
@@ -11,7 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
  * so exercising it is half of what these tests are for.
  */
 async function setPageSize(page: Page, size: number): Promise<void> {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ТАБЛИЦЫ', exact: true }).click();
   /*

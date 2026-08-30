@@ -11,6 +11,7 @@ import { createVirtualPath } from '@gremuchaya/domain';
 import { FileBridgeService } from '@gremuchaya/protocol';
 
 import { startBridge } from '../../file-bridge/src/server.js';
+import { gotoSettingsUnified } from './settingsHelpers';
 
 /**
  * R13: the `image` and `video` background kinds used to paint a placeholder
@@ -84,7 +85,7 @@ test('paints a chosen material as the application background, and lets go of it'
       await route.fulfill({ response: proxied });
     });
 
-    await page.goto('/settings');
+    await gotoSettingsUnified(page);
     const shell = page.locator('.ops-shell');
 
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
@@ -131,7 +132,7 @@ test('offers only material the setting accepts', async ({ page }) => {
   // The video source must not offer a still, and vice versa. Without a bridge
   // the catalogue is empty, which is the state most sessions are in and must
   // itself stay usable rather than break the settings screen.
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
   await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
@@ -206,7 +207,7 @@ test('plays a chosen clip as the background and stops it when motion is off', as
       await route.fulfill({ response: proxied });
     });
 
-    await page.goto('/settings');
+    await gotoSettingsUnified(page);
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
     await category.click();
     await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
