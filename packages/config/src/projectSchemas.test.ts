@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  controlPlaneAddressRefusal,
   defaultScreenWindows,
   productionOverrideSchema,
   projectConfigSchema,
@@ -110,6 +111,54 @@ describe('project config schema', () => {
         ],
       }).success,
     ).toBe(false);
+  });
+
+  it('refuses the Windows path Git Bash makes of a leading-slash value', () => {
+    // `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL=/api` becomes this at build time under
+    // MSYS2, and `new URL` parses it happily as the scheme `c:`.
+    expect(
+      projectConfigSchema.safeParse({ ...project, controlPlaneUrl: 'C:/Program Files/Git/api' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('names why an address was refused, so a caller can say more than "invalid"', () => {
+    expect(controlPlaneAddressRefusal('C:/Program Files/Git/api')).toBe('msys-rewritten-path');
+    expect(controlPlaneAddressRefusal('C:\\Program Files\\Git\\api')).toBe('msys-rewritten-path');
+    expect(controlPlaneAddressRefusal('192.168.10.5:4100')).toBe('not-a-url');
+    expect(controlPlaneAddressRefusal('ws://192.168.10.5:4100')).toBe('not-http');
+    expect(controlPlaneAddressRefusal('http://operator:secret@192.168.10.5:4100')).toBe(
+      'has-credentials',
+    );
+    expect(controlPlaneAddressRefusal(nearPlane)).toBeUndefined();
+    expect(controlPlaneAddressRefusal(cloudPlane)).toBeUndefined();
+  });
+
+  it('agrees with the schema on every address it judges', () => {
+    // The reason exists to explain a refusal, never to cause or excuse one: a
+    // classifier that faulted an address the schema accepts would refuse a
+    // working deployment, and one that cleared an address the schema refuses
+    // would print "accepted" beside a client that was never built.
+    const values = [
+      nearPlane,
+      cloudPlane,
+      'https://plane.example/api',
+      'C:/Program Files/Git/api',
+      'C:\\Program Files\\Git\\api',
+      '/api',
+      '192.168.10.5:4100',
+      'ws://192.168.10.5:4100',
+      'ftp://192.168.10.5:4100',
+      'http://operator:secret@192.168.10.5:4100',
+      '',
+    ];
+    for (const value of values) {
+      const accepted = projectConfigSchema.safeParse({
+        ...project,
+        controlPlaneUrl: value,
+      }).success;
+      expect(controlPlaneAddressRefusal(value) === undefined, value).toBe(accepted);
+    }
   });
 
   it('still binds the bridge to the loopback interface', () => {

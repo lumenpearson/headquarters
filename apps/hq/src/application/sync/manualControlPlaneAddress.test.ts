@@ -115,13 +115,23 @@ describe('writeManualControlPlaneAddress', () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it('collapses a repeated address to one rather than refusing the field', () => {
-    // `parseControlPlaneAddressList` already dedupes a comma list, so this is
-    // not the "two entries the same" rejection `controlPlaneUrl` itself
-    // enforces -- there is only ever one entry by the time the schema sees it.
+  it('refuses a repeated address, which is what its own refusal text promises', () => {
+    // The field deduplicated the list before `controlPlaneUrl` saw it, so the
+    // schema's "must not repeat an address" rule was unreachable from here and
+    // the refusal below ended `БЕЗ ПОВТОРОВ` on the strength of nothing.
     const outcome = writeManualControlPlaneAddress(`${nearPlane}, ${nearPlane}`, memoryStorage());
 
-    expect(outcome).toEqual({ ok: true, addresses: [nearPlane] });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('БЕЗ ПОВТОРОВ');
+  });
+
+  it('refuses the path Git Bash makes of a leading-slash address', () => {
+    // The build variable is where this value comes from in practice; the field
+    // has to refuse it too, or the two sources disagree about what an address
+    // is.
+    const outcome = writeManualControlPlaneAddress('C:/Program Files/Git/api', memoryStorage());
+
+    expect(outcome.ok).toBe(false);
   });
 
   it('refuses a value with no scheme at all rather than throwing', () => {

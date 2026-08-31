@@ -1,12 +1,18 @@
-import { productionOverrideSchema } from '@gremuchaya/config';
+import { controlPlaneAddressLimit, productionOverrideSchema } from '@gremuchaya/config';
 
+import { t } from '@/application/localization/locale';
 import { loadProjectConfiguration } from '@/infrastructure/config/RuntimeConfigLoader';
 
-import { parseControlPlaneAddressList } from './controlPlaneLinks';
 import {
-  readManualControlPlaneAddress,
+  parseControlPlaneAddressList,
   safeParseControlPlaneUrl,
-} from './manualControlPlaneAddress';
+  validateControlPlaneAddresses,
+  type ControlPlaneAddressListRefusal,
+  type ControlPlaneAddressRefusalReport,
+} from './controlPlaneLinks';
+import { readManualControlPlaneAddress } from './manualControlPlaneAddress';
+
+import type { MessageId } from '@/application/localization/messages';
 
 /**
  * Where the control plane answers, if anywhere, in the operator's order.
@@ -33,13 +39,70 @@ export interface ResolvedControlPlaneAddresses {
   readonly addresses: readonly string[];
   readonly source: ControlPlaneAddressSource;
   /**
-   * Non-empty when `/runtime/project.override.json` exists but did not apply
-   * -- invalid JSON, a value `controlPlaneUrl`'s own schema refuses, or
-   * anything else the override's own schema refuses. Empty when there is no
-   * override file (a 404, or the Tauri application-shell fallback a route
-   * with no runtime configuration resolves to) or it applied cleanly.
+   * Why the configuration produced no usable address, in the operator's
+   * language; empty when it produced one or when nothing was configured at all.
+   *
+   * Two things reach this field. `/runtime/project.override.json` exists but
+   * did not apply -- invalid JSON, a value `controlPlaneUrl`'s own schema
+   * refuses, or anything else the override's own schema refuses. And
+   * `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL` named something that is not an address,
+   * which until now was passed to `fetch` unexamined and came back as the
+   * browser's `NetworkError`.
+   *
+   * Both are reported when both happened, joined into one line: neither is a
+   * consequence of the other, they are fixed in different places, and choosing
+   * between them would hide one defect behind the other. The name says
+   * `override` because that was the field's first and only source; the
+   * surface draws one failure line and the operator's next act -- go and
+   * correct the configuration -- is the same for either.
    */
   readonly overrideFailure: string;
+}
+
+/**
+ * The sentence for each reason {@link validateControlPlaneAddresses} can give.
+ *
+ * A `Record` over the union rather than a built id: a reason added to the union
+ * with no message here is a compile error, where a template string would have
+ * produced a bracketed id on a shoot-day screen.
+ */
+const refusalMessageIds: Readonly<Record<ControlPlaneAddressListRefusal, MessageId>> = {
+  'msys-rewritten-path': 'connection.address.refusal.msysPath',
+  'not-a-url': 'connection.address.refusal.notAUrl',
+  'not-http': 'connection.address.refusal.notHttp',
+  'has-credentials': 'connection.address.refusal.credentials',
+  repeated: 'connection.address.refusal.repeated',
+  'too-many': 'connection.address.refusal.tooMany',
+  unclassified: 'connection.address.refusal.unclassified',
+};
+
+/**
+ * The refused build variable as one line an operator can act on.
+ *
+ * The reason is composed into a frame that names the variable, because a
+ * sentence about an address is not actionable until the operator knows which of
+ * the three places it came from -- and this is the one place they cannot see
+ * from inside the running application.
+ *
+ * No browser message is composed in. `NetworkError when attempting to fetch
+ * resource` is the account of a request that never left, which `describe` in
+ * `ControlPlaneSession.ts` still appends to a failed call and which remains
+ * worth having as a diagnostic. It is not an explanation of a configuration:
+ * the operator who reads it learns that something did not answer, not that the
+ * address was never an address. A refusal decided here is decided before any
+ * request exists to fail.
+ */
+function buildVariableRefusalMessage(refusal: ControlPlaneAddressRefusalReport): string {
+  const reason = t(refusalMessageIds[refusal.reason], {
+    address: refusal.address,
+    limit: controlPlaneAddressLimit,
+  });
+  return t('connection.address.buildVariableRefused', { reason });
+}
+
+/** Both configuration failures on one line, in the order they were found. */
+function joinFailures(first: string, second: string): string {
+  return [first, second].filter((line) => line !== '').join(' ');
 }
 
 /**
@@ -80,13 +143,32 @@ export async function resolveControlPlaneAddresses(
   // above, independent of whether the rest of the file could still be read
   // and merged.
 
+  /*
+   * The build variable is checked against `controlPlaneUrl`'s own schema, the
+   * same one the in-app field and the override file have always been checked
+   * against. It used to be split on commas and used as it stood, which is how
+   * `C:/Program Files/Git/api` -- Git Bash's rewrite of the documented `/api`
+   * -- became the primary link and reached `fetch`. A variable baked into a
+   * static export at build time is the least examined of the three sources,
+   * not the most trustworthy: nobody sees it again after the build.
+   *
+   * A refused variable yields no address, so no client is constructed and no
+   * request is attempted; the source is still reported as the build variable,
+   * because "not configured" would send the operator looking for a setting
+   * that is in fact set and wrong.
+   */
   const configured = process.env.NEXT_PUBLIC_HQ_CONTROL_PLANE_URL;
-  const envAddresses = configured === undefined ? [] : parseControlPlaneAddressList(configured);
-  return {
-    addresses: envAddresses,
-    source: envAddresses.length > 0 ? 'build-variable' : 'none',
-    overrideFailure,
-  };
+  const entries = configured === undefined ? [] : parseControlPlaneAddressList(configured);
+  if (entries.length === 0) return { addresses: [], source: 'none', overrideFailure };
+  const outcome = validateControlPlaneAddresses(entries);
+  if (!outcome.ok) {
+    return {
+      addresses: [],
+      source: 'build-variable',
+      overrideFailure: joinFailures(overrideFailure, buildVariableRefusalMessage(outcome.refusal)),
+    };
+  }
+  return { addresses: outcome.addresses, source: 'build-variable', overrideFailure };
 }
 
 /**

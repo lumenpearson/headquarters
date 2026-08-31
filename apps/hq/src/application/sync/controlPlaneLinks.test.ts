@@ -9,6 +9,8 @@ import {
   linkStatusTokens,
   parseControlPlaneAddressList,
   preferredPublishLinkId,
+  validateControlPlaneAddresses,
+  validateControlPlaneAddressList,
   withLinkPatch,
   withLinksIdle,
 } from './controlPlaneLinks';
@@ -51,10 +53,84 @@ describe('resolving the addresses a device holds', () => {
     ]);
   });
 
-  it('drops blank entries and repeats rather than building a client for them', () => {
-    expect(parseControlPlaneAddressList(`${nearPlane},,${nearPlane},`)).toEqual([nearPlane]);
+  it('drops blank entries and keeps a repeat for the validator to refuse', () => {
+    // A trailing comma is a typo. A repeated address is a statement the
+    // operator made twice, and collapsing it here is what made
+    // `controlPlaneUrl`'s "must not repeat an address" rule unreachable.
+    expect(parseControlPlaneAddressList(`${nearPlane},,${nearPlane},`)).toEqual([
+      nearPlane,
+      nearPlane,
+    ]);
     expect(parseControlPlaneAddressList('')).toEqual([]);
     expect(parseControlPlaneAddressList('   ')).toEqual([]);
+  });
+
+  it('accepts what the project schema accepts', () => {
+    expect(validateControlPlaneAddressList(` ${nearPlane}, ${cloudPlane} `)).toEqual({
+      ok: true,
+      addresses: [nearPlane, cloudPlane],
+    });
+    // Nothing configured is a valid configuration: a device in no group.
+    expect(validateControlPlaneAddresses([])).toEqual({ ok: true, addresses: [] });
+  });
+
+  it('names the reason for each shape the schema refuses', () => {
+    const reasonFor = (raw: string): string => {
+      const outcome = validateControlPlaneAddressList(raw);
+      return outcome.ok ? 'accepted' : outcome.refusal.reason;
+    };
+
+    expect(reasonFor('C:/Program Files/Git/api')).toBe('msys-rewritten-path');
+    expect(reasonFor('192.168.10.5:4100')).toBe('not-a-url');
+    expect(reasonFor('ftp://192.168.10.5:4100')).toBe('not-http');
+    expect(reasonFor('http://operator:secret@192.168.10.5:4100')).toBe('has-credentials');
+    expect(reasonFor(`${nearPlane},${nearPlane}`)).toBe('repeated');
+    expect(
+      reasonFor(
+        'http://a.example,http://b.example,http://c.example,http://d.example,http://e.example',
+      ),
+    ).toBe('too-many');
+  });
+
+  it('names the entry that earned the refusal, not the list', () => {
+    // A variable holding four addresses is otherwise a sentence about none of
+    // them.
+    const outcome = validateControlPlaneAddressList(`${nearPlane},ftp://192.168.10.5:4100`);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.refusal.address).toBe('ftp://192.168.10.5:4100');
+  });
+
+  it('keeps the credential out of the refusal it reports', () => {
+    // The report is what a message, a store and a diagnostic copy are built
+    // from, so the password has to stop here rather than at whichever of them
+    // happens to render it.
+    const outcome = validateControlPlaneAddressList('http://operator:secret@192.168.10.5:4100');
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.refusal.address).toBe('http://192.168.10.5:4100');
+      expect(outcome.refusal.address).not.toContain('secret');
+    }
+  });
+
+  it('recognises a drive path before the URL parser turns it into a scheme', () => {
+    // `new URL('C:/Program Files/Git/api')` succeeds with the protocol `c:`,
+    // so the reason would otherwise be the true but useless "not an http
+    // address" and the operator would never learn that the build rewrote it.
+    const outcome = validateControlPlaneAddressList('C:\\Program Files\\Git\\api');
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.refusal.reason).toBe('msys-rewritten-path');
+  });
+
+  it('refuses anything the schema refuses, even with no reason to give', () => {
+    // The schema decides; this list only explains. A value nothing above can
+    // fault still has to be accepted by `controlPlaneUrl` before a client is
+    // built for it.
+    for (const raw of ['http://', 'https://:4100', 'http://x .example']) {
+      expect(validateControlPlaneAddressList(raw).ok, raw).toBe(false);
+    }
   });
 
   it('makes the first address the primary and every other a secondary', () => {

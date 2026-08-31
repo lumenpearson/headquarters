@@ -44,14 +44,48 @@ export const assetManifestSchema = z
   });
 
 /**
- * One control-plane address.
+ * Why one control-plane address is not an address this application will build a
+ * client against.
  *
- * Split out of {@link projectConfigSchema} because the field now holds either a
- * single address or a list of them and both branches have to enforce exactly
- * the same rule; two copies of the refinement would be two places for "no
- * credentials in the URL" to drift apart.
+ * A reason rather than a boolean, because the three places an address can be
+ * configured -- the in-app field, `project.override.json` and
+ * `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL` -- all report their refusal to an operator
+ * who cannot see the other two, and "invalid address" sends that operator to
+ * read a build log. The reason is what a caller turns into a sentence; this
+ * module does not carry the sentence itself, because the text an operator reads
+ * is localized in `apps/hq` and `packages/config` holds no UI.
  */
-const controlPlaneAddressSchema = z.url().refine((value) => {
+export type ControlPlaneAddressRefusal =
+  /** A Windows drive path, which is what Git Bash makes of a leading slash. */
+  | 'msys-rewritten-path'
+  /** `new URL` cannot parse it: an address with no scheme at all, typically. */
+  | 'not-a-url'
+  /** Parses, but names a scheme this client has no transport for. */
+  | 'not-http'
+  /** Carries a user name or a password, which would travel to the plane. */
+  | 'has-credentials';
+
+/**
+ * A path MSYS2 rewrote, recognised before the URL parser is asked.
+ *
+ * Git Bash on Windows converts an argument that starts with a slash into a
+ * Windows path against its own installation root, so the documented
+ * `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL=/api` is baked into the static export as a
+ * drive path and reaches `fetch` as one. The check has to run before
+ * {@link controlPlaneAddressRefusal} calls `new URL`, because `new URL` parses
+ * `C:/…` perfectly happily as the scheme `c:` and the reason would then be the
+ * true but useless "not an http address".
+ *
+ * One letter, a colon and a separator is the whole rule. It is narrow in the
+ * only way that matters: no http(s) address can match it -- a scheme of one
+ * letter is not `http` -- so a value this pattern claims has already been
+ * refused on its own merits, and the pattern only decides which sentence the
+ * operator reads.
+ */
+const windowsDrivePath = /^[A-Za-z]:[\\/]/u;
+
+export function controlPlaneAddressRefusal(value: string): ControlPlaneAddressRefusal | undefined {
+  if (windowsDrivePath.test(value)) return 'msys-rewritten-path';
   // `new URL` can still throw on strings `z.url()` accepts, and Zod does not
   // turn an exception inside `.refine` into a validation issue -- it escapes
   // `safeParse` as a crash. A throwing value is a failing value.
@@ -59,14 +93,41 @@ const controlPlaneAddressSchema = z.url().refine((value) => {
   try {
     url = new URL(value);
   } catch {
-    return false;
+    return 'not-a-url';
   }
-  return (
-    (url.protocol === 'http:' || url.protocol === 'https:') &&
-    url.username === '' &&
-    url.password === ''
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'not-http';
+  if (url.username !== '' || url.password !== '') return 'has-credentials';
+  return undefined;
+}
+
+/**
+ * How many control-plane addresses one device may be pointed at.
+ *
+ * Exported because the client that reports a refusal has to name the same
+ * number the schema enforces: a message promising four while the schema allowed
+ * three is the kind of disagreement an operator can only resolve by reading the
+ * source.
+ */
+export const controlPlaneAddressLimit = 4;
+
+/**
+ * One control-plane address.
+ *
+ * Split out of {@link projectConfigSchema} because the field now holds either a
+ * single address or a list of them and both branches have to enforce exactly
+ * the same rule; two copies of the refinement would be two places for "no
+ * credentials in the URL" to drift apart.
+ *
+ * The predicate is {@link controlPlaneAddressRefusal} rather than a copy of it,
+ * so the schema that decides whether an address is used and the reason an
+ * operator is given for a refusal can never disagree about what an address is.
+ */
+const controlPlaneAddressSchema = z
+  .url()
+  .refine(
+    (value) => controlPlaneAddressRefusal(value) === undefined,
+    'Control plane URL must be an http(s) URL without credentials',
   );
-}, 'Control plane URL must be an http(s) URL without credentials');
 
 export const screenWindowSchema = z.object({
   screenId: screenIdSchema,
@@ -130,12 +191,16 @@ export const projectConfigSchema = z.object({
    * Absent, one address and several therefore all parse, and the first two
    * behave exactly as they did before this field could hold more than one.
    *
-   * The ceiling of four is not a guess about topology: every address costs a
-   * client, a probe and -- where the plane serves no socket -- a poll on a
-   * metered invocation budget, so a mistyped list must not be able to spend it.
+   * The ceiling of {@link controlPlaneAddressLimit} is not a guess about
+   * topology: every address costs a client, a probe and -- where the plane
+   * serves no socket -- a poll on a metered invocation budget, so a mistyped
+   * list must not be able to spend it.
    */
   controlPlaneUrl: z
-    .union([controlPlaneAddressSchema, z.array(controlPlaneAddressSchema).max(4)])
+    .union([
+      controlPlaneAddressSchema,
+      z.array(controlPlaneAddressSchema).max(controlPlaneAddressLimit),
+    ])
     .transform((value) => (typeof value === 'string' ? [value] : value))
     .refine(
       (value) => new Set(value).size === value.length,

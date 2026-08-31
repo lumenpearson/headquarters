@@ -1,4 +1,5 @@
 import { chromeMessages } from './chromeMessages';
+import { connectionMessages } from './connectionMessages';
 import { editMessages } from './editMessages';
 import { galleryMessages } from './galleryMessages';
 import { keybindMessages } from './keybindMessages';
@@ -55,6 +56,8 @@ export {
  *   declares `Record<SettingId, MessageId>` over the schema's own id union.
  * - `settingOptionMessages` -- the option labels an enum setting's dropdown
  *   shows.
+ * - `connectionMessages` -- why a configured control-plane address was refused,
+ *   read before any request is attempted rather than after one fails.
  *
  * A wave translating a surface with no module of its own adds one here rather
  * than appending to an existing file: `<area>Messages.ts`, exporting
@@ -90,6 +93,7 @@ const catalogModulesByName = {
   gallery: galleryMessages,
   plural: pluralMessages,
   record: recordMessages,
+  connection: connectionMessages,
 } as const satisfies Readonly<Record<string, CatalogModule>>;
 
 /** Every module, by name, so a test can check the modules stay disjoint. */
@@ -109,6 +113,7 @@ export const catalog = {
   ...galleryMessages,
   ...pluralMessages,
   ...recordMessages,
+  ...connectionMessages,
 } as const satisfies Readonly<Record<string, CatalogEntry>>;
 
 export type CatalogId = keyof typeof catalog;
