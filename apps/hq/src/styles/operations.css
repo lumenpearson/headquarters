@@ -4374,6 +4374,15 @@ body[data-accent='red']:not([data-theme='high-contrast-dark']):not(
     alternate;
 }
 
+/*
+ * `bitmap-shader`'s own texture is the animated layer below, not a CSS
+ * background-image -- a flat fill here is cheaper to paint than the grid
+ * every other kind draws, and it is what shows before WebGL has mounted.
+ */
+.ops-shell[data-background-kind='bitmap-shader'] {
+  background: var(--ops-bg);
+}
+
 /* Media backgrounds require a material binding from the storage phase. Until then
    they deliberately fall back to a deterministic terminal field rather than
    loading an arbitrary path or URL. */
@@ -4462,6 +4471,28 @@ body[data-accent='red']:not([data-theme='high-contrast-dark']):not(
   inset: 0;
   background: rgb(2 2 2 / calc(var(--ops-background-overlay, 0.55) * 100%));
   content: '';
+}
+
+/*
+ * The bitmap-shader background: one WebGL canvas, declared once by
+ * `BackgroundShaderLayer` and attached here rather than drawn again by every
+ * screen. Screen-blended over the pure opaque black `colorBack` the layer
+ * renders with -- under that blend mode a black pixel contributes nothing to
+ * what is already on screen, so only the dithered pattern's lit pixels ever
+ * add anything, and the shell's own `--ops-bg` never needs a second copy to
+ * stay in step with. The blur is what turns a dithered bitmap into a soft
+ * wash rather than visible grain -- the glow R13 asks for, not a texture. It
+ * stacks with `backgrounds.blur`, whose default of 0 leaves the baseline
+ * untouched.
+ */
+.ops-shell__background-shader {
+  position: absolute;
+  z-index: var(--z-base);
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: blur(calc(32px + var(--ops-background-blur, 0px)));
 }
 
 .ops-shell[data-style-mode='dense-mainframe'] {

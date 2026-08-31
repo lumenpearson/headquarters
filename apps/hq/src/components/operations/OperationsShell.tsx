@@ -72,6 +72,7 @@ import {
 } from '@/application/sync/connection';
 import { linkStatusTokens } from '@/application/sync/controlPlaneLinks';
 
+import { BackgroundShaderLayer } from '@/components/background/BackgroundShaderLayer';
 import { EditableContent } from '@/components/edit/EditableContent';
 import { TitleBar } from '@/components/shell/TitleBar';
 import { toMaterialEntry } from '@/application/materials/importedMaterials';
@@ -165,6 +166,7 @@ export function OperationsShell({
   const selectCase = useOperationsStore((state) => state.selectCase);
   const personalization = useOperationsStore((state) => state.personalization);
   const editActive = useOperationsStore((state) => state.edit.active);
+  const videoPlaying = useOperationsStore((state) => state.ui.videoPlaying);
   // Every setting that becomes an attribute or a custom property comes from one
   // table, so a new one is added by declaring it rather than by editing this
   // JSX — and a definition that reaches nothing is caught by a test instead of
@@ -180,6 +182,7 @@ export function OperationsShell({
   const animationIntensity = numberSetting(values, 'animations.intensity');
   const draftAnimations = booleanSetting(values, 'animations.enabled');
   const reducedMotion = booleanSetting(values, 'accessibility.reducedMotion');
+  const backgroundMotionSetting = booleanSetting(values, 'animations.backgroundMotion');
 
   // Only the selected kind resolves a material; the other resolves nothing.
   const backgroundImageUrl = useBackgroundMaterialUrl(
@@ -189,6 +192,22 @@ export function OperationsShell({
     background === 'video' ? backgroundVideoSource : '',
   );
   const motionAllowed = production.animations && draftAnimations && !reducedMotion;
+
+  // R13: high-contrast themes exist to remove decoration that competes with
+  // legibility, so the shader never mounts under either -- not muted, absent,
+  // the same stance `data-background-kind='solid'` already reads as safe.
+  const shellTheme = presentation.attributes['data-theme'];
+  const shaderActive =
+    background === 'bitmap-shader' &&
+    shellTheme !== 'high-contrast-dark' &&
+    shellTheme !== 'high-contrast-light';
+  // The player and the map already spend the GPU budget this ambient layer
+  // would otherwise share, so it holds still while either is the reason the
+  // route exists rather than only while a setting says so.
+  const shaderRouteBusy =
+    route === 'map' ||
+    ((route === 'video' || route === 'cameras' || route === 'video-archive') && videoPlaying);
+  const shaderMotionAllowed = motionAllowed && backgroundMotionSetting && !shaderRouteBusy;
 
   useEffect(() => {
     setRoute(route);
@@ -336,6 +355,13 @@ export function OperationsShell({
     >
       {backgroundVideoUrl === null ? null : (
         <BackgroundVideoLayer source={backgroundVideoUrl} paused={!motionAllowed} />
+      )}
+      {!shaderActive ? null : (
+        <BackgroundShaderLayer
+          paused={!shaderMotionAllowed}
+          speed={numberSetting(values, 'backgrounds.motionSpeed')}
+          intensity={animationIntensity}
+        />
       )}
       <pre className="ops-shell__ascii" aria-hidden="true">
         {asciiSignalField}

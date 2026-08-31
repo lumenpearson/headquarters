@@ -857,6 +857,7 @@ const settingsDefinitionsList = [
       'barber-lines',
       'radar',
       'particles',
+      'bitmap-shader',
       'image',
       'video',
     ]),
@@ -1866,7 +1867,7 @@ const settingsDefinitionsList = [
     'backgrounds',
     0,
     'device',
-    'Blur applied to a video background, in pixels.',
+    'Blur applied to a video or bitmap-shader background, in pixels, on top of the glow the shader kind already carries.',
     numberWithin(0, 24),
   ),
   definition(

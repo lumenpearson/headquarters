@@ -867,8 +867,8 @@ export const settingLabelMessages = {
     en: 'Opacity of the wash over an image or video background.',
   },
   'settingDescription.backgrounds.blur': {
-    ru: 'Размытие, применяемое к видеофону, в пикселях.',
-    en: 'Blur applied to a video background, in pixels.',
+    ru: 'Размытие, применяемое к видеофону или растровому шейдеру, в пикселях, поверх свечения, которое шейдер несёт сам.',
+    en: 'Blur applied to a video or bitmap-shader background, in pixels, on top of the glow the shader kind already carries.',
   },
   'settingDescription.backgrounds.motionSpeed': {
     ru: 'Насколько быстро движется анимированный фон, как коэффициент.',

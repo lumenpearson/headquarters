@@ -78,6 +78,10 @@ export const settingOptionMessages = {
   'settingOption.backgrounds.kind.particles': { ru: 'ЧАСТИЦЫ', en: 'PARTICLES' },
   'settingOption.backgrounds.kind.image': { ru: 'ИЗОБРАЖЕНИЕ', en: 'IMAGE' },
   'settingOption.backgrounds.kind.video': { ru: 'ВИДЕО', en: 'VIDEO' },
+  'settingOption.backgrounds.kind.bitmap-shader': {
+    ru: 'РАСТРОВЫЙ ШЕЙДЕР',
+    en: 'BITMAP SHADER',
+  },
   'settingOption.patterns.focus.solid': { ru: 'СПЛОШНОЙ', en: 'SOLID' },
   'settingOption.patterns.focus.dashed': { ru: 'ПУНКТИРНЫЙ', en: 'DASHED' },
   'settingOption.patterns.focus.dotted': { ru: 'ТОЧЕЧНЫЙ', en: 'DOTTED' },

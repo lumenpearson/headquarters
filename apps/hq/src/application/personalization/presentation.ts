@@ -609,7 +609,9 @@ export const settingsDerivedIntoPresentation: Readonly<Record<string, string>> =
   // stylesheet and no module ever read: the shell takes the value itself and
   // spends it as two durations. The binding was accounting, not a consumer.
   'animations.intensity':
-    'Spent by OperationsShell as `--ops-motion-duration` and `--ops-background-duration`.',
+    'Spent by OperationsShell as `--ops-motion-duration` and `--ops-background-duration`, ' +
+    'and passed to BackgroundShaderLayer, which spends it as the bitmap-shader ' +
+    "background's glow opacity.",
 };
 
 const controlFloorProperty = '--ops-control-floor';

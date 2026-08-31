@@ -26,11 +26,14 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   experimental: {
     cpus: 2,
-    // `lucide-react` and `@tabler/icons-react` are already in Next's own
-    // default list; `@hugeicons/core-free-icons` is the one adapter
-    // (`packages/ui/src/icons/hugeicons.ts`) that imports its icons by name
-    // from that package's barrel rather than by a per-icon path, and is not.
-    optimizePackageImports: ['@hugeicons/core-free-icons'],
+    // Two packages import by name from a barrel rather than by a per-icon or
+    // per-shader path, so without this webpack's tree-shaking is what has to
+    // prove the rest unreachable, instead of them never being bundled:
+    // `@hugeicons/core-free-icons` (the one icon adapter that reads its
+    // barrel; `lucide-react` and `@tabler/icons-react` are already in Next's
+    // own default list) and `@paper-design/shaders-react`, whose `Dithering`
+    // sits beside two dozen other shaders in the same `index.js`.
+    optimizePackageImports: ['@hugeicons/core-free-icons', '@paper-design/shaders-react'],
   },
   pageExtensions,
   ...(target === 'desktop'
