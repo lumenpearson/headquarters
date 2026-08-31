@@ -4,6 +4,7 @@ import { editMessages } from './editMessages';
 import { galleryMessages } from './galleryMessages';
 import { keybindMessages } from './keybindMessages';
 import { materialMessages } from './materialMessages';
+import { pairingMessages } from './pairingMessages';
 import { pluralMessages } from './pluralMessages';
 import { recordMessages } from './recordMessages';
 import { settingLabelMessages } from './settingLabelMessages';
@@ -44,6 +45,9 @@ export {
  * - `updateMessages` -- the in-app updater and the autostart switch.
  * - `materialMessages` -- materials, transport, the record drawer and the
  *   production panel: the surfaces built around a file rather than a screen.
+ * - `pairingMessages` -- the group pairing dialog: the control-plane address,
+ *   the join-or-create wizard, group administration, the device roster,
+ *   presence and the links a paired session holds to the group.
  * - `galleryMessages` -- the primitive gallery at `/dev/ui`, a developer
  *   surface whose text never appears on a shoot-day route.
  * - `pluralMessages` -- every message whose text depends on a count, grouped
@@ -90,6 +94,7 @@ const catalogModulesByName = {
   edit: editMessages,
   update: updateMessages,
   material: materialMessages,
+  pairing: pairingMessages,
   gallery: galleryMessages,
   plural: pluralMessages,
   record: recordMessages,
@@ -110,6 +115,7 @@ export const catalog = {
   ...editMessages,
   ...updateMessages,
   ...materialMessages,
+  ...pairingMessages,
   ...galleryMessages,
   ...pluralMessages,
   ...recordMessages,

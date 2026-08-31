@@ -7570,3 +7570,23 @@ body {
     max-height: none;
   }
 }
+
+/*
+ * The group pairing surface (session 2026-08-30 continued): the join-or-
+ * create wizard `GroupPairingDialog.tsx` swaps between `choose`, `join` and
+ * `create` steps. Every other class this dialog carries is styled in
+ * `interaction.css` (R27) or on the elements themselves; this block is only
+ * what the wizard's own step swap needs and did not exist before it.
+ *
+ * The step heading is the one element `GroupJoinWizard` moves focus to on
+ * every step change past the first, so it has to show a ring of its own: the
+ * sitewide `:focus-visible` rule above only names `button, a, input, select`,
+ * and a heading holds no click surface a mouse can trigger it from, so a
+ * plain `:focus` reaches every path that puts focus there -- the effect's own
+ * `.focus()` call included -- with no risk of the ring some
+ * `:focus-visible`-only rules exist to avoid on a pointer click.
+ */
+.group-pairing__step h3:focus {
+  outline: var(--ops-focus-ring-width, 1px) solid var(--ops-orange-bright);
+  outline-offset: 2px;
+}

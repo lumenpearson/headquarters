@@ -52,6 +52,10 @@ class FakeSession {
    * signature that moves breaks this file instead of leaving it passing against
    * a shape the dialog no longer calls.
    */
+  readonly pair: ControlPlaneSession['pair'] = async (pairingCode, deviceName) => {
+    this.calls.push(`pair:${pairingCode}:${deviceName}`);
+  };
+
   readonly createGroup: ControlPlaneSession['createGroup'] = async (request) => {
     this.calls.push(`createGroup:${request.name}:${request.deviceName}:${request.bootstrapSecret}`);
     return this.created;
@@ -480,6 +484,189 @@ describe('GroupPairingDialog over the group administration commands', () => {
 
     // The one line an operator has to see when a command did nothing.
     expect(within(dialog).getByText(/ЗАПРОС К CONTROL PLANE ОТКЛОНЁН/)).not.toBeNull();
+  });
+});
+
+/*
+ * The join-or-create wizard (session 2026-08-30 continued, R27 rework): a
+ * session with no group yet opens on a choice between the two paths, each
+ * path is a screen of its own reached by exactly one action from that choice,
+ * and a back step never discards what was already typed. Every case starts
+ * from the same "nothing paired yet" setup the administration block above
+ * uses for the same reason it does there: the pairing code a `createGroup`
+ * case asks for cannot exist before a group does.
+ */
+describe('GroupPairingDialog over the join-or-create wizard', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    operationsStore.getState().resetWorld();
+    operationsStore.getState().patchConnection({
+      ...disconnectedConnection('local-only'),
+      links: [],
+      mirror: initialGroupMirrorSummary,
+    });
+    held.session = null;
+    expect(document.body.textContent).toBe('');
+  });
+
+  it('opens on the choice between the two paths, with no back button yet', async () => {
+    useSession();
+    act(() => {
+      operationsStore.getState().patchConnection({ mode: 'reauth-required' });
+    });
+    const dialog = await open();
+
+    expect(dialog.querySelector('h3')?.textContent).toBe('СПОСОБ ВХОДА');
+    expect(within(dialog).queryByRole('button', { name: /назад/i })).toBeNull();
+    expect(button(dialog, /войти по коду/i)).not.toBeNull();
+    expect(button(dialog, /создать новую группу/i)).not.toBeNull();
+  });
+
+  it('carries a typed pairing code and device name through a step back and forward again', async () => {
+    useSession();
+    act(() => {
+      operationsStore.getState().patchConnection({ mode: 'reauth-required' });
+    });
+    const dialog = await open();
+
+    act(() => {
+      fireEvent.click(button(dialog, /войти по коду/i));
+    });
+    expect(dialog.querySelector('h3')?.textContent).toBe('ВХОД В ГРУППУ');
+
+    act(() => {
+      fireEvent.change(within(dialog).getByLabelText('Код пары'), {
+        target: { value: 'PAIR-9000' },
+      });
+      fireEvent.change(within(dialog).getByLabelText('Имя устройства'), {
+        target: { value: 'MON-03' },
+      });
+    });
+
+    act(() => {
+      fireEvent.click(button(dialog, /назад/i));
+    });
+    expect(dialog.querySelector('h3')?.textContent).toBe('СПОСОБ ВХОДА');
+
+    act(() => {
+      fireEvent.click(button(dialog, /войти по коду/i));
+    });
+
+    expect((within(dialog).getByLabelText('Код пары') as HTMLInputElement).value).toBe('PAIR-9000');
+    expect((within(dialog).getByLabelText('Имя устройства') as HTMLInputElement).value).toBe(
+      'MON-03',
+    );
+  });
+
+  it('carries a typed group name and secret through a step back and forward again', async () => {
+    useSession();
+    act(() => {
+      operationsStore.getState().patchConnection({ mode: 'reauth-required' });
+    });
+    const dialog = await open();
+
+    act(() => {
+      fireEvent.click(button(dialog, /создать новую группу/i));
+    });
+    act(() => {
+      fireEvent.change(within(dialog).getByLabelText('Имя новой группы'), {
+        target: { value: 'ШТАБ-2' },
+      });
+      fireEvent.change(within(dialog).getByLabelText('Секрет развёртывания'), {
+        target: { value: 'top-secret' },
+      });
+    });
+
+    act(() => {
+      fireEvent.click(button(dialog, /назад/i));
+    });
+    act(() => {
+      fireEvent.click(button(dialog, /создать новую группу/i));
+    });
+
+    expect((within(dialog).getByLabelText('Имя новой группы') as HTMLInputElement).value).toBe(
+      'ШТАБ-2',
+    );
+    expect((within(dialog).getByLabelText('Секрет развёртывания') as HTMLInputElement).value).toBe(
+      'top-secret',
+    );
+  });
+
+  it('moves focus to the new step heading on every step change past the first', async () => {
+    useSession();
+    act(() => {
+      operationsStore.getState().patchConnection({ mode: 'reauth-required' });
+    });
+    const dialog = await open();
+
+    act(() => {
+      fireEvent.click(button(dialog, /войти по коду/i));
+    });
+    const joinHeading = dialog.querySelector('h3');
+    expect(joinHeading?.textContent).toBe('ВХОД В ГРУППУ');
+    // A keyboard operator who just chose a path is not stranded on the
+    // control they clicked: the surface tells them where it put them.
+    expect(document.activeElement).toBe(joinHeading);
+
+    act(() => {
+      fireEvent.click(button(dialog, /назад/i));
+    });
+    const chooseHeadingAgain = dialog.querySelector('h3');
+    expect(chooseHeadingAgain?.textContent).toBe('СПОСОБ ВХОДА');
+    expect(document.activeElement).toBe(chooseHeadingAgain);
+  });
+
+  it('reaches session.pair from the join step, with what was typed there', async () => {
+    const session = useSession();
+    act(() => {
+      operationsStore.getState().patchConnection({ mode: 'reauth-required' });
+    });
+    const dialog = await open();
+
+    act(() => {
+      fireEvent.click(button(dialog, /войти по коду/i));
+    });
+    act(() => {
+      fireEvent.change(within(dialog).getByLabelText('Код пары'), {
+        target: { value: 'PAIR-4242' },
+      });
+      fireEvent.change(within(dialog).getByLabelText('Имя устройства'), {
+        target: { value: 'MON-02' },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(button(dialog, /подключиться к группе/i));
+    });
+
+    expect(session.calls).toEqual(['pair:PAIR-4242:MON-02']);
+  });
+
+  it('reaches session.createGroup from the create step, with what was typed there', async () => {
+    const session = useSession();
+    act(() => {
+      operationsStore.getState().patchConnection({ mode: 'reauth-required' });
+    });
+    const dialog = await open();
+
+    act(() => {
+      fireEvent.click(button(dialog, /создать новую группу/i));
+    });
+    act(() => {
+      fireEvent.change(within(dialog).getByLabelText('Имя новой группы'), {
+        target: { value: 'ШТАБ' },
+      });
+      fireEvent.change(within(dialog).getByLabelText('Имя устройства'), {
+        target: { value: 'MON-01' },
+      });
+      fireEvent.change(within(dialog).getByLabelText('Секрет развёртывания'), {
+        target: { value: 'secret-value' },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(button(dialog, /\[N\] создать группу/i));
+    });
+
+    expect(session.calls).toEqual(['createGroup:ШТАБ:MON-01:secret-value']);
   });
 });
 

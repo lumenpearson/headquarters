@@ -42,7 +42,7 @@
   "apps/hq/src/components/shell/TitleBar.tsx": 8,
   "apps/hq/src/components/shell/TopBar.tsx": 9,
   "apps/hq/src/components/startup/StartupSequence.tsx": 4,
-  "apps/hq/src/components/sync/GroupPairingDialog.tsx": 69,
+  "apps/hq/src/components/sync/GroupPairingDialog.tsx": 3,
   "apps/hq/src/components/update/UpdateSection.tsx": 5,
   "apps/hq/src/components/workspace/WindowLayer.tsx": 13,
   "apps/hq/src/infrastructure/explorer/BrowserDirectorySource.ts": 1,
