@@ -21,7 +21,8 @@ import {
 } from '@vidstack/react';
 import { TerminalButton, TerminalSelect, TerminalSlider } from '@gremuchaya/ui/primitives';
 
-import { t } from '@/application/localization/locale';
+import { t, useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import {
   useBooleanSetting,
   useNumberSetting,
@@ -96,19 +97,19 @@ const webcamCaptureSizes = {
   '480p': { width: { ideal: 854 }, height: { ideal: 480 } },
 } as const;
 
-const cameraFilterOptions = [
-  { value: 'all', label: 'ВСЕ КАНАЛЫ' },
-  { value: 'online', label: 'ТОЛЬКО ACTIVE' },
-  { value: 'alert', label: 'ТОЛЬКО ALERT' },
-  { value: 'lost', label: 'ПОТЕРЯ СИГНАЛА' },
-] as const;
+const cameraFilterMessageIds = [
+  { value: 'all', id: 'video.filterAll' },
+  { value: 'online', id: 'video.filterOnline' },
+  { value: 'alert', id: 'video.filterAlert' },
+  { value: 'lost', id: 'overview.metricSignalLost' },
+] as const satisfies ReadonlyArray<{ readonly value: string; readonly id: MessageId }>;
 
-const cameraSortOptions = [
-  { value: 'registry', label: 'ПОРЯДОК РЕЕСТРА' },
-  { value: 'id', label: 'ИДЕНТИФИКАТОР' },
-  { value: 'signal', label: 'УРОВЕНЬ СИГНАЛА' },
-  { value: 'sector', label: 'СЕКТОР' },
-] as const;
+const cameraSortMessageIds = [
+  { value: 'registry', id: 'video.sortRegistryOrder' },
+  { value: 'id', id: 'video.sortId' },
+  { value: 'signal', id: 'drawer.signalLevel' },
+  { value: 'sector', id: 'field.sector' },
+] as const satisfies ReadonlyArray<{ readonly value: string; readonly id: MessageId }>;
 
 interface WebcamSession {
   readonly cameraId: string;
@@ -119,6 +120,26 @@ type WebcamState = 'idle' | 'requesting' | 'active' | 'denied' | 'unavailable' |
 type MaterialCatalogState = 'loading' | 'ready' | 'unavailable';
 type MaterialSourceState = 'idle' | 'loading' | 'ready' | 'missing' | 'unavailable';
 type PlaybackSyncState = 'CONNECTING' | 'ACTIVE' | 'SOURCE MISMATCH' | 'LOCAL ONLY';
+
+/**
+ * The badge a channel's registry filter draws in the query summary
+ * (`camera-grid-query-summary`), keyed by `CameraRegistryFilter`: a table
+ * rather than `cameraFilter.toUpperCase()`, which drew the filter's own
+ * English identifier however `localization.locale` was set.
+ */
+const registryFilterMessageIds: Readonly<Record<CameraRegistryFilter, MessageId>> = {
+  all: 'video.registryFilterAll',
+  online: 'video.registryFilterOnline',
+  alert: 'video.registryFilterAlert',
+  lost: 'overview.metricSignalLost',
+};
+
+const playbackSyncStateMessageIds: Readonly<Record<PlaybackSyncState, MessageId>> = {
+  CONNECTING: 'video.syncConnecting',
+  ACTIVE: 'video.syncActive',
+  'SOURCE MISMATCH': 'video.syncSourceMismatch',
+  'LOCAL ONLY': 'video.syncLocalOnly',
+};
 
 interface CameraMaterialSource {
   readonly cameraId: string;
@@ -217,6 +238,22 @@ function useInactiveDecodeSuspension(surfaceRef: RefObject<MediaPlayerInstance |
 }
 
 export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'archive' }) {
+  const translate = useTranslate();
+  // Memoized rather than a plain `.map()` on every render: an unmemoized
+  // derived value built from `translate` (a new closure on every render)
+  // between this component's many hooks confused React Compiler's reactive-
+  // scope inference for callbacks declared later that reference neither --
+  // `assignCameraMaterial`, `toggleWebcam`, `applyPlaybackAction` and
+  // `selectCameraWithSync` all failed `preserve-manual-memoization` for that
+  // reason until these two moved into `useMemo`.
+  const cameraFilterOptions = useMemo(
+    () => cameraFilterMessageIds.map(({ value, id }) => ({ value, label: translate(id) })),
+    [translate],
+  );
+  const cameraSortOptions = useMemo(
+    () => cameraSortMessageIds.map(({ value, id }) => ({ value, label: translate(id) })),
+    [translate],
+  );
   const router = useRouter();
   const state = useOperationsStore((value) => value);
   const playerRef = useRef<MediaPlayerInstance>(null);
@@ -512,10 +549,12 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
       readonly label: string;
       readonly disabled?: boolean;
     }> = [
-      { value: demoCameraMaterialOption, label: '[DEMO] SURVEILLANCE LOOP' },
+      { value: demoCameraMaterialOption, label: translate('video.demoSourceLabel') },
       ...assignableCameraMaterials.map((material) => ({
         value: material.materialId,
-        label: `[FILE] ${abbreviateMaterialName(material.displayName)}`,
+        label: translate('video.fileSourceLabel', {
+          name: abbreviateMaterialName(material.displayName),
+        }),
       })),
     ];
     if (
@@ -524,12 +563,15 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
     ) {
       options.push({
         value: selectedMaterialId,
-        label: `[MISSING] ${selectedMaterialId.slice(0, 12)}`,
+        label: translate('video.missingSourceLabel', { id: selectedMaterialId.slice(0, 12) }),
         disabled: true,
       });
     }
     return options;
-  }, [assignableCameraMaterials, selectedMaterialId]);
+    // `translate` belongs here: without it the memo keeps whatever locale was
+    // in force when the material list last changed, and a pure locale switch
+    // would leave these three labels stuck in the old language.
+  }, [assignableCameraMaterials, selectedMaterialId, translate]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -609,7 +651,8 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
         setCameraMaterialSourceFailure({
           cameraId,
           materialId: selectedMaterial.materialId,
-          message: error instanceof Error ? error.message : 'LOCAL MATERIAL STREAM UNAVAILABLE',
+          message:
+            error instanceof Error ? error.message : t('video.localMaterialStreamUnavailable'),
         });
       });
     return () => {
@@ -1084,25 +1127,29 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
 
   if (selected === undefined || selectedStream === undefined) return null;
   const activeSelectedSource = selectedSource ?? selectedStream.browserSource;
-  const selectedSourceLabel = isWebcamSelected
-    ? '● LOCAL WEBCAM'
-    : selectedTransport === 'LOCAL_MATERIAL'
-      ? '▶ LOCAL MATERIAL'
-      : selectedTransport === 'RTSP_GATEWAY'
-        ? '● OPTIONAL LIVE'
-        : '↻ DEMO LOOP';
+  const selectedSourceLabel = translate(
+    isWebcamSelected
+      ? 'video.sourceLabelWebcam'
+      : selectedTransport === 'LOCAL_MATERIAL'
+        ? 'video.sourceLabelLocalMaterial'
+        : selectedTransport === 'RTSP_GATEWAY'
+          ? 'video.sourceLabelOptionalLive'
+          : 'video.sourceLabelDemoLoop',
+  );
 
   return (
     <div className={`ops-screen video-screen video-screen--${mode}`}>
       <header className="ops-screen__title">
         <div>
-          <span>VIDEO / LOCAL MEDIA MATRIX</span>
+          <span>{translate('video.eyebrow')}</span>
           <h1>
-            {mode === 'archive'
-              ? 'ВИДЕОАРХИВ'
-              : mode === 'cameras'
-                ? 'ЦЕНТР КАМЕР / VIDEO WALL'
-                : 'ВИДЕО / ПРЯМОЙ ЭФИР'}
+            {translate(
+              mode === 'archive'
+                ? 'video.headingArchive'
+                : mode === 'cameras'
+                  ? 'video.headingCameras'
+                  : 'video.headingLive',
+            )}
           </h1>
         </div>
         <nav className="screen-subnav">
@@ -1110,19 +1157,19 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             className={mode === 'live' ? 'is-active' : ''}
             onClick={() => router.push('/video')}
           >
-            [L] LIVE
+            {translate('video.navLive')}
           </TerminalButton>
           <TerminalButton
             className={mode === 'cameras' ? 'is-active' : ''}
             onClick={() => router.push('/video/cameras')}
           >
-            [C] CAMERAS
+            {translate('video.navCameras')}
           </TerminalButton>
           <TerminalButton
             className={mode === 'archive' ? 'is-active' : ''}
             onClick={() => router.push('/video/archive')}
           >
-            [A] ARCHIVE
+            {translate('video.navArchive')}
           </TerminalButton>
         </nav>
       </header>
@@ -1212,7 +1259,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               if (event.key.toLowerCase() === 'w') void toggleWebcam();
             }}
             tabIndex={0}
-            aria-label={`Видеопоток ${selected.id}`}
+            aria-label={translate('video.streamAriaLabel', { id: selected.id })}
           >
             <MediaProvider mediaProps={{ className: 'video-main-feed__media' }} />
             <div className="video-scanlines" aria-hidden="true" />
@@ -1222,7 +1269,9 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 transform: `translate(${state.ui.ptz.pan * 0.15}%, ${state.ui.ptz.tilt * 0.15}%) scale(${state.ui.ptz.zoom})`,
               }}
             >
-              <span>{selected.objectId} / TRACKING</span>
+              <span>
+                {selected.objectId} / {translate('video.trackingLabel')}
+              </span>
             </div>
             <header>
               <span>
@@ -1231,29 +1280,30 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               <i>{selectedSourceLabel}</i>
             </header>
             <div className="video-overlay-left">
-              <span>КАМЕРА {selected.id}</span>
-              <span>ЛОКАЦИЯ {selected.sectorId}</span>
+              <span>{translate('video.overlayCamera', { id: selected.id })}</span>
+              <span>{translate('video.overlayLocation', { sector: selected.sectorId })}</span>
               <span>
                 {selected.resolution} / {selected.fps} FPS
               </span>
               <span>
                 {selected.codec} / {selected.bitrate}
               </span>
-              <span>ЗУМ {state.ui.ptz.zoom.toFixed(1)}×</span>
-              <span>УГОЛ {87 + state.ui.ptz.pan / 10}°</span>
-              <b>СТАБИЛИЗАЦИЯ АКТИВНА</b>
+              <span>{translate('video.overlayZoom', { value: state.ui.ptz.zoom.toFixed(1) })}</span>
+              <span>{translate('video.overlayAngle', { value: 87 + state.ui.ptz.pan / 10 })}</span>
+              <b>{translate('video.stabilizationActive')}</b>
             </div>
             <div className="video-timecode">
               <strong>07:42:{String(Math.floor(currentTime) % 60).padStart(2, '0')}</strong>
               <span>
-                {state.ui.videoLive ? 'LIVE' : 'ARCHIVE'} /{' '}
-                {state.ui.videoPlaying ? 'PLAY' : 'PAUSE'} / {playbackRate}×
+                {translate(state.ui.videoLive ? 'media.liveLabel' : 'media.archiveLabel')} /{' '}
+                {translate(state.ui.videoPlaying ? 'media.playLabel' : 'media.pauseLabel')} /{' '}
+                {playbackRate}×
               </span>
             </div>
             {selected.status === 'SIGNAL_LOST' || mediaError ? (
               <div className="video-signal-lost">
-                <strong>ПОТЕРЯ СИГНАЛА</strong>
-                <span>ПЕРЕКЛЮЧЕНИЕ НА РЕЗЕРВНЫЙ КАНАЛ</span>
+                <strong>{translate('overview.metricSignalLost')}</strong>
+                <span>{translate('video.switchingToBackup')}</span>
                 <TerminalButton
                   onClick={() => {
                     setFailedCameraId(null);
@@ -1261,15 +1311,15 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                     playerRef.current?.startLoading();
                   }}
                 >
-                  [R] RETRY STREAM
+                  {translate('video.retryStreamButton')}
                 </TerminalButton>
               </div>
             ) : null}
           </MediaPlayer>
 
           <Panel
-            title="УПРАВЛЕНИЕ ПОТОКОМ"
-            eyebrow="TIMELINE / TRANSPORT"
+            title={translate('video.transportTitle')}
+            eyebrow={translate('video.transportEyebrow')}
             className="video-transport"
           >
             <div className="transport-controls">
@@ -1278,39 +1328,43 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                   requestPlaybackAction('PAUSE', 0);
                 }}
               >
-                [■] STOP
+                {translate('video.stopButton')}
               </TerminalButton>
               <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(-1 / selected.fps)}>
-                [|◀] FRAME
+                {translate('video.prevFrameButton')}
               </TerminalButton>
               <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(-seekStepSeconds)}>
-                [◀] -{seekStepSeconds}S
+                {translate('media.seekBackward', { seconds: seekStepSeconds })}
               </TerminalButton>
               <TerminalButton
                 tone="primary"
                 className="is-primary"
                 onClick={() => requestPlaybackAction(state.ui.videoPlaying ? 'PAUSE' : 'PLAY')}
               >
-                {state.ui.videoPlaying ? '[Ⅱ] PAUSE' : '[▶] PLAY'}
+                {translate(state.ui.videoPlaying ? 'media.pauseButton' : 'media.playButton')}
               </TerminalButton>
               <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(seekStepSeconds)}>
-                [▶] +{seekStepSeconds}S
+                {translate('media.seekForward', { seconds: seekStepSeconds })}
               </TerminalButton>
               <TerminalButton disabled={isWebcamSelected} onClick={() => seekBy(1 / selected.fps)}>
-                [▶|] FRAME
+                {translate('video.nextFrameButton')}
               </TerminalButton>
               <TerminalButton
                 className={state.ui.videoLive ? 'is-live' : ''}
                 disabled={isWebcamSelected}
                 onClick={goLive}
               >
-                [●] LIVE
+                {translate('video.goLiveButton')}
               </TerminalButton>
               <TerminalButton disabled={!frameCaptureAllowed} onClick={takeSnapshot}>
-                [S] SNAP
+                {translate('video.snapButton')}
               </TerminalButton>
-              <TerminalButton onClick={togglePictureInPicture}>[P] PIP</TerminalButton>
-              <TerminalButton onClick={fullscreen}>[F] FULL</TerminalButton>
+              <TerminalButton onClick={togglePictureInPicture}>
+                {translate('video.pipButton')}
+              </TerminalButton>
+              <TerminalButton onClick={fullscreen}>
+                {translate('media.fullscreenButton')}
+              </TerminalButton>
               <TerminalButton
                 className={isWebcamSelected ? 'is-live' : ''}
                 disabled={
@@ -1320,11 +1374,13 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 }
                 onClick={() => void toggleWebcam()}
               >
-                {webcamState === 'requesting'
-                  ? '[W] REQUEST'
-                  : isWebcamSelected
-                    ? '[W] STOP CAM'
-                    : '[W] WEBCAM'}
+                {translate(
+                  webcamState === 'requesting'
+                    ? 'video.webcamRequestButton'
+                    : isWebcamSelected
+                      ? 'video.webcamStopButton'
+                      : 'video.webcamStartButton',
+                )}
               </TerminalButton>
             </div>
             <div className="transport-secondary">
@@ -1333,7 +1389,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 value={selectedMaterialId ?? demoCameraMaterialOption}
                 options={materialSourceOptions}
                 onValueChange={assignCameraMaterial}
-                label="Источник выбранного канала"
+                label={translate('video.sourceSelectLabel')}
               />
               <TerminalSelect
                 value={String(playbackRate)}
@@ -1341,7 +1397,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 onValueChange={(value) =>
                   requestPlaybackAction('SET_RATE', currentTime, Number(value))
                 }
-                label="Скорость воспроизведения"
+                label={translate('media.playbackRateLabel')}
                 disabled={isWebcamSelected}
               />
               <MaterialRenditionMenu
@@ -1353,13 +1409,13 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 disabled={isWebcamSelected || selectedMaterial === undefined}
               />
               <TerminalButton onClick={() => setChosenMuted(!muted)}>
-                {muted ? '[M] MUTED' : '[M] AUDIO'}
+                {translate(muted ? 'media.mutedButton' : 'media.audioButton')}
               </TerminalButton>
               <TerminalSlider
                 className="video-volume"
                 value={volume * 100}
                 onValueChange={(value) => setChosenVolume(value / 100)}
-                label="Громкость"
+                label={translate('video.volumeLabel')}
                 min={0}
                 max={100}
                 step={5}
@@ -1367,42 +1423,52 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               />
               <span>
                 {isWebcamSelected
-                  ? 'LOCAL DEVICE / LIVE'
+                  ? translate('video.localDeviceLive')
                   : `${formatTime(currentTime)} / ${formatTime(duration)}`}
               </span>
               <span
                 className={`playback-sync-status playback-sync-status--${playbackSyncState.toLowerCase().replaceAll(' ', '-')}`}
                 aria-live="polite"
               >
-                [⇄] SYNC / {playbackSyncTarget === null ? 'LOCAL SOURCE' : playbackSyncState}
+                {translate('video.syncStatusLine', {
+                  status:
+                    playbackSyncTarget === null
+                      ? translate('video.syncLocalSource')
+                      : translate(playbackSyncStateMessageIds[playbackSyncState]),
+                })}
               </span>
               <span className="webcam-status" aria-live="polite">
-                {webcamState === 'denied' ? <b>CAMERA ACCESS DENIED</b> : null}
-                {webcamState === 'unavailable' ? <b>CAMERA API UNAVAILABLE</b> : null}
-                {webcamState === 'ended' ? <b>CAMERA STREAM ENDED</b> : null}
+                {webcamState === 'denied' ? <b>{translate('video.webcamDenied')}</b> : null}
+                {webcamState === 'unavailable' ? (
+                  <b>{translate('video.webcamApiUnavailable')}</b>
+                ) : null}
+                {webcamState === 'ended' ? <b>{translate('video.webcamEnded')}</b> : null}
               </span>
               <span className="camera-material-status" aria-live="polite">
                 {selectedMaterialId !== undefined && materialSourceState === 'loading' ? (
-                  <b>LOADING LOCAL MATERIAL…</b>
+                  <b>{translate('video.loadingLocalMaterial')}</b>
                 ) : null}
                 {selectedMaterialId !== undefined && materialSourceState === 'ready' ? (
                   <b>
-                    {activeCameraMaterialSource?.transport === 'RANGE_GRANT'
-                      ? 'RANGE STREAM READY'
-                      : 'MATERIAL READY'}{' '}
+                    {translate(
+                      activeCameraMaterialSource?.transport === 'RANGE_GRANT'
+                        ? 'video.rangeStreamReady'
+                        : 'video.materialReady',
+                    )}{' '}
                     / {abbreviateMaterialName(selectedMaterial?.displayName ?? '')}
                   </b>
                 ) : null}
                 {selectedMaterialId !== undefined && materialSourceState === 'missing' ? (
-                  <b>MATERIAL NOT AVAILABLE IN LOCAL MIRROR</b>
+                  <b>{translate('video.materialNotAvailable')}</b>
                 ) : null}
                 {selectedMaterialId !== undefined && materialSourceState === 'unavailable' ? (
                   <b>
-                    {activeCameraMaterialFailure?.message || 'LOCAL MATERIAL STREAM UNAVAILABLE'}
+                    {activeCameraMaterialFailure?.message ||
+                      translate('video.localMaterialStreamUnavailable')}
                   </b>
                 ) : null}
                 {selectedMaterialId === undefined && materialCatalogState === 'unavailable' ? (
-                  <b>LOCAL MATERIAL CATALOG OFFLINE</b>
+                  <b>{translate('video.catalogOffline')}</b>
                 ) : null}
               </span>
             </div>
@@ -1412,7 +1478,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 className="video-scrubber__slider"
                 value={state.ui.videoPosition}
                 onValueChange={seekToPercent}
-                label="Позиция видеопотока"
+                label={translate('video.scrubberLabel')}
                 disabled={isWebcamSelected}
                 min={0}
                 max={100}
@@ -1435,8 +1501,12 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
         </div>
 
         <Panel
-          title="СЕТКА КАМЕР"
-          eyebrow={`VIEW ${cameraPage.page}/${cameraPage.totalPages} / ${cameraPage.totalItems} CHANNELS`}
+          title={translate('video.cameraGridTitle')}
+          eyebrow={translate('video.cameraGridEyebrow', {
+            page: cameraPage.page,
+            total: cameraPage.totalPages,
+            count: cameraPage.totalItems,
+          })}
           className="camera-grid-panel"
         >
           <div className="camera-grid-toolbar">
@@ -1447,7 +1517,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 setChosenFilter(value as CameraRegistryFilter);
                 setCameraPageIndex(1);
               }}
-              label="Фильтр камер"
+              label={translate('video.cameraFilterSelectLabel')}
             />
             <TerminalSelect
               value={cameraSort}
@@ -1456,7 +1526,7 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 setCameraSort(value as CameraRegistrySort);
                 setCameraPageIndex(1);
               }}
-              label="Сортировка камер"
+              label={translate('video.cameraSortSelectLabel')}
             />
           </div>
           <div className="camera-grid">
@@ -1467,23 +1537,28 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 onClick={() => {
                   selectCameraWithSync(camera.id);
                 }}
-                title={`${camera.location} / открыть поток`}
+                title={translate('video.openStreamTitle', { location: camera.location })}
               >
                 <div className="camera-thumb">
                   <Image
                     src={stream.thumbnailSource}
-                    alt={`Камера ${camera.id}: ${camera.location}`}
+                    alt={translate('video.cameraImageAlt', {
+                      id: camera.id,
+                      location: camera.location,
+                    })}
                     fill
                     sizes="(max-width: 1500px) 24vw, 16vw"
                   />
                   <span>
-                    {camera.status === 'SIGNAL_LOST'
-                      ? 'NO SIGNAL'
-                      : stream.transport === 'LOCAL_MATERIAL'
-                        ? '▶ FILE'
-                        : stream.transport === 'RTSP_GATEWAY'
-                          ? '● LIVE'
-                          : '↻ DEMO'}
+                    {translate(
+                      camera.status === 'SIGNAL_LOST'
+                        ? 'video.thumbNoSignal'
+                        : stream.transport === 'LOCAL_MATERIAL'
+                          ? 'video.thumbFile'
+                          : stream.transport === 'RTSP_GATEWAY'
+                            ? 'video.thumbLive'
+                            : 'video.thumbDemo',
+                    )}
                   </span>
                 </div>
                 <footer>
@@ -1494,47 +1569,50 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               </TerminalButton>
             ))}
             {cameraPage.items.length >= cameraPageSize ? null : (
-              <aside className="camera-grid-query-summary" aria-label="Сводка реестра камер">
+              <aside
+                className="camera-grid-query-summary"
+                aria-label={translate('video.registrySummaryLabel')}
+              >
                 <header>
-                  <strong>[ REGISTRY QUERY ]</strong>
-                  <span>{cameraFilter.toUpperCase()}</span>
+                  <strong>{translate('video.registryQueryLabel')}</strong>
+                  <span>{translate(registryFilterMessageIds[cameraFilter])}</span>
                 </header>
                 <dl>
                   <div>
-                    <dt>MATCH</dt>
+                    <dt>{translate('video.dtMatch')}</dt>
                     <dd>{cameraPage.totalItems}</dd>
                   </div>
                   <div>
-                    <dt>ACTIVE</dt>
+                    <dt>{translate('video.dtActive')}</dt>
                     <dd>{cameraRegistryHealth.online}</dd>
                   </div>
                   <div>
-                    <dt>ALERT</dt>
+                    <dt>{translate('video.registryFilterAlert')}</dt>
                     <dd>{cameraRegistryHealth.alert}</dd>
                   </div>
                   <div>
-                    <dt>LOST</dt>
+                    <dt>{translate('video.dtLost')}</dt>
                     <dd>{cameraRegistryHealth.lost}</dd>
                   </div>
                   <div>
-                    <dt>DEMO</dt>
+                    <dt>{translate('video.dtDemo')}</dt>
                     <dd>{cameraRegistryHealth.demo}</dd>
                   </div>
                   <div>
-                    <dt>MATERIAL</dt>
+                    <dt>{translate('video.dtMaterial')}</dt>
                     <dd>{cameraRegistryHealth.materials}</dd>
                   </div>
                   <div>
-                    <dt>WEBCAM</dt>
+                    <dt>{translate('video.dtWebcam')}</dt>
                     <dd>{isWebcamSelected ? 1 : 0}</dd>
                   </div>
                   <div>
-                    <dt>RTSP OPT-IN</dt>
+                    <dt>{translate('video.dtRtspOptIn')}</dt>
                     <dd>{cameraRegistryHealth.gateway}</dd>
                   </div>
                 </dl>
                 <p>
-                  HIDDEN FEEDS: STATIC THUMBNAILS / DECODE TARGET: <b>{selected.id}</b>
+                  {translate('video.hiddenFeedsNote')} <b>{selected.id}</b>
                 </p>
               </aside>
             )}
@@ -1553,99 +1631,119 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
               total: cameraPage.totalItems,
             }}
             onPage={setCameraPageIndex}
-            label="Страницы реестра камер"
+            label={translate('video.cameraPaginationLabel')}
           />
         </Panel>
 
         <aside className="video-side-stack">
-          <Panel title="ХРАНИЛИЩЕ / КАНАЛЫ" eyebrow="RECORDING MATRIX" className="video-storage">
+          <Panel
+            title={translate('video.storageTitle')}
+            eyebrow={translate('video.storageEyebrow')}
+            className="video-storage"
+          >
             <dl className="ops-definition-list">
               <div>
-                <dt>АКТИВНЫЕ КАНАЛЫ</dt>
+                <dt>{translate('video.dtActiveChannels')}</dt>
                 <dd>12 / 24</dd>
               </div>
               <div>
-                <dt>СВОБОДНЫЕ</dt>
+                <dt>{translate('video.dtFree')}</dt>
                 <dd>12</dd>
               </div>
               <div>
-                <dt>ЗАПИСЬ</dt>
+                <dt>{translate('video.dtRecording')}</dt>
                 <dd>12</dd>
               </div>
               <div>
-                <dt>АРХИВ</dt>
+                <dt>{translate('media.archiveLabel')}</dt>
                 <dd>4.2 TB</dd>
               </div>
             </dl>
             <ProgressBar value={68} tone="ok" />
           </Panel>
-          <Panel title="УРОВЕНЬ СИГНАЛА" eyebrow="LIVE CHANNEL" className="video-signal">
-            <Gauge value={selected.signal} label="ОТЛИЧНЫЙ" />
+          <Panel
+            title={translate('drawer.signalLevel')}
+            eyebrow={translate('video.liveChannelEyebrow')}
+            className="video-signal"
+          >
+            <Gauge value={selected.signal} label={translate('video.gaugeExcellent')} />
           </Panel>
-          <Panel title="АКТИВНЫЙ КАНАЛ" eyebrow="CAMERA / TELEMETRY" className="video-channel-info">
+          <Panel
+            title={translate('video.activeChannelTitle')}
+            eyebrow={translate('video.activeChannelEyebrow')}
+            className="video-channel-info"
+          >
             <header>
               <strong>{selected.id}</strong>
               <StatusBadge status={selected.status} />
             </header>
             <dl className="ops-definition-list">
               <div>
-                <dt>LOCATION</dt>
+                <dt>{translate('video.dtLocation')}</dt>
                 <dd>{selected.location}</dd>
               </div>
               <div>
-                <dt>STREAM</dt>
+                <dt>{translate('field.stream')}</dt>
                 <dd>
                   {selected.resolution} / {selected.fps} FPS
                 </dd>
               </div>
               <div>
-                <dt>TRANSPORT</dt>
+                <dt>{translate('video.dtTransport')}</dt>
                 <dd>
                   {selectedTransport}
-                  {selectedSourceOverride === null ? '' : ' / FALLBACK'}
+                  {selectedSourceOverride === null ? '' : translate('video.fallbackSuffix')}
                 </dd>
               </div>
               <div>
-                <dt>CODEC</dt>
+                <dt>{translate('field.codec')}</dt>
                 <dd>
                   {selected.codec} / {selected.bitrate}
                 </dd>
               </div>
               <div>
-                <dt>UPTIME</dt>
+                <dt>{translate('video.dtUptime')}</dt>
                 <dd>{selected.uptime}</dd>
               </div>
               <div>
-                <dt>OPERATOR</dt>
-                <dd>СИСТЕМА</dd>
+                <dt>{translate('field.operator')}</dt>
+                <dd>{translate('video.operatorSystem')}</dd>
               </div>
               <div>
-                <dt>{t('token.ptz')}</dt>
-                <dd>{selected.ptz ? 'AVAILABLE' : 'FIXED'}</dd>
+                <dt>{translate('token.ptz')}</dt>
+                <dd>{translate(selected.ptz ? 'video.ptzAvailable' : 'video.ptzFixed')}</dd>
               </div>
             </dl>
           </Panel>
-          <Panel title="ЗАЩИЩЁННАЯ СЕТЬ" eyebrow="SECURITY" className="video-security">
+          <Panel
+            title={translate('video.securityTitle')}
+            eyebrow={translate('video.securityEyebrow')}
+            className="video-security"
+          >
             <dl className="ops-definition-list">
               <div>
-                <dt>VPN-ТУННЕЛИ</dt>
+                <dt>{translate('video.dtVpnTunnels')}</dt>
                 <dd>12</dd>
               </div>
               <div>
-                <dt>ШИФРОВАНИЕ</dt>
+                <dt>{translate('field.encryption')}</dt>
                 <dd>AES-256</dd>
               </div>
               <div>
-                <dt>ЦЕЛОСТНОСТЬ</dt>
+                <dt>{translate('video.dtIntegrity')}</dt>
                 <dd className="is-ok">100%</dd>
               </div>
               <div>
-                <dt>УГРОЗЫ</dt>
-                <dd className="is-ok">НЕ ОБНАРУЖЕНЫ</dd>
+                <dt>{translate('video.dtThreats')}</dt>
+                <dd className="is-ok">{translate('video.threatsNone')}</dd>
               </div>
             </dl>
           </Panel>
-          <Panel title="ЖУРНАЛ СОБЫТИЙ" eyebrow="LATEST / 05" className="video-events">
+          <Panel
+            title={translate('video.eventLogTitle')}
+            eyebrow={translate('video.eventLogEyebrow')}
+            className="video-events"
+          >
             <div className="video-event-log">
               {state.events.slice(0, 5).map((event) => (
                 <TerminalButton key={event.id} onClick={() => state.openDrawer('event', event.id)}>
@@ -1661,7 +1759,11 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
           {mode === 'cameras' ? (
             <PtzPanel />
           ) : (
-            <Panel title="СПУТНИКОВАЯ КАРТА" eyebrow="GEO / CAMERA" className="video-mini-map">
+            <Panel
+              title={translate('video.miniMapTitle')}
+              eyebrow={translate('video.miniMapEyebrow')}
+              className="video-mini-map"
+            >
               <TerminalButton
                 className="camera-map"
                 onClick={() => router.push(`/map?camera=${selected.id}`)}
@@ -1676,7 +1778,11 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             </Panel>
           )}
 
-          <Panel title="ПЕРЕХВАТ СВЯЗИ" eyebrow="AUDIO / INTERCEPT" className="video-intercepts">
+          <Panel
+            title={translate('video.interceptTitle')}
+            eyebrow={translate('video.interceptEyebrow')}
+            className="video-intercepts"
+          >
             <div className="intercept-list">
               {Object.values(state.channels)
                 .slice(0, 4)
@@ -1702,21 +1808,27 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                 <TerminalButton
                   onClick={() => requestPlaybackAction(state.ui.videoPlaying ? 'PAUSE' : 'PLAY')}
                 >
-                  [{state.ui.videoPlaying ? 'Ⅱ' : '▶'}] SAMPLE
+                  {translate('video.sampleButton', { icon: state.ui.videoPlaying ? 'Ⅱ' : '▶' })}
                 </TerminalButton>
                 <TerminalButton onClick={() => state.openDrawer('channel', activeChannel.id)}>
-                  [T] TRANSCRIPT
+                  {translate('video.transcriptButton')}
                 </TerminalButton>
-                <TerminalButton>[+] ADD TO CASE</TerminalButton>
+                <TerminalButton>{translate('media.addToCaseButton')}</TerminalButton>
               </footer>
             )}
           </Panel>
 
-          <Panel title="РАСПОЗНАВАНИЕ" eyebrow="LOCAL AI / SYNTHETIC" className="video-recognition">
+          <Panel
+            title={translate('video.recognitionTitle')}
+            eyebrow={translate('video.recognitionEyebrow')}
+            className="video-recognition"
+          >
             <nav>
-              <TerminalButton className="is-active">ЛЮДИ</TerminalButton>
-              <TerminalButton>ТРАНСПОРТ</TerminalButton>
-              <TerminalButton>НОМЕРА</TerminalButton>
+              <TerminalButton className="is-active">
+                {translate('video.recognitionPeople')}
+              </TerminalButton>
+              <TerminalButton>{translate('video.recognitionVehicles')}</TerminalButton>
+              <TerminalButton>{translate('video.recognitionPlates')}</TerminalButton>
             </nav>
             <div>
               {Object.values(state.people)
@@ -1726,11 +1838,13 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
                     key={person.id}
                     onClick={() => router.push(`/objects/${person.objectId}`)}
                   >
-                    <i>[FACE {String(index + 1).padStart(2, '0')}]</i>
+                    <i>
+                      {translate('video.faceLabel', { index: String(index + 1).padStart(2, '0') })}
+                    </i>
                     <span>
                       <strong>{person.fullName}</strong>
                       <small>
-                        {person.id} / LAST 07:{39 + index}
+                        {person.id} / {translate('video.lastLabel')} 07:{39 + index}
                       </small>
                     </span>
                     <b>{94 - index * 6}%</b>
@@ -1739,33 +1853,37 @@ export function VideoScreen({ mode }: { readonly mode: 'live' | 'cameras' | 'arc
             </div>
           </Panel>
 
-          <Panel title="СЕТЬ / ПИТАНИЕ" eyebrow="CHANNEL HEALTH" className="video-network">
+          <Panel
+            title={translate('video.networkTitle')}
+            eyebrow={translate('video.networkEyebrow')}
+            className="video-network"
+          >
             <div className="video-health-grid">
               <span>
-                <small>INCOMING</small>
+                <small>{translate('video.incoming')}</small>
                 <strong>{state.metrics.networkIn} Mb/s</strong>
                 <Sparkline
-                  label="Входящий трафик"
+                  label={translate('video.incomingTrafficLabel')}
                   values={state.metricsHistory.networkIn}
                   domain={channelDomain('network-in')}
                 />
               </span>
               <span>
-                <small>OUTGOING</small>
+                <small>{translate('video.outgoing')}</small>
                 <strong>{state.metrics.networkOut} Mb/s</strong>
                 <Sparkline
-                  label="Исходящий трафик"
+                  label={translate('video.outgoingTrafficLabel')}
                   values={state.metricsHistory.networkOut}
                   domain={channelDomain('network-out')}
                 />
               </span>
               <span>
-                <small>POWER</small>
+                <small>{translate('video.power')}</small>
                 <strong>228.4 V</strong>
                 <ProgressBar value={76} tone="ok" />
               </span>
               <span>
-                <small>BACKUP</small>
+                <small>{translate('video.backup')}</small>
                 <strong>04:18:32</strong>
                 <ProgressBar value={88} tone="ok" />
               </span>
@@ -1783,6 +1901,7 @@ function abbreviateMaterialName(value: string): string {
 }
 
 function PtzPanel() {
+  const translate = useTranslate();
   const ptz = useOperationsStore((state) => state.ui.ptz);
   // Zoom keeps its own 0.15 step: it is a factor, not an angle, and binding it
   // to a setting measured in degrees would change zoom at the default.
@@ -1790,7 +1909,11 @@ function PtzPanel() {
   const adjust = useOperationsStore((state) => state.adjustPtz);
   const setSpeed = useOperationsStore((state) => state.setPtzSpeed);
   return (
-    <Panel title="PTZ CONTROL" eyebrow="VIRTUAL CROP / LOCAL" className="ptz-panel">
+    <Panel
+      title={translate('video.ptzControlTitle')}
+      eyebrow={translate('video.ptzControlEyebrow')}
+      className="ptz-panel"
+    >
       <div className="ptz-pad">
         <TerminalButton onClick={() => adjust('tilt', -step)}>▲</TerminalButton>
         <TerminalButton onClick={() => adjust('pan', -step)}>◀</TerminalButton>
@@ -1806,21 +1929,27 @@ function PtzPanel() {
         <TerminalButton onClick={() => adjust('tilt', step)}>▼</TerminalButton>
       </div>
       <div className="ptz-controls">
-        <TerminalButton onClick={() => adjust('zoom', 0.15)}>[+] ZOOM</TerminalButton>
-        <TerminalButton onClick={() => adjust('zoom', -0.15)}>[-] ZOOM</TerminalButton>
-        <TerminalButton>[+] FOCUS</TerminalButton>
-        <TerminalButton>[-] FOCUS</TerminalButton>
-        <TerminalButton>[+] IRIS</TerminalButton>
-        <TerminalButton>[-] IRIS</TerminalButton>
+        <TerminalButton onClick={() => adjust('zoom', 0.15)}>
+          {translate('video.zoomInButton')}
+        </TerminalButton>
+        <TerminalButton onClick={() => adjust('zoom', -0.15)}>
+          {translate('video.zoomOutButton')}
+        </TerminalButton>
+        <TerminalButton>{translate('video.focusInButton')}</TerminalButton>
+        <TerminalButton>{translate('video.focusOutButton')}</TerminalButton>
+        <TerminalButton>{translate('video.irisOpenButton')}</TerminalButton>
+        <TerminalButton>{translate('video.irisCloseButton')}</TerminalButton>
       </div>
       <div className="ptz-presets">
         {[1, 2, 3, 4].map((preset) => (
-          <TerminalButton key={preset}>PRESET {preset}</TerminalButton>
+          <TerminalButton key={preset}>
+            {translate('video.presetButton', { n: preset })}
+          </TerminalButton>
         ))}
       </div>
       <TerminalSlider
         className="ptz-speed"
-        label="PTZ SPEED"
+        label={translate('video.ptzSpeedLabel')}
         showValue
         min={10}
         max={100}
@@ -1828,7 +1957,11 @@ function PtzPanel() {
         onValueChange={setSpeed}
       />
       <footer>
-        PAN {ptz.pan.toFixed(0)} / TILT {ptz.tilt.toFixed(0)} / ZOOM {ptz.zoom.toFixed(2)}×
+        {translate('video.ptzFooter', {
+          pan: ptz.pan.toFixed(0),
+          tilt: ptz.tilt.toFixed(0),
+          zoom: ptz.zoom.toFixed(2),
+        })}
       </footer>
     </Panel>
   );

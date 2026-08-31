@@ -173,6 +173,6 @@ describe("the import dialog's selected-entry row", () => {
 });
 
 function registryTotal(): number {
-  const label = screen.getByText('FILES');
-  return Number(label.parentElement?.textContent?.replace('FILES', '') ?? '');
+  const label = screen.getByText('ФАЙЛЫ');
+  return Number(label.parentElement?.textContent?.replace('ФАЙЛЫ', '') ?? '');
 }

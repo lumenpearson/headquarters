@@ -10,9 +10,13 @@ import {
   TerminalSelect,
 } from '@gremuchaya/ui/primitives';
 
+import type { FileKind } from '@gremuchaya/domain';
+
 import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { formatChord } from '@/application/keybinds/match';
 import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
+import { t, useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { EmptyState, Panel, StatusBadge } from '@/components/operations/OpsUi';
 import { LocalMaterialPreview } from '@/components/operations/LocalMaterialPreview';
@@ -27,7 +31,10 @@ import {
 } from '@/infrastructure/materials/materialLibrary';
 import { useMaterialLibrary } from '@/application/materials/useMaterialLibrary';
 import { useMaterialLibraryEvents } from '@/application/materials/useMaterialLibraryEvents';
-import { materialCategoryOptions } from '@/application/materials/materialCategories';
+import {
+  importPhaseLabel,
+  materialCategoryOptions,
+} from '@/application/materials/materialCategories';
 import {
   formatBytes,
   importedMaterialToAttachment,
@@ -54,14 +61,44 @@ const stampParts = { dateStyle: 'short', timeStyle: 'medium' } as const;
 
 type FileSort = 'title' | 'createdAt' | 'kind' | 'sizeLabel';
 
-const fileSortOptions = [
-  { value: 'createdAt', label: 'ДАТА' },
-  { value: 'title', label: 'НАЗВАНИЕ' },
-  { value: 'kind', label: 'ТИП' },
-  { value: 'sizeLabel', label: 'РАЗМЕР' },
-] as const satisfies ReadonlyArray<{ readonly value: FileSort; readonly label: string }>;
+const fileSortMessageIds = [
+  { value: 'createdAt', id: 'files.sortDate' },
+  { value: 'title', id: 'field.name' },
+  { value: 'kind', id: 'field.type' },
+  { value: 'sizeLabel', id: 'field.size' },
+] as const satisfies ReadonlyArray<{ readonly value: FileSort; readonly id: MessageId }>;
+
+const fileKindOrder = ['image', 'video', 'audio', 'document', 'report', 'map', 'data'] as const;
+
+/**
+ * The word an operator reads for a `FileKind` -- the categories tile's own
+ * filter chips and the badge a table row or a card draws for its file, keyed
+ * so a kind the domain package gains with no entry here is a compile error.
+ * The three-letter glyph beside it (`file.kind.slice(0, 3).toUpperCase()`) is
+ * left alone: a mechanical short code derived from the English identifier,
+ * not a word this table exists to translate.
+ */
+const fileKindMessageIds: Readonly<Record<FileKind, MessageId>> = {
+  image: 'field.kindImage',
+  video: 'field.kindVideo',
+  audio: 'field.kindAudio',
+  document: 'field.document',
+  report: 'field.kindReport',
+  map: 'nav.map',
+  data: 'files.kindData',
+};
 
 export function FilesScreen({ archive }: { readonly archive: boolean }) {
+  const translate = useTranslate();
+  // Memoized, not a plain `.map()`: `tiles` below reads this array and lists
+  // `translate` itself in its own dependency array, so an unmemoized
+  // reference recreated every render would ask `react-hooks/exhaustive-deps`
+  // for a dependency array `tiles` could never satisfy without listing this
+  // whole array by value.
+  const fileSortOptions = useMemo(
+    () => fileSortMessageIds.map(({ value, id }) => ({ value, label: translate(id) })),
+    [translate],
+  );
   const state = useOperationsStore((value) => value);
   useContextMenuAction('record.open', (subject) => {
     if (subject !== undefined) state.openDrawer('file', subject);
@@ -304,7 +341,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           importedAt: new Date().toISOString(),
         }),
       );
-      setTrashMessage(`ВОССТАНОВЛЕНО: ${target.displayName}`);
+      setTrashMessage(t('files.restoredMessage', { name: target.displayName }));
     } catch (error: unknown) {
       setTrashStatus('unavailable');
       setTrashMessage(messageFromBridgeError(error));
@@ -320,7 +357,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
         current.filter((entry) => entry.materialId !== target.materialId),
       );
       state.forgetImportedMaterial(target.materialId);
-      setTrashMessage(`УДАЛЕНО НАВСЕГДА: ${target.displayName}`);
+      setTrashMessage(t('files.purgedMessage', { name: target.displayName }));
     } catch (error: unknown) {
       setTrashStatus('unavailable');
       setTrashMessage(messageFromBridgeError(error));
@@ -383,13 +420,16 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
         state.selectFile(completed.material.materialId);
       }
       setBridgeMessage(
-        `ЗАГРУЖЕНО: ${filesToImport.length} / ${materialOriginLabel(materialClient.origin)}`,
+        t('files.importedMessage', {
+          count: filesToImport.length,
+          origin: materialOriginLabel(materialClient.origin),
+        }),
       );
       setBridgeStatus('idle');
     } catch (error: unknown) {
       setBridgeStatus('unavailable');
       setBridgeMessage(
-        controller.signal.aborted ? 'ИМПОРТ ОТМЕНЁН ОПЕРАТОРОМ' : messageFromBridgeError(error),
+        controller.signal.aborted ? t('files.importCancelled') : messageFromBridgeError(error),
       );
     } finally {
       abortImport.current = null;
@@ -410,7 +450,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'КАТЕГОРИИ',
+        title: translate('files.categoriesTitle'),
         category: 'navigation',
         descriptor: {
           id: 'categories',
@@ -423,23 +463,27 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="КАТЕГОРИИ" eyebrow="FILTER / INDEX" className="file-categories">
+          <Panel
+            title={translate('files.categoriesTitle')}
+            eyebrow={translate('files.categoriesEyebrow')}
+            className="file-categories"
+          >
             <TerminalButton
               className={state.ui.fileKindFilter === 'all' ? 'is-active' : ''}
               onClick={() => state.setFileKindFilter('all')}
             >
               <i>[*]</i>
-              <span>ВСЕ МАТЕРИАЛЫ</span>
+              <span>{translate('files.allMaterials')}</span>
               <b>{allFiles.length}</b>
             </TerminalButton>
-            {['image', 'video', 'audio', 'document', 'report', 'map', 'data'].map((kind) => (
+            {fileKindOrder.map((kind) => (
               <TerminalButton
                 key={kind}
                 className={state.ui.fileKindFilter === kind ? 'is-active' : ''}
                 onClick={() => state.setFileKindFilter(kind)}
               >
                 <i>[{kind.slice(0, 3).toUpperCase()}]</i>
-                <span>{kind.toUpperCase()}</span>
+                <span>{translate(fileKindMessageIds[kind])}</span>
                 <b>{allFiles.filter((file) => file.kind === kind).length}</b>
               </TerminalButton>
             ))}
@@ -447,7 +491,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
         ),
       },
       {
-        title: 'РЕЕСТР ФАЙЛОВ',
+        title: translate('files.registryTitle'),
         category: 'records',
         descriptor: {
           id: 'registry',
@@ -461,8 +505,8 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
         },
         render: () => (
           <Panel
-            title={archive ? 'АРХИВНЫЙ ИНДЕКС' : 'МАТЕРИАЛЫ'}
-            eyebrow={`${filePage.total} RECORDS / LOCAL`}
+            title={translate(archive ? 'files.archiveIndexTitle' : 'field.materials')}
+            eyebrow={translate('files.registryEyebrow', { count: filePage.total })}
             className="file-registry"
           >
             <div className="ops-filterbar">
@@ -470,43 +514,43 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 onClick={() => state.setFilesView('list')}
                 className={state.ui.filesView === 'list' ? 'is-active' : ''}
               >
-                [L] LIST
+                {translate('files.listViewButton')}
               </TerminalButton>
               <TerminalButton
                 onClick={() => state.setFilesView('grid')}
                 className={state.ui.filesView === 'grid' ? 'is-active' : ''}
               >
-                [G] GRID
+                {translate('files.gridViewButton')}
               </TerminalButton>
               <label>
                 <span>/</span>
                 <TerminalInput
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  aria-label="Поиск материалов"
-                  placeholder="ПОИСК ПО ID / ТЕГАМ / ИСТОЧНИКУ"
+                  aria-label={translate('files.searchAriaLabel')}
+                  placeholder={translate('files.searchPlaceholder')}
                 />
               </label>
               <TerminalSelect
                 value={sort}
                 options={fileSortOptions}
                 onValueChange={setChosenSort}
-                label="Сортировка материалов"
+                label={translate('files.sortSelectLabel')}
               />
             </div>
             {files.length === 0 ? (
-              <EmptyState>АРХИВНЫЕ МАТЕРИАЛЫ ОТСУТСТВУЮТ</EmptyState>
+              <EmptyState>{translate('files.noArchiveMaterials')}</EmptyState>
             ) : state.ui.filesView === 'list' ? (
               <table className="ops-table files-table">
                 <thead>
                   <tr>
-                    <th>TYPE</th>
-                    <th>ID / NAME</th>
-                    <th>STATUS</th>
-                    <th>DATE</th>
-                    <th>SOURCE</th>
-                    <th>ACCESS</th>
-                    <th>SIZE</th>
+                    <th>{translate('field.type')}</th>
+                    <th>{translate('files.colIdName')}</th>
+                    <th>{translate('field.status')}</th>
+                    <th>{translate('files.sortDate')}</th>
+                    <th>{translate('field.source')}</th>
+                    <th>{translate('files.colAccess')}</th>
+                    <th>{translate('field.size')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -546,7 +590,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                     onDoubleClick={() => state.openDrawer('file', file.id)}
                   >
                     <div className={`file-card-preview file-card-preview--${file.kind}`}>
-                      <i>[{file.kind.toUpperCase()}]</i>
+                      <i>[{translate(fileKindMessageIds[file.kind])}]</i>
                       <span>{file.id}</span>
                     </div>
                     <strong>{file.title}</strong>
@@ -557,14 +601,18 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 ))}
               </div>
             )}
-            <RecordPagination page={filePage} onPage={goToPage} label="Страницы реестра файлов">
-              <span>SELECTED: {selected?.id ?? '—'}</span>
+            <RecordPagination
+              page={filePage}
+              onPage={goToPage}
+              label={translate('files.paginationLabel')}
+            >
+              <span>{translate('registry.selectedFooter', { id: selected?.id ?? '—' })}</span>
             </RecordPagination>
           </Panel>
         ),
       },
       {
-        title: 'ПРЕДПРОСМОТР',
+        title: translate('files.previewTitle'),
         category: 'detail',
         descriptor: {
           id: 'preview',
@@ -579,12 +627,12 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
         },
         render: () => (
           <Panel
-            title="ПРЕДПРОСМОТР"
-            eyebrow={selected?.id ?? 'NO SELECTION'}
+            title={translate('files.previewTitle')}
+            eyebrow={selected?.id ?? translate('registry.noSelection')}
             className="file-preview-panel"
           >
             {selected === undefined ? (
-              <EmptyState>МАТЕРИАЛ НЕ ВЫБРАН</EmptyState>
+              <EmptyState>{translate('files.noMaterialSelected')}</EmptyState>
             ) : (
               <>
                 {selectedMaterial ? (
@@ -596,9 +644,11 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 ) : (
                   <div className={`ops-file-preview ops-file-preview--${selected.kind}`}>
                     <div className="file-preview-grid" />
-                    <i>[{selected.kind.toUpperCase()}]</i>
+                    <i>[{translate(fileKindMessageIds[selected.kind])}]</i>
                     <strong>{selected.preview}</strong>
-                    <span>LOCAL / VERIFIED / {selected.classification}</span>
+                    <span>
+                      {translate('files.localVerifiedPrefix')} {selected.classification}
+                    </span>
                   </div>
                 )}
                 <header>
@@ -610,37 +660,37 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                 </header>
                 <dl className="ops-definition-list">
                   <div>
-                    <dt>ДАТА</dt>
+                    <dt>{translate('files.sortDate')}</dt>
                     <dd>{dateTimeFormat(stampParts).format(new Date(selected.createdAt))}</dd>
                   </div>
                   <div>
-                    <dt>ИСТОЧНИК</dt>
+                    <dt>{translate('field.source')}</dt>
                     <dd>{selected.source}</dd>
                   </div>
                   <div>
-                    <dt>РАЗМЕР</dt>
+                    <dt>{translate('field.size')}</dt>
                     <dd>{selected.sizeLabel}</dd>
                   </div>
                   <div>
-                    <dt>ТЕГИ</dt>
+                    <dt>{translate('field.tags')}</dt>
                     <dd>{selected.tags.join(', ')}</dd>
                   </div>
                   <div>
-                    <dt>ДЕЛА</dt>
+                    <dt>{translate('field.cases')}</dt>
                     <dd>{selected.linkedCaseIds.join(', ')}</dd>
                   </div>
                   <div>
-                    <dt>ОБЪЕКТЫ</dt>
+                    <dt>{translate('field.objects')}</dt>
                     <dd>{selected.linkedObjectIds.join(', ')}</dd>
                   </div>
                 </dl>
                 <footer>
                   <TerminalButton onClick={() => state.openDrawer('file', selected.id)}>
-                    [ENTER] FILE VIEWER
+                    {translate('files.fileViewerButton')}
                   </TerminalButton>
-                  <TerminalButton>[+] ADD TO CASE</TerminalButton>
-                  <TerminalButton>[P] PRINT SIM</TerminalButton>
-                  <TerminalButton>[D] DOWNLOAD SIM</TerminalButton>
+                  <TerminalButton>{translate('media.addToCaseButton')}</TerminalButton>
+                  <TerminalButton>{translate('files.printSimButton')}</TerminalButton>
+                  <TerminalButton>{translate('files.downloadSimButton')}</TerminalButton>
                 </footer>
                 {lifecycle !== null &&
                 selectedMaterial !== undefined &&
@@ -665,6 +715,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       applyLifecycleTrash,
       applyLifecycleUpdate,
       archive,
+      fileSortOptions,
       filePage,
       files,
       goToPage,
@@ -676,6 +727,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       selectedMaterial,
       sort,
       state,
+      translate,
     ],
   );
 
@@ -684,38 +736,46 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
       <div className="ops-screen files-screen">
         <header className="ops-screen__title">
           <div>
-            <span>{archive ? 'HISTORICAL MATERIALS' : 'LOCAL EVIDENCE STORE'} / READ ONLY</span>
-            <h1>{archive ? 'АРХИВНЫЕ МАТЕРИАЛЫ' : 'ФАЙЛЫ И МАТЕРИАЛЫ'}</h1>
+            <span>
+              {translate(
+                archive ? 'files.historicalMaterialsEyebrow' : 'files.localEvidenceStoreEyebrow',
+              )}
+            </span>
+            <h1>{translate(archive ? 'files.archiveHeading' : 'files.filesHeading')}</h1>
           </div>
           <div className="files-summary">
             <span>
-              <small>FILES</small>
+              <small>{translate('files.summaryFiles')}</small>
               <strong>{filePage.total}</strong>
             </span>
             <span>
-              <small>STORAGE</small>
+              <small>{translate('files.summaryStorage')}</small>
               <strong>72%</strong>
             </span>
             <span>
-              <small>INTEGRITY</small>
-              <strong>OK</strong>
+              <small>{translate('video.dtIntegrity')}</small>
+              <strong>{translate('files.integrityOk')}</strong>
             </span>
           </div>
         </header>
         <TileGrid tiles={tiles} columns={12} className="files-layout" screen="files" />
       </div>
       <TerminalDialog
-        title={
+        title={translate(
           materialClient.origin === 'group-library'
-            ? 'ИМПОРТ МАТЕРИАЛОВ В ГРУППУ'
-            : 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ'
-        }
-        eyebrow={`${importChord}${materialClient.origin === 'group-library' ? 'CONTROL PLANE GRPC-WEB' : 'LOOPBACK GRPC-WEB'}`}
-        description={
+            ? 'files.groupImportTitle'
+            : 'files.localImportTitle',
+        )}
+        eyebrow={`${importChord}${translate(
           materialClient.origin === 'group-library'
-            ? 'Материалы уходят в библиотеку группы: control plane резервирует части, браузер пишет их прямо в объектное хранилище по подписанным адресам.'
-            : 'Материалы пишутся только в локальный mirror. Группа не подключена либо этот control plane не объявляет коллаборатор materials.'
-        }
+            ? 'files.controlPlaneEyebrow'
+            : 'files.loopbackEyebrow',
+        )}`}
+        description={translate(
+          materialClient.origin === 'group-library'
+            ? 'files.groupImportDescription'
+            : 'files.localImportDescription',
+        )}
         open={importOpen}
         onOpenChange={(open) => {
           if (!open && importing) abortImport.current?.abort();
@@ -727,33 +787,33 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           <>
             {importing ? (
               <TerminalButton tone="critical" onClick={() => abortImport.current?.abort()}>
-                [ESC] CANCEL IMPORT
+                {translate('files.cancelImportButton')}
               </TerminalButton>
             ) : null}
             <TerminalButton tone="quiet" onClick={() => setImportOpen(false)}>
-              CLOSE
+              {translate('files.closeButton')}
             </TerminalButton>
           </>
         }
       >
         <div className="material-import-dialog__content">
           <label className="material-import-dialog__picker">
-            <span>КАТЕГОРИЯ ИМПОРТА</span>
+            <span>{translate('files.importCategoryFieldLabel')}</span>
             <TerminalSelect
               value={importCategory}
-              options={materialCategoryOptions}
+              options={materialCategoryOptions()}
               onValueChange={setImportCategory}
-              label="Категория импортируемых материалов"
+              label={translate('files.importCategorySelectLabel')}
               disabled={importing}
             />
           </label>
           <label className="material-import-dialog__picker">
-            <span>ВЫБРАТЬ ФАЙЛЫ / ВИДЕО / ФОТО / ДОКУМЕНТЫ</span>
+            <span>{translate('files.selectFilesFieldLabel')}</span>
             <TerminalInput
               type="file"
               multiple
               disabled={importing}
-              aria-label="Выбрать материалы для локального импорта"
+              aria-label={translate('files.selectFilesAriaLabel')}
               onChange={(event) => {
                 void importSelectedFiles(event.currentTarget.files);
                 event.currentTarget.value = '';
@@ -764,7 +824,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
             <TerminalProgress
               value={importProgress.receivedBytes}
               max={Math.max(1, importProgress.totalBytes)}
-              label={`${importProgress.phase.toUpperCase()} / ${importProgress.fileName}`}
+              label={`${importPhaseLabel(importProgress.phase)} / ${importProgress.fileName}`}
               tone="warning"
             />
           ) : null}
@@ -774,9 +834,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
             role={bridgeStatus === 'unavailable' ? 'alert' : 'status'}
           >
             {bridgeMessage ||
-              (bridgeStatus === 'loading'
-                ? 'ЧТЕНИЕ ЛОКАЛЬНОГО MIRROR…'
-                : 'READY / SELECT FILES TO START A BOUNDED BINARY TRANSFER')}
+              translate(bridgeStatus === 'loading' ? 'files.readingMirror' : 'files.readyToImport')}
           </p>
           {lifecycle !== null ? (
             <div className="material-import-dialog__view-toggle" role="tablist">
@@ -788,7 +846,7 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                   setDialogView('recent');
                 }}
               >
-                НЕДАВНИЕ
+                {translate('files.recentTabLabel')}
               </TerminalButton>
               <TerminalButton
                 size="small"
@@ -800,12 +858,14 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                   setDialogView('trash');
                 }}
               >
-                КОРЗИНА
+                {translate('files.trashTabLabel')}
               </TerminalButton>
               {libraryEvents.length > 0 ? (
                 <span className="material-import-dialog__events" role="status">
-                  СОБЫТИЯ БИБЛИОТЕКИ: {libraryEvents.length} / ПОСЛЕДНЕЕ{' '}
-                  {libraryEvents[0]?.kind.toUpperCase()}
+                  {translate('files.libraryEventsLabel', {
+                    count: libraryEvents.length,
+                    kind: libraryEvents[0]?.kind.toUpperCase() ?? '',
+                  })}
                 </span>
               ) : null}
             </div>
@@ -813,15 +873,15 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           {dialogView === 'trash' && lifecycle !== null ? (
             <div className="material-import-dialog__recent">
               <header>
-                <span>КОРЗИНА ГРУППЫ / {trashMaterials.length} RECORDS</span>
+                <span>{translate('files.groupTrashHeader', { count: trashMaterials.length })}</span>
                 {nextTrashCursor ? (
                   <TerminalButton size="small" tone="quiet" onClick={() => void loadMoreTrash()}>
-                    NEXT PAGE
+                    {translate('files.nextPageButton')}
                   </TerminalButton>
                 ) : null}
               </header>
               {trashMaterials.length === 0 ? (
-                <EmptyState>КОРЗИНА ПУСТА</EmptyState>
+                <EmptyState>{translate('files.trashEmpty')}</EmptyState>
               ) : (
                 <ul>
                   {trashMaterials.map((entry) => (
@@ -848,17 +908,17 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                       </TerminalButton>
                       <div className="material-import-dialog__recent-actions">
                         <TerminalButton size="small" onClick={() => void restoreFromTrash(entry)}>
-                          [R] ВОССТАНОВИТЬ
+                          {translate('files.restoreButton')}
                         </TerminalButton>
                         <TerminalAlertDialog
                           trigger={
                             <TerminalButton size="small" tone="critical">
-                              [P] УДАЛИТЬ НАВСЕГДА
+                              {translate('files.purgeButton')}
                             </TerminalButton>
                           }
-                          title="УДАЛИТЬ МАТЕРИАЛ НАВСЕГДА?"
-                          description="Объект будет удалён из хранилища группы без возможности восстановления."
-                          confirmLabel="[P] УДАЛИТЬ НАВСЕГДА"
+                          title={translate('files.purgeConfirmTitle')}
+                          description={translate('files.purgeConfirmDescription')}
+                          confirmLabel={translate('files.purgeButton')}
                           onConfirm={() => void purgeFromTrash(entry)}
                         />
                       </div>
@@ -880,7 +940,10 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
             <div className="material-import-dialog__recent">
               <header>
                 <span>
-                  {materialOriginLabel(materialClient.origin)} / {libraryMaterials.length} RECORDS
+                  {translate('files.libraryHeader', {
+                    origin: materialOriginLabel(materialClient.origin),
+                    count: libraryMaterials.length,
+                  })}
                 </span>
                 {nextLibraryCursor ? (
                   <TerminalButton
@@ -888,12 +951,12 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
                     tone="quiet"
                     onClick={() => void loadMoreLibraryMaterials()}
                   >
-                    NEXT PAGE
+                    {translate('files.nextPageButton')}
                   </TerminalButton>
                 ) : null}
               </header>
               {libraryMaterials.length === 0 ? (
-                <EmptyState>ИМПОРТИРОВАННЫЕ МАТЕРИАЛЫ ОТСУТСТВУЮТ</EmptyState>
+                <EmptyState>{translate('files.noImportedMaterials')}</EmptyState>
               ) : (
                 <ul>
                   {libraryMaterials.map((material) => (
@@ -925,9 +988,11 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
           {previewMaterial !== null ? (
             <div className="material-import-dialog__preview">
               <header>
-                <span>ПРЕДПРОСМОТР / {previewMaterial.displayName}</span>
+                <span>
+                  {translate('files.previewTitle')} / {previewMaterial.displayName}
+                </span>
                 <TerminalButton size="small" tone="quiet" onClick={() => setPreviewMaterial(null)}>
-                  [X] ЗАКРЫТЬ
+                  {translate('files.closePreviewButton')}
                 </TerminalButton>
               </header>
               <LocalMaterialPreview
@@ -944,6 +1009,6 @@ export function FilesScreen({ archive }: { readonly archive: boolean }) {
 }
 
 function messageFromBridgeError(error: unknown): string {
-  if (error instanceof Error) return `BRIDGE: ${error.message}`;
-  return 'BRIDGE: НЕИЗВЕСТНАЯ ОШИБКА ЛОКАЛЬНОГО ИМПОРТА';
+  if (error instanceof Error) return t('files.bridgeErrorPrefix', { message: error.message });
+  return t('files.bridgeErrorPrefix', { message: t('files.bridgeUnknownError') });
 }

@@ -76,7 +76,7 @@ describe('the import dialog category', () => {
         .getState()
         .applySettingsPatch([{ id: 'materials.defaultCategory', value: 'intercept' }]);
     });
-    fireEvent.click(screen.getByRole('button', { name: 'CLOSE' }));
+    fireEvent.click(screen.getByRole('button', { name: 'ЗАКРЫТЬ' }));
     openImportDialog();
 
     expect(selectedCategory()).toContain('ПЕРЕХВАТ');

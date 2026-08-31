@@ -3,6 +3,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { appStore } from '@/state/appStore';
+import { operationsStore } from '@/state/operationsStore';
 
 import { VirtualExplorer } from './VirtualExplorer';
 
@@ -36,13 +37,16 @@ describe('VirtualExplorer reads connections.bridgeStatus and connections.lastFil
     patchConnections({ bridgeStatus: 'online' });
     render(<VirtualExplorer />);
 
+    // The status word is translated (`bridgeStatusMessageIds`), not the raw
+    // enum value -- an operator on the Russian default reads "В СЕТИ", not
+    // the identifier `RuntimeController` wrote.
     expect(screen.getByText('МОСТ ФАЙЛОВ').closest('.source-state')?.textContent).toContain(
-      'online',
+      'В СЕТИ',
     );
 
     patchConnections({ bridgeStatus: 'offline' });
     expect(screen.getByText('МОСТ ФАЙЛОВ').closest('.source-state')?.textContent).toContain(
-      'offline',
+      'НЕ В СЕТИ',
     );
   });
 
@@ -56,5 +60,26 @@ describe('VirtualExplorer reads connections.bridgeStatus and connections.lastFil
 
     expect(screen.getByText('FILE_CHANGED tauri /LOCAL-0/cases/K-01/report.txt')).toBeTruthy();
     expect(screen.queryByText('НЕТ СОБЫТИЙ')).toBeNull();
+  });
+});
+
+describe('VirtualExplorer locale', () => {
+  it('draws its chrome in the locale now in force', () => {
+    patchConnections({ bridgeStatus: 'online' });
+    const { rerender } = render(<VirtualExplorer />);
+
+    expect(screen.getByText('БЫСТРЫЙ ДОСТУП')).toBeTruthy();
+    expect(screen.getByText('ДЕЛА')).toBeTruthy();
+
+    act(() => {
+      operationsStore.getState().applySettingsPatch([{ id: 'localization.locale', value: 'en' }]);
+    });
+    rerender(<VirtualExplorer />);
+
+    expect(screen.getByText('QUICK ACCESS')).toBeTruthy();
+    expect(screen.getByText('CASES')).toBeTruthy();
+    expect(screen.queryByText('БЫСТРЫЙ ДОСТУП')).toBeNull();
+
+    operationsStore.getState().applySettingsPatch([{ id: 'localization.locale', value: 'ru' }]);
   });
 });

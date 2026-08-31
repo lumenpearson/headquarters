@@ -125,7 +125,7 @@ async function main() {
       return finish(browser, context, results);
     }
 
-    await page.getByRole('button', { name: 'CLOSE' }).click();
+    await page.getByRole('button', { name: 'ЗАКРЫТЬ' }).click();
 
     // --- Select the uploaded material in the main file browser to reach MaterialLifecyclePanel ---
     const row = page.locator('.files-table tr', { hasText: fileName });
@@ -238,7 +238,7 @@ async function main() {
     // time without a page reload. Genuine finding, not fixed here (out of this
     // card's apps/hq/src footprint) -- reported precisely instead of masked
     // by reusing the same material for both restore and purge.
-    await page.getByRole('button', { name: 'CLOSE' }).click();
+    await page.getByRole('button', { name: 'ЗАКРЫТЬ' }).click();
     const secondFileName = `live-proof-purge-${Date.now()}.txt`;
     await page.keyboard.press('Control+Shift+Alt+KeyS');
     await importDialog.waitFor({ state: 'visible' });
@@ -256,7 +256,7 @@ async function main() {
       30_000,
       1_000,
     );
-    if (secondUploaded) await page.getByRole('button', { name: 'CLOSE' }).click();
+    if (secondUploaded) await page.getByRole('button', { name: 'ЗАКРЫТЬ' }).click();
     const rowSecond = page.locator('.files-table tr', { hasText: secondFileName });
     const rowSecondFound =
       secondUploaded && (await pollUntil(async () => (await rowSecond.count()) > 0, 15_000, 1_000));

@@ -28,6 +28,7 @@ import {
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
 import { useBooleanSetting, useNumberSetting } from '@/application/personalization/useSetting';
 
 import type { MaterialSubtitleTrack } from './materialSubtitleTracks';
@@ -105,6 +106,7 @@ export const LocalMaterialPlayer = forwardRef<
   },
   handleRef,
 ) {
+  const translate = useTranslate();
   const playerRef = useRef<MediaPlayerInstance>(null);
   const [paused, setPaused] = useState(true);
   const seekStep = useNumberSetting('player.seekStep');
@@ -244,7 +246,7 @@ export const LocalMaterialPlayer = forwardRef<
         loop={loop}
         preload="metadata"
         crossOrigin={sourceUrl.startsWith('http://127.0.0.1:') ? 'anonymous' : undefined}
-        aria-label={`Локальный медиаплеер: ${title}`}
+        aria-label={translate('localPlayer.ariaLabel', { title })}
         onCanPlay={(detail) => {
           setDuration(detail.duration);
           const pending = pendingSeekRef.current;
@@ -299,7 +301,7 @@ export const LocalMaterialPlayer = forwardRef<
               data-revealed={controlsRevealed ? 'true' : 'false'}
             >
               <TerminalButton size="small" tone="primary" onClick={togglePlayback}>
-                {paused ? '[▶] PLAY' : '[Ⅱ] PAUSE'}
+                {translate(paused ? 'media.playButton' : 'media.pauseButton')}
               </TerminalButton>
               <TerminalButton
                 size="small"
@@ -309,7 +311,7 @@ export const LocalMaterialPlayer = forwardRef<
                   player.currentTime = Math.max(0, player.currentTime - seekStep);
                 }}
               >
-                [◀] -{seekStep}S
+                {translate('media.seekBackward', { seconds: seekStep })}
               </TerminalButton>
               <TerminalButton
                 size="small"
@@ -322,10 +324,10 @@ export const LocalMaterialPlayer = forwardRef<
                   );
                 }}
               >
-                [▶] +{seekStep}S
+                {translate('media.seekForward', { seconds: seekStep })}
               </TerminalButton>
               <TerminalButton size="small" onClick={() => setChosenMuted(!muted)}>
-                {muted ? '[M] MUTED' : '[M] AUDIO'}
+                {translate(muted ? 'media.mutedButton' : 'media.audioButton')}
               </TerminalButton>
               <span className="local-material-player__time-readout">
                 {formatTime(currentTime)} / {formatTime(duration)}
@@ -334,7 +336,7 @@ export const LocalMaterialPlayer = forwardRef<
                 size="small"
                 onClick={() => void playerRef.current?.enterFullscreen().catch(() => undefined)}
               >
-                [F] FULL
+                {translate('media.fullscreenButton')}
               </TerminalButton>
             </div>
           </Controls.Group>
@@ -349,7 +351,7 @@ export const LocalMaterialPlayer = forwardRef<
             <div className="local-material-player__persistent-row">
               <TimeSlider.Root
                 className="local-material-player__time-slider"
-                aria-label="Позиция воспроизведения"
+                aria-label={translate('localPlayer.positionLabel')}
               >
                 <TimeSlider.Track className="local-material-player__time-track">
                   <TimeSlider.Progress className="local-material-player__time-buffered" />
@@ -358,14 +360,14 @@ export const LocalMaterialPlayer = forwardRef<
                 <TimeSlider.Thumb className="local-material-player__time-thumb" />
               </TimeSlider.Root>
               <TerminalPopover
-                title="НАСТРОЙКИ ПЛЕЕРА"
+                title={translate('localPlayer.settingsTitle')}
                 side="top"
                 open={settingsOpen}
                 onOpenChange={setSettingsOpen}
                 className="local-material-player__settings-popover"
                 trigger={
                   <TerminalIconButton
-                    label="Настройки плеера"
+                    label={translate('localPlayer.settingsButtonLabel')}
                     size="small"
                     className="local-material-player__settings-trigger"
                   >
@@ -376,16 +378,16 @@ export const LocalMaterialPlayer = forwardRef<
                 <div className="local-material-player__settings-panel">
                   {quality}
                   <label className="local-material-player__settings-row">
-                    <span>СКОРОСТЬ</span>
+                    <span>{translate('localPlayer.rateFieldLabel')}</span>
                     <TerminalSelect
                       value={String(playbackRate)}
                       options={playbackRateOptions}
                       onValueChange={(value) => setChosenRate(Number(value))}
-                      label="Скорость воспроизведения"
+                      label={translate('media.playbackRateLabel')}
                     />
                   </label>
                   <TerminalSlider
-                    label="ГРОМКОСТЬ"
+                    label={translate('localPlayer.volumeLabel')}
                     value={Math.round(volume * 100)}
                     onValueChange={(value) => setChosenVolume(value / 100)}
                     min={0}
@@ -394,13 +396,13 @@ export const LocalMaterialPlayer = forwardRef<
                   />
                   {tracks.length > 0 ? (
                     <label className="local-material-player__settings-row">
-                      <span>СУБТИТРЫ</span>
+                      <span>{translate('localPlayer.subtitlesFieldLabel')}</span>
                       <TerminalSwitch
-                        label="Показывать субтитры"
+                        label={translate('localPlayer.subtitlesToggleLabel')}
                         checked={captionsOn}
                         onCheckedChange={applyCaptions}
-                        onLabel="[CC] SUBS ON"
-                        offLabel="[CC] SUBS OFF"
+                        onLabel={translate('localPlayer.subtitlesOnLabel')}
+                        offLabel={translate('localPlayer.subtitlesOffLabel')}
                       />
                     </label>
                   ) : null}

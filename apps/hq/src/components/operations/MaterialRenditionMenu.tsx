@@ -2,6 +2,8 @@
 
 import { TerminalSelect } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import type { MaterialRendition } from '@/infrastructure/materials/materialLibrary';
 
 /**
@@ -13,14 +15,17 @@ import type { MaterialRendition } from '@/infrastructure/materials/materialLibra
  */
 export type RenditionOutcome = 'pending' | 'rendered' | 'original' | 'failed';
 
-const outcomeLabels: Readonly<Record<RenditionOutcome, string>> = {
-  pending: 'ЗАПРОС ГРАНТА…',
-  rendered: 'ВАРИАНТ ВЫДАН',
-  // The honest half of the control. Every deployment in this repository
-  // presigns the stored object for whatever variant it is asked for, so a menu
-  // that stayed silent here would read as a quality change that never happened.
-  original: 'ВАРИАНТ НЕ СОБРАН — ОТДАН ОРИГИНАЛ',
-  failed: 'ВАРИАНТ НЕДОСТУПЕН',
+/*
+ * The honest half of the control lives in `rendition.outcome.original`'s
+ * text, not in this table: every deployment in this repository presigns the
+ * stored object for whatever variant it is asked for, so a menu that stayed
+ * silent here would read as a quality change that never happened.
+ */
+const outcomeMessageIds: Readonly<Record<RenditionOutcome, MessageId>> = {
+  pending: 'rendition.outcome.pending',
+  rendered: 'rendition.outcome.rendered',
+  original: 'rendition.outcome.original',
+  failed: 'rendition.outcome.failed',
 };
 
 /**
@@ -46,6 +51,7 @@ export function MaterialRenditionMenu({
   readonly disabled?: boolean;
   readonly className?: string;
 }) {
+  const translate = useTranslate();
   if (renditions.length <= 1) {
     /*
      * A single-entry menu is not a choice. The loopback bridge has no variant
@@ -55,7 +61,7 @@ export function MaterialRenditionMenu({
      */
     return (
       <span className={joinClassNames('material-rendition-menu__single', className)}>
-        [Q] ORIGINAL / БЕЗ ЛЕСТНИЦЫ КАЧЕСТВА
+        {translate('rendition.singleEntry')}
       </span>
     );
   }
@@ -70,7 +76,7 @@ export function MaterialRenditionMenu({
           label: rendition.label,
         }))}
         onValueChange={onVariantChange}
-        label="Качество воспроизведения"
+        label={translate('rendition.qualityLabel')}
         disabled={disabled}
       />
       <span
@@ -79,7 +85,7 @@ export function MaterialRenditionMenu({
         role={outcome === 'failed' ? 'alert' : 'status'}
         aria-live="polite"
       >
-        {outcomeLabels[outcome]}
+        {translate(outcomeMessageIds[outcome])}
       </span>
     </div>
   );

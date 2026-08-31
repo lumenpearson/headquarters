@@ -75,8 +75,8 @@ test('runs the Vidstack surveillance player and keeps the 720p matrix horizontal
   await page.goto('/video');
   await expect(page.locator('.video-main-feed video')).toBeVisible();
   await expect(page.locator('.camera-grid > button')).toHaveCount(12);
-  await page.getByRole('button', { name: '[Ⅱ] PAUSE', exact: true }).click();
-  await expect(page.locator('.video-timecode')).toContainText('PAUSE');
+  await page.getByRole('button', { name: '[Ⅱ] ПАУЗА', exact: true }).click();
+  await expect(page.locator('.video-timecode')).toContainText('ПАУЗА');
   await page.locator('.camera-grid > button').nth(1).click();
   await expect(page.locator('.video-main-feed > header')).toContainText('CAM-02');
   await expect
@@ -86,7 +86,7 @@ test('runs the Vidstack surveillance player and keeps the 720p matrix horizontal
 
 test('operates playback and PTZ through typed Base UI media controls', async ({ page }) => {
   await page.goto('/video');
-  await page.getByRole('button', { name: '[Ⅱ] PAUSE', exact: true }).click();
+  await page.getByRole('button', { name: '[Ⅱ] ПАУЗА', exact: true }).click();
 
   const playbackRate = page.getByRole('combobox', { name: 'Скорость воспроизведения' });
   await playbackRate.click();
@@ -107,14 +107,14 @@ test('operates playback and PTZ through typed Base UI media controls', async ({ 
     .toBeGreaterThan(positionBefore);
 
   await page.goto('/video/cameras');
-  const ptzSpeed = page.getByRole('slider', { name: 'PTZ SPEED' });
+  const ptzSpeed = page.getByRole('slider', { name: 'СКОРОСТЬ PTZ' });
   const speedBefore = Number(await ptzSpeed.getAttribute('aria-valuenow'));
   await ptzSpeed.press('ArrowRight');
   await expect
     .poll(async () => Number(await ptzSpeed.getAttribute('aria-valuenow')))
     .toBeGreaterThan(speedBefore);
   await page.getByRole('button', { name: '▲', exact: true }).click();
-  await expect(page.locator('.ptz-panel footer')).not.toContainText('TILT 0');
+  await expect(page.locator('.ptz-panel footer')).not.toContainText('НАКЛОН 0');
 });
 
 test('pages and filters the complete camera registry without decoding hidden feeds', async ({
@@ -135,7 +135,7 @@ test('pages and filters the complete camera registry without decoding hidden fee
   await expect(page.locator('.camera-grid > button')).toHaveCount(1);
   await expect(page.locator('.camera-grid')).toContainText('CAM-14');
   await expect(page.locator('.registry-pagination')).toContainText('СТРАНИЦА 01 / 01');
-  await expect(page.locator('.camera-grid-query-summary')).toContainText('HIDDEN FEEDS');
+  await expect(page.locator('.camera-grid-query-summary')).toContainText('СКРЫТЫЕ ПОТОКИ');
   await page.getByRole('button', { name: /Камера CAM-14:/ }).click();
   await expect(page.locator('.video-channel-info')).toContainText('CAM-14');
   await expect(page.locator('.video-channel-info')).toContainText('DEMO_VIDEO');
@@ -173,14 +173,14 @@ test('uses a webcam only after explicit local permission and returns to the demo
   });
   await page.goto('/video');
 
-  const webcamButton = page.getByRole('button', { name: '[W] WEBCAM', exact: true });
+  const webcamButton = page.getByRole('button', { name: '[W] ВЕБКАМЕРА', exact: true });
   await webcamButton.click();
-  await expect(page.getByRole('button', { name: '[W] STOP CAM', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '[W] ОСТАНОВИТЬ', exact: true })).toBeVisible();
   await expect(page.locator('.video-channel-info')).toContainText('WEBCAM');
-  await expect(page.locator('.video-main-feed > header')).toContainText('LOCAL WEBCAM');
+  await expect(page.locator('.video-main-feed > header')).toContainText('ЛОКАЛЬНАЯ ВЕБКАМЕРА');
 
-  await page.getByRole('button', { name: '[W] STOP CAM', exact: true }).click();
-  await expect(page.getByRole('button', { name: '[W] WEBCAM', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '[W] ОСТАНОВИТЬ', exact: true }).click();
+  await expect(page.getByRole('button', { name: '[W] ВЕБКАМЕРА', exact: true })).toBeVisible();
   await expect(page.locator('.video-channel-info')).toContainText('DEMO_VIDEO');
 });
 
@@ -197,15 +197,15 @@ test('restores and clears a per-channel local material assignment without persis
   await page.goto('/video');
 
   const sourceSelect = page.getByRole('combobox', { name: 'Источник выбранного канала' });
-  await expect(sourceSelect).toContainText('[MISSING] 018f0f1a-80');
+  await expect(sourceSelect).toContainText('[ОТСУТСТВУЕТ] 018f0f1a-80');
   await sourceSelect.click();
-  await page.getByRole('option', { name: '[DEMO] SURVEILLANCE LOOP', exact: true }).click();
+  await page.getByRole('option', { name: '[DEMO] ПЕТЛЯ НАБЛЮДЕНИЯ', exact: true }).click();
   await expect
     .poll(() =>
       page.evaluate(() => window.localStorage.getItem('hq.camera-material-assignments.v1')),
     )
     .toBe('{}');
-  await expect(sourceSelect).toContainText('[DEMO] SURVEILLANCE LOOP');
+  await expect(sourceSelect).toContainText('[DEMO] ПЕТЛЯ НАБЛЮДЕНИЯ');
 });
 
 test('streams an oversized local video through a revocable browser range grant', async ({
@@ -282,12 +282,12 @@ test('streams an oversized local video through a revocable browser range grant',
     await page.goto('/video');
 
     const sourceSelect = page.getByRole('combobox', { name: 'Источник выбранного канала' });
-    await expect(sourceSelect).toContainText('[FILE] phase6-range-camera.webm');
-    await expect(page.locator('.camera-material-status')).toContainText('RANGE STREAM READY');
+    await expect(sourceSelect).toContainText('[ФАЙЛ] phase6-range-camera.webm');
+    await expect(page.locator('.camera-material-status')).toContainText('RANGE-ПОТОК ГОТОВ');
     await expect.poll(() => running.activePlaybackGrantCount()).toBe(1);
 
     await sourceSelect.click();
-    await page.getByRole('option', { name: '[DEMO] SURVEILLANCE LOOP', exact: true }).click();
+    await page.getByRole('option', { name: '[DEMO] ПЕТЛЯ НАБЛЮДЕНИЯ', exact: true }).click();
     await expect.poll(() => running.activePlaybackGrantCount()).toBe(0);
   } finally {
     await running.close();
@@ -303,12 +303,14 @@ test('synchronizes demo playback between local browser sessions without syncing 
   await page.goto('/video');
   await follower.goto('/video');
 
-  await expect(page.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
-  await expect(follower.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
-  await page.getByRole('button', { name: '[Ⅱ] PAUSE', exact: true }).click();
+  await expect(page.locator('.playback-sync-status')).toContainText('СИНХРО / АКТИВНА');
+  await expect(follower.locator('.playback-sync-status')).toContainText('СИНХРО / АКТИВНА');
+  await page.getByRole('button', { name: '[Ⅱ] ПАУЗА', exact: true }).click();
 
-  await expect(follower.getByRole('button', { name: '[▶] PLAY', exact: true })).toBeVisible();
-  await expect(follower.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
+  await expect(
+    follower.getByRole('button', { name: '[▶] ВОСПРОИЗВЕСТИ', exact: true }),
+  ).toBeVisible();
+  await expect(follower.locator('.playback-sync-status')).toContainText('СИНХРО / АКТИВНА');
   await follower.close();
 });
 
@@ -827,7 +829,7 @@ test('migrates registry filters and actions to typed terminal controls', async (
   await fileSort.click();
   await page.getByRole('option', { name: 'НАЗВАНИЕ', exact: true }).click();
   await expect(fileSort).toContainText('НАЗВАНИЕ');
-  await page.getByRole('button', { name: '[G] GRID', exact: true }).click();
+  await page.getByRole('button', { name: '[G] СЕТКА', exact: true }).click();
   await expect(page.locator('.file-card-grid')).toBeVisible();
   await expect(
     page.locator('.files-screen button:not(.terminal-button):not(.terminal-select)'),
@@ -1061,9 +1063,9 @@ test('opens the file drawer for an imported material and shows its preview', asy
     await expect(page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' })).toBeHidden();
 
     // OperationsShell's file drawer used to read `attachments` only, so
-    // `[ENTER] FILE VIEWER` on an imported material opened nothing at all
+    // `[ENTER] ПРОСМОТР ФАЙЛА` on an imported material opened nothing at all
     // (t5-player-rework).
-    await page.getByRole('button', { name: '[ENTER] FILE VIEWER' }).click();
+    await page.getByRole('button', { name: '[ENTER] ПРОСМОТР ФАЙЛА' }).click();
     const drawer = page.locator('.ops-drawer--card');
     await expect(drawer).toBeVisible();
     await expect(drawer.locator('.local-material-preview--text pre')).toHaveText(importPreviewNote);
@@ -1093,17 +1095,17 @@ test('keeps the hidden transport row out of the browser hit-test until it is rev
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
 
-    await page.getByRole('button', { name: '[ENTER] FILE VIEWER' }).click();
+    await page.getByRole('button', { name: '[ENTER] ПРОСМОТР ФАЙЛА' }).click();
     const drawer = page.locator('.ops-drawer--card');
     await expect(drawer).toBeVisible();
 
     const hoverRow = drawer.locator('.local-material-player__hover-row');
     const muteButton = hoverRow.getByText(/^\[M\]/);
-    await expect(muteButton).toHaveText('[M] MUTED');
+    await expect(muteButton).toHaveText('[M] ЗАГЛУШЕНО');
     await expect(hoverRow).toHaveAttribute('data-revealed', 'false');
 
     // The property that actually decides whether a click -- a real pointer's,
-    // or the same touch tap that reveals the row -- reaches [M] MUTED: the
+    // or the same touch tap that reveals the row -- reaches [M] ЗАГЛУШЕНО: the
     // browser's own computed `pointer-events`, not a simulated gesture racing
     // against React's own reveal. `opacity: 0` alone leaves this row
     // hit-testable; `Controls.Group` (the parent) force-sets `pointer-events:
@@ -1122,7 +1124,7 @@ test('keeps the hidden transport row out of the browser hit-test until it is rev
     await expect(hoverRow).not.toHaveCSS('pointer-events', 'none');
 
     await muteButton.press('Enter');
-    await expect(muteButton).toHaveText('[M] AUDIO');
+    await expect(muteButton).toHaveText('[M] ЗВУК');
   });
 });
 

@@ -834,7 +834,9 @@ test('R6: privacy.webcamCapture refuses the camera to the key as well as the but
 
   const feed = page.locator('.video-main-feed');
   await expect(feed).toBeVisible();
-  await expect(page.getByRole('button', { name: /WEBCAM|КАМЕРА МАШИНЫ/i }).first()).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: /WEBCAM|ВЕБКАМЕРА|КАМЕРА МАШИНЫ/i }).first(),
+  ).toBeDisabled();
 
   /*
    * The keyboard is the path that matters. Disabling the button alone would
@@ -852,7 +854,7 @@ test('R6: privacy.frameCapture refuses to write a surveillance frame to disk', a
   await seedSettings(page, { 'privacy.frameCapture': false });
   await page.goto('/video/cameras');
 
-  const snap = page.getByRole('button', { name: '[S] SNAP' });
+  const snap = page.getByRole('button', { name: '[S] СНИМОК' });
   await expect(snap).toBeVisible();
   // A PNG of a live feed, stamped with a camera id and a wall-clock time, used
   // to reach the download folder with no confirmation and no way to refuse.

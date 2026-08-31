@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { TerminalButton, TerminalTextarea } from '@gremuchaya/ui/primitives';
 
+import { useTranslate } from '@/application/localization/locale';
+
 import {
   addMaterialAnnotation,
   annotationsFor,
@@ -31,6 +33,7 @@ export function MaterialAnnotationsPanel({
   /** Jumps the player to an existing note's timestamp; omitted where there is no player to seek. */
   readonly onSeek?: (timestampSeconds: number) => void;
 }) {
+  const translate = useTranslate();
   const [annotations, setAnnotations] = useState<MaterialAnnotations>({});
   const [draft, setDraft] = useState('');
 
@@ -55,13 +58,16 @@ export function MaterialAnnotationsPanel({
   };
 
   return (
-    <section className="material-annotations-panel" aria-label="Аннотации материала">
+    <section
+      className="material-annotations-panel"
+      aria-label={translate('annotations.panelLabel')}
+    >
       <header className="material-annotations-panel__header">
-        <span>[ANNOTATIONS]</span>
+        <span>{translate('annotations.headerLabel')}</span>
         <span>{entries.length}</span>
       </header>
       {entries.length === 0 ? (
-        <p className="material-annotations-panel__empty">ЗАМЕТОК НЕТ</p>
+        <p className="material-annotations-panel__empty">{translate('annotations.empty')}</p>
       ) : (
         <ol className="material-annotations-panel__list">
           {entries.map((annotation) => (
@@ -86,8 +92,10 @@ export function MaterialAnnotationsPanel({
         <TerminalTextarea
           value={draft}
           onValueChange={setDraft}
-          placeholder={`ЗАМЕТКА НА ${formatTimestamp(currentTime)}…`}
-          aria-label="Текст новой аннотации"
+          placeholder={translate('annotations.draftPlaceholder', {
+            timestamp: formatTimestamp(currentTime),
+          })}
+          aria-label={translate('annotations.draftLabel')}
           rows={2}
         />
         <TerminalButton
@@ -96,7 +104,7 @@ export function MaterialAnnotationsPanel({
           type="submit"
           disabled={draft.trim().length === 0}
         >
-          [+] ДОБАВИТЬ НА {formatTimestamp(currentTime)}
+          {translate('annotations.addButton', { timestamp: formatTimestamp(currentTime) })}
         </TerminalButton>
       </form>
     </section>
@@ -112,6 +120,7 @@ function AnnotationRow({
   readonly onSeek?: ((timestampSeconds: number) => void) | undefined;
   readonly onRemove: () => void;
 }) {
+  const translate = useTranslate();
   return (
     <li className="material-annotations-panel__row">
       <TerminalButton
@@ -127,7 +136,7 @@ function AnnotationRow({
       <TerminalButton
         size="small"
         tone="critical"
-        aria-label="Удалить аннотацию"
+        aria-label={translate('annotations.removeLabel')}
         onClick={onRemove}
       >
         [X]

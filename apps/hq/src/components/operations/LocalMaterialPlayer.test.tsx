@@ -192,12 +192,12 @@ describe('LocalMaterialPlayer subtitles', () => {
     render(<LocalMaterialPlayer sourceUrl="blob:video" title="clip.mp4" tracks={tracks} />);
 
     fireEvent.click(screen.getByLabelText('Настройки плеера'));
-    const toggle = await screen.findByText('[CC] SUBS ON');
+    const toggle = await screen.findByText('[CC] СУБТИТРЫ ВКЛ');
     fireEvent.click(toggle);
     expect(fakeTextTrack.mode).toBe('disabled');
-    expect(await screen.findByText('[CC] SUBS OFF')).toBeTruthy();
+    expect(await screen.findByText('[CC] СУБТИТРЫ ВЫКЛ')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('[CC] SUBS OFF'));
+    fireEvent.click(screen.getByText('[CC] СУБТИТРЫ ВЫКЛ'));
     expect(fakeTextTrack.mode).toBe('showing');
   });
 });
@@ -209,7 +209,7 @@ describe('LocalMaterialPlayer control-layer reveal', () => {
     expect(hoverRow().getAttribute('data-revealed')).toBe('false');
     // Present, not merely visible: reachable by keyboard whether or not the
     // pointer has ever touched the surface.
-    expect(screen.getByText('[▶] PLAY')).toBeTruthy();
+    expect(screen.getByText('[▶] ВОСПРОИЗВЕСТИ')).toBeTruthy();
     expect(screen.getByLabelText('Позиция воспроизведения')).toBeTruthy();
     expect(screen.getByLabelText('Настройки плеера')).toBeTruthy();
   });
@@ -228,10 +228,10 @@ describe('LocalMaterialPlayer control-layer reveal', () => {
   it('reveals on focus within the control layer, independent of the pointer', () => {
     render(<LocalMaterialPlayer sourceUrl="blob:video" title="clip.mp4" />);
 
-    fireEvent.focus(screen.getByText('[▶] PLAY'));
+    fireEvent.focus(screen.getByText('[▶] ВОСПРОИЗВЕСТИ'));
     expect(hoverRow().getAttribute('data-revealed')).toBe('true');
 
-    fireEvent.blur(screen.getByText('[▶] PLAY'));
+    fireEvent.blur(screen.getByText('[▶] ВОСПРОИЗВЕСТИ'));
     expect(hoverRow().getAttribute('data-revealed')).toBe('true');
   });
 
@@ -259,7 +259,7 @@ describe('LocalMaterialPlayer settings wiring', () => {
     render(<LocalMaterialPlayer sourceUrl="blob:video" title="clip.mp4" />);
 
     expect(mockPlayer.muted).toBe(true);
-    fireEvent.click(screen.getByText('[M] MUTED'));
+    fireEvent.click(screen.getByText('[M] ЗАГЛУШЕНО'));
     expect(mockPlayer.muted).toBe(false);
   });
 
@@ -333,5 +333,17 @@ describe('LocalMaterialPlayer remembered position', () => {
     });
 
     expect(mockPlayer.currentTime).toBe(17);
+  });
+});
+
+describe('LocalMaterialPlayer locale', () => {
+  it('draws the transport captions in the locale now in force', () => {
+    render(<LocalMaterialPlayer sourceUrl="blob:video" title="clip.mp4" />);
+    expect(screen.getByText('[▶] ВОСПРОИЗВЕСТИ')).toBeTruthy();
+
+    patchSetting('localization.locale', 'en');
+
+    expect(screen.getByText('[▶] PLAY')).toBeTruthy();
+    expect(screen.queryByText('[▶] ВОСПРОИЗВЕСТИ')).toBeNull();
   });
 });

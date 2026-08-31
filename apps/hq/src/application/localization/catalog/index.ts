@@ -5,6 +5,7 @@ import { galleryMessages } from './galleryMessages';
 import { keybindMessages } from './keybindMessages';
 import { materialMessages } from './materialMessages';
 import { pairingMessages } from './pairingMessages';
+import { mediaMessages } from './mediaMessages';
 import { pluralMessages } from './pluralMessages';
 import { recordMessages } from './recordMessages';
 import { settingLabelMessages } from './settingLabelMessages';
@@ -55,6 +56,10 @@ export {
  *   by the mechanism they share rather than by the surface that draws them.
  * - `recordMessages` -- the record screens: overview, map, cases, objects,
  *   analytics, search, reports, communications and archive.
+ * - `mediaMessages` -- the video screen, the file registry, the virtual
+ *   explorer, and the file-backed surfaces around a single material: the
+ *   lifecycle panel, the local player, the local preview, the rendition menu
+ *   and the annotation panel.
  * - `settingLabelMessages` -- a label and a description for every setting
  *   definition, plus the `settingScope.*` vocabulary the detail line draws
  *   from. Totality is a compile error, not a convention: `settingLocalization`
@@ -104,6 +109,7 @@ const catalogModulesByName = {
   record: recordMessages,
   connection: connectionMessages,
   system: systemMessages,
+  media: mediaMessages,
 } as const satisfies Readonly<Record<string, CatalogModule>>;
 
 /** Every module, by name, so a test can check the modules stay disjoint. */
@@ -126,6 +132,7 @@ export const catalog = {
   ...recordMessages,
   ...connectionMessages,
   ...systemMessages,
+  ...mediaMessages,
 } as const satisfies Readonly<Record<string, CatalogEntry>>;
 
 export type CatalogId = keyof typeof catalog;

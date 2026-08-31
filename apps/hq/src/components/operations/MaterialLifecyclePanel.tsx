@@ -9,8 +9,12 @@ import {
 } from '@gremuchaya/ui/primitives';
 
 import { dateTimeFormat } from '@/application/localization/intl';
+import { useTranslate } from '@/application/localization/locale';
 import { formatBytes } from '@/application/materials/importedMaterials';
-import { materialCategoryOptions } from '@/application/materials/materialCategories';
+import {
+  importPhaseLabel,
+  materialCategoryOptions,
+} from '@/application/materials/materialCategories';
 import type {
   MaterialEntry,
   MaterialImportProgress,
@@ -50,6 +54,7 @@ export function MaterialLifecyclePanel({
   onUpdated,
   onTrashed,
 }: MaterialLifecyclePanelProps) {
+  const translate = useTranslate();
   /*
    * `FilesScreen` keys this panel by `material.materialId`, so a new
    * selection remounts it rather than leaving these fields to be reset by an
@@ -87,9 +92,9 @@ export function MaterialLifecyclePanel({
         tags: [],
       });
       onUpdated(updated, chosenCategory);
-      setStatus('МЕТАДАННЫЕ ОБНОВЛЕНЫ');
+      setStatus(translate('materialLifecycle.metadataUpdated'));
     } catch (error: unknown) {
-      setStatus(messageFromLifecycleError(error));
+      setStatus(messageFromLifecycleError(translate, error));
     } finally {
       setSaving(false);
     }
@@ -105,9 +110,9 @@ export function MaterialLifecyclePanel({
       onUpdated(result.material, chosenCategory);
       const page = await lifecycle.listVersions(material.materialId);
       setVersions(page.versions);
-      setStatus('НОВАЯ ВЕРСИЯ ЗАГРУЖЕНА');
+      setStatus(translate('materialLifecycle.versionUploaded'));
     } catch (error: unknown) {
-      setStatus(messageFromLifecycleError(error));
+      setStatus(messageFromLifecycleError(translate, error));
     } finally {
       setUploadingVersion(false);
       setVersionProgress(null);
@@ -120,56 +125,58 @@ export function MaterialLifecyclePanel({
       await lifecycle.moveToTrash(material.materialId);
       onTrashed(material.materialId);
     } catch (error: unknown) {
-      setStatus(messageFromLifecycleError(error));
+      setStatus(messageFromLifecycleError(translate, error));
     }
   };
 
   return (
     <div className="material-lifecycle-panel">
       <header>
-        <span>УПРАВЛЕНИЕ МАТЕРИАЛОМ / {material.materialId.slice(0, 8)}</span>
+        <span>
+          {translate('materialLifecycle.header', { id: material.materialId.slice(0, 8) })}
+        </span>
       </header>
       <label className="material-lifecycle-panel__field">
-        <span>НАЗВАНИЕ</span>
+        <span>{translate('field.name')}</span>
         <TerminalInput
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
-          aria-label="Название материала"
+          aria-label={translate('materialLifecycle.nameInputLabel')}
           disabled={saving}
         />
       </label>
       <label className="material-lifecycle-panel__field">
-        <span>КАТЕГОРИЯ</span>
+        <span>{translate('field.category')}</span>
         <TerminalSelect
           value={chosenCategory}
-          options={materialCategoryOptions}
+          options={materialCategoryOptions()}
           onValueChange={setChosenCategory}
-          label="Категория материала"
+          label={translate('materialLifecycle.categorySelectLabel')}
           disabled={saving}
         />
       </label>
       <div className="material-lifecycle-panel__actions">
         <TerminalButton size="small" onClick={() => void saveMetadata()} disabled={saving}>
-          [S] СОХРАНИТЬ
+          {translate('materialLifecycle.saveButton')}
         </TerminalButton>
         <TerminalAlertDialog
           trigger={
             <TerminalButton size="small" tone="critical">
-              [T] В КОРЗИНУ
+              {translate('materialLifecycle.trashButton')}
             </TerminalButton>
           }
-          title="ПЕРЕМЕСТИТЬ МАТЕРИАЛ В КОРЗИНУ?"
-          description="Материал уйдёт в корзину группы. До полного удаления его можно восстановить из вкладки КОРЗИНА."
-          confirmLabel="[T] В КОРЗИНУ"
+          title={translate('materialLifecycle.trashConfirmTitle')}
+          description={translate('materialLifecycle.trashConfirmDescription')}
+          confirmLabel={translate('materialLifecycle.trashButton')}
           onConfirm={() => void trash()}
         />
       </div>
       <label className="material-lifecycle-panel__field">
-        <span>НОВАЯ ВЕРСИЯ</span>
+        <span>{translate('materialLifecycle.newVersionFieldLabel')}</span>
         <TerminalInput
           type="file"
           disabled={uploadingVersion}
-          aria-label="Загрузить новую версию материала"
+          aria-label={translate('materialLifecycle.uploadVersionLabel')}
           onChange={(event) => {
             void uploadVersion(event.currentTarget.files);
             event.currentTarget.value = '';
@@ -178,7 +185,7 @@ export function MaterialLifecyclePanel({
       </label>
       {versionProgress ? (
         <p className="material-lifecycle-panel__progress">
-          {versionProgress.phase.toUpperCase()} / {versionProgress.fileName}
+          {importPhaseLabel(versionProgress.phase)} / {versionProgress.fileName}
         </p>
       ) : null}
       {status.length > 0 ? (
@@ -187,9 +194,9 @@ export function MaterialLifecyclePanel({
         </p>
       ) : null}
       <div className="material-lifecycle-panel__versions">
-        <span>ВЕРСИИ / {versions.length}</span>
+        <span>{translate('materialLifecycle.versionsHeader', { count: versions.length })}</span>
         {versions.length === 0 ? (
-          <EmptyState>ИСТОРИЯ ВЕРСИЙ ОТСУТСТВУЕТ</EmptyState>
+          <EmptyState>{translate('materialLifecycle.noVersions')}</EmptyState>
         ) : (
           <ul>
             {versions.map((version) => (
@@ -211,7 +218,13 @@ export function MaterialLifecyclePanel({
   );
 }
 
-function messageFromLifecycleError(error: unknown): string {
-  if (error instanceof Error) return `ОШИБКА: ${error.message}`;
-  return 'ОШИБКА: НЕИЗВЕСТНАЯ ОШИБКА ОПЕРАЦИИ';
+function messageFromLifecycleError(
+  translate: ReturnType<typeof useTranslate>,
+  error: unknown,
+): string {
+  if (error instanceof Error)
+    return translate('materialLifecycle.errorPrefix', { message: error.message });
+  return translate('materialLifecycle.errorPrefix', {
+    message: translate('materialLifecycle.unknownError'),
+  });
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { t, useTranslate } from '@/application/localization/locale';
 import type { MaterialEntry } from '@/infrastructure/materials/BridgeMaterialClient';
 import type { MaterialLibraryClient } from '@/infrastructure/materials/materialLibrary';
 import {
@@ -48,6 +49,7 @@ export function LocalMaterialPreview({
   readonly material: MaterialEntry;
   readonly client: MaterialLibraryClient;
 }) {
+  const translate = useTranslate();
   // The operator's own limits reach the reader as an argument; the module that
   // enforces them stays free of the store.
   const textBytes = useNumberSetting('materials.textPreviewLimitMb') * 1024 * 1024;
@@ -188,7 +190,11 @@ export function LocalMaterialPreview({
         if (!released && !controller.signal.aborted) {
           setState({
             type: 'error',
-            message: error instanceof Error ? error.message : 'Unknown local preview error.',
+            // Not `translate`: it would have to join this effect's own
+            // dependency list to satisfy `react-hooks/exhaustive-deps`, and
+            // that would re-run the read itself on a locale switch mid-load.
+            // `t` reads the locale at the moment this catch actually runs.
+            message: error instanceof Error ? error.message : t('localPreview.unknownError'),
           });
         }
       }
@@ -213,22 +219,24 @@ export function LocalMaterialPreview({
             : 'original';
 
   if (mode === 'unsupported') {
-    return <MetadataOnlyPreview reason="ПРЕДПРОСМОТР ЭТОГО ТИПА БУДЕТ ДОБАВЛЕН ОТДЕЛЬНЫМ VIEWER" />;
+    return <MetadataOnlyPreview reason={translate('localPreview.unsupportedReason')} />;
   }
   if (mode === 'oversize') {
-    return (
-      <MetadataOnlyPreview reason="МАТЕРИАЛ ПРЕВЫШАЕТ БЕЗОПАСНЫЙ ЛИМИТ ЛОКАЛЬНОГО ПРЕДПРОСМОТРА" />
-    );
+    return <MetadataOnlyPreview reason={translate('localPreview.oversizeReason')} />;
   }
   if (state.type === 'loading')
-    return <MetadataOnlyPreview reason="ЧТЕНИЕ ЛОКАЛЬНОГО MATERIAL STREAM…" />;
+    return <MetadataOnlyPreview reason={translate('localPreview.loadingReason')} />;
   if (state.type === 'error')
-    return <MetadataOnlyPreview reason={`ОШИБКА VIEWER: ${state.message}`} />;
+    return (
+      <MetadataOnlyPreview
+        reason={translate('localPreview.errorReason', { message: state.message })}
+      />
+    );
   if (state.type === 'text') {
     return (
       <section
         className="local-material-preview local-material-preview--text"
-        aria-label="Текстовый предпросмотр"
+        aria-label={translate('localPreview.textPreviewLabel')}
       >
         <pre>{state.content}</pre>
       </section>
@@ -285,7 +293,10 @@ export function LocalMaterialPreview({
     <section className="local-material-preview local-material-preview--image">
       {/* Local Blob URLs cannot use Next image optimization without an HTTP grant. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={state.url} alt={`Предпросмотр ${material.displayName}`} />
+      <img
+        src={state.url}
+        alt={translate('localPreview.imageAlt', { name: material.displayName })}
+      />
       <MaterialRenditionMenu
         renditions={renditions}
         variant={variant}
@@ -297,7 +308,7 @@ export function LocalMaterialPreview({
     <section className="local-material-preview local-material-preview--pdf">
       <iframe
         src={state.url}
-        title={`PDF предпросмотр ${material.displayName}`}
+        title={translate('localPreview.pdfTitle', { name: material.displayName })}
         sandbox=""
         referrerPolicy="no-referrer"
       />
@@ -306,9 +317,10 @@ export function LocalMaterialPreview({
 }
 
 function MetadataOnlyPreview({ reason }: { readonly reason: string }) {
+  const translate = useTranslate();
   return (
     <section className="local-material-preview local-material-preview--status" role="status">
-      <span>[LOCAL VIEWER]</span>
+      <span>{translate('localPreview.statusBadge')}</span>
       <strong>{reason}</strong>
     </section>
   );

@@ -299,13 +299,13 @@ describe('player.loopDemo', () => {
 describe('player.seekStep', () => {
   it('names its own step on the control, so the button cannot promise one figure and move another', () => {
     const { getByText } = render(<VideoScreen mode="live" />);
-    expect(getByText('[◀] -10S')).toBeTruthy();
-    expect(getByText('[▶] +10S')).toBeTruthy();
+    expect(getByText('[◀] -10СЕК')).toBeTruthy();
+    expect(getByText('[▶] +10СЕК')).toBeTruthy();
 
     patchSetting('player.seekStep', 30);
 
-    expect(getByText('[◀] -30S')).toBeTruthy();
-    expect(getByText('[▶] +30S')).toBeTruthy();
+    expect(getByText('[◀] -30СЕК')).toBeTruthy();
+    expect(getByText('[▶] +30СЕК')).toBeTruthy();
   });
 
   /*

@@ -3,7 +3,8 @@ import type { CatalogModule } from './catalogTypes';
 /**
  * Materials, their transport and lifecycle, the record drawer and the
  * production panel -- the surfaces built around a file rather than around a
- * screen.
+ * screen. `materialCategory.*` names the twelve `materials.defaultCategory`
+ * enum values the import dialog and the material lifecycle panel both offer.
  */
 export const materialMessages = {
   'drawer.attachToCase': { ru: '[+] ПРИКРЕПИТЬ К ДЕЛУ', en: '[+] ATTACH TO CASE' },
@@ -13,6 +14,7 @@ export const materialMessages = {
   'drawer.progression': { ru: 'ПРОХОЖДЕНИЕ', en: 'PROGRESSION' },
   'drawer.signalLevel': { ru: 'УРОВЕНЬ СИГНАЛА', en: 'SIGNAL LEVEL' },
   'field.cases': { ru: 'ДЕЛА', en: 'CASES' },
+  'field.category': { ru: 'КАТЕГОРИЯ', en: 'CATEGORY' },
   'field.clearance': { ru: 'ДОПУСК', en: 'CLEARANCE' },
   'field.codec': { ru: 'КОДЕК', en: 'CODEC' },
   'field.coordinates': { ru: 'КООРДИНАТЫ', en: 'COORDINATES' },
@@ -31,6 +33,18 @@ export const materialMessages = {
   'field.stream': { ru: 'ПОТОК', en: 'STREAM' },
   'field.tags': { ru: 'ТЕГИ', en: 'TAGS' },
   'field.time': { ru: 'ВРЕМЯ', en: 'TIME' },
+  'materialCategory.archive': { ru: 'АРХИВ', en: 'ARCHIVE' },
+  'materialCategory.audio': { ru: 'АУДИО', en: 'AUDIO' },
+  'materialCategory.camera': { ru: 'КАМЕРА', en: 'CAMERA' },
+  'materialCategory.document': { ru: 'ДОКУМЕНТ', en: 'DOCUMENT' },
+  'materialCategory.dossier': { ru: 'ДОСЬЕ', en: 'DOSSIER' },
+  'materialCategory.intercept': { ru: 'ПЕРЕХВАТ', en: 'INTERCEPT' },
+  'materialCategory.map': { ru: 'КАРТА', en: 'MAP' },
+  'materialCategory.other': { ru: 'ПРОЧЕЕ', en: 'OTHER' },
+  'materialCategory.photo': { ru: 'ФОТО', en: 'PHOTO' },
+  'materialCategory.report': { ru: 'РАПОРТ', en: 'REPORT' },
+  'materialCategory.technical': { ru: 'ТЕХНИЧЕСКОЕ', en: 'TECHNICAL' },
+  'materialCategory.video': { ru: 'ВИДЕО', en: 'VIDEO' },
   'production.clockSpeedLabel': { ru: 'Скорость часов', en: 'Clock speed' },
   'production.fixedTimeLabel': {
     ru: 'Фиксированное время production',
@@ -88,4 +102,5 @@ export const materialMessages = {
   'transport.screenLabel': { ru: 'ЭКРАН', en: 'SCREEN' },
   'unit.km': { ru: 'КМ', en: 'KM' },
   'unit.min': { ru: 'МИН', en: 'MIN' },
+  'unit.s': { ru: 'СЕК', en: 'S' },
 } as const satisfies CatalogModule;
