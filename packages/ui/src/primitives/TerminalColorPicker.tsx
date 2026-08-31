@@ -52,6 +52,10 @@ export function TerminalColorPicker<Value extends string>({
           nativeButton
           render={<button type="button" />}
           value={option.value}
+          // The swatch's stored value, for the same reason
+          // `TerminalSelect` publishes one: the accessible name is the
+          // translated label, so it names the colour in one language only.
+          data-option-value={option.value}
           disabled={option.disabled}
           aria-label={option.label}
           title={option.label}

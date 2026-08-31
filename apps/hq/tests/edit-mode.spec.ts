@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { messagesFor } from '../src/application/localization/messages';
 import { expandEditPanel } from './editPanelHelpers';
-import { gotoSettingsUnified } from './settingsHelpers';
+import { gotoSettingsUnified, optionByValue, settingControl } from './settingsHelpers';
 
 /** The shipped Russian text a test needs to prove an override replaced, read from the catalogue rather than pasted. */
 const ru = messagesFor('ru');
@@ -146,7 +146,7 @@ test('R6/R26: the panel navigates and scrolls its own body on a short window', a
   // `advanced.liveEdit` is in `system`; the panel opens on `appearance`. One
   // search box answering across every section is what replaces the screen's
   // section-scoped search plus its separate "found elsewhere" block.
-  await expect(panel.getByText('ADVANCED / LIVE EDIT')).toBeVisible();
+  await expect(panel.locator('[data-setting-id="advanced.liveEdit"]')).toBeVisible();
 
   await search.fill('');
   await expect
@@ -284,20 +284,20 @@ test('R4: an event card opened in edit mode is edited from inside the card', asy
 // element looks like. Three of the seven -- brackets (the default), barber and
 // scan -- used to change only the data attribute, so the setting was a control
 // that did nothing.
-for (const [option, attribute] of [
-  ['BRACKETS', 'brackets'],
-  ['BARBER', 'barber'],
-  ['SCAN', 'scan'],
-] as const) {
+// The pattern is named once, by the value `patterns.focus` stores: it is both
+// what the option carries and what the shell publishes as
+// `data-focus-pattern`. The option's visible label is translated and no longer
+// names it.
+for (const attribute of ['brackets', 'barber', 'scan'] as const) {
   test(`R13: the ${attribute} focus pattern paints a focused control`, async ({ page }) => {
     await gotoSettingsUnified(page);
 
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
     await category.click();
     await page.getByRole('option', { name: 'ПАТТЕРНЫ', exact: true }).click();
-    const pattern = page.getByRole('combobox', { name: 'PATTERNS / FOCUS' });
+    const pattern = settingControl(page, 'patterns.focus', 'combobox');
     await pattern.click();
-    await page.getByRole('option', { name: option, exact: true }).click();
+    await optionByValue(page, attribute).click();
     await expect(page.locator('.ops-shell')).toHaveAttribute('data-focus-pattern', attribute);
 
     // Leave the settings screen through a client-side link. The select keeps

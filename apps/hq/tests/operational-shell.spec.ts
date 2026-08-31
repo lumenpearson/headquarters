@@ -12,7 +12,7 @@ import { FileBridgeService } from '@gremuchaya/protocol';
 
 import { messagesFor, type MessageId } from '../src/application/localization/messages';
 import { startBridge } from '../../file-bridge/src/server.js';
-import { gotoSettingsUnified } from './settingsHelpers';
+import { gotoSettingsUnified, optionByValue, settingControl, settingRow } from './settingsHelpers';
 
 /** The shipped Russian text a selector needs, read from the catalogue rather than pasted. */
 function shippedText(id: MessageId): string {
@@ -549,13 +549,13 @@ test('renders the full safe personalization catalogue and resets one selected ca
   await expect(page.getByRole('option', { name: 'РАСШИРЕННЫЕ', exact: true })).toBeVisible();
   await page.getByRole('option', { name: 'АНИМАЦИИ', exact: true }).click();
 
-  const enabled = page.getByRole('switch', { name: 'ANIMATIONS / ENABLED' });
+  const enabled = settingControl(page, 'animations.enabled', 'switch');
   await expect(enabled).toBeChecked();
   await enabled.click();
   await expect(enabled).not.toBeChecked();
   await page.getByRole('button', { name: '[R] СБРОСИТЬ КАТЕГОРИЮ', exact: true }).click();
   await expect(enabled).toBeChecked();
-  await expect(page.getByRole('textbox', { name: 'ANIMATIONS / INTENSITY' })).toBeVisible();
+  await expect(settingControl(page, 'animations.intensity', 'textbox')).toBeVisible();
 });
 
 test('round-trips a schema-validated settings draft through the terminal import control', async ({
@@ -578,18 +578,24 @@ test('keeps local settings history filterable and reversible inside its own sett
 }) => {
   await gotoSettingsUnified(page);
 
-  const theme = page.getByRole('combobox', { name: 'THEMES / ID' });
+  const theme = settingControl(page, 'themes.id', 'combobox');
   await theme.click();
-  await page.getByRole('option', { name: 'COLD-CYAN', exact: true }).click();
+  await optionByValue(page, 'cold-cyan').click();
   await expect(page.locator('.settings-history-row').first()).toContainText('PATCH');
   await expect(page.locator('.settings-history-row').first()).toContainText('themes.id');
 
+  // The theme is read off the shell rather than the select's own text: the
+  // trigger draws the option's translated label, which names the theme in one
+  // language, while `data-theme` carries the value the setting stores.
+  const shell = page.locator('.ops-shell');
+  await expect(shell).toHaveAttribute('data-theme', 'cold-cyan');
+
   await page.getByRole('button', { name: '[CTRL+Z] UNDO', exact: true }).click();
-  await expect(theme).toContainText('TERMINAL-RED');
+  await expect(shell).toHaveAttribute('data-theme', 'terminal-red');
   await expect(page.locator('.settings-history-row').first()).toContainText('UNDO');
 
   await page.getByRole('button', { name: '[CTRL+Y] REDO', exact: true }).click();
-  await expect(theme).toContainText('COLD-CYAN');
+  await expect(shell).toHaveAttribute('data-theme', 'cold-cyan');
 
   const operation = page.getByRole('combobox', { name: 'Операция истории' });
   await operation.click();
@@ -608,15 +614,15 @@ test('applies schema-backed visual preview tokens without introducing arbitrary 
   await page.getByRole('option', { name: 'ЦВЕТА', exact: true }).click();
   // `colors.accent` is a swatch picker now, not a select: a radiogroup of
   // five fixed swatches, each labelled with its accent name.
-  const accent = page.getByRole('radiogroup', { name: 'COLORS / ACCENT' });
-  await accent.getByRole('radio', { name: 'CYAN', exact: true }).click();
+  const accent = settingRow(page, 'colors.accent').getByRole('radiogroup');
+  await accent.locator('[data-option-value="cyan"]').click();
   await expect(page.locator('.ops-shell')).toHaveAttribute('data-accent', 'cyan');
 
   await category.click();
   await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
-  const background = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
+  const background = settingControl(page, 'backgrounds.kind', 'combobox');
   await background.click();
-  await page.getByRole('option', { name: 'GRADIENT', exact: true }).click();
+  await optionByValue(page, 'gradient').click();
   await expect(page.locator('.ops-shell')).toHaveAttribute('data-background-kind', 'gradient');
 });
 

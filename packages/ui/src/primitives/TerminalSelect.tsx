@@ -67,6 +67,12 @@ export function TerminalSelect<Value extends string>({
                 <Select.Item
                   key={option.value}
                   value={option.value}
+                  // The option's stored value, published to the DOM beside
+                  // its label. The label is translated and the trigger's
+                  // accessible name is the label, so anything that picked an
+                  // option by the words in it was picking in one language;
+                  // the value is the same in every locale.
+                  data-option-value={option.value}
                   disabled={option.disabled}
                   className="terminal-select__item grid min-h-[30px] grid-cols-[24px_minmax(0,1fr)] items-center px-hq-2 outline-none cursor-pointer font-mono text-[length:inherit] uppercase data-[highlighted]:bg-hq-accent data-[highlighted]:text-hq-text-inverse data-[disabled]:cursor-not-allowed data-[disabled]:opacity-[0.38]"
                 >

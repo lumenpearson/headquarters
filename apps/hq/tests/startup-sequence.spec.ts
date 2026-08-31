@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { gotoSettingsUnified } from './settingsHelpers';
+import { gotoSettingsUnified, settingControl } from './settingsHelpers';
 
 test('R16: the startup sequence plays on load and clears itself', async ({ page }) => {
   await page.goto('/');
@@ -92,12 +92,12 @@ test('R16: turning the sequence off in settings silences the next launch', async
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
   await page.getByRole('option', { name: 'ЗАПУСК', exact: true }).click();
-  await page.getByRole('switch', { name: 'STARTUP / ENABLED' }).click();
+  await settingControl(page, 'startup.enabled', 'switch').click();
 
   // The draft does not survive a reload, so the switch is read back in place
   // rather than through one: what this pins is that the setting reaches the
   // sequence at all, which is what R16 asks be configurable.
-  await expect(page.getByRole('switch', { name: 'STARTUP / ENABLED' })).toHaveAttribute(
+  await expect(settingControl(page, 'startup.enabled', 'switch')).toHaveAttribute(
     'aria-checked',
     'false',
   );

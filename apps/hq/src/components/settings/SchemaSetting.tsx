@@ -271,6 +271,7 @@ export function SchemaSetting({
 
   return (
     <Setting
+      settingId={definition.id}
       label={`${label}${changed ? ' *' : ''}`}
       detail={`${localizedSettingScope(definition.scope, locale)} · ${settingDescription(definition, locale)}`}
       notice={awaitingFeature === undefined ? undefined : t('settings.awaitingFeature')}
@@ -304,18 +305,36 @@ function settingDescription(definition: SettingDefinition, locale: AppLocale): s
 }
 
 export function Setting({
+  settingId,
   label,
   detail,
   notice,
   children,
 }: {
+  /**
+   * The definition id this row edits, published to the DOM so a caller can
+   * find the row without reading its label.
+   *
+   * The label is now translated, and a locale is a thing an operator changes.
+   * Anything that located a control by the words next to it -- the end-to-end
+   * specs did, through the English `TILES / PRESENTATION` that
+   * `settingLabel` used to generate -- was therefore asserting about one
+   * language rather than about the setting, and broke the moment the label
+   * became Russian. The id is the contract the schema already keys
+   * everything else off, and it is the same in every locale.
+   *
+   * Optional because `Setting` also draws rows that edit no definition (the
+   * group and address panels compose it directly); those carry no id rather
+   * than an invented one.
+   */
+  readonly settingId?: string | undefined;
   readonly label: string;
   readonly detail: string;
   readonly notice?: string | undefined;
   readonly children: ReactNode;
 }) {
   return (
-    <div className="settings-row">
+    <div className="settings-row" data-setting-id={settingId}>
       <span>
         <strong>{label}</strong>
         <small>{detail}</small>

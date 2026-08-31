@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { messagesFor, type MessageId } from '../src/application/localization/messages';
-import { gotoSettingsUnified } from './settingsHelpers';
+import { gotoSettingsUnified, settingControl } from './settingsHelpers';
 
 /** The shipped Russian text a selector needs, read from the catalogue rather than pasted. */
 function shippedText(id: MessageId): string {
@@ -49,7 +49,7 @@ async function setPageSize(page: Page, size: number): Promise<void> {
    * typing the same two characters stores `10`. Measured both ways -- the
    * control is right and `fill` is the wrong gesture to test it with.
    */
-  const field = page.getByRole('textbox', { name: 'TABLES / PAGE SIZE' });
+  const field = settingControl(page, 'tables.pageSize', 'textbox');
   await expect(field).toBeVisible();
   await field.click();
   await page.keyboard.press('Control+A');

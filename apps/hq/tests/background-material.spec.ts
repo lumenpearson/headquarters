@@ -11,7 +11,7 @@ import { createVirtualPath } from '@gremuchaya/domain';
 import { FileBridgeService } from '@gremuchaya/protocol';
 
 import { startBridge } from '../../file-bridge/src/server.js';
-import { gotoSettingsUnified } from './settingsHelpers';
+import { gotoSettingsUnified, optionByValue, settingControl } from './settingsHelpers';
 
 /**
  * R13: the `image` and `video` background kinds used to paint a placeholder
@@ -92,14 +92,14 @@ test('paints a chosen material as the application background, and lets go of it'
     await category.click();
     await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
 
-    const kind = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
+    const kind = settingControl(page, 'backgrounds.kind', 'combobox');
     await kind.click();
-    await page.getByRole('option', { name: 'IMAGE', exact: true }).click();
+    await optionByValue(page, 'image').click();
     await expect(shell).toHaveAttribute('data-background-kind', 'image');
     // Nothing chosen yet: the kind alone must not claim to have a source.
     await expect(shell).toHaveAttribute('data-background-image', 'none');
 
-    const source = page.getByRole('combobox', { name: 'BACKGROUNDS / IMAGE SOURCE' });
+    const source = settingControl(page, 'backgrounds.imageSource', 'combobox');
     await source.click();
     await page.getByRole('option', { name: '[ФАЙЛ] background-plate.webp', exact: true }).click();
 
@@ -137,7 +137,7 @@ test('offers only material the setting accepts', async ({ page }) => {
   await category.click();
   await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
 
-  const source = page.getByRole('combobox', { name: 'BACKGROUNDS / VIDEO SOURCE' });
+  const source = settingControl(page, 'backgrounds.videoSource', 'combobox');
   await expect(source).toBeVisible();
   await source.click();
   await expect(page.getByRole('option', { name: '[НЕ ВЫБРАН]', exact: true })).toBeVisible();
@@ -212,11 +212,11 @@ test('plays a chosen clip as the background and stops it when motion is off', as
     await category.click();
     await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
 
-    const kind = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
+    const kind = settingControl(page, 'backgrounds.kind', 'combobox');
     await kind.click();
-    await page.getByRole('option', { name: 'VIDEO', exact: true }).click();
+    await optionByValue(page, 'video').click();
 
-    const source = page.getByRole('combobox', { name: 'BACKGROUNDS / VIDEO SOURCE' });
+    const source = settingControl(page, 'backgrounds.videoSource', 'combobox');
     await source.click();
     await page.getByRole('option', { name: '[ФАЙЛ] background-loop.webm', exact: true }).click();
 
@@ -231,7 +231,7 @@ test('plays a chosen clip as the background and stops it when motion is off', as
     // animations off must actually stop the decoder, not merely hide movement.
     await category.click();
     await page.getByRole('option', { name: 'АНИМАЦИИ', exact: true }).click();
-    await page.getByRole('switch', { name: 'ANIMATIONS / ENABLED' }).click();
+    await settingControl(page, 'animations.enabled', 'switch').click();
 
     await expect
       .poll(() => backgroundVideo.evaluate((element: HTMLVideoElement) => element.paused))

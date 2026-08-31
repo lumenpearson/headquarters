@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { messagesFor, type MessageId } from '../src/application/localization/messages';
 import { expandEditPanel } from './editPanelHelpers';
-import { gotoSettingsUnified } from './settingsHelpers';
+import { gotoSettingsUnified, settingControl } from './settingsHelpers';
 
 /** The shipped Russian text a selector needs to find a tile by its title, read from the catalogue rather than pasted. */
 function shippedText(id: MessageId): string {
@@ -136,17 +136,15 @@ test('R10: no screen can be left blank by a size the operator is allowed to set'
   await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page
-    .getByRole('textbox', { name: 'TILES / SPANS' })
-    .fill(
-      [
-        'cases:registry=12x1',
-        'objects:registry=12x1',
-        'reports:registry=12x1',
-        'files:registry=12x1',
-        'search:results=12x1',
-      ].join(','),
-    );
+  await settingControl(page, 'tiles.spans', 'textbox').fill(
+    [
+      'cases:registry=12x1',
+      'objects:registry=12x1',
+      'reports:registry=12x1',
+      'files:registry=12x1',
+      'search:results=12x1',
+    ].join(','),
+  );
 
   // The shortest grid the runtime can produce: one row.
   await page.setViewportSize({ width: 1280, height: 400 });
@@ -166,7 +164,7 @@ test('R3: a tile hidden on one screen stays on the screens that share its name',
   await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('cases:registry');
+  await settingControl(page, 'tiles.hiddenIds', 'textbox').fill('cases:registry');
 
   /*
    * `registry` is the record table on four screens. While the settings were
@@ -192,7 +190,7 @@ test('R3: switching a group off takes every tile in it, on every screen', async 
   await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN CATEGORIES' }).fill('geo');
+  await settingControl(page, 'tiles.hiddenCategories', 'textbox').fill('geo');
 
   await page.goto('/overview');
   await expect(page.locator('[data-tile="brief"]')).toBeVisible();
@@ -214,7 +212,7 @@ test('R3: the operator can cap how rich a tile is drawn', async ({ page }) => {
   await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('combobox', { name: 'TILES / PRESENTATION' }).click();
+  await settingControl(page, 'tiles.presentation', 'combobox').click();
   // The dropdown reuses the presentation picker's own phrases
   // (`localizedEnumOptionLabel` -> `tilePresentationLabel`), not the bare
   // uppercased identifier it showed before the chrome read the catalogue.
@@ -353,7 +351,7 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
   await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('overview:objectives');
+  await settingControl(page, 'tiles.hiddenIds', 'textbox').fill('overview:objectives');
 
   await page.goto('/overview');
   /*
@@ -405,7 +403,7 @@ test('R10: layout.tileMinimumWidth changes which tiles fit, without emptying the
   await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'МАКЕТ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'LAYOUT / TILE MINIMUM WIDTH' }).fill(String(target));
+  await settingControl(page, 'layout.tileMinimumWidth', 'textbox').fill(String(target));
 
   await page.goto('/overview');
   await expect(page.locator('.tile-grid__cell').first()).toBeVisible();

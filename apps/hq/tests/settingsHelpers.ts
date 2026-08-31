@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * Opens `/settings` in the continuous, single-list presentation
@@ -63,4 +63,65 @@ export async function gotoSettingsUnified(page: Page): Promise<void> {
     );
   });
   await page.goto('/settings');
+}
+
+/**
+ * One settings row, addressed by the definition id it edits.
+ *
+ * Every row publishes `data-setting-id`, which is the same in every locale;
+ * its visible label is not. A spec that located a control through
+ * `getByRole('textbox', { name: 'TABLES / PAGE SIZE' })` was asserting that
+ * the application speaks English, and said nothing about `tables.pageSize` --
+ * so translating the catalogue turned twenty-one specs red without a single
+ * behaviour changing. Reach the row by id, then the control by its role
+ * within the row.
+ */
+export function settingRow(page: Page, settingId: string): Locator {
+  return page.locator(`[data-setting-id="${settingId}"]`);
+}
+
+/** The one control inside a settings row, by ARIA role. */
+export function settingControl(
+  page: Page,
+  settingId: string,
+  role: 'textbox' | 'combobox' | 'switch' | 'slider' | 'button',
+): Locator {
+  return settingRow(page, settingId).getByRole(role);
+}
+
+/**
+ * Picks an open select's option by the value it stores rather than the label
+ * it draws, for the same reason {@link settingRow} exists.
+ */
+export function optionByValue(page: Page, value: string): Locator {
+  return page.locator(`[role="option"][data-option-value="${value}"]`);
+}
+
+/** Opens a setting's dropdown and chooses one option by its stored value. */
+export async function chooseSettingOption(
+  page: Page,
+  settingId: string,
+  value: string,
+): Promise<void> {
+  await settingControl(page, settingId, 'combobox').click();
+  await optionByValue(page, value).click();
+}
+
+/**
+ * Types a value into a setting's text field, replacing whatever it held.
+ *
+ * `Control+A` rather than `fill`: several of these fields commit on change
+ * and re-render from the store, and `fill` clears through a path the field's
+ * own handler does not see.
+ */
+export async function typeSettingValue(
+  page: Page,
+  settingId: string,
+  value: string,
+): Promise<void> {
+  const field = settingControl(page, settingId, 'textbox');
+  await field.click();
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type(value);
+  await field.blur();
 }

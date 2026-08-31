@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { gotoSettingsUnified } from './settingsHelpers';
+import { gotoSettingsUnified, optionByValue, settingControl } from './settingsHelpers';
 
 /**
  * Drags the pointer across a line of text the way an operator would.
@@ -62,8 +62,8 @@ test('R12: the selection colour follows the theme the operator chose', async ({ 
 
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ТЕМЫ', exact: true }).click();
-  await page.getByRole('combobox', { name: 'THEMES / ID' }).click();
-  await page.getByRole('option', { name: 'LIGHT-OPERATIONS', exact: true }).click();
+  await settingControl(page, 'themes.id', 'combobox').click();
+  await optionByValue(page, 'light-operations').click();
 
   await expect(shell).toHaveAttribute('data-theme', 'light-operations');
   const light = await readSelection();
@@ -210,7 +210,7 @@ test('R12: a long press reaches the same menu on touch, and the setting turns it
   await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'POP-UP', exact: true }).click();
-  await page.getByRole('switch', { name: 'POPUPS / LONG PRESS' }).click();
+  await settingControl(page, 'popups.longPress', 'switch').click();
 
   await page.goto('/objects');
   await longPress(page, page.locator('.ops-table tbody tr').first());
