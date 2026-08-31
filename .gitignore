@@ -83,3 +83,5 @@ packages/protocol/v3/
 # left behind should never reach a diff or turn the local gate red.
 *.tmp.mjs
 *.tmp.ts
+*-tmp.mjs
+*-tmp.ts
