@@ -11,12 +11,14 @@ import {
 import { appLocales } from './catalog';
 
 /**
- * The read side of the in-app translation editor a later wave builds:
- * storage, validation and resolution for the operator's own per-id, per-locale
- * text overrides. No UI here -- this is the tenth key `localStorage` grows to,
- * `hq.translation-overrides.v1` (the roster is a stated contract in
- * `CLAUDE.md`, `docs/release/environment.md` and
- * `docs/architecture/dependency-map.md`, amended alongside this file).
+ * Storage, validation and resolution for the operator's own per-id,
+ * per-locale text overrides -- the read and write side of the in-app
+ * translation editor (`TranslationEditorSection.tsx`), which is the only
+ * caller of the writing functions below; this module still holds no UI of
+ * its own. `hq.translation-overrides.v1` is one of the keys `localStorage`
+ * grows to (the roster is a stated contract in `CLAUDE.md`,
+ * `docs/release/environment.md` and `docs/architecture/dependency-map.md`,
+ * amended alongside this file).
  *
  * ## The idiom
  *
@@ -58,6 +60,16 @@ import { appLocales } from './catalog';
  * this module's own patterns list, and asks for exactly the placeholders the
  * source message does -- an override that dropped `{target}` would silently
  * break a label instead of visibly failing to save.
+ *
+ * ## Import refuses the file, not the entry
+ *
+ * {@link parseTranslationOverrideFile} is the opposite discipline, on
+ * purpose: a stored blob accumulates from many small writes and a hand edit
+ * can always damage one line without the rest, but an imported file is one
+ * deliberate act, and applying most of it while silently dropping the entry
+ * that failed would leave the operator believing they imported something
+ * they did not. It validates every entry before writing any of them, and
+ * refuses the whole file, named, on the first one that does not parse.
  */
 
 export const translationOverridesStorageKey = 'hq.translation-overrides.v1';
@@ -91,7 +103,8 @@ export type TranslationOverrideRefusalReason =
   | 'too-long'
   | 'control-character'
   | 'bidi-override'
-  | 'placeholder-mismatch';
+  | 'placeholder-mismatch'
+  | 'entry-count-cap';
 
 export type TranslationOverrideValidation =
   | { readonly ok: true; readonly value: string }
@@ -220,6 +233,13 @@ export type TranslationOverrideWriteResult =
  * an override equal to no override is not a change the operator later has to
  * find and undo. A refusal leaves `overrides` untouched and says why, for the
  * editor to show beside the row.
+ *
+ * Checks {@link maxOverrideEntryCount} itself, ahead of
+ * {@link validateTranslationOverride}, for a *new* key -- `normalizeTranslationOverrides`
+ * already enforces the cap, but only at the next read, by silently dropping
+ * whichever entries sort last; an operator who had just typed the one that
+ * got dropped would never see that happen. Rewriting a key already present
+ * never grows the table, so it is never refused on this ground alone.
  */
 export function withTranslationOverride(
   overrides: TranslationOverrides,
@@ -231,17 +251,102 @@ export function withTranslationOverride(
     const { [key]: _removed, ...rest } = overrides;
     return { kind: 'cleared', overrides: rest };
   }
+  if (!Object.hasOwn(overrides, key) && Object.keys(overrides).length >= maxOverrideEntryCount) {
+    return { kind: 'refused', reason: 'entry-count-cap' };
+  }
   const validation = validateTranslationOverride(address, text);
   if (!validation.ok) return { kind: 'refused', reason: validation.reason };
   return { kind: 'set', overrides: { ...overrides, [key]: validation.value } };
+}
+
+/** One entry, or the whole file, refused on import -- named, not dropped. */
+export type TranslationOverrideImportRefusal =
+  | { readonly kind: 'malformed' }
+  | { readonly kind: 'unknown-locale'; readonly locale: string }
+  | {
+      readonly kind: 'entry';
+      readonly id: string;
+      readonly reason: TranslationOverrideRefusalReason;
+    }
+  | { readonly kind: 'entry-count-cap' };
+
+export type TranslationOverrideImportResult =
+  | {
+      readonly ok: true;
+      readonly locale: AppLocale;
+      /** Every override the operator now has, this locale's replaced wholesale. */
+      readonly overrides: TranslationOverrides;
+      readonly count: number;
+    }
+  | { readonly ok: false; readonly refusal: TranslationOverrideImportRefusal };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Parses one exported translation file (`{ locale, overrides }`) against the
+ * overrides already stored, the discipline `parseSettingsSnapshot`
+ * (`packages/settings-schema`) uses for a settings snapshot: presence must
+ * pass the validator, and a value that is present and wrong refuses the whole
+ * file by name rather than being dropped and the rest applied -- unlike
+ * {@link normalizeTranslationOverrides}, which exists for a hand-edited
+ * `localStorage` blob and drops what it cannot parse so one bad line does not
+ * cost the rest of the table. A file is not that: it is one deliberate act by
+ * the operator who exported it, and a corrupt one should cost nothing already
+ * stored, named clearly enough to fix and re-import.
+ *
+ * A locale's overrides are replaced wholesale rather than merged, the same
+ * "the file names a complete state, absence takes the default" reading
+ * `parseSettingsSnapshot` gives a settings values object -- an id the file
+ * does not mention returns to the built-in text, not to whatever this locale
+ * held before the import. The other locale's entries are untouched: a file
+ * exported for `en` never moves anything filed under `ru:`.
+ */
+export function parseTranslationOverrideFile(
+  value: unknown,
+  existingOverrides: TranslationOverrides,
+): TranslationOverrideImportResult {
+  if (!isRecord(value) || typeof value.locale !== 'string' || !isRecord(value.overrides)) {
+    return { ok: false, refusal: { kind: 'malformed' } };
+  }
+  if (!isAppLocale(value.locale)) {
+    return { ok: false, refusal: { kind: 'unknown-locale', locale: value.locale } };
+  }
+  const locale = value.locale;
+  const validated: [string, string][] = [];
+  for (const [id, text] of Object.entries(value.overrides)) {
+    // A non-string entry value is not this one entry failing content rules --
+    // `validateTranslationOverride` has no reason for "not text at all" -- it
+    // is the file itself not holding the shape this format promises.
+    if (typeof text !== 'string') return { ok: false, refusal: { kind: 'malformed' } };
+    const result = validateTranslationOverride({ locale, id }, text);
+    if (!result.ok) return { ok: false, refusal: { kind: 'entry', id, reason: result.reason } };
+    // `result.ok` already implies `isMessageId(id)` -- `validateTranslationOverride`
+    // checks it internally -- but that check does not narrow this loop's own
+    // `id`, which `Object.entries` types as `string`; re-checking it is what
+    // `normalizeTranslationOverrides` does for the same reason.
+    if (!isMessageId(id))
+      return { ok: false, refusal: { kind: 'entry', id, reason: 'unknown-id' } };
+    validated.push([overrideCacheKey(locale, id), result.value]);
+  }
+  const otherLocalePrefix = `${locale}:`;
+  const otherLocaleEntries = Object.entries(existingOverrides).filter(
+    ([key]) => !key.startsWith(otherLocalePrefix),
+  );
+  const overrides = Object.fromEntries([...otherLocaleEntries, ...validated]);
+  if (Object.keys(overrides).length > maxOverrideEntryCount) {
+    return { ok: false, refusal: { kind: 'entry-count-cap' } };
+  }
+  return { ok: true, locale, overrides, count: validated.length };
 }
 
 /**
  * Populates `translateWith`'s runtime cache from storage.
  *
  * Refreshes the cache wholesale; nothing calls this per lookup; it is meant
- * to run once at startup and again whenever the editor this module has no UI
- * for yet saves a change.
+ * to run once at startup and again whenever `TranslationEditorSection.tsx`
+ * saves a change.
  */
 export function loadTranslationOverrides(storage: StorageLike): void {
   setOverrideCache(new Map(Object.entries(readTranslationOverrides(storage))));

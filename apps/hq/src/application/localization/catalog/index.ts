@@ -13,6 +13,7 @@ import { settingOptionMessages } from './settingOptionMessages';
 import { settingsMessages } from './settingsMessages';
 import { systemMessages } from './systemMessages';
 import { tileMessages } from './tileMessages';
+import { translationEditorMessages } from './translationEditorMessages';
 import { updateMessages } from './updateMessages';
 
 import type { CatalogEntry, CatalogModule } from './catalogTypes';
@@ -110,6 +111,7 @@ const catalogModulesByName = {
   connection: connectionMessages,
   system: systemMessages,
   media: mediaMessages,
+  translationEditor: translationEditorMessages,
 } as const satisfies Readonly<Record<string, CatalogModule>>;
 
 /** Every module, by name, so a test can check the modules stay disjoint. */
@@ -133,6 +135,7 @@ export const catalog = {
   ...connectionMessages,
   ...systemMessages,
   ...mediaMessages,
+  ...translationEditorMessages,
 } as const satisfies Readonly<Record<string, CatalogEntry>>;
 
 export type CatalogId = keyof typeof catalog;

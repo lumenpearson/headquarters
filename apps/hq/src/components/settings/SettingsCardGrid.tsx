@@ -87,6 +87,18 @@ export const settingsSections = [
     labelId: 'settingsSection.update',
     icon: 'update',
   },
+  {
+    id: 'translations',
+    className: 'settings-translations',
+    labelId: 'settingsSection.translations',
+    // Reuses the `information` mark rather than adding a new one: every kind
+    // `SettingsCardIcon` knows is already spoken for by an existing card
+    // (`settingsCardIcons.tsx`), and `appearance` is already reused the same
+    // way, between this array's own `personalization` entry and one of
+    // `groupIcon`'s seven -- one shape standing for two different cards is an
+    // accepted reading here, not a broken one.
+    icon: 'information',
+  },
 ] as const satisfies readonly {
   readonly id: string;
   readonly className: string;

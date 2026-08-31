@@ -5,6 +5,7 @@ import {
   capTranslationOverrideEntries,
   loadTranslationOverrides,
   normalizeTranslationOverrides,
+  parseTranslationOverrideFile,
   readTranslationOverrides,
   setTranslationOverridesForTests,
   translationOverridesStorageKey,
@@ -205,6 +206,97 @@ describe('setting one override', () => {
     const result = withTranslationOverride(before, { locale: 'en', id: 'token.utc' }, 'ALIAS');
 
     expect(result).toEqual({ kind: 'refused', reason: 'non-catalog-id' });
+  });
+
+  it('refuses a new entry once the table already holds the entry cap, by name', () => {
+    // 4,000 synthetic keys reach the real cap without needing the catalogue to
+    // grow to it -- the same reasoning `capTranslationOverrideEntries`'s own
+    // "too large to reach with the ids that exist today" test gives for
+    // constructing the input rather than waiting for the catalogue.
+    const full = Object.fromEntries(
+      Array.from({ length: 4000 }, (_unused, index) => [`en:synthetic.id-${index}`, 'X']),
+    );
+    const result = withTranslationOverride(full, { locale: 'en', id: 'nav.overview' }, 'OVERVIEW');
+
+    expect(result).toEqual({ kind: 'refused', reason: 'entry-count-cap' });
+  });
+
+  it('still rewrites a key already present at the cap, since the table does not grow', () => {
+    const full = Object.fromEntries(
+      Array.from({ length: 3999 }, (_unused, index) => [`en:synthetic.id-${index}`, 'X']),
+    );
+    const atCap = { ...full, 'en:nav.overview': 'OVERVIEW' };
+    const result = withTranslationOverride(
+      atCap,
+      { locale: 'en', id: 'nav.overview' },
+      'OVERVIEW 2',
+    );
+
+    expect(result).toEqual({
+      kind: 'set',
+      overrides: { ...full, 'en:nav.overview': 'OVERVIEW 2' },
+    });
+  });
+});
+
+describe('importing a translation file', () => {
+  it('refuses a value that is not an object, naming the shape rather than an entry', () => {
+    expect(parseTranslationOverrideFile('not an object', {})).toEqual({
+      ok: false,
+      refusal: { kind: 'malformed' },
+    });
+    expect(parseTranslationOverrideFile({ locale: 'en' }, {})).toEqual({
+      ok: false,
+      refusal: { kind: 'malformed' },
+    });
+    expect(
+      parseTranslationOverrideFile({ locale: 'en', overrides: { 'nav.overview': 42 } }, {}),
+    ).toEqual({ ok: false, refusal: { kind: 'malformed' } });
+  });
+
+  it('refuses a locale this application does not ship, naming it', () => {
+    expect(
+      parseTranslationOverrideFile({ locale: 'uk', overrides: { 'nav.overview': 'X' } }, {}),
+    ).toEqual({ ok: false, refusal: { kind: 'unknown-locale', locale: 'uk' } });
+  });
+
+  it('refuses on the first entry the validator refuses, naming the id and the reason', () => {
+    const result = parseTranslationOverrideFile(
+      { locale: 'en', overrides: { 'nav.overview': 'OK', 'token.utc': 'ALIAS' } },
+      {},
+    );
+    expect(result).toEqual({
+      ok: false,
+      refusal: { kind: 'entry', id: 'token.utc', reason: 'non-catalog-id' },
+    });
+  });
+
+  it('refuses a file that would push the stored table past the entry cap', () => {
+    const existing = Object.fromEntries(
+      Array.from({ length: 3999 }, (_unused, index) => [`ru:synthetic.id-${index}`, 'X']),
+    );
+    const result = parseTranslationOverrideFile(
+      { locale: 'en', overrides: { 'nav.overview': 'A', 'nav.rail': 'B' } },
+      existing,
+    );
+    expect(result).toEqual({ ok: false, refusal: { kind: 'entry-count-cap' } });
+  });
+
+  it('replaces the named locale wholesale, leaving the other locale untouched', () => {
+    const existing = { 'en:nav.overview': 'STALE', 'ru:nav.overview': 'ОБЗОР (ПРАВКА)' };
+    const result = parseTranslationOverrideFile(
+      { locale: 'en', overrides: { 'nav.rail': 'RAIL' } },
+      existing,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      locale: 'en',
+      count: 1,
+      // `en:nav.overview` is gone: the file did not mention it, and import
+      // names a complete state for the locale rather than adding to it.
+      overrides: { 'ru:nav.overview': 'ОБЗОР (ПРАВКА)', 'en:nav.rail': 'RAIL' },
+    });
   });
 });
 

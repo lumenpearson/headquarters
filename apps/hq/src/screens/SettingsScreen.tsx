@@ -50,6 +50,7 @@ import {
   type SettingsHistoryOrder,
   type SettingsHistoryScope,
 } from '@/infrastructure/settings/SettingsHistoryLedger';
+import { TranslationEditorSection } from '@/components/settings/TranslationEditorSection';
 import { UpdateSection } from '@/components/update/UpdateSection';
 import { useStringSetting } from '@/application/personalization/useSetting';
 import { useOperationsStore } from '@/state/operationsStore';
@@ -1173,6 +1174,7 @@ export function SettingsScreen() {
                   </Panel>
                 ) : null}
                 {isSectionVisible('update') ? <UpdateSection /> : null}
+                {isSectionVisible('translations') ? <TranslationEditorSection /> : null}
               </>
             )}
           </div>

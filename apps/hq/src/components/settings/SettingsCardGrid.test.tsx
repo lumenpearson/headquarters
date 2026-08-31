@@ -24,6 +24,9 @@ describe('SettingsCardGrid locale', () => {
     // module's own table -- proven here so the two halves of the grid are
     // both known to follow the locale, not just the one this file owns.
     expect(titles()).toContain('ВНЕШНИЙ ВИД');
+    // The translation editor's own card, resolved through
+    // `settingsSection.translations` the same way every other section is.
+    expect(titles()).toContain('ПЕРЕВОДЫ');
 
     act(() => {
       operationsStore.getState().applySettingsPatch([{ id: 'localization.locale', value: 'en' }]);
@@ -31,6 +34,7 @@ describe('SettingsCardGrid locale', () => {
 
     expect(titles()).toContain('INTERFACE');
     expect(titles()).toContain('APPEARANCE');
+    expect(titles()).toContain('TRANSLATIONS');
   });
 
   it('resolves every card label through the same function calls read directly', () => {
