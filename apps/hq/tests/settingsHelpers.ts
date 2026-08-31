@@ -1,5 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
+import { messagesFor, type MessageId } from '../src/application/localization/messages';
+
 /**
  * Opens `/settings` in the continuous, single-list presentation
  * (`layout.settingsLanding: 'unified'`) rather than the card grid it opens
@@ -124,4 +126,20 @@ export async function typeSettingValue(
   await page.keyboard.press('Control+A');
   await page.keyboard.type(value);
   await field.blur();
+}
+
+/**
+ * The shipped Russian text a selector needs, read from the catalogue rather
+ * than pasted into the spec.
+ *
+ * A control's accessible name is now a translation, so a spec that pasted the
+ * English it used to render was asserting the application speaks English.
+ * Where a stable attribute exists -- `data-setting-id`, `data-option-value` --
+ * prefer it; this is for the controls that have none, and it keeps the spec
+ * tracking the catalogue rather than one snapshot of it.
+ */
+export function shippedText(id: MessageId): string {
+  const value = messagesFor('ru')[id];
+  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
+  return value;
 }

@@ -10,16 +10,14 @@ import type { BridgeConfig } from '@gremuchaya/config';
 import { createVirtualPath } from '@gremuchaya/domain';
 import { FileBridgeService } from '@gremuchaya/protocol';
 
-import { messagesFor, type MessageId } from '../src/application/localization/messages';
 import { startBridge } from '../../file-bridge/src/server.js';
-import { gotoSettingsUnified, optionByValue, settingControl, settingRow } from './settingsHelpers';
-
-/** The shipped Russian text a selector needs, read from the catalogue rather than pasted. */
-function shippedText(id: MessageId): string {
-  const value = messagesFor('ru')[id];
-  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
-  return value;
-}
+import {
+  gotoSettingsUnified,
+  optionByValue,
+  settingControl,
+  settingRow,
+  shippedText,
+} from './settingsHelpers';
 
 test('boots the unified operational world and opens a linked object', async ({ page }) => {
   await page.goto('/');
@@ -491,17 +489,21 @@ test('persists settings through Base UI switch, select and input adapters', asyn
   await animations.click();
   await expect(animations).not.toBeChecked();
 
-  const cursorMode = page.getByRole('combobox', { name: 'Cursor mode' });
+  const cursorMode = page.getByRole('combobox', {
+    name: shippedText('settings.cursorModeSelectLabel'),
+  });
   await cursorMode.click();
-  await page.getByRole('option', { name: 'HIDDEN', exact: true }).click();
-  await expect(cursorMode).toContainText('HIDDEN');
+  await optionByValue(page, 'hidden').click();
+  await expect(cursorMode).toContainText(shippedText('settings.cursorModeHidden'));
 
   const fixedTime = page.getByRole('textbox', { name: 'Фиксированное время' });
   await fixedTime.fill('13:37:42');
   await page.reload();
 
   await expect(page.getByRole('switch', { name: 'Анимации' })).not.toBeChecked();
-  await expect(page.getByRole('combobox', { name: 'Cursor mode' })).toContainText('HIDDEN');
+  await expect(
+    page.getByRole('combobox', { name: shippedText('settings.cursorModeSelectLabel') }),
+  ).toContainText(shippedText('settings.cursorModeHidden'));
   await expect(page.getByRole('textbox', { name: 'Фиксированное время' })).toHaveValue('13:37:42');
   await expect(page.locator('.settings-row select')).toHaveCount(0);
 });
@@ -564,13 +566,17 @@ test('round-trips a schema-validated settings draft through the terminal import 
   await gotoSettingsUnified(page);
 
   const downloadReady = page.waitForEvent('download');
-  await page.getByRole('button', { name: '[↓] EXPORT JSON', exact: true }).click();
+  await page
+    .getByRole('button', { name: shippedText('settings.exportJsonButton'), exact: true })
+    .click();
   const download = await downloadReady;
   const path = await download.path();
   if (path === null) throw new Error('Settings export did not produce a local file.');
 
   await page.locator('#settings-import-file').setInputFiles(path);
-  await expect(page.locator('.settings-import-status')).toContainText('[✓] IMPORTED');
+  await expect(page.locator('.settings-import-status')).toContainText(
+    shippedText('settings.importSuccessStatus').replace('{fileName}', '').trim(),
+  );
 });
 
 test('keeps local settings history filterable and reversible inside its own settings pane', async ({
@@ -581,7 +587,9 @@ test('keeps local settings history filterable and reversible inside its own sett
   const theme = settingControl(page, 'themes.id', 'combobox');
   await theme.click();
   await optionByValue(page, 'cold-cyan').click();
-  await expect(page.locator('.settings-history-row').first()).toContainText('PATCH');
+  await expect(page.locator('.settings-history-row').first()).toContainText(
+    shippedText('settings.historyOperationPatch'),
+  );
   await expect(page.locator('.settings-history-row').first()).toContainText('themes.id');
 
   // The theme is read off the shell rather than the select's own text: the
@@ -590,16 +598,18 @@ test('keeps local settings history filterable and reversible inside its own sett
   const shell = page.locator('.ops-shell');
   await expect(shell).toHaveAttribute('data-theme', 'cold-cyan');
 
-  await page.getByRole('button', { name: '[CTRL+Z] UNDO', exact: true }).click();
+  await page.getByRole('button', { name: shippedText('settings.undoButton'), exact: true }).click();
   await expect(shell).toHaveAttribute('data-theme', 'terminal-red');
-  await expect(page.locator('.settings-history-row').first()).toContainText('UNDO');
+  await expect(page.locator('.settings-history-row').first()).toContainText(
+    shippedText('settings.historyOperationUndo'),
+  );
 
-  await page.getByRole('button', { name: '[CTRL+Y] REDO', exact: true }).click();
+  await page.getByRole('button', { name: shippedText('settings.redoButton'), exact: true }).click();
   await expect(shell).toHaveAttribute('data-theme', 'cold-cyan');
 
   const operation = page.getByRole('combobox', { name: 'Операция истории' });
   await operation.click();
-  await page.getByRole('option', { name: 'PATCH', exact: true }).click();
+  await optionByValue(page, 'patch').click();
   await expect(page.locator('.settings-history-row')).toHaveCount(1);
   await expect(page.locator('.settings-history-pagination')).toContainText('ВСЕГО 1');
 });
@@ -755,7 +765,9 @@ test('uses a custom Base UI snapshot dialog instead of a native prompt', async (
   await page.getByRole('textbox', { name: 'Код инженерного доступа' }).fill('314159');
   await page.getByRole('button', { name: 'РАЗБЛОКИРОВАТЬ', exact: true }).click();
   await expect(page.locator('.developer-panel')).toBeVisible();
-  await page.getByRole('button', { name: 'snapshots', exact: true }).click();
+  await page
+    .getByRole('button', { name: shippedText('developer.snapshotsHeading'), exact: true })
+    .click();
 
   const trigger = page.getByRole('button', { name: 'СОХРАНИТЬ SNAPSHOT', exact: true });
   await trigger.click();

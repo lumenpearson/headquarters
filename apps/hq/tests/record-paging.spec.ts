@@ -1,14 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { messagesFor, type MessageId } from '../src/application/localization/messages';
-import { gotoSettingsUnified, settingControl } from './settingsHelpers';
-
-/** The shipped Russian text a selector needs, read from the catalogue rather than pasted. */
-function shippedText(id: MessageId): string {
-  const value = messagesFor('ru')[id];
-  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
-  return value;
-}
+import { gotoSettingsUnified, settingControl, shippedText } from './settingsHelpers';
 
 /**
  * The genitive-plural noun `cases.registryEyebrow` selects for a count, the
