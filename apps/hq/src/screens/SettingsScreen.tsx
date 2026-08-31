@@ -19,6 +19,7 @@ import {
   type SettingGroup,
 } from '@/application/personalization/catalog';
 import { t } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { dateTimeFormat } from '@/application/localization/intl';
 import { TileVisibility } from '@/components/edit/TileVisibility';
 import { KeybindList } from '@/components/keybinds/KeybindList';
@@ -46,11 +47,47 @@ import {
   settingsHistoryOperations,
   settingsHistoryScopes,
   type SettingsHistoryOperation,
+  type SettingsHistoryOrder,
   type SettingsHistoryScope,
 } from '@/infrastructure/settings/SettingsHistoryLedger';
 import { UpdateSection } from '@/components/update/UpdateSection';
 import { useStringSetting } from '@/application/personalization/useSetting';
 import { useOperationsStore } from '@/state/operationsStore';
+
+/** `state.production.cursorMode`'s three values -- not exported as a type of its own. */
+const cursorModeLabelIds: Readonly<Record<'visible' | 'auto' | 'hidden', MessageId>> = {
+  visible: 'settings.cursorModeVisible',
+  auto: 'settings.cursorModeAutoHide',
+  hidden: 'settings.cursorModeHidden',
+};
+
+/** `state.production.clockMode`'s two values (the settings screen never offers `'scene'`). */
+const clockModeLabelIds: Readonly<Record<'real' | 'fixed', MessageId>> = {
+  real: 'settings.clockModeSystem',
+  fixed: 'settings.clockModeFixed',
+};
+
+const historyOperationLabelIds: Readonly<Record<SettingsHistoryOperation, MessageId>> = {
+  patch: 'settings.historyOperationPatch',
+  'reset-category': 'settings.historyOperationResetCategory',
+  'reset-all': 'settings.historyOperationResetAll',
+  import: 'settings.historyOperationImport',
+  discard: 'settings.historyOperationDiscard',
+  publish: 'settings.historyOperationPublish',
+  restore: 'settings.historyOperationRestore',
+  undo: 'settings.historyOperationUndo',
+  redo: 'settings.historyOperationRedo',
+};
+
+const historyScopeLabelIds: Readonly<Record<SettingsHistoryScope, MessageId>> = {
+  device: 'settings.historyScopeDevice',
+  group: 'settings.historyScopeGroup',
+};
+
+const historyOrderLabelIds: Readonly<Record<SettingsHistoryOrder, MessageId>> = {
+  newest: 'settings.historyOrderNewest',
+  oldest: 'settings.historyOrderOldest',
+};
 
 export function SettingsScreen() {
   const state = useOperationsStore((value) => value);
@@ -290,9 +327,9 @@ export function SettingsScreen() {
     if (file === undefined) return;
     try {
       state.importSettingsDraft(await file.text());
-      setImportStatus(`[✓] IMPORTED ${file.name.toUpperCase()}`);
+      setImportStatus(t('settings.importSuccessStatus', { fileName: file.name.toUpperCase() }));
     } catch {
-      setImportStatus('[!] IMPORT REJECTED: SCHEMA VALIDATION FAILED');
+      setImportStatus(t('settings.importRejectedStatus'));
     }
   };
   return (
@@ -304,24 +341,24 @@ export function SettingsScreen() {
     >
       <header className="ops-screen__title">
         <div>
-          <span>LOCAL CONFIGURATION / PERSISTED</span>
-          <h1>НАСТРОЙКИ КОНТУРА</h1>
+          <span>{t('settings.localConfigEyebrow')}</span>
+          <h1>{t('settings.screenTitle')}</h1>
         </div>
         {settingsLanding === 'unified' ? (
           <TerminalButton
             className="settings-nav-toggle"
-            aria-label="Разделы настроек"
+            aria-label={t('settings.sectionsAriaLabel')}
             aria-expanded={navOpen}
             onClick={() => setNavOpen((current) => !current)}
           >
-            [≡] РАЗДЕЛЫ
+            {t('settings.sectionsToggleButton')}
           </TerminalButton>
         ) : null}
         {/* Reachable in both presentations, so leaving either one never
             depends on first finding it inside the catalogue (R6). */}
         <TerminalSelect
           className="settings-landing-toggle"
-          label="Вид настроек"
+          label={t('settings.landingToggleLabel')}
           value={settingsLanding === 'unified' ? 'unified' : 'cards'}
           onValueChange={(value) =>
             state.applySettingsPatch([{ id: 'layout.settingsLanding', value }])
@@ -331,12 +368,12 @@ export function SettingsScreen() {
             { value: 'unified', label: t('settingOption.layout.settingsLanding.unified') },
           ]}
         />
-        <span className="settings-saved">[✓] ИЗМЕНЕНИЯ СОХРАНЯЮТСЯ ЛОКАЛЬНО</span>
+        <span className="settings-saved">{t('settings.savedLocallyNotice')}</span>
       </header>
       <div className="settings-docs">
         {settingsLanding === 'unified' ? (
-          <nav className="settings-docs__nav" aria-label="Разделы настроек">
-            <span className="settings-docs__nav-title">РАЗДЕЛЫ</span>
+          <nav className="settings-docs__nav" aria-label={t('settings.sectionsAriaLabel')}>
+            <span className="settings-docs__nav-title">{t('settings.sectionsNavTitle')}</span>
             {settingsSections.map((section) => (
               <TerminalButton
                 key={section.id}
@@ -344,7 +381,7 @@ export function SettingsScreen() {
                 data-active={activeSection === section.id ? 'true' : 'false'}
                 onClick={() => goToSection(section)}
               >
-                {section.label}
+                {t(section.labelId)}
               </TerminalButton>
             ))}
           </nav>
@@ -398,73 +435,89 @@ export function SettingsScreen() {
                     className="ops-action settings-card-back"
                     onClick={closeCard}
                   >
-                    [←] К РАЗДЕЛАМ
+                    {t('settings.backToSectionsButton')}
                   </TerminalButton>
                 ) : null}
                 {isSectionVisible('interface') ? (
                   <Panel
-                    title="ИНТЕРФЕЙС"
-                    eyebrow="DISPLAY / TERMINAL"
+                    title={t('settingsSection.interface')}
+                    eyebrow={t('settings.interfaceEyebrow')}
                     className="settings-interface"
                   >
                     <Setting
-                      label="КОМПАКТНАЯ НАВИГАЦИЯ"
-                      detail="Освобождает пространство рабочей области"
+                      label={t('settings.compactNavLabel')}
+                      detail={t('settings.compactNavDetail')}
                     >
                       <TerminalSwitch
-                        label="Компактная навигация"
+                        label={t('settings.compactNavSwitchLabel')}
                         className="settings-toggle"
                         checked={state.ui.navCompact}
                         onCheckedChange={() => state.toggleNavCompact()}
                       />
                     </Setting>
-                    <Setting label="АНИМАЦИИ" detail="Плавные переходы и импульсы событий">
+                    <Setting
+                      label={t('settings.animationsLabel')}
+                      detail={t('settings.animationsDetail')}
+                    >
                       <TerminalSwitch
-                        label="Анимации"
+                        label={t('settings.animationsSwitchLabel')}
                         className="settings-toggle"
                         checked={state.production.animations}
                         onCheckedChange={(value) => state.setProductionOption('animations', value)}
                       />
                     </Setting>
-                    <Setting label="CAMERA SAFE" detail="Снижает контраст и яркость для съёмки">
+                    <Setting
+                      label={t('settings.cameraSafeLabel')}
+                      detail={t('settings.cameraSafeDetail')}
+                    >
                       <TerminalSwitch
-                        label="Camera safe"
+                        label={t('settings.cameraSafeSwitchLabel')}
                         className="settings-toggle"
                         checked={state.production.cameraSafe}
                         onCheckedChange={(value) => state.setProductionOption('cameraSafe', value)}
                       />
                     </Setting>
-                    <Setting label="CURSOR MODE" detail="Поведение курсора в полноэкранном режиме">
+                    <Setting
+                      label={t('settings.cursorModeLabel')}
+                      detail={t('settings.cursorModeDetail')}
+                    >
                       <TerminalSelect
-                        label="Cursor mode"
+                        label={t('settings.cursorModeSelectLabel')}
                         value={state.production.cursorMode}
                         onValueChange={(value) => state.setProductionOption('cursorMode', value)}
-                        options={[
-                          { value: 'visible', label: 'VISIBLE' },
-                          { value: 'auto', label: 'AUTO HIDE' },
-                          { value: 'hidden', label: 'HIDDEN' },
-                        ]}
+                        options={(['visible', 'auto', 'hidden'] as const).map((mode) => ({
+                          value: mode,
+                          label: t(cursorModeLabelIds[mode]),
+                        }))}
                       />
                     </Setting>
                   </Panel>
                 ) : null}
                 {isSectionVisible('simulation') ? (
                   <Panel
-                    title="СИМУЛЯЦИЯ"
-                    eyebrow="DETERMINISTIC WORLD"
+                    title={t('settingsSection.simulation')}
+                    eyebrow={t('settings.simulationEyebrow')}
                     className="settings-simulation"
                   >
-                    <Setting label="СОСТОЯНИЕ" detail={`TICK ${state.metrics.simulationStep}`}>
+                    <Setting
+                      label={t('settings.stateLabel')}
+                      detail={t('settings.simulationTickDetail', {
+                        tick: state.metrics.simulationStep,
+                      })}
+                    >
                       <TerminalSwitch
-                        label="Состояние симуляции"
+                        label={t('settings.simulationStateSwitchLabel')}
                         className="settings-toggle"
                         checked={!state.production.paused}
                         onCheckedChange={(value) => state.setProductionOption('paused', !value)}
                       />
                     </Setting>
-                    <Setting label="СКОРОСТЬ ЧАСОВ" detail="Масштаб локального времени">
+                    <Setting
+                      label={t('settings.clockSpeedLabel')}
+                      detail={t('settings.clockSpeedDetail')}
+                    >
                       <TerminalSelect
-                        label="Скорость часов"
+                        label={t('settings.clockSpeedSelectLabel')}
                         value={String(state.production.clockSpeed) as '0.5' | '1' | '2' | '5'}
                         onValueChange={(value) =>
                           state.setProductionOption('clockSpeed', Number(value) as 0.5 | 1 | 2 | 5)
@@ -477,20 +530,26 @@ export function SettingsScreen() {
                         ]}
                       />
                     </Setting>
-                    <Setting label="РЕЖИМ ЧАСОВ" detail="Фиксированное или системное время">
+                    <Setting
+                      label={t('settings.clockModeLabel')}
+                      detail={t('settings.clockModeDetail')}
+                    >
                       <TerminalSelect
-                        label="Режим часов"
+                        label={t('settings.clockModeSelectLabel')}
                         value={state.production.clockMode}
                         onValueChange={(value) => state.setProductionOption('clockMode', value)}
-                        options={[
-                          { value: 'fixed', label: 'FIXED' },
-                          { value: 'real', label: 'SYSTEM' },
-                        ]}
+                        options={(['fixed', 'real'] as const).map((mode) => ({
+                          value: mode,
+                          label: t(clockModeLabelIds[mode]),
+                        }))}
                       />
                     </Setting>
-                    <Setting label="ФИКСИРОВАННОЕ ВРЕМЯ" detail="HH:MM:SS">
+                    <Setting
+                      label={t('settings.fixedTimeLabel')}
+                      detail={t('settings.fixedTimeFormatDetail')}
+                    >
                       <TerminalInput
-                        aria-label="Фиксированное время"
+                        aria-label={t('settings.fixedTimeAriaLabel')}
                         value={state.production.fixedTime}
                         onValueChange={(value) => state.setProductionOption('fixedTime', value)}
                       />
@@ -498,10 +557,17 @@ export function SettingsScreen() {
                   </Panel>
                 ) : null}
                 {isSectionVisible('workspace') ? (
-                  <Panel title="РАБОЧЕЕ МЕСТО" eyebrow="MULTI MONITOR" className="settings-monitor">
-                    <Setting label="SCREEN ID" detail="Идентификатор текущего монитора">
+                  <Panel
+                    title={t('settingsSection.workspace')}
+                    eyebrow={t('settings.workspaceEyebrow')}
+                    className="settings-monitor"
+                  >
+                    <Setting
+                      label={t('settings.screenIdLabel')}
+                      detail={t('settings.screenIdDetail')}
+                    >
                       <TerminalSelect
-                        label="Screen ID"
+                        label={t('settings.screenIdSelectLabel')}
                         value={state.production.screenId}
                         onValueChange={(value) => state.setProductionOption('screenId', value)}
                         options={['MON-01', 'MON-02', 'MON-03', 'MON-04', 'MON-05', 'MON-06'].map(
@@ -513,11 +579,11 @@ export function SettingsScreen() {
                       />
                     </Setting>
                     <Setting
-                      label="AUTO DEMO"
-                      detail="Циклическое локальное демо, отключается при вводе"
+                      label={t('settings.autoDemoLabel')}
+                      detail={t('settings.autoDemoDetail')}
                     >
                       <TerminalSwitch
-                        label="Auto demo"
+                        label={t('settings.autoDemoSwitchLabel')}
                         className="settings-toggle"
                         checked={state.production.autoDemo}
                         onCheckedChange={(value) => state.setProductionOption('autoDemo', value)}
@@ -527,7 +593,7 @@ export function SettingsScreen() {
                       className="ops-action"
                       onClick={() => state.toggleProductionPanel(true)}
                     >
-                      [CTRL+SHIFT+P] PRODUCTION PANEL
+                      {t('settings.productionPanelButton')}
                     </TerminalButton>
                     <TerminalButton
                       className="ops-action"
@@ -537,7 +603,7 @@ export function SettingsScreen() {
                           : void document.exitFullscreen()
                       }
                     >
-                      [F] FULLSCREEN / KIOSK
+                      {t('settings.fullscreenKioskButton')}
                     </TerminalButton>
                   </Panel>
                 ) : null}
@@ -552,16 +618,22 @@ export function SettingsScreen() {
           settings to find out when a screen stops following.
         */}
                     <Panel
-                      title="СИНХРОНИЗАЦИЯ ГРУППЫ"
-                      eyebrow="SYNC / R27"
+                      title={t('settingsSection.group')}
+                      eyebrow={t('settings.groupSyncEyebrow')}
                       className="settings-group"
                     >
-                      <Setting label="СОСТОЯНИЕ" detail="Связь с control plane">
+                      <Setting
+                        label={t('settings.stateLabel')}
+                        detail={t('settings.groupConnectionDetail')}
+                      >
                         <span className="settings-group__mode">
                           {connectionModeLabel(state.connection.mode)}
                         </span>
                       </Setting>
-                      <Setting label="ГРУППА" detail="Имя группы и роль этого устройства">
+                      <Setting
+                        label={t('settings.groupNameLabel')}
+                        detail={t('settings.groupNameDetail')}
+                      >
                         <span className="settings-group__mode">
                           {state.connection.groupName ?? '—'}
                           {state.connection.session === undefined
@@ -570,37 +642,34 @@ export function SettingsScreen() {
                         </span>
                       </Setting>
                       <TerminalButton className="ops-action" onClick={() => openGroupPairing()}>
-                        [G] ОТКРЫТЬ ПОДКЛЮЧЕНИЕ К ГРУППЕ
+                        {t('settings.openGroupPairingButton')}
                       </TerminalButton>
                     </Panel>
                   </>
                 ) : null}
                 {isSectionVisible('data') ? (
                   <Panel
-                    title="ЛОКАЛЬНЫЕ ДАННЫЕ"
-                    eyebrow="PERSISTENCE / OFFLINE"
+                    title={t('settingsSection.data')}
+                    eyebrow={t('settings.dataEyebrow')}
                     className="settings-data"
                   >
-                    <p>
-                      Конфигурация, подтверждения тревог, выполненные задачи и съёмочные snapshots
-                      хранятся в профиле браузера. Сеть не требуется.
-                    </p>
+                    <p>{t('settings.dataDescription')}</p>
                     <dl className="ops-definition-list">
                       <div>
-                        <dt>WORLD STORE</dt>
-                        <dd>ZUSTAND / NORMALIZED</dd>
+                        <dt>{t('settings.dataWorldStoreLabel')}</dt>
+                        <dd>{t('settings.dataWorldStoreValue')}</dd>
                       </div>
                       <div>
-                        <dt>PERSISTENCE</dt>
-                        <dd>LOCALSTORAGE V2</dd>
+                        <dt>{t('settings.dataPersistenceLabel')}</dt>
+                        <dd>{t('settings.dataPersistenceValue')}</dd>
                       </div>
                       <div>
-                        <dt>SYNC</dt>
-                        <dd>BROADCASTCHANNEL</dd>
+                        <dt>{t('settings.dataSyncLabel')}</dt>
+                        <dd>{t('settings.dataSyncValue')}</dd>
                       </div>
                       <div>
-                        <dt>EXPORT</dt>
-                        <dd>STATIC / OFFLINE</dd>
+                        <dt>{t('settings.dataExportLabel')}</dt>
+                        <dd>{t('settings.dataExportValue')}</dd>
                       </div>
                     </dl>
                     {/*
@@ -613,18 +682,17 @@ export function SettingsScreen() {
                     <TerminalAlertDialog
                       trigger={
                         <TerminalButton className="ops-action ops-action--danger" tone="critical">
-                          [R] СБРОСИТЬ ОПЕРАТИВНЫЙ МИР
+                          {t('settings.resetWorldButton')}
                         </TerminalButton>
                       }
-                      title="СБРОСИТЬ ОПЕРАТИВНЫЙ МИР?"
-                      description="Объекты, дела, тревоги, события и связь вернутся к исходному состоянию сцены. Настройки персонализации это не затронет."
-                      confirmLabel="[R] СБРОСИТЬ МИР"
+                      title={t('settings.resetWorldDialogTitle')}
+                      description={t('settings.resetWorldDialogDescription')}
+                      confirmLabel={t('settings.resetWorldConfirmLabel')}
                       onConfirm={() => {
                         state.resetWorld();
                         toast.notify({
-                          title: 'ОПЕРАТИВНЫЙ МИР СБРОШЕН',
-                          description:
-                            'Объекты, дела, тревоги и связь вернулись к исходному состоянию сцены.',
+                          title: t('settings.resetWorldToastTitle'),
+                          description: t('settings.resetWorldToastDescription'),
                           tone: 'warning',
                         });
                       }}
@@ -633,13 +701,13 @@ export function SettingsScreen() {
                 ) : null}
                 {isSectionVisible('personalization') ? (
                   <Panel
-                    title="ПЕРСОНАЛИЗАЦИЯ / КАТАЛОГ"
-                    eyebrow={`SAFE DRAFT / ${t('settings.draftChangeCount', { count: draft.changedIds.length })} / REV ${state.personalization.published.revision}`}
+                    title={t('settings.personalizationTitle')}
+                    eyebrow={`${t('settings.personalizationEyebrowPrefix')} / ${t('settings.draftChangeCount', { count: draft.changedIds.length })} / ${t('settings.personalizationEyebrowRevision', { revision: state.personalization.published.revision })}`}
                     className="settings-personalization"
                   >
                     <div className="settings-catalog-toolbar">
                       <TerminalSelect
-                        label="Раздел персонализации"
+                        label={t('settings.catalogGroupSelectLabel')}
                         value={catalogGroup}
                         onValueChange={(value) => {
                           setCatalogGroup(value as SettingGroup);
@@ -654,7 +722,7 @@ export function SettingsScreen() {
                         }))}
                       />
                       <TerminalSelect
-                        label="Категория персонализации"
+                        label={t('settings.catalogCategorySelectLabel')}
                         value={catalogCategory}
                         onValueChange={(value) => {
                           const next = value as SettingCategory | 'all';
@@ -667,7 +735,7 @@ export function SettingsScreen() {
                           if (next !== 'all') setCatalogGroup(groupOfCategory(next));
                         }}
                         options={[
-                          { value: 'all', label: 'ВСЕ КАТЕГОРИИ РАЗДЕЛА' },
+                          { value: 'all', label: t('settings.allCategoriesOption') },
                           ...settingCategories.map((category) => ({
                             value: category,
                             label: categoryLabel(category),
@@ -675,19 +743,22 @@ export function SettingsScreen() {
                         ]}
                       />
                       <TerminalInput
-                        aria-label="Поиск по настройкам"
-                        placeholder="ИМЯ ИЛИ ОПИСАНИЕ"
+                        aria-label={t('settingsLanding.searchLabel')}
+                        placeholder={t('settingsLanding.searchPlaceholder')}
                         value={catalogSearch}
                         onValueChange={setCatalogSearch}
                       />
                       <TerminalSwitch
-                        label="Только изменённые"
+                        label={t('settings.changedOnlyLabel')}
                         checked={changedOnly}
                         onCheckedChange={setChangedOnly}
                       />
                       <span>
-                        {catalog.definitions.length} ИЗ {catalog.groupTotal} ·{' '}
-                        {catalog.changedInGroup} ИЗМЕНЕНО В РАЗДЕЛЕ
+                        {t('settings.catalogCountSummary', {
+                          shown: catalog.definitions.length,
+                          total: catalog.groupTotal,
+                          changed: catalog.changedInGroup,
+                        })}
                       </span>
                     </div>
                     {/*
@@ -720,8 +791,9 @@ export function SettingsScreen() {
                     acrossGroups.length > catalog.definitions.length ? (
                       <div className="settings-catalog-elsewhere">
                         <h3>
-                          НАЙДЕНО В ДРУГИХ РАЗДЕЛАХ:{' '}
-                          {acrossGroups.length - catalog.definitions.length}
+                          {t('settings.foundElsewhereHeading', {
+                            count: acrossGroups.length - catalog.definitions.length,
+                          })}
                         </h3>
                         {acrossGroups
                           .filter((definition) => !catalog.definitions.includes(definition))
@@ -747,21 +819,22 @@ export function SettingsScreen() {
                             state.resetSettingsCategory(catalogCategory);
                         }}
                       >
-                        [R] СБРОСИТЬ КАТЕГОРИЮ
+                        {t('settings.resetCategoryButton')}
                       </TerminalButton>
                       <TerminalAlertDialog
                         trigger={
-                          <TerminalButton className="ops-action">[RR] СБРОСИТЬ ВСЁ</TerminalButton>
+                          <TerminalButton className="ops-action">
+                            {t('settings.resetAllButton')}
+                          </TerminalButton>
                         }
-                        title="СБРОСИТЬ ВСЕ НАСТРОЙКИ?"
-                        description="Все категории персонализации вернутся к значениям по умолчанию. Отменяется через [CTRL+Z] UNDO."
-                        confirmLabel="[RR] СБРОСИТЬ ВСЁ"
+                        title={t('settings.resetAllDialogTitle')}
+                        description={t('settings.resetAllDialogDescription')}
+                        confirmLabel={t('settings.resetAllButton')}
                         onConfirm={() => {
                           state.resetAllSettings();
                           toast.notify({
-                            title: 'НАСТРОЙКИ СБРОШЕНЫ',
-                            description:
-                              'Все категории вернулись к значениям по умолчанию; [CTRL+Z] отменяет.',
+                            title: t('settings.resetAllToastTitle'),
+                            description: t('settings.resetAllToastDescription'),
                             tone: 'warning',
                           });
                         }}
@@ -770,41 +843,42 @@ export function SettingsScreen() {
                         className="ops-action"
                         onClick={() => state.discardSettingsDraft()}
                       >
-                        [ESC] ОТМЕНИТЬ DRAFT
+                        {t('settings.discardDraftButton')}
                       </TerminalButton>
                       <TerminalButton
                         className="ops-action"
                         disabled={state.personalization.undoStack.length === 0}
                         onClick={() => state.undoSettingsDraft()}
                       >
-                        [CTRL+Z] UNDO
+                        {t('settings.undoButton')}
                       </TerminalButton>
                       <TerminalButton
                         className="ops-action"
                         disabled={state.personalization.redoStack.length === 0}
                         onClick={() => state.redoSettingsDraft()}
                       >
-                        [CTRL+Y] REDO
+                        {t('settings.redoButton')}
                       </TerminalButton>
                       <TerminalButton className="ops-action" onClick={exportDraft}>
-                        [↓] EXPORT JSON
+                        {t('settings.exportJsonButton')}
                       </TerminalButton>
                       <TerminalButton
                         className="ops-action"
                         onClick={() => document.getElementById('settings-import-file')?.click()}
                       >
-                        [↑] IMPORT JSON
+                        {t('settings.importJsonButton')}
                       </TerminalButton>
                       <TerminalButton
                         className="ops-action ops-action--primary"
                         onClick={() => state.publishSettingsDraft()}
                       >
-                        [CTRL+ENTER] ОПУБЛИКОВАТЬ
+                        {t('settings.publishButton')}
                       </TerminalButton>
                     </div>
                     <p className="settings-draft-history">
-                      ИСТОРИЯ DRAFT: {draft.history.length} СОБЫТИЙ · ЛОКАЛЬНЫЙ SCOPE · БЕЗ
-                      НЕБЕЗОПАСНЫХ CSS/JS
+                      {t('settings.draftHistorySummary', {
+                        events: t('settings.eventCount', { count: draft.history.length }),
+                      })}
                     </p>
                     {importStatus === null ? null : (
                       <p className="settings-import-status">{importStatus}</p>
@@ -813,7 +887,7 @@ export function SettingsScreen() {
                       id="settings-import-file"
                       type="file"
                       accept="application/json,.json"
-                      aria-label="Импорт черновика настроек"
+                      aria-label={t('settings.importDraftAriaLabel')}
                       className="settings-import-input"
                       onChange={(event) => {
                         void importDraft(event.currentTarget.files?.[0]);
@@ -824,8 +898,8 @@ export function SettingsScreen() {
                 ) : null}
                 {isSectionVisible('keybinds') ? (
                   <Panel
-                    title="СОЧЕТАНИЯ КЛАВИШ"
-                    eyebrow="KEYBINDS / НАЖМИТЕ ЛЮБОЕ"
+                    title={t('settingsSection.keybinds')}
+                    eyebrow={t('settings.keybindsEyebrow')}
                     className="settings-keybinds"
                   >
                     <KeybindList />
@@ -833,65 +907,66 @@ export function SettingsScreen() {
                 ) : null}
                 {isSectionVisible('history') ? (
                   <Panel
-                    title="ИСТОРИЯ НАСТРОЕК"
-                    eyebrow={
-                      'LOCAL LEDGER / ' +
-                      state.personalization.history.length +
-                      ' СОБЫТИЙ / ' +
-                      state.personalization.undoStack.length +
-                      ' UNDO'
-                    }
+                    title={t('settingsSection.history')}
+                    eyebrow={t('settings.historyEyebrow', {
+                      events: t('settings.eventCount', {
+                        count: state.personalization.history.length,
+                      }),
+                      undo: t('settings.undoCount', {
+                        count: state.personalization.undoStack.length,
+                      }),
+                    })}
                     className="settings-history"
                   >
                     <div className="settings-history-filters">
                       <TerminalSelect
-                        label="Операция истории"
+                        label={t('settings.historyOperationSelectLabel')}
                         value={historyOperation}
                         onValueChange={(value) => {
                           setHistoryOperation(value as SettingsHistoryOperation | 'all');
                           setHistoryPageNumber(1);
                         }}
                         options={[
-                          { value: 'all', label: 'ВСЕ ОПЕРАЦИИ' },
+                          { value: 'all', label: t('settings.allOperationsOption') },
                           ...settingsHistoryOperations.map((operation) => ({
                             value: operation,
-                            label: operation.toUpperCase(),
+                            label: t(historyOperationLabelIds[operation]),
                           })),
                         ]}
                       />
                       <TerminalSelect
-                        label="Охват истории"
+                        label={t('settings.historyScopeSelectLabel')}
                         value={historyScope}
                         onValueChange={(value) => {
                           setHistoryScope(value as SettingsHistoryScope | 'all');
                           setHistoryPageNumber(1);
                         }}
                         options={[
-                          { value: 'all', label: 'ЛЮБОЙ ОХВАТ' },
+                          { value: 'all', label: t('settings.allScopesOption') },
                           ...settingsHistoryScopes.map((scope) => ({
                             value: scope,
-                            label: scope === 'group' ? 'ГРУППОВЫЕ' : 'ТОЛЬКО ЭТА МАШИНА',
+                            label: t(historyScopeLabelIds[scope]),
                           })),
                         ]}
                       />
                       <TerminalSelect
-                        label="Категория истории"
+                        label={t('settings.historyCategorySelectLabel')}
                         value={historyCategory}
                         onValueChange={(value) => {
                           setHistoryCategory(value as SettingCategory | 'all');
                           setHistoryPageNumber(1);
                         }}
                         options={[
-                          { value: 'all', label: 'ВСЕ КАТЕГОРИИ' },
+                          { value: 'all', label: t('settings.allHistoryCategoriesOption') },
                           ...settingCategories.map((category) => ({
                             value: category,
-                            label: category.toUpperCase(),
+                            label: categoryLabel(category),
                           })),
                         ]}
                       />
                       <TerminalInput
-                        aria-label="Фильтр истории по параметру"
-                        placeholder="SETTING ID"
+                        aria-label={t('settings.historySettingFilterAriaLabel')}
+                        placeholder={t('settings.historySettingFilterPlaceholder')}
                         value={historySettingId}
                         onValueChange={(value) => {
                           setHistorySettingId(value);
@@ -900,7 +975,7 @@ export function SettingsScreen() {
                       />
                       <TerminalInput
                         type="date"
-                        aria-label="Фильтр истории по дате"
+                        aria-label={t('settings.historyDateFilterAriaLabel')}
                         value={historyDate}
                         onValueChange={(value) => {
                           setHistoryDate(value);
@@ -908,36 +983,42 @@ export function SettingsScreen() {
                         }}
                       />
                       <TerminalSelect
-                        label="Порядок истории"
+                        label={t('settings.historyOrderSelectLabel')}
                         value={historyOrder}
                         onValueChange={(value) => {
-                          setHistoryOrder(value as 'newest' | 'oldest');
+                          setHistoryOrder(value as SettingsHistoryOrder);
                           setHistoryPageNumber(1);
                         }}
-                        options={[
-                          { value: 'newest', label: 'СНАЧАЛА НОВЫЕ' },
-                          { value: 'oldest', label: 'СНАЧАЛА СТАРЫЕ' },
-                        ]}
+                        options={(['newest', 'oldest'] as const).map((order) => ({
+                          value: order,
+                          label: t(historyOrderLabelIds[order]),
+                        }))}
                       />
                     </div>
                     <div className="settings-history-list" aria-live="polite">
                       {historyPage.items.length === 0 ? (
-                        <p className="settings-history-empty">НЕТ СОБЫТИЙ ПО ТЕКУЩЕМУ ФИЛЬТРУ</p>
+                        <p className="settings-history-empty">{t('settings.historyEmptyState')}</p>
                       ) : (
                         historyPage.items.map((entry) => (
                           <article className="settings-history-row" key={entry.id}>
                             <div>
-                              <strong>{entry.operation.toUpperCase()}</strong>
+                              <strong>{t(historyOperationLabelIds[entry.operation])}</strong>
                               <small>{formatHistoryDate(entry.at)}</small>
                             </div>
-                            <p>{entry.changedIds.join(', ') || 'ПУБЛИКАЦИЯ БЕЗ ИЗМЕНЕНИЙ'}</p>
-                            <span>{entry.category?.toUpperCase() ?? 'LOCAL'}</span>
+                            <p>
+                              {entry.changedIds.join(', ') || t('settings.publicationNoChanges')}
+                            </p>
+                            <span>
+                              {entry.category === undefined
+                                ? t('settings.localScopeLabel')
+                                : categoryLabel(entry.category)}
+                            </span>
                             <TerminalButton
                               className="ops-action"
                               size="small"
                               onClick={() => state.restoreSettingsHistoryEntry(entry.id)}
                             >
-                              [↩] В DRAFT
+                              {t('settings.restoreToDraftButton')}
                             </TerminalButton>
                           </article>
                         ))
@@ -950,11 +1031,14 @@ export function SettingsScreen() {
                         disabled={historyPage.page <= 1}
                         onClick={() => setHistoryPageNumber(historyPage.page - 1)}
                       >
-                        [←] НАЗАД
+                        {t('settings.paginationBackButton')}
                       </TerminalButton>
                       <span>
-                        СТР. {historyPage.page} / {historyPage.pageCount} · ВСЕГО{' '}
-                        {historyPage.total}
+                        {t('settings.paginationSummary', {
+                          page: historyPage.page,
+                          pageCount: historyPage.pageCount,
+                          total: historyPage.total,
+                        })}
                       </span>
                       <TerminalButton
                         className="ops-action"
@@ -962,27 +1046,30 @@ export function SettingsScreen() {
                         disabled={historyPage.page >= historyPage.pageCount}
                         onClick={() => setHistoryPageNumber(historyPage.page + 1)}
                       >
-                        ВПЕРЁД [→]
+                        {t('settings.paginationForwardButton')}
                       </TerminalButton>
                     </div>
-                    <p className="settings-draft-history">
-                      ВОССТАНОВЛЕНИЕ ЗАГРУЖАЕТ СОСТОЯНИЕ В ЛОКАЛЬНЫЙ DRAFT; ПУБЛИКАЦИЯ СОЗДАЁТ НОВУЮ
-                      РЕВИЗИЮ И НЕ ПЕРЕЗАПИСЫВАЕТ ИСТОРИЮ.
-                    </p>
+                    <p className="settings-draft-history">{t('settings.historyRestoreNote')}</p>
                     {historyScope !== 'group' ? null : (
-                      <section className="settings-history-group" aria-label="Журнал группы">
+                      <section
+                        className="settings-history-group"
+                        aria-label={t('settings.groupJournalAriaLabel')}
+                      >
                         <header className="settings-history-group__head">
-                          <h3>ЖУРНАЛ ГРУППЫ</h3>
+                          <h3>{t('settings.groupJournalHeading')}</h3>
                           <span>
                             {groupHistory.status === 'unavailable'
-                              ? 'СЕССИЯ НЕ В ГРУППЕ — ЧИТАТЬ НЕЧЕГО'
+                              ? t('settings.groupJournalUnavailable')
                               : groupHistory.status === 'loading'
-                                ? 'ЧТЕНИЕ'
+                                ? t('settings.groupJournalLoading')
                                 : groupHistory.status === 'failed'
                                   ? groupHistory.failure
-                                  : `ЗАГРУЖЕНО ${groupHistory.entries.length}${
-                                      groupHistory.hasMore ? ', ЕСТЬ ЕЩЁ' : ', БОЛЬШЕ НЕТ'
-                                    }`}
+                                  : t('settings.groupJournalLoaded', {
+                                      count: groupHistory.entries.length,
+                                      more: groupHistory.hasMore
+                                        ? t('settings.groupJournalHasMore')
+                                        : t('settings.groupJournalNoMore'),
+                                    })}
                           </span>
                         </header>
                         {/*
@@ -994,7 +1081,7 @@ export function SettingsScreen() {
                     settings patch never does.
                   */}
                         <TerminalSwitch
-                          label="Только правки режима редактирования"
+                          label={t('settings.groupJournalEditModeOnlyLabel')}
                           className="settings-toggle"
                           checked={historyGroupEditModeOnly}
                           onCheckedChange={setHistoryGroupEditModeOnly}
@@ -1002,7 +1089,7 @@ export function SettingsScreen() {
                         {groupHistoryEntries.length === 0 ? (
                           groupHistory.entries.length === 0 ? null : (
                             <p className="settings-history-empty">
-                              НЕТ ПРАВОК РЕЖИМА РЕДАКТИРОВАНИЯ НА ЭТОЙ СТРАНИЦЕ
+                              {t('settings.groupJournalEditModeEmpty')}
                             </p>
                           )
                         ) : (
@@ -1016,12 +1103,18 @@ export function SettingsScreen() {
                                 <p>
                                   {entry.changedIds.join(', ') ||
                                     entry.elementId ||
-                                    'ИЗМЕНЕНИЕ БЕЗ ПАРАМЕТРОВ'}
+                                    t('settings.groupJournalNoParameters')}
                                 </p>
-                                <span>{entry.category.toUpperCase() || 'GROUP'}</span>
+                                <span>
+                                  {entry.category.toUpperCase() || t('settings.groupScopeLabel')}
+                                </span>
                                 <span className="settings-history-actor">
-                                  РЕВ. {entry.revision} ·{' '}
-                                  {entry.actorDeviceId || 'НЕИЗВЕСТНОЕ УСТРОЙСТВО'}
+                                  {t('settings.groupJournalRevisionActor', {
+                                    revision: entry.revision,
+                                    actor:
+                                      entry.actorDeviceId ||
+                                      t('settings.groupJournalUnknownDevice'),
+                                  })}
                                 </span>
                               </article>
                             ))}
@@ -1039,16 +1132,16 @@ export function SettingsScreen() {
                             disabled={groupHistory.status === 'unavailable'}
                             onClick={groupHistory.reload}
                           >
-                            [↺] СНАЧАЛА
+                            {t('settings.groupJournalReloadButton')}
                           </TerminalButton>
-                          <span>ПАГИНАЦИЯ ПО КУРСОРУ · БЕЗ ОБЩЕГО СЧЁТА</span>
+                          <span>{t('settings.groupJournalPaginationNote')}</span>
                           <TerminalButton
                             className="ops-action"
                             size="small"
                             disabled={!groupHistory.hasMore}
                             onClick={groupHistory.loadMore}
                           >
-                            ЕЩЁ [→]
+                            {t('settings.groupJournalMoreButton')}
                           </TerminalButton>
                         </div>
                       </section>
@@ -1057,22 +1150,24 @@ export function SettingsScreen() {
                 ) : null}
                 {isSectionVisible('keymap') ? (
                   <Panel
-                    title="ГОРЯЧИЕ КЛАВИШИ"
-                    eyebrow="KEYMAP / TERMINAL"
+                    title={t('settingsSection.keymap')}
+                    eyebrow={t('settings.keymapEyebrow')}
                     className="settings-keymap"
                   >
-                    {[
-                      ['1–9', 'ПЕРЕХОД ПО РАЗДЕЛАМ'],
-                      ['CTRL+K', 'ГЛОБАЛЬНЫЙ ПОИСК'],
-                      ['CTRL+SHIFT+P', 'PRODUCTION PANEL'],
-                      ['F', 'FULLSCREEN'],
-                      ['W', 'WEBCAM ON / OFF'],
-                      ['SPACE', 'PLAY / PAUSE VIDEO'],
-                      ['ESC', 'ЗАКРЫТЬ DRAWER / PANEL'],
-                    ].map(([key, label]) => (
+                    {(
+                      [
+                        ['1–9', 'settings.keymapSections'],
+                        ['CTRL+K', 'settings.keymapGlobalSearch'],
+                        ['CTRL+SHIFT+P', 'settings.keymapProductionPanel'],
+                        ['F', 'settings.keymapFullscreen'],
+                        ['W', 'settings.keymapWebcamToggle'],
+                        ['SPACE', 'settings.keymapPlayPause'],
+                        ['ESC', 'settings.keymapCloseDrawer'],
+                      ] as const satisfies ReadonlyArray<readonly [string, MessageId]>
+                    ).map(([key, labelId]) => (
                       <div key={key}>
                         <kbd>{key}</kbd>
-                        <span>{label}</span>
+                        <span>{t(labelId)}</span>
                       </div>
                     ))}
                   </Panel>

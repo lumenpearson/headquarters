@@ -2,8 +2,20 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { translateWith } from '@/application/localization/messages';
+
 import { operationsStore } from '../state/operationsStore.js';
 import { SystemScreen } from './SystemScreen.js';
+
+/**
+ * The metric labels this file reads by, resolved once against the source
+ * locale rather than hard-coded: `hostCounters` keys its map off whatever
+ * text `Metric` actually draws, and that text is Russian by default (`ru` is
+ * `sourceLocale`) now that the panel routes it through the catalogue.
+ */
+const cpuLabel = translateWith('ru', 'system.metricLabelCpu');
+const ramLabel = translateWith('ru', 'system.metricLabelRam');
+const storageLabel = translateWith('ru', 'system.metricLabelStorage');
 
 // `TileGrid`, which lays this screen out, calls useRouter() to offer a
 // relocated tile its own screen. The stub only has to survive the render.
@@ -68,8 +80,8 @@ describe('telemetry.source names what the system screen samples', () => {
 
     const { container } = render(<SystemScreen />);
 
-    expect(hostCounters(container).CPU).toBe(`${simulated.cpu}%`);
-    expect(hostCounters(container).RAM).toBe(`${simulated.ram}%`);
+    expect(hostCounters(container)[cpuLabel]).toBe(`${simulated.cpu}%`);
+    expect(hostCounters(container)[ramLabel]).toBe(`${simulated.ram}%`);
     expect(sourceCaption(container)).toContain('SIM');
   });
 
@@ -81,9 +93,9 @@ describe('telemetry.source names what the system screen samples', () => {
     // The failure this guards against is silence: the simulated series shown
     // under a native heading, telling the operator this machine is at 43%.
     const simulated = operationsStore.getState().metrics;
-    expect(hostCounters(container).CPU).not.toBe(`${simulated.cpu}%`);
-    expect(hostCounters(container).CPU).toBe('—');
-    expect(hostCounters(container).STORAGE).toBe('—');
+    expect(hostCounters(container)[cpuLabel]).not.toBe(`${simulated.cpu}%`);
+    expect(hostCounters(container)[cpuLabel]).toBe('—');
+    expect(hostCounters(container)[storageLabel]).toBe('—');
     expect(sourceCaption(container)).toContain('НЕДОСТУПЕН');
     expect(screen.getByText(/ИСТОЧНИК ТЕЛЕМЕТРИИ NATIVE/u)).not.toBeNull();
     // A history plotted from the fixed leading values alone would draw a line
@@ -97,12 +109,13 @@ describe('telemetry.source names what the system screen samples', () => {
     const { container } = render(<SystemScreen />);
 
     const simulated = operationsStore.getState().metrics;
-    expect(hostCounters(container).CPU).toBe(`${simulated.cpu}%`);
+    expect(hostCounters(container)[cpuLabel]).toBe(`${simulated.cpu}%`);
     expect(sourceCaption(container)).toContain('HYBRID');
     expect(screen.getByText(/СЧЁТЧИКИ ХОСТА НЕДОСТУПНЫ/u)).not.toBeNull();
-    // The charts carry no eyebrow of their own, so each series says it too.
+    // The charts carry no eyebrow of their own, so each series says it too --
+    // in the operator's language, since the substitution tag is translated.
     expect(container.querySelector('.system-resources .resource-charts')?.textContent).toContain(
-      'SIM',
+      translateWith('ru', 'system.telemetrySeriesTagSimulated'),
     );
   });
 

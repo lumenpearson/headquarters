@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { resolveFromTables } from '@/application/localization/messages';
 import type { GroupChannel, GroupSessionCommand } from '@/application/sync/groupChannel';
 import type {
   GroupSettingsDocument,
@@ -10,6 +11,7 @@ import type {
   GroupSettingsPort,
 } from '@/application/sync/groupSettingsPort';
 import { setGroupRuntime } from '@/components/sync/groupRuntimeHolder';
+import { operationsStore } from '@/state/operationsStore';
 
 import { groupHistoryOperationLabel, useGroupSettingsHistory } from './useGroupSettingsHistory';
 
@@ -167,9 +169,36 @@ describe('useGroupSettingsHistory', () => {
 });
 
 describe('groupHistoryOperationLabel', () => {
-  it('keeps an operation the client vocabulary has no word for', () => {
+  beforeEach(() => {
+    operationsStore.getState().resetWorld();
+  });
+
+  it('names an operation the client vocabulary has a word for', () => {
     expect(groupHistoryOperationLabel('REVERT_SETTINGS_VERSION')).toBe('ВОЗВРАТ К РЕВИЗИИ');
     expect(groupHistoryOperationLabel('RESET_ELEMENT')).toBe('СБРОС ПАРАМЕТРА');
+  });
+
+  it('follows the locale', () => {
+    expect(groupHistoryOperationLabel('RESET_ELEMENT')).toBe('СБРОС ПАРАМЕТРА');
+
+    operationsStore.getState().applySettingsPatch([{ id: 'localization.locale', value: 'en' }]);
+
+    expect(groupHistoryOperationLabel('RESET_ELEMENT')).toBe('RESET SETTING');
+  });
+
+  it('falls back to English rather than Russian for a locale this catalogue has no line for', () => {
+    const tables = {
+      ru: { 'settings.groupHistoryOperationResetElement': 'СБРОС ПАРАМЕТРА' },
+      en: { 'settings.groupHistoryOperationResetElement': 'RESET SETTING' },
+    };
+    const thirdLocale = 'xx' as unknown as Parameters<typeof resolveFromTables>[1];
+    expect(
+      resolveFromTables(
+        { ...tables, [thirdLocale]: {} },
+        thirdLocale,
+        'settings.groupHistoryOperationResetElement',
+      ),
+    ).toBe('RESET SETTING');
   });
 
   it('shows an operation this build does not know verbatim rather than as "other"', () => {

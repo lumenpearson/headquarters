@@ -2,6 +2,7 @@
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { translateWith } from '@/application/localization/messages';
 import { setTelemetryMeasurementClient } from '@/application/telemetry/telemetryMeasurementClient';
 
 import { operationsStore } from '../state/operationsStore.js';
@@ -62,8 +63,10 @@ describe('the storage contour and the network graph', () => {
     const labels = [...container.querySelectorAll('.resource-charts span')].map(
       (node) => node.textContent,
     );
-    expect(labels.some((label) => label?.includes('NETWORK IN'))).toBe(true);
-    expect(labels.some((label) => label?.includes('NETWORK OUT'))).toBe(true);
+    const networkInLabel = translateWith('ru', 'system.networkInLabel');
+    const networkOutLabel = translateWith('ru', 'system.networkOutLabel');
+    expect(labels.some((label) => label?.includes(networkInLabel))).toBe(true);
+    expect(labels.some((label) => label?.includes(networkOutLabel))).toBe(true);
   });
 });
 

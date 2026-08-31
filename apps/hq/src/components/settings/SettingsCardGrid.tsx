@@ -4,6 +4,8 @@ import { useEffect, useRef } from 'react';
 
 import type { SettingGroup } from '@/application/personalization/catalog';
 import { settingGroups } from '@/application/personalization/catalog';
+import { useAppLocale, t } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { Panel } from '@/components/operations/OpsUi';
 
 import { groupLabel } from './SchemaSetting';
@@ -18,32 +20,77 @@ import { SettingsCardIcon, type SettingsCardIconKind } from './settingsCardIcons
  * section here -- unified mode draws it inline, exactly as it always has --
  * and only the card grid ({@link settingsCardTargets}) treats it specially,
  * replacing it with one card per `settingGroups` entry.
+ *
+ * `labelId` rather than a resolved `label`: `SettingsSectionId` is derived from
+ * this very array, so every member already carries one by construction, and
+ * resolving through `t()` here rather than at each reader keeps a locale
+ * change from requiring a second table.
  */
 export const settingsSections = [
-  { id: 'interface', className: 'settings-interface', label: 'ИНТЕРФЕЙС', icon: 'interface' },
-  { id: 'simulation', className: 'settings-simulation', label: 'СИМУЛЯЦИЯ', icon: 'simulation' },
-  { id: 'workspace', className: 'settings-monitor', label: 'РАБОЧЕЕ МЕСТО', icon: 'workspace' },
-  { id: 'group', className: 'settings-group', label: 'СИНХРОНИЗАЦИЯ ГРУППЫ', icon: 'group' },
-  { id: 'data', className: 'settings-data', label: 'ЛОКАЛЬНЫЕ ДАННЫЕ', icon: 'data' },
+  {
+    id: 'interface',
+    className: 'settings-interface',
+    labelId: 'settingsSection.interface',
+    icon: 'interface',
+  },
+  {
+    id: 'simulation',
+    className: 'settings-simulation',
+    labelId: 'settingsSection.simulation',
+    icon: 'simulation',
+  },
+  {
+    id: 'workspace',
+    className: 'settings-monitor',
+    labelId: 'settingsSection.workspace',
+    icon: 'workspace',
+  },
+  {
+    id: 'group',
+    className: 'settings-group',
+    labelId: 'settingsSection.group',
+    icon: 'group',
+  },
+  {
+    id: 'data',
+    className: 'settings-data',
+    labelId: 'settingsSection.data',
+    icon: 'data',
+  },
   {
     id: 'personalization',
     className: 'settings-personalization',
-    label: 'ПЕРСОНАЛИЗАЦИЯ',
+    labelId: 'settingsSection.personalization',
     icon: 'appearance',
   },
-  { id: 'keybinds', className: 'settings-keybinds', label: 'СОЧЕТАНИЯ КЛАВИШ', icon: 'keybinds' },
-  { id: 'history', className: 'settings-history', label: 'ИСТОРИЯ НАСТРОЕК', icon: 'history' },
-  { id: 'keymap', className: 'settings-keymap', label: 'ГОРЯЧИЕ КЛАВИШИ', icon: 'keymap' },
+  {
+    id: 'keybinds',
+    className: 'settings-keybinds',
+    labelId: 'settingsSection.keybinds',
+    icon: 'keybinds',
+  },
+  {
+    id: 'history',
+    className: 'settings-history',
+    labelId: 'settingsSection.history',
+    icon: 'history',
+  },
+  {
+    id: 'keymap',
+    className: 'settings-keymap',
+    labelId: 'settingsSection.keymap',
+    icon: 'keymap',
+  },
   {
     id: 'update',
     className: 'settings-update',
-    label: 'ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ',
+    labelId: 'settingsSection.update',
     icon: 'update',
   },
 ] as const satisfies readonly {
   readonly id: string;
   readonly className: string;
-  readonly label: string;
+  readonly labelId: MessageId;
   readonly icon: SettingsCardIconKind;
 }[];
 
@@ -94,7 +141,7 @@ export function settingsCardTargets(): readonly SettingsCard[] {
     }
     cards.push({
       target: { kind: 'section', id: section.id },
-      label: section.label,
+      label: t(section.labelId),
       icon: section.icon,
     });
   }
@@ -127,6 +174,13 @@ export function SettingsCardGrid({
    */
   readonly onFocused?: () => void;
 }) {
+  // `settingsCardTargets` resolves every label through `t()` at call time,
+  // not through a hook, so nothing here re-renders on a locale change without
+  // this subscription -- unlike `SettingsScreen`, which selects the whole
+  // store and re-renders on any change, a caller that mounts this grid on
+  // its own would otherwise leave it in whichever language was in force at
+  // mount.
+  useAppLocale();
   const gridRef = useRef<HTMLDivElement | null>(null);
   const initialFocusTarget = useRef(focusTarget);
   const onFocusedRef = useRef(onFocused);

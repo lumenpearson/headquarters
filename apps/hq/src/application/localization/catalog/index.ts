@@ -10,6 +10,7 @@ import { recordMessages } from './recordMessages';
 import { settingLabelMessages } from './settingLabelMessages';
 import { settingOptionMessages } from './settingOptionMessages';
 import { settingsMessages } from './settingsMessages';
+import { systemMessages } from './systemMessages';
 import { tileMessages } from './tileMessages';
 import { updateMessages } from './updateMessages';
 
@@ -62,6 +63,9 @@ export {
  *   shows.
  * - `connectionMessages` -- why a configured control-plane address was refused,
  *   read before any request is attempted rather than after one fails.
+ * - `systemMessages` -- the settings screen's own chrome and its ten shared
+ *   sections, the group-history sub-panel, the `/system` screen and the
+ *   developer contour (`DeveloperGate`, `DeveloperPanel`).
  *
  * A wave translating a surface with no module of its own adds one here rather
  * than appending to an existing file: `<area>Messages.ts`, exporting
@@ -99,6 +103,7 @@ const catalogModulesByName = {
   plural: pluralMessages,
   record: recordMessages,
   connection: connectionMessages,
+  system: systemMessages,
 } as const satisfies Readonly<Record<string, CatalogModule>>;
 
 /** Every module, by name, so a test can check the modules stay disjoint. */
@@ -120,6 +125,7 @@ export const catalog = {
   ...pluralMessages,
   ...recordMessages,
   ...connectionMessages,
+  ...systemMessages,
 } as const satisfies Readonly<Record<string, CatalogEntry>>;
 
 export type CatalogId = keyof typeof catalog;
