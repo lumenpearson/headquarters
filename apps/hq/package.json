@@ -30,7 +30,7 @@
     "@gremuchaya/protocol": "workspace:*",
     "@gremuchaya/settings-schema": "workspace:*",
     "@gremuchaya/ui": "workspace:*",
-    "@noble/hashes": "2.3.0",
+    "@noble/hashes": "2.4.0",
     "@paper-design/shaders-react": "0.0.80",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-autostart": "2.5.1",

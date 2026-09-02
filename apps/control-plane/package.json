@@ -41,7 +41,7 @@
     "@gremuchaya/protocol": "workspace:*",
     "@gremuchaya/settings-schema": "workspace:*",
     "@neondatabase/serverless": "1.1.0",
-    "@noble/hashes": "2.3.0",
+    "@noble/hashes": "2.4.0",
     "@upstash/ratelimit": "2.0.8",
     "@upstash/redis": "1.38.2",
     "pg": "8.23.0",
