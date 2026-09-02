@@ -2,14 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   appLocales,
+  fallbackLocale,
   forgetMissingMessageReports,
   messageIds,
   messagesFor,
+  placeholdersMatch,
+  resolveFromTables,
   sourceLocale,
   tokens,
   translateWith,
   type MessageId,
 } from './messages';
+import { catalog, catalogModules } from './catalog';
 
 const localeIds = (locale: (typeof appLocales)[number]): readonly string[] =>
   Object.keys(messagesFor(locale));
@@ -166,5 +170,79 @@ describe('the missing-id guard', () => {
     // A list of two hundred rows drawing one missing label must not produce
     // two hundred console lines; the first one is the report.
     expect(reported.filter((line) => line.includes('no.such.id'))).toHaveLength(1);
+  });
+});
+
+describe('which language a hole falls back to', () => {
+  // `CatalogEntry` makes a hole impossible for a real id, so the order is
+  // proven against a stand-in table rather than by weakening that guarantee.
+  // What is being asserted is the policy, not the data: an operator who chose
+  // English and met an untranslated id should read English, and the previous
+  // order handed them Russian -- which let "translated into every language" be
+  // satisfied by leaving the English line unwritten.
+  const id = 'nav.overview' as MessageId;
+
+  it('answers the requested locale when it has the id', () => {
+    const tables = { ru: { [id]: 'RU' }, en: { [id]: 'EN' } };
+    expect(resolveFromTables(tables, 'en', id)).toBe('EN');
+    expect(resolveFromTables(tables, 'ru', id)).toBe('RU');
+  });
+
+  it('falls back to English, not to the source locale, when the requested locale has a hole', () => {
+    const tables = { ru: { [id]: 'RU' }, en: {} };
+    expect(fallbackLocale).toBe('en');
+    expect(sourceLocale).toBe('ru');
+    // English itself is the hole here, so the source locale is all that is left.
+    expect(resolveFromTables(tables, 'en', id)).toBe('RU');
+  });
+
+  it('prefers English over the source locale for a third locale with a hole', () => {
+    const tables = { ru: { [id]: 'RU' }, en: { [id]: 'EN' } };
+    // A locale the catalogue does not carry stands for a third language
+    // contributed one id at a time; it must reach English before Russian.
+    const third = 'xx' as (typeof appLocales)[number];
+    expect(resolveFromTables({ ...tables, [third]: {} }, third, id)).toBe('EN');
+  });
+});
+
+describe('a message that depends on a count', () => {
+  it('selects the Russian category rather than one frozen form', () => {
+    expect(translateWith('ru', 'search.matchCount', { count: 1 })).toBe('1 СОВПАДЕНИЕ');
+    expect(translateWith('ru', 'search.matchCount', { count: 3 })).toBe('3 СОВПАДЕНИЯ');
+    expect(translateWith('ru', 'search.matchCount', { count: 7 })).toBe('7 СОВПАДЕНИЙ');
+  });
+
+  it('selects the English category, which distinguishes fewer cases', () => {
+    expect(translateWith('en', 'search.matchCount', { count: 1 })).toBe('1 MATCH');
+    expect(translateWith('en', 'search.matchCount', { count: 7 })).toBe('7 MATCHES');
+  });
+
+  it('renders `other` rather than blanking when a caller forgets the count', () => {
+    expect(translateWith('ru', 'search.matchCount')).toBe('{count} СОВПАДЕНИЯ');
+  });
+});
+
+describe('the modules the catalogue is split across', () => {
+  it('declares no id twice, because a spread would silently let one win', () => {
+    const seen = new Map<string, string>();
+    const duplicates: string[] = [];
+    for (const [name, module] of Object.entries(catalogModules)) {
+      for (const id of Object.keys(module)) {
+        const owner = seen.get(id);
+        if (owner !== undefined) duplicates.push(`${id} (${owner} and ${name})`);
+        else seen.set(id, name);
+      }
+    }
+    expect(duplicates).toEqual([]);
+    expect(seen.size).toBe(Object.keys(catalog).length);
+  });
+
+  it('asks for the same placeholders in every locale', () => {
+    // True by luck until now: nothing asserted it, and an `en` line that drops
+    // `{target}` renders a label with a hole in it for English operators only.
+    const mismatched = Object.entries(catalog)
+      .filter(([, entry]) => !placeholdersMatch(entry.ru, entry.en))
+      .map(([id]) => id);
+    expect(mismatched).toEqual([]);
   });
 });

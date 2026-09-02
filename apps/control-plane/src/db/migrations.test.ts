@@ -8,6 +8,19 @@ interface MigrationOutcomeRow extends Record<string, unknown> {
   readonly applied: boolean;
 }
 
+/**
+ * Indexing a list is unchecked under `noUncheckedIndexedAccess`; a silently `undefined`
+ * element would turn "the migration run issued this statement" into a vacuous assertion,
+ * so a missing element fails loudly instead.
+ */
+function requireAt<Item>(items: readonly Item[], index: number): Item {
+  const item = items[index];
+  if (item === undefined) {
+    throw new Error(`Expected an element at index ${String(index)}`);
+  }
+  return item;
+}
+
 function resultsFor(
   statements: readonly SqlStatement[],
   outcomes: readonly MigrationOutcomeRow[],
@@ -45,20 +58,28 @@ describe('control-plane migrations', () => {
         '0008_service_documents_and_receipt_scopes',
         '0009_upload_session_storage_upload_id',
         '0010_control_plane_installation',
+        '0011_telemetry_data_sources_and_samples',
+        '0012_material_renditions',
+        '0013_layout_document_receipt_scope',
+        '0014_symbolic_document_ids',
       ],
       skipped: [],
     });
 
     expect(transactions).toHaveLength(1);
-    const transaction = transactions[0];
-    const foundation = transaction[3].text;
-    const authentication = transaction[4].text;
-    const replayAndIntegrity = transaction[5].text;
-    const pairingIssuerBinding = transaction[6].text;
+    const transaction = requireAt(transactions, 0);
+    const foundation = requireAt(transaction, 3).text;
+    const authentication = requireAt(transaction, 4).text;
+    const replayAndIntegrity = requireAt(transaction, 5).text;
+    const pairingIssuerBinding = requireAt(transaction, 6).text;
 
-    expect(transaction[0]).toMatchObject({ text: 'SELECT pg_advisory_xact_lock($1)' });
-    expect(transaction[1].text).toContain('CREATE TABLE IF NOT EXISTS hq_schema_migrations');
-    expect(transaction[2].text).toContain('CREATE TEMPORARY TABLE hq_migration_run_outcomes');
+    expect(requireAt(transaction, 0)).toMatchObject({ text: 'SELECT pg_advisory_xact_lock($1)' });
+    expect(requireAt(transaction, 1).text).toContain(
+      'CREATE TABLE IF NOT EXISTS hq_schema_migrations',
+    );
+    expect(requireAt(transaction, 2).text).toContain(
+      'CREATE TEMPORARY TABLE hq_migration_run_outcomes',
+    );
     expect(transaction.at(-1)?.text).toBe(
       'SELECT id, applied FROM hq_migration_run_outcomes ORDER BY ordinal',
     );
@@ -143,15 +164,21 @@ describe('control-plane migrations', () => {
       '0008_service_documents_and_receipt_scopes',
       '0009_upload_session_storage_upload_id',
       '0010_control_plane_installation',
+      '0011_telemetry_data_sources_and_samples',
+      '0012_material_renditions',
+      '0013_layout_document_receipt_scope',
+      '0014_symbolic_document_ids',
     ]);
-    const authenticationSql = migrations[1].statements
-      .map((statement) => statement.text)
+    const authenticationSql = requireAt(migrations, 1)
+      .statements.map((statement) => statement.text)
       .join('\n');
 
     expect(authenticationSql).toContain('token_hash');
-    expect(migrations[0].statements.map((statement) => statement.text).join('\n')).toContain(
-      'refresh_token_hash',
-    );
+    expect(
+      requireAt(migrations, 0)
+        .statements.map((statement) => statement.text)
+        .join('\n'),
+    ).toContain('refresh_token_hash');
     expect(authenticationSql).toContain('hash_version');
     expect(authenticationSql).not.toMatch(/\baccess_token\s+text\b/u);
     expect(authenticationSql).not.toMatch(/\brefresh_token\s+text\b/u);
@@ -165,16 +192,20 @@ describe('control-plane migrations', () => {
       transaction: async (statements) => {
         transactions.push([...statements]);
         return resultsFor(statements, [
-          { id: migrations[0].id, applied: false },
-          { id: migrations[1].id, applied: true },
-          { id: migrations[2].id, applied: true },
-          { id: migrations[3].id, applied: true },
-          { id: migrations[4].id, applied: true },
-          { id: migrations[5].id, applied: true },
-          { id: migrations[6].id, applied: true },
-          { id: migrations[7].id, applied: true },
-          { id: migrations[8].id, applied: true },
-          { id: migrations[9].id, applied: true },
+          { id: requireAt(migrations, 0).id, applied: false },
+          { id: requireAt(migrations, 1).id, applied: true },
+          { id: requireAt(migrations, 2).id, applied: true },
+          { id: requireAt(migrations, 3).id, applied: true },
+          { id: requireAt(migrations, 4).id, applied: true },
+          { id: requireAt(migrations, 5).id, applied: true },
+          { id: requireAt(migrations, 6).id, applied: true },
+          { id: requireAt(migrations, 7).id, applied: true },
+          { id: requireAt(migrations, 8).id, applied: true },
+          { id: requireAt(migrations, 9).id, applied: true },
+          { id: requireAt(migrations, 10).id, applied: true },
+          { id: requireAt(migrations, 11).id, applied: true },
+          { id: requireAt(migrations, 12).id, applied: true },
+          { id: requireAt(migrations, 13).id, applied: true },
         ]);
       },
     };
@@ -190,6 +221,10 @@ describe('control-plane migrations', () => {
         '0008_service_documents_and_receipt_scopes',
         '0009_upload_session_storage_upload_id',
         '0010_control_plane_installation',
+        '0011_telemetry_data_sources_and_samples',
+        '0012_material_renditions',
+        '0013_layout_document_receipt_scope',
+        '0014_symbolic_document_ids',
       ],
       skipped: ['0001_control_plane_foundation'],
     });
@@ -258,14 +293,16 @@ describe('control-plane migrations', () => {
   });
 
   it('preserves immutable checksum drift rejection inside the locked migration block', async () => {
-    const migration = migrations[0];
+    const migration = requireAt(migrations, 0);
     const database: SqlClient = {
       query: async () => {
         throw new Error('Migration state must not be read outside the locked transaction');
       },
       transaction: async (statements) => {
-        expect(statements[0]).toMatchObject({ text: 'SELECT pg_advisory_xact_lock($1)' });
-        expect(statements[3].text).toContain(
+        expect(requireAt(statements, 0)).toMatchObject({
+          text: 'SELECT pg_advisory_xact_lock($1)',
+        });
+        expect(requireAt(statements, 3).text).toContain(
           `Migration checksum drift detected for ${migration.id}`,
         );
         throw new Error(`Migration checksum drift detected for ${migration.id}`);

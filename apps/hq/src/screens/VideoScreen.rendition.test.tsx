@@ -187,7 +187,7 @@ describe('the declared codec and bitrate of a camera (C25)', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    await waitFor(() => expect(cameraMaterialStatus(container)).toContain('RANGE STREAM READY'));
+    await waitFor(() => expect(cameraMaterialStatus(container)).toContain('RANGE-ПОТОК ГОТОВ'));
 
     // The next grant is withheld, which is the state the operator is in for as
     // long as the request is in flight.
@@ -205,7 +205,7 @@ describe('the declared codec and bitrate of a camera (C25)', () => {
     // named a different one, because a source was identified by its camera and
     // material alone.
     expect(library.asked).toContain('1080p');
-    await waitFor(() => expect(cameraMaterialStatus(container)).toContain('LOADING'));
+    await waitFor(() => expect(cameraMaterialStatus(container)).toContain('ЗАГРУЗКА'));
   });
 });
 
@@ -238,7 +238,7 @@ describe('a library that offers no ladder', () => {
     // The declared codec named a variant the library does not offer. Seeding it
     // anyway left the channel loading forever, because the grant that came back
     // always described the original and never matched what was asked for.
-    await waitFor(() => expect(cameraMaterialStatus(container)).toContain('READY'));
+    await waitFor(() => expect(cameraMaterialStatus(container)).toContain('ГОТОВ'));
     // The original travels the plain grant path, so no variant is asked for at
     // all -- and in particular not the declared one, which nothing would serve.
     expect(library.asked).toEqual([]);

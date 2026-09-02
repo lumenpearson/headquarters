@@ -2,10 +2,12 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { create } from '@bufbuild/protobuf';
 import { timestampFromDate, timestampNow } from '@bufbuild/protobuf/wkt';
-import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
-import { syncV1 } from '@gremuchaya/protocol';
+import type { HandlerContext, ServiceImpl } from '@connectrpc/connect';
+import { ControlPlaneFailure, syncV1 } from '@gremuchaya/protocol';
 import type { SyncService } from '@gremuchaya/protocol';
 
+import { controlPlaneFailure, withRuntimeErrors } from '../errors.js';
+import { maxDocumentBodyBytes } from '../http-policy.js';
 import {
   defaultRealtimeReplayLimit,
   type DurableRealtimeEventStore,
@@ -62,6 +64,13 @@ export interface PairedDeviceServiceOptions {
    * to an unbounded log; every other mutation is bounded by the row it changes.
    */
   readonly coordination?: UpstashCoordination;
+  /**
+   * The document-payload ceiling `PublishDocumentDelta` and
+   * `GetDocumentSnapshot` refuse to cross, defaulting to
+   * {@link maxDocumentBodyBytes}. A Node deployment behind its own socket may
+   * raise it; a serverless one must not.
+   */
+  readonly maxDocumentBodyBytes?: number;
 }
 
 /**
@@ -78,6 +87,10 @@ export function createPairedDeviceSyncService(
   options: PairedDeviceServiceOptions,
 ): Partial<ServiceImpl<typeof SyncService>> {
   const verifyBootstrapSecret = requireBootstrapVerifier(options.verifyBootstrapSecret);
+  const documentBodyCeiling = positiveInteger(
+    options.maxDocumentBodyBytes ?? maxDocumentBodyBytes,
+    'maxDocumentBodyBytes',
+  );
 
   return {
     async createGroup(request, context) {
@@ -325,10 +338,20 @@ export function createPairedDeviceSyncService(
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
+        // The four reported fields ride on the join because the join is already
+        // publishing `PRESENCE_UPDATED`: a device that arrives on a screen tells
+        // the group which one in the same row that says it arrived. A request
+        // that carries no detail reports the four empty rather than inheriting
+        // whatever the device's previous participation left in the row.
+        const detail = toPresenceDetail(request.detail);
         const recorded = await presence.record({
           groupId,
           deviceId: authenticated.device.id,
           status: 'ONLINE',
+          activeScreen: detail.activeScreen,
+          selectedElement: detail.selectedElement,
+          clockOffsetMs: detail.clockOffsetMs,
+          latencyMs: detail.latencyMs,
         });
         await publishPresence(options, groupId, recorded);
         return { group: toGroup(authenticated.group) };
@@ -342,6 +365,10 @@ export function createPairedDeviceSyncService(
         assertContextActor(authenticated, request.context?.actorDeviceId?.value);
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
+        // No detail travels with a departure, and `record` writes the four
+        // fields empty: a device that left is not looking at anything, so
+        // keeping the screen it was on would leave the pairing dialog showing
+        // a live-looking readout for a device that is gone.
         const recorded = await presence.record({
           groupId,
           deviceId: authenticated.device.id,
@@ -400,6 +427,60 @@ export function createPairedDeviceSyncService(
       });
     },
 
+    /**
+     * Reports what the calling device is looking at, and answers with the
+     * group's presence.
+     *
+     * This is the path that was missing: the store has carried `active_screen`,
+     * `selected_element`, `clock_offset_ms` and `latency_ms` since the first
+     * migration and `Presence` has carried them on the wire, but nothing a
+     * client could call ever set them, so every device reported them empty
+     * forever. `JoinGroup` now carries the first report and this carries every
+     * one after it.
+     *
+     * Three properties are deliberate, and each is a refusal:
+     *
+     * - It names no device. `UpdatePresenceRequest` has no device field, so the
+     *   row a report reaches is the one the bearer token authenticated — a
+     *   caller cannot describe a neighbour's screen.
+     * - It creates nothing. `reportDetail` updates a row and refuses to insert
+     *   one, so a device that never joined, or that left, is not put back on
+     *   the list by reporting; announcing presence stays `JoinGroup`'s alone.
+     * - It publishes nothing. A screen change is as frequent as navigation, and
+     *   an event per change would append a durable `sync_events` row and spend
+     *   a sequence number each time. That is the same growth that keeps
+     *   liveness renewal out of `JoinGroup`; neighbours read the detail on the
+     *   presence poll they already make.
+     *
+     * The renewal happens for the same reason it happens on a read: reporting a
+     * screen is evidence of being at it, so a reporting client cannot forget to
+     * keep itself alive. The answer is built after the renewal, so it already
+     * accounts for it.
+     */
+    async updatePresence(request, context) {
+      return withRuntimeErrors(async () => {
+        const presence = requirePresence(options.presence);
+        const authenticated = await authenticateRequest(options.runtime, context);
+        assertContextActor(authenticated, request.context?.actorDeviceId?.value);
+        const groupId = requireResourceId(request.groupId?.value, 'group_id');
+        assertAuthenticatedGroup(authenticated, groupId);
+        const reported = await presence.reportDetail({
+          groupId,
+          deviceId: authenticated.device.id,
+          ...toPresenceDetail(request.detail),
+        });
+        if (reported === undefined) {
+          throw new PairedDeviceRuntimeError(
+            'FAILED_PRECONDITION',
+            'This device has no presence in the group; join it before reporting what it shows.',
+          );
+        }
+        await presence.renew({ groupId, deviceId: authenticated.device.id });
+        const devices = await presence.list(groupId);
+        return { devices: devices.map(toPresence) };
+      });
+    },
+
     async publishDocumentDelta(request, context) {
       return withRuntimeErrors(async () => {
         const events = requireEventStore(options.eventStore);
@@ -408,6 +489,13 @@ export function createPairedDeviceSyncService(
         const groupId = requireResourceId(request.groupId?.value, 'group_id');
         assertAuthenticatedGroup(authenticated, groupId);
         assertEditor(authenticated);
+        // Before the rate-limit spend and before the append: an oversized
+        // delta must not consume a publication allowance it can never use.
+        assertDocumentBodyWithinCeiling(
+          request.delta.byteLength + request.stateVector.byteLength,
+          documentBodyCeiling,
+          'request',
+        );
         await assertPublicationAllowed(options, groupId, authenticated.device.id, 'document');
         const mutation = toMutationReceiptContext(request.context?.requestId);
         const appended = await events.appendAuthorized(
@@ -504,6 +592,16 @@ export function createPairedDeviceSyncService(
             'No snapshot has been recorded for this document.',
           );
         }
+        // A snapshot too large for the transport is refused with a
+        // control-plane error naming the size, rather than handed to a
+        // platform that answers `FUNCTION_PAYLOAD_TOO_LARGE` with nothing in
+        // it. The resync path stays stuck either way; only one of the two
+        // tells the operator why.
+        assertDocumentBodyWithinCeiling(
+          snapshot.snapshot.byteLength + snapshot.stateVector.byteLength,
+          documentBodyCeiling,
+          'reply',
+        );
         return {
           snapshot: snapshot.snapshot,
           stateVector: snapshot.stateVector,
@@ -598,12 +696,7 @@ export function createPairedDeviceSyncService(
             // A resume the log can no longer answer is reported in-band rather
             // than by silently starting from the oldest retained event, which
             // would look to the client like a complete history.
-            queue.fail(
-              new ConnectError(
-                'The requested resume point is no longer retained; request a snapshot.',
-                Code.OutOfRange,
-              ),
-            );
+            queue.fail(controlPlaneFailure(ControlPlaneFailure.REPLAY_WINDOW_EXCEEDED));
           }
         },
       });
@@ -685,7 +778,7 @@ function requireBootstrapAuthorization(
 ): void {
   const supplied = context.requestHeader.get('x-hq-bootstrap-secret');
   if (supplied === null || !verifyBootstrapSecret(supplied)) {
-    throw new ConnectError('Bootstrap authorization is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BOOTSTRAP_AUTHORIZATION_REQUIRED);
   }
 }
 
@@ -693,7 +786,7 @@ function readBearerToken(context: HandlerContext): string {
   const header = context.requestHeader.get('authorization');
   const match = header === null ? undefined : /^Bearer ([^\s]+)$/u.exec(header.trim());
   if (match?.[1] === undefined) {
-    throw new ConnectError('A bearer access token is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BEARER_TOKEN_REQUIRED);
   }
   return match[1];
 }
@@ -795,46 +888,55 @@ function requireResourceId(value: string | undefined, field: string): string {
   return value.trim();
 }
 
-async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: unknown) {
-    if (error instanceof ConnectError) throw error;
-    if (error instanceof PairedDeviceRuntimeError) {
-      throw new ConnectError(error.message, toConnectCode(error.code));
-    }
-    throw error;
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive safe integer`);
   }
+  return value;
 }
 
-function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
-  if (code === 'ABORTED') return Code.Aborted;
-  if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
-  if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
-  if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;
-  if (code === 'NOT_FOUND') return Code.NotFound;
-  if (code === 'PERMISSION_DENIED') return Code.PermissionDenied;
-  return Code.Unauthenticated;
+/**
+ * Refuses a document payload the transport under this router may not be able
+ * to carry.
+ *
+ * Both directions are measured, and each is measured as the sum of the two
+ * byte fields the message actually spends: the update or snapshot and the
+ * state vector travel in the same body, so checking only the larger one would
+ * let their sum cross the ceiling unremarked.
+ *
+ * The codes are `INVALID_ARGUMENT` for a request the caller can shrink and
+ * `FAILED_PRECONDITION` for a reply this deployment cannot deliver. Neither is
+ * `RESOURCE_EXHAUSTED`, which would fit better: `PairedDeviceErrorCode` is
+ * translated by a `toConnectCode` written once per service, each ending in a
+ * fallback to `Code.Unauthenticated`, so a code added to the union here would
+ * silently surface elsewhere as an authentication failure.
+ */
+function assertDocumentBodyWithinCeiling(
+  byteLength: number,
+  ceiling: number,
+  subject: 'request' | 'reply',
+): void {
+  if (byteLength <= ceiling) return;
+  throw new PairedDeviceRuntimeError(
+    subject === 'request' ? 'INVALID_ARGUMENT' : 'FAILED_PRECONDITION',
+    `This document ${subject} is ${byteLength.toString()} bytes, above the ${ceiling.toString()}-byte ` +
+      'ceiling this control plane serves. Mounted behind a serverless function the platform refuses a ' +
+      'body over 4.5 MB before any handler runs, so the limit is enforced here to name the cause.',
+  );
 }
 
 function requireAdministration(
   administration: GroupAdministration | undefined,
 ): GroupAdministration {
   if (administration === undefined) {
-    throw new ConnectError(
-      'This control plane was started without group administration.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.GROUP_ADMINISTRATION_UNAVAILABLE);
   }
   return administration;
 }
 
 function requirePresence(presence: PresenceStore | undefined): PresenceStore {
   if (presence === undefined) {
-    throw new ConnectError(
-      'This control plane was started without presence storage.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.PRESENCE_UNAVAILABLE);
   }
   return presence;
 }
@@ -843,20 +945,14 @@ function requireEventStore(
   eventStore: DurableRealtimeEventStore | undefined,
 ): DurableRealtimeEventStore {
   if (eventStore === undefined) {
-    throw new ConnectError(
-      'This control plane was started without a durable event log.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.EVENT_LOG_UNAVAILABLE);
   }
   return eventStore;
 }
 
 function requireHub(hub: RealtimeHub | undefined): RealtimeHub {
   if (hub === undefined) {
-    throw new ConnectError(
-      'This control plane was started without a realtime hub.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.REALTIME_HUB_UNAVAILABLE);
   }
   return hub;
 }
@@ -918,10 +1014,7 @@ async function assertPublicationAllowed(
   if (coordination === undefined || !coordination.configured) return;
   const decision = await coordination.limitMutation(groupId, deviceId, category);
   if (decision.allowed) return;
-  throw new ConnectError(
-    'The group publication rate limit has been reached; retry after the window resets.',
-    Code.ResourceExhausted,
-  );
+  throw controlPlaneFailure(ControlPlaneFailure.RATE_LIMITED);
 }
 
 /**
@@ -990,6 +1083,75 @@ async function publishPresence(
     kind: syncV1.GroupEventKind.PRESENCE_UPDATED,
     presence: toPresence(snapshot),
   });
+}
+
+/**
+ * The longest screen or element identifier a device may report.
+ *
+ * `active_screen` and `selected_element` are `text` columns with no length
+ * constraint, and presence is the one row a client may rewrite as often as it
+ * likes. Without a ceiling a paired device could park megabytes in the group's
+ * presence and every neighbour would fetch them on every poll. Route and
+ * element identifiers in this application are short; 256 characters is far
+ * above any of them and far below a payload worth carrying.
+ */
+const maxPresenceIdentifierLength = 256;
+
+/**
+ * The largest round trip a client may claim, in milliseconds.
+ *
+ * `latency_ms` is `uint32` on the wire and `integer` in the table, so a value
+ * above 2^31 - 1 would not be a wrong reading but a failed `INSERT` — a
+ * numeric-overflow error with nothing in it for the operator. Five minutes is
+ * refused as an argument instead, because nothing above it is a measurement.
+ *
+ * `clock_offset_ms` gets no such bound: it is `int64` on the wire and `bigint`
+ * in the table, and a device whose clock is set to the wrong year honestly
+ * reports an offset in the billions.
+ */
+const maxReportedLatencyMs = 300_000;
+
+/**
+ * Reads the four fields a device may report about itself.
+ *
+ * An absent message is the four empty values rather than an error: a client
+ * that has nothing to say about its screen is still entitled to join, and the
+ * proto3 defaults are exactly what "nothing to say" means. What is refused is a
+ * value the storage cannot hold or should not carry, and it is refused here —
+ * before the write — so the caller is told which field was wrong.
+ */
+function toPresenceDetail(detail: syncV1.PresenceDetail | undefined): {
+  readonly activeScreen: string;
+  readonly selectedElement: string;
+  readonly clockOffsetMs: bigint;
+  readonly latencyMs: number;
+} {
+  return {
+    activeScreen: boundedPresenceIdentifier(detail?.activeScreen ?? '', 'active_screen'),
+    selectedElement: boundedPresenceIdentifier(detail?.selectedElement ?? '', 'selected_element'),
+    clockOffsetMs: detail?.clockOffsetMs ?? 0n,
+    latencyMs: boundedLatency(detail?.latencyMs ?? 0),
+  };
+}
+
+function boundedPresenceIdentifier(value: string, field: string): string {
+  if (value.length > maxPresenceIdentifierLength) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      `${field} must not exceed ${maxPresenceIdentifierLength.toString()} characters.`,
+    );
+  }
+  return value;
+}
+
+function boundedLatency(value: number): number {
+  if (value > maxReportedLatencyMs) {
+    throw new PairedDeviceRuntimeError(
+      'INVALID_ARGUMENT',
+      `latency_ms must not exceed ${maxReportedLatencyMs.toString()} milliseconds.`,
+    );
+  }
+  return value;
 }
 
 function toPresence(snapshot: PresenceSnapshot) {

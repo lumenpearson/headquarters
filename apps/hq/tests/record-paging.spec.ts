@@ -1,5 +1,25 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { gotoSettingsUnified, settingControl, shippedText } from './settingsHelpers';
+
+/**
+ * The genitive-plural noun `cases.registryEyebrow` selects for a count, the
+ * same way `Intl.PluralRules` picks it at render time -- so this assertion
+ * tracks the catalogue's plural forms instead of assuming the one that
+ * happens to be right for the fixture's current RESTRICTED count.
+ */
+function ruRecordsWord(count: number): string {
+  const forms: Readonly<Record<Intl.LDMLPluralRule, string>> = {
+    zero: 'ЗАПИСЕЙ',
+    one: 'ЗАПИСЬ',
+    two: 'ЗАПИСИ',
+    few: 'ЗАПИСИ',
+    many: 'ЗАПИСЕЙ',
+    other: 'ЗАПИСИ',
+  };
+  return forms[new Intl.PluralRules('ru').select(count)];
+}
+
 /**
  * Sets `tables.pageSize` the way an operator would.
  *
@@ -11,7 +31,7 @@ import { expect, test, type Page } from '@playwright/test';
  * so exercising it is half of what these tests are for.
  */
 async function setPageSize(page: Page, size: number): Promise<void> {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ТАБЛИЦЫ', exact: true }).click();
   /*
@@ -21,7 +41,7 @@ async function setPageSize(page: Page, size: number): Promise<void> {
    * typing the same two characters stores `10`. Measured both ways -- the
    * control is right and `fill` is the wrong gesture to test it with.
    */
-  const field = page.getByRole('textbox', { name: 'TABLES / PAGE SIZE' });
+  const field = settingControl(page, 'tables.pageSize', 'textbox');
   await expect(field).toBeVisible();
   await field.click();
   await page.keyboard.press('Control+A');
@@ -101,7 +121,7 @@ test('R9: filtering recounts the pages and never strands the operator on an empt
   // The header counts what the filter left, not what the registry holds. It
   // read the whole set while the table beneath it showed a filtered one.
   await expect(page.locator('.case-registry .ops-panel__header')).toContainText(
-    `${remaining} RECORDS`,
+    `${remaining} ${ruRecordsWord(remaining)}`,
   );
 });
 
@@ -126,26 +146,27 @@ test('R9: the object registry sorts on a column that had none', async ({ page })
   expect(unsorted.length).toBeGreaterThan(2);
   expect(unsorted.every((value) => Number.isFinite(value))).toBe(true);
 
-  await page.getByRole('button', { name: /^THREAT/ }).click();
+  await page.getByRole('button', { name: /^УГРОЗА/ }).click();
   const descending = await threats();
   expect(descending).toEqual([...descending].sort((left, right) => right - left));
   // Stated so a registry that happened to arrive sorted could not pass.
   expect(descending).not.toEqual(unsorted);
 
-  await page.getByRole('button', { name: /^THREAT/ }).click();
+  await page.getByRole('button', { name: /^УГРОЗА/ }).click();
   const ascending = await threats();
   expect(ascending).toEqual([...ascending].sort((left, right) => left - right));
 });
 
 test('R9: every data screen carries the same pagination control', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
-  for (const [route, label] of [
-    ['/objects', 'Страницы реестра объектов'],
-    ['/cases', 'Страницы реестра дел'],
-    ['/reports', 'Страницы реестра отчётов'],
+  const routes: ReadonlyArray<readonly [string, string]> = [
+    ['/objects', shippedText('objects.paginationLabel')],
+    ['/cases', shippedText('cases.paginationLabel')],
+    ['/reports', shippedText('reports.paginationLabel')],
     ['/files', 'Страницы реестра файлов'],
     ['/video/cameras', 'Страницы реестра камер'],
-  ] as const) {
+  ];
+  for (const [route, label] of routes) {
     await page.goto(route);
     const pagination = page.locator(`[aria-label="${label}"]`);
     await expect(pagination).toHaveClass(/registry-pagination/);
@@ -173,11 +194,11 @@ test('R9: the tactical map sorts its channel table', async ({ page }) => {
 
   // This screen had no filter, sort or pagination at all -- the last of the
   // data screens with none of the three.
-  await page.getByRole('button', { name: /^LAT/ }).click();
+  await page.getByRole('button', { name: /^ЗАДЕРЖКА/ }).click();
   const ascending = await latencies();
   expect(ascending).toEqual([...ascending].sort((left, right) => left - right));
 
-  await page.getByRole('button', { name: /^LAT/ }).click();
+  await page.getByRole('button', { name: /^ЗАДЕРЖКА/ }).click();
   const descending = await latencies();
   expect(descending).toEqual([...descending].sort((left, right) => right - left));
   /*

@@ -16,7 +16,7 @@ const redisConfig: NonNullable<ControlPlaneConfig['redis']> = {
 
 describe('Upstash coordination', () => {
   it('creates the Redis client lazily and stores bounded presence under a group namespace', async () => {
-    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const calls: Array<{ method: string; args: readonly unknown[] }> = [];
     const client = fakeRedis(calls);
     const factory = vi.fn<CoordinationClientFactory>(() => client);
     const coordination = createUpstashCoordination(redisConfig, factory);
@@ -55,7 +55,7 @@ describe('Upstash coordination', () => {
   });
 
   it('renews a liveness key without rewriting it, and withdraws one outright', async () => {
-    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const calls: Array<{ method: string; args: readonly unknown[] }> = [];
     const coordination = createUpstashCoordination(redisConfig, () => fakeRedis(calls));
 
     await expect(
@@ -90,8 +90,49 @@ describe('Upstash coordination', () => {
     });
   });
 
+  it('writes a report through one guarded script rather than a plain set', async () => {
+    const calls: Array<{ method: string; args: readonly unknown[] }> = [];
+    const coordination = createUpstashCoordination(redisConfig, () => fakeRedis(calls));
+
+    await expect(
+      coordination.reportPresence({
+        groupId: 'group-01',
+        deviceId: 'device-01',
+        activeScreen: '/materials',
+        clockOffsetMs: -4,
+        latencyMs: 11,
+      }),
+    ).resolves.toBe(true);
+
+    // A change detector for the statement, not a proof of expiry: what a report
+    // does to a key that is or is not there is proved against a
+    // deadline-keeping double in `sync/coordinated-presence-store.test.ts`.
+    // Both keys travel in one script for the same reason the renewal's do, and
+    // the value is serialized here because a script argument is a string while
+    // `listPresence` parses JSON.
+    const script = calls.find((call) => call.method === 'script.exec');
+    expect(script?.args[0]).toBe('REPORT-PRESENCE');
+    expect(script?.args[1]).toEqual([
+      'hq:group:group-01:presence:device-01',
+      'hq:group:group-01:presence:members',
+    ]);
+    const [payload, ttl] = script?.args[2] as [string, string];
+    expect(JSON.parse(payload)).toMatchObject({
+      deviceId: 'device-01',
+      activeScreen: '/materials',
+      clockOffsetMs: -4,
+      latencyMs: 11,
+    });
+    expect(ttl).toBe('45');
+    // Nothing is written outside the script: a plain `set` would create the key
+    // for a device that had left or lapsed, which is precisely what reporting
+    // must not be able to do.
+    expect(calls.map((call) => call.method)).not.toContain('set');
+    expect(calls.map((call) => call.method)).not.toContain('sadd');
+  });
+
   it('uses compare-and-set scripts for lease renewal and release', async () => {
-    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const calls: Array<{ method: string; args: readonly unknown[] }> = [];
     const coordination = createUpstashCoordination(redisConfig, () => fakeRedis(calls));
 
     await expect(
@@ -155,7 +196,9 @@ describe('Upstash coordination', () => {
   });
 });
 
-function fakeRedis(calls: Array<{ method: string; args: unknown[] }>): CoordinationRedisClient {
+function fakeRedis(
+  calls: Array<{ method: string; args: readonly unknown[] }>,
+): CoordinationRedisClient {
   return {
     async set(...args) {
       calls.push({ method: 'set', args });
@@ -189,19 +232,24 @@ function fakeRedis(calls: Array<{ method: string; args: unknown[] }>): Coordinat
       calls.push({ method: 'incr', args });
       return 1;
     },
-    createScript(source) {
+    createScript<Result>(source: string) {
       // The lease scripts compare a holder before acting, so they read; the
-      // presence renewal only extends. Classifying on `GET` keeps the three
-      // apart now that two of them call `EXPIRE`.
-      const operation = !source.includes('GET')
-        ? 'RENEW-PRESENCE'
-        : source.includes('EXPIRE')
-          ? 'EXPIRE'
-          : 'DEL';
+      // presence renewal only extends, and the presence report guards its write
+      // on `EXISTS`. Classifying on those two words keeps the four apart now
+      // that three of them call `EXPIRE`.
+      const operation = source.includes('EXISTS')
+        ? 'REPORT-PRESENCE'
+        : !source.includes('GET')
+          ? 'RENEW-PRESENCE'
+          : source.includes('EXPIRE')
+            ? 'EXPIRE'
+            : 'DEL';
       return {
-        async exec(keys, args) {
+        async exec(keys: readonly string[], args: readonly string[]): Promise<Result> {
           calls.push({ method: 'script.exec', args: [operation, keys, args] });
-          return operation === 'DEL' ? 0 : 1;
+          // The scripts under test answer a numeric reply; the port is generic in it,
+          // so the double casts rather than the port narrowing to please a test.
+          return (operation === 'DEL' ? 0 : 1) as Result;
         },
       };
     },

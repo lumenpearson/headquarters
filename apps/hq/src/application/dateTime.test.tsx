@@ -10,6 +10,7 @@ import {
   dateTimeModes,
   formatSecondsOfDay,
   formatShellClock,
+  formatShellDate,
   operationSecondsOfDay,
   resolveDateTimeMode,
   useShellClock,
@@ -83,6 +84,13 @@ describe('dateTime.mode', () => {
         operationSecondsOfDay({ clockMode: 'real', fixedTime: '07:42:15' }, 900, instant),
       ),
     ).toBe(localReading(instant));
+  });
+
+  it('reads the calendar date rather than repeating the clock', () => {
+    // The literal `12.09.2026 / СБ` the topbar printed before this reading
+    // existed was, coincidentally or not, this exact instant -- confirmed
+    // here so the binding is not a guess about what the day should read.
+    expect(formatShellDate(new Date(2026, 8, 12, 10, 0, 0))).toBe('12.09.2026 / СБ');
   });
 
   it('names the clock it is showing', () => {

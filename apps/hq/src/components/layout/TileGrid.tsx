@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 
-import type { TileCategory } from '@gremuchaya/settings-schema';
+import { getSettingDefinition, type TileCategory } from '@gremuchaya/settings-schema';
 
 import {
   elementCaption,
@@ -19,6 +19,7 @@ import {
 } from '@/application/localization/elementTranslations';
 import { useAppLocale } from '@/application/localization/locale';
 import { resolveTileMotion } from '@/application/personalization/tileMotion';
+import { resolveTilePresentationCap } from '@/application/personalization/tilePresentation';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
 
 import { TileCaptionProvider } from './tileCaption';
@@ -52,6 +53,15 @@ const panelFloorsPerRow = 2;
  */
 const dragThresholdPx = 6;
 
+/**
+ * The schema's own default for `layout.tileMinimumWidth`, read once at module
+ * scope rather than repeated as a literal here: the schema already states
+ * what an unset draft falls back to, and a second copy of it is a second
+ * thing to keep in step (the same reasoning `resolvePresentation` gives its
+ * own fallback).
+ */
+const tileMinimumWidthDefault = getSettingDefinition('layout.tileMinimumWidth')?.defaultValue;
+
 export interface ScreenTile {
   readonly descriptor: TileDescriptor;
   /** Shown in the relocation notice, so the operator can name what moved. */
@@ -75,18 +85,30 @@ const presentationRank: Readonly<Record<TilePresentation, number>> = {
  * Everything the row budget is counted from, measured on the document in one
  * pass: the box the screen was given, the chrome of one panel, and the gap the
  * stylesheet resolved between two rows.
+ *
+ * `width` rides along in the same measurement for `resolveGridLayout`'s
+ * `containerWidth`, rather than a second observer: the resolver needs to know
+ * how wide one column actually renders to enforce `layout.tileMinimumWidth`,
+ * and this box is already the one honest source for the room the screen was
+ * given.
  */
 interface GridBox {
   readonly height: number;
+  readonly width: number;
   readonly floor: number;
   readonly gap: number;
 }
 
 /** Before the first pass, and wherever there is no layout to measure. */
-const unmeasured: GridBox = { height: 0, floor: 0, gap: 0 };
+const unmeasured: GridBox = { height: 0, width: 0, floor: 0, gap: 0 };
 
 function sameBox(left: GridBox, right: GridBox): boolean {
-  return left.height === right.height && left.floor === right.floor && left.gap === right.gap;
+  return (
+    left.height === right.height &&
+    left.width === right.width &&
+    left.floor === right.floor &&
+    left.gap === right.gap
+  );
 }
 
 /**
@@ -196,6 +218,18 @@ export function TileGrid({
     const value = state.personalization.draft.values['tiles.presentation'];
     return value === 'full' || value === 'compact' || value === 'minimal' ? value : null;
   });
+  /*
+   * The two finer tiers over the application ceiling above, in the shape
+   * `tiles.animations`/`tiles.categoryAnimations` already carry: a tile
+   * identifier is unique only within a screen, so the per-tile entries name
+   * it and the per-category ones do not.
+   */
+  const presentationTileEntries = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values['tiles.presentationOverrides']),
+  );
+  const presentationCategoryEntries = useOperationsStore((state) =>
+    stringList(state.personalization.draft.values['tiles.categoryPresentation']),
+  );
 
   /*
    * The gap is read from the stylesheet below, not from here. `--ops-tile-gap`
@@ -208,6 +242,19 @@ export function TileGrid({
   const gapSetting = useOperationsStore(
     (state) => state.personalization.draft.values['sizes.tileGap'],
   );
+
+  /*
+   * `layout.tileMinimumWidth`'s only reader: the value passed to
+   * `resolveGridLayout` as `minimumTileWidth`, beside the container width
+   * measured below as `containerWidth`. Falls back to the schema's own
+   * default rather than a literal here for the reason every other fallback in
+   * this file does.
+   */
+  const tileMinimumWidth = useOperationsStore((state) => {
+    const value = state.personalization.draft.values['layout.tileMinimumWidth'];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    return typeof tileMinimumWidthDefault === 'number' ? tileMinimumWidthDefault : 160;
+  });
 
   /*
    * The grid is measured, not derived from `100dvh`. The shell chrome around
@@ -224,6 +271,7 @@ export function TileGrid({
       const gap = Number.parseFloat(window.getComputedStyle(element).rowGap);
       const next: GridBox = {
         height: element.getBoundingClientRect().height,
+        width: element.getBoundingClientRect().width,
         floor: floor.getBoundingClientRect().height,
         gap: Number.isFinite(gap) ? gap : 0,
       };
@@ -273,15 +321,44 @@ export function TileGrid({
 
   const arranged = useMemo(
     () =>
-      visible.map((tile) =>
-        applyOperatorArrangement(tile.descriptor, screen, order, spans, presentationCap),
-      ),
-    [order, presentationCap, screen, spans, visible],
+      visible.map((tile) => {
+        // Per tile, then per category, then the application ceiling read
+        // above -- the same precedence `resolveTileMotion` gives R19's
+        // per-element animation.
+        const cap = resolveTilePresentationCap({
+          screen,
+          tile: tile.descriptor.id,
+          category: tile.category,
+          tileEntries: presentationTileEntries,
+          categoryEntries: presentationCategoryEntries,
+          applicationCap: presentationCap,
+        });
+        return applyOperatorArrangement(tile.descriptor, screen, order, spans, cap);
+      }),
+    [
+      order,
+      presentationCap,
+      presentationCategoryEntries,
+      presentationTileEntries,
+      screen,
+      spans,
+      visible,
+    ],
   );
 
   const layout = useMemo(
-    () => resolveGridLayout({ columns, maximumRows: rowBudget(box), tiles: arranged }),
-    [arranged, box, columns],
+    () =>
+      resolveGridLayout({
+        columns,
+        maximumRows: rowBudget(box),
+        tiles: arranged,
+        // Omitted before the first measurement, the same gate the JSX below
+        // uses to render nothing: a `containerWidth` of `0` would fail every
+        // tile against the floor instead of running the resolver exactly as
+        // it did before this setting had a reader.
+        ...(box.width > 0 ? { containerWidth: box.width, minimumTileWidth: tileMinimumWidth } : {}),
+      }),
+    [arranged, box, columns, tileMinimumWidth],
   );
 
   const byId = useMemo(() => new Map(visible.map((tile) => [tile.descriptor.id, tile])), [visible]);

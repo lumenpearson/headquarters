@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput, TerminalSelect } from '@gremuchaya/ui/primitives';
 
 import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, ProgressBar, StatusBadge } from '@/components/operations/OpsUi';
@@ -18,18 +20,64 @@ const clockParts = { timeStyle: 'medium' } as const;
 
 type ObjectKindFilter = 'all' | 'person' | 'vehicle' | 'device' | 'group';
 
-const objectKindOptions = [
-  { value: 'all', label: 'ВСЕ ТИПЫ' },
-  { value: 'person', label: 'ЛИЦА' },
-  { value: 'vehicle', label: 'ТРАНСПОРТ' },
-  { value: 'device', label: 'УСТРОЙСТВА' },
-  { value: 'group', label: 'ГРУППЫ' },
-] as const satisfies ReadonlyArray<{
-  readonly value: ObjectKindFilter;
-  readonly label: string;
-}>;
+/** Keyed by the union rather than built with a template string, so a kind with no message is a compile error. */
+const objectKindFilterLabelIds: Readonly<Record<ObjectKindFilter, MessageId>> = {
+  all: 'objects.kindAll',
+  person: 'objects.kindPerson',
+  vehicle: 'objects.kindVehicle',
+  device: 'objects.kindDevice',
+  group: 'objects.kindGroup',
+};
+
+const objectKindFilters = [
+  'all',
+  'person',
+  'vehicle',
+  'device',
+  'group',
+] as const satisfies readonly ObjectKindFilter[];
+
+type ObjectKind = 'person' | 'vehicle' | 'device' | 'group';
+
+const objectKindLabelIds: Readonly<Record<ObjectKind, MessageId>> = {
+  person: 'objects.kindLabelPerson',
+  vehicle: 'objects.kindLabelVehicle',
+  device: 'objects.kindLabelDevice',
+  group: 'objects.kindLabelGroup',
+};
+
+const objectKinds = [
+  'person',
+  'vehicle',
+  'device',
+  'group',
+] as const satisfies readonly ObjectKind[];
+
+type ObjectSortKey = 'id' | 'name' | 'threat' | 'lastSeenAt';
+
+type ObjectTabValue = 'summary' | 'activity' | 'relations' | 'files' | 'map' | 'video';
+
+/** Keyed by the union rather than built with a template string, so a tab with no message is a compile error. */
+const objectTabLabelIds: Readonly<Record<ObjectTabValue, MessageId>> = {
+  summary: 'objects.tabSummary',
+  activity: 'objects.tabActivity',
+  relations: 'objects.tabRelations',
+  files: 'objects.tabFiles',
+  map: 'objects.tabMap',
+  video: 'objects.tabVideo',
+};
+
+const objectTabs = [
+  'summary',
+  'activity',
+  'relations',
+  'files',
+  'map',
+  'video',
+] as const satisfies readonly ObjectTabValue[];
 
 export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
+  const translate = useTranslate();
   const router = useRouter();
   const state = useOperationsStore((value) => value);
   useContextMenuAction('record.open', (subject) => {
@@ -40,16 +88,22 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   });
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<ObjectKindFilter>('all');
-  const [tab, setTab] = useState<'summary' | 'activity' | 'relations' | 'files' | 'map' | 'video'>(
-    'summary',
-  );
+  const [tab, setTab] = useState<ObjectTabValue>('summary');
   const selectedId = detailId ?? state.ui.selectedObjectId;
   const selected = state.objects[selectedId] ?? Object.values(state.objects)[0];
   const pageSize = useTablePageSize();
   const allObjects = useMemo(() => Object.values(state.objects), [state.objects]);
-  const [sortKey, setSortKey] = useState<'id' | 'name' | 'threat' | 'lastSeenAt'>('id');
+  const [sortKey, setSortKey] = useState<ObjectSortKey>('id');
   const [descending, setDescending] = useState(false);
   const normalizedQuery = foldCase(query);
+  const objectKindOptions = useMemo(
+    () =>
+      objectKindFilters.map((value) => ({
+        value,
+        label: translate(objectKindFilterLabelIds[value]),
+      })),
+    [translate],
+  );
   // The question is the kind filter plus the search text: either one narrows
   // the registry, and without this the operator kept whatever page the
   // previous filter had left them on.
@@ -90,7 +144,7 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'ОБЪЕКТЫ',
+        title: translate('objects.registryTitle'),
         category: 'records',
         descriptor: {
           id: 'registry',
@@ -104,8 +158,8 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
         },
         render: () => (
           <Panel
-            title="ОБЪЕКТЫ"
-            eyebrow={`REGISTRY / ${objectPage.total}`}
+            title={translate('objects.registryTitle')}
+            eyebrow={translate('objects.registryEyebrow', { total: objectPage.total })}
             className="objects-registry"
           >
             <div className="ops-filterbar">
@@ -114,62 +168,71 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
                 <TerminalInput
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  aria-label="Поиск объектов"
-                  placeholder="ID / ИМЯ / ПОЗЫВНОЙ / СЕКТОР"
+                  aria-label={translate('objects.searchAriaLabel')}
+                  placeholder={translate('objects.searchPlaceholder')}
                 />
               </label>
               <TerminalSelect
                 value={kind}
                 options={objectKindOptions}
                 onValueChange={setKind}
-                label="Тип объекта"
+                label={translate('objects.kindSelectLabel')}
               />
             </div>
             {objects.length === 0 ? (
-              <EmptyState>СОВПАДЕНИЙ НЕ ОБНАРУЖЕНО</EmptyState>
+              <EmptyState>{translate('objects.noMatches')}</EmptyState>
             ) : (
               <div className="ops-table-wrap">
                 <table className="ops-table">
                   <thead>
                     <tr>
-                      {(
-                        [
-                          ['id', 'ID'],
-                          ['name', 'NAME / CALLSIGN'],
-                        ] as const
-                      ).map(([column, caption]) => (
-                        <th key={column}>
-                          <TerminalButton
-                            onClick={() => {
-                              setDescending(sortKey === column ? !descending : false);
-                              setSortKey(column);
-                            }}
-                          >
-                            {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
-                          </TerminalButton>
-                        </th>
-                      ))}
-                      <th>TYPE</th>
-                      <th>STATUS</th>
-                      <th>SECTOR</th>
-                      {(
-                        [
-                          ['lastSeenAt', 'LAST SEEN'],
-                          ['threat', 'THREAT'],
-                        ] as const
-                      ).map(([column, caption]) => (
-                        <th key={column}>
-                          <TerminalButton
-                            onClick={() => {
-                              setDescending(sortKey === column ? !descending : true);
-                              setSortKey(column);
-                            }}
-                          >
-                            {caption} {sortKey === column ? (descending ? '▼' : '▲') : ''}
-                          </TerminalButton>
-                        </th>
-                      ))}
-                      <th>CASES</th>
+                      <th>
+                        <TerminalButton
+                          onClick={() => {
+                            setDescending(sortKey === 'id' ? !descending : false);
+                            setSortKey('id');
+                          }}
+                        >
+                          ID {sortKey === 'id' ? (descending ? '▼' : '▲') : ''}
+                        </TerminalButton>
+                      </th>
+                      <th>
+                        <TerminalButton
+                          onClick={() => {
+                            setDescending(sortKey === 'name' ? !descending : false);
+                            setSortKey('name');
+                          }}
+                        >
+                          {translate('objects.columnNameCallsign')}{' '}
+                          {sortKey === 'name' ? (descending ? '▼' : '▲') : ''}
+                        </TerminalButton>
+                      </th>
+                      <th>{translate('field.type')}</th>
+                      <th>{translate('field.status')}</th>
+                      <th>{translate('field.sector')}</th>
+                      <th>
+                        <TerminalButton
+                          onClick={() => {
+                            setDescending(sortKey === 'lastSeenAt' ? !descending : true);
+                            setSortKey('lastSeenAt');
+                          }}
+                        >
+                          {translate('field.lastSeen')}{' '}
+                          {sortKey === 'lastSeenAt' ? (descending ? '▼' : '▲') : ''}
+                        </TerminalButton>
+                      </th>
+                      <th>
+                        <TerminalButton
+                          onClick={() => {
+                            setDescending(sortKey === 'threat' ? !descending : true);
+                            setSortKey('threat');
+                          }}
+                        >
+                          {translate('field.threat')}{' '}
+                          {sortKey === 'threat' ? (descending ? '▼' : '▲') : ''}
+                        </TerminalButton>
+                      </th>
+                      <th>{translate('field.cases')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -209,14 +272,18 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
                 </table>
               </div>
             )}
-            <RecordPagination page={objectPage} onPage={goToPage} label="Страницы реестра объектов">
-              <span>SELECTED: {selected?.id ?? '—'}</span>
+            <RecordPagination
+              page={objectPage}
+              onPage={goToPage}
+              label={translate('objects.paginationLabel')}
+            >
+              <span>{translate('registry.selectedFooter', { id: selected?.id ?? '—' })}</span>
             </RecordPagination>
           </Panel>
         ),
       },
       {
-        title: 'КАРТОЧКА ОБЪЕКТА',
+        title: translate('objects.detailTitle'),
         category: 'detail',
         descriptor: {
           id: 'detail',
@@ -231,12 +298,12 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
         },
         render: () => (
           <Panel
-            title="КАРТОЧКА ОБЪЕКТА"
-            eyebrow={selected?.id ?? 'NO OBJECT'}
+            title={translate('objects.detailTitle')}
+            eyebrow={selected?.id ?? translate('objects.noObjectEyebrow')}
             className="object-detail-panel"
           >
             {selected === undefined ? (
-              <EmptyState>ОБЪЕКТ НЕ ВЫБРАН</EmptyState>
+              <EmptyState>{translate('objects.noObjectSelected')}</EmptyState>
             ) : (
               <>
                 <header className="object-detail-header">
@@ -249,36 +316,34 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
                     <StatusBadge status={selected.status} />
                   </div>
                   <b>
-                    THREAT
+                    {translate('field.threat')}
                     <br />
                     <strong>{selected.threat}</strong>
                   </b>
                 </header>
                 <nav className="object-tabs">
-                  {(['summary', 'activity', 'relations', 'files', 'map', 'video'] as const).map(
-                    (value) => (
-                      <TerminalButton
-                        key={value}
-                        className={tab === value ? 'is-active' : ''}
-                        onClick={() => setTab(value)}
-                      >
-                        {value.toUpperCase()}
-                      </TerminalButton>
-                    ),
-                  )}
+                  {objectTabs.map((value) => (
+                    <TerminalButton
+                      key={value}
+                      className={tab === value ? 'is-active' : ''}
+                      onClick={() => setTab(value)}
+                    >
+                      {translate(objectTabLabelIds[value])}
+                    </TerminalButton>
+                  ))}
                 </nav>
                 <ObjectTab tab={tab} objectId={selected.id} />
                 <footer className="object-actions">
                   <TerminalButton onClick={() => router.push('/map')}>
-                    [04] ПОКАЗАТЬ НА КАРТЕ
+                    {translate('objects.showOnMapButton')}
                   </TerminalButton>
                   <TerminalButton onClick={() => router.push('/video')}>
-                    [05] ОТКРЫТЬ ВИДЕО
+                    {translate('objects.openVideoButton')}
                   </TerminalButton>
                   <TerminalButton
                     onClick={() => router.push(`/cases/${selected.linkedCaseIds[0] ?? 'CASE-01'}`)}
                   >
-                    [03] СВЯЗАННОЕ ДЕЛО
+                    {translate('objects.linkedCaseButton')}
                   </TerminalButton>
                 </footer>
               </>
@@ -287,20 +352,38 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
         ),
       },
     ],
-    [descending, goToPage, kind, objectPage, objects, query, router, selected, sortKey, state, tab],
+    [
+      descending,
+      goToPage,
+      kind,
+      objectKindOptions,
+      objectPage,
+      objects,
+      query,
+      router,
+      selected,
+      sortKey,
+      state,
+      tab,
+      translate,
+    ],
   );
 
   return (
     <div className="ops-screen objects-screen">
       <header className="ops-screen__title">
         <div>
-          <span>ENTITIES / NORMALIZED REGISTRY</span>
-          <h1>{detailId === undefined ? 'РЕЕСТР ОБЪЕКТОВ' : `КАРТОЧКА ОБЪЕКТА ${detailId}`}</h1>
+          <span>{translate('objects.headerEyebrow')}</span>
+          <h1>
+            {detailId === undefined
+              ? translate('objects.headerRegistryTitle')
+              : translate('objects.headerDetailTitle', { id: detailId })}
+          </h1>
         </div>
         <div className="object-kind-metrics">
-          {['person', 'vehicle', 'device', 'group'].map((value) => (
-            <TerminalButton key={value} onClick={() => setKind(value as ObjectKindFilter)}>
-              <small>{value.toUpperCase()}</small>
+          {objectKinds.map((value) => (
+            <TerminalButton key={value} onClick={() => setKind(value)}>
+              <small>{translate(objectKindLabelIds[value])}</small>
               <strong>
                 {Object.values(state.objects).filter((object) => object.kind === value).length}
               </strong>
@@ -313,13 +396,8 @@ export function ObjectsScreen({ detailId }: { readonly detailId?: string }) {
   );
 }
 
-function ObjectTab({
-  tab,
-  objectId,
-}: {
-  readonly tab: 'summary' | 'activity' | 'relations' | 'files' | 'map' | 'video';
-  readonly objectId: string;
-}) {
+function ObjectTab({ tab, objectId }: { readonly tab: ObjectTabValue; readonly objectId: string }) {
+  const translate = useTranslate();
   const state = useOperationsStore((value) => value);
   const object = state.objects[objectId];
   if (object === undefined) return null;
@@ -328,53 +406,57 @@ function ObjectTab({
       <div className="object-summary">
         <dl className="ops-definition-list">
           <div>
-            <dt>ID / ПОЗЫВНОЙ</dt>
+            <dt>{translate('objects.idCallsignLabel')}</dt>
             <dd>
               {object.id} / {object.callsign}
             </dd>
           </div>
           <div>
-            <dt>ТИП</dt>
+            <dt>{translate('field.type')}</dt>
             <dd>{object.kind.toUpperCase()}</dd>
           </div>
           <div>
-            <dt>СЕКТОР</dt>
+            <dt>{translate('field.sector')}</dt>
             <dd>{object.sectorId}</dd>
           </div>
           <div>
-            <dt>КООРДИНАТЫ</dt>
+            <dt>{translate('field.coordinates')}</dt>
             <dd>
               {object.position.lat}, {object.position.lng}
             </dd>
           </div>
           <div>
-            <dt>СКОРОСТЬ</dt>
-            <dd>{object.speed} КМ/Ч</dd>
+            <dt>{translate('field.speed')}</dt>
+            <dd>
+              {object.speed} {translate('unit.kmh')}
+            </dd>
           </div>
           <div>
-            <dt>ВЫСОТА</dt>
-            <dd>{object.altitude} М</dd>
+            <dt>{translate('field.altitude')}</dt>
+            <dd>
+              {object.altitude} {translate('unit.m')}
+            </dd>
           </div>
           <div>
-            <dt>КАНАЛ</dt>
+            <dt>{translate('field.channel')}</dt>
             <dd>{object.channelId}</dd>
           </div>
           <div>
-            <dt>ИСТОЧНИК</dt>
+            <dt>{translate('field.source')}</dt>
             <dd>{object.source}</dd>
           </div>
         </dl>
         <section>
-          <h3>СИГНАЛ / УГРОЗА</h3>
+          <h3>{translate('objects.signalThreatHeading')}</h3>
           <ProgressBar
             value={object.signal}
             tone={object.signal < 30 ? 'critical' : 'ok'}
-            label="SIGNAL"
+            label={translate('field.signal')}
           />
           <ProgressBar
             value={object.threat}
             tone={object.threat > 70 ? 'critical' : 'warning'}
-            label="THREAT"
+            label={translate('field.threat')}
           />
         </section>
       </div>
@@ -453,8 +535,12 @@ function ObjectTab({
   return (
     <div className="object-video-preview">
       <div>
-        <span>{camera?.id ?? 'NO CAMERA'}</span>
-        <strong>{camera?.status === 'SIGNAL_LOST' ? 'ПОТЕРЯ СИГНАЛА' : 'LOCAL VIDEO FEED'}</strong>
+        <span>{camera?.id ?? translate('objects.noCameraLabel')}</span>
+        <strong>
+          {camera?.status === 'SIGNAL_LOST'
+            ? translate('objects.signalLostLabel')
+            : translate('objects.localVideoFeedLabel')}
+        </strong>
       </div>
     </div>
   );

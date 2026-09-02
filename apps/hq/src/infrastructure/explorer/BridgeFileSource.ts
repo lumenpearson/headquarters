@@ -1,6 +1,8 @@
-import { createClient, type Client } from '@connectrpc/connect';
+import { Code, ConnectError, createClient, type Client } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
 import {
+  BridgeFailure,
+  BridgeFailureDetailSchema,
   EntryKind,
   FileBridgeService,
   FileEventKind,
@@ -43,6 +45,208 @@ interface BridgeWatcher {
   readonly listener: FileSourceListener;
 }
 
+/**
+ * What the operator is shown a caption for when the bridge refuses.
+ *
+ * Twenty-four members mirror `gremuchaya.bridge.v1.BridgeFailure` one for one;
+ * the remaining five describe the transport rather than a decision the bridge
+ * took. `'unknown'` is the degradation target and must never be removed: a
+ * bridge newer than this build sends codes that are not in this union, and the
+ * alternative to landing on `'unknown'` is landing on `undefined`.
+ */
+export type BridgeErrorCode =
+  // Coded by the bridge.
+  | 'internal'
+  | 'missing-field'
+  | 'path-escapes-mount'
+  | 'symlink-refused'
+  | 'internal-path-hidden'
+  | 'mount-unknown'
+  | 'not-a-directory'
+  | 'not-a-file'
+  | 'entry-not-found'
+  | 'material-import-disabled'
+  | 'material-too-large'
+  | 'material-name-unsafe'
+  | 'material-chunk-rejected'
+  | 'material-upload-incomplete'
+  | 'material-hash-mismatch'
+  | 'material-session-not-found'
+  | 'material-not-found'
+  | 'material-record-unreadable'
+  | 'material-mount-unavailable'
+  | 'playback-unsupported-media'
+  | 'playback-capacity-reached'
+  | 'playback-unavailable'
+  | 'material-request-invalid'
+  | 'path-rejected'
+  // Read off the transport, for failures the bridge never decided.
+  | 'canceled'
+  | 'deadline-exceeded'
+  | 'unavailable'
+  | 'unimplemented'
+  | 'unknown';
+
+/**
+ * The coarse grouping, for a caller that has to branch rather than caption.
+ *
+ * Named to match `ControlPlaneErrorKind` so the two adapters read the same way,
+ * even though the bridge's callers use far less of it: nothing in the explorer
+ * retries or re-authenticates, so today this only separates "the bridge is not
+ * there" from "the bridge said no".
+ */
+export type BridgeErrorKind =
+  | 'permission-denied'
+  | 'not-found'
+  | 'invalid-argument'
+  | 'failed-precondition'
+  | 'unavailable'
+  | 'unknown';
+
+/** Total over the code union, so a code added without a kind fails to compile. */
+const bridgeErrorKinds: Readonly<Record<BridgeErrorCode, BridgeErrorKind>> = {
+  internal: 'unknown',
+  'missing-field': 'invalid-argument',
+  'path-escapes-mount': 'permission-denied',
+  'symlink-refused': 'permission-denied',
+  'internal-path-hidden': 'permission-denied',
+  'mount-unknown': 'not-found',
+  'not-a-directory': 'invalid-argument',
+  'not-a-file': 'invalid-argument',
+  'entry-not-found': 'not-found',
+  'material-import-disabled': 'failed-precondition',
+  'material-too-large': 'invalid-argument',
+  'material-name-unsafe': 'invalid-argument',
+  'material-chunk-rejected': 'invalid-argument',
+  'material-upload-incomplete': 'failed-precondition',
+  'material-hash-mismatch': 'invalid-argument',
+  'material-session-not-found': 'not-found',
+  'material-not-found': 'not-found',
+  'material-record-unreadable': 'failed-precondition',
+  'material-mount-unavailable': 'failed-precondition',
+  'playback-unsupported-media': 'invalid-argument',
+  'playback-capacity-reached': 'failed-precondition',
+  'playback-unavailable': 'failed-precondition',
+  'material-request-invalid': 'invalid-argument',
+  'path-rejected': 'permission-denied',
+  canceled: 'unavailable',
+  'deadline-exceeded': 'unavailable',
+  unavailable: 'unavailable',
+  unimplemented: 'unknown',
+  unknown: 'unknown',
+};
+
+/** What each wire code is called on this side. Total over `BridgeFailure`. */
+const wireFailureCodes: Readonly<
+  Record<Exclude<BridgeFailure, BridgeFailure.UNSPECIFIED>, BridgeErrorCode>
+> = {
+  [BridgeFailure.INTERNAL]: 'internal',
+  [BridgeFailure.MISSING_FIELD]: 'missing-field',
+  [BridgeFailure.PATH_ESCAPES_MOUNT]: 'path-escapes-mount',
+  [BridgeFailure.SYMLINK_REFUSED]: 'symlink-refused',
+  [BridgeFailure.INTERNAL_PATH_HIDDEN]: 'internal-path-hidden',
+  [BridgeFailure.MOUNT_UNKNOWN]: 'mount-unknown',
+  [BridgeFailure.NOT_A_DIRECTORY]: 'not-a-directory',
+  [BridgeFailure.NOT_A_FILE]: 'not-a-file',
+  [BridgeFailure.ENTRY_NOT_FOUND]: 'entry-not-found',
+  [BridgeFailure.MATERIAL_IMPORT_DISABLED]: 'material-import-disabled',
+  [BridgeFailure.MATERIAL_TOO_LARGE]: 'material-too-large',
+  [BridgeFailure.MATERIAL_NAME_UNSAFE]: 'material-name-unsafe',
+  [BridgeFailure.MATERIAL_CHUNK_REJECTED]: 'material-chunk-rejected',
+  [BridgeFailure.MATERIAL_UPLOAD_INCOMPLETE]: 'material-upload-incomplete',
+  [BridgeFailure.MATERIAL_HASH_MISMATCH]: 'material-hash-mismatch',
+  [BridgeFailure.MATERIAL_SESSION_NOT_FOUND]: 'material-session-not-found',
+  [BridgeFailure.MATERIAL_NOT_FOUND]: 'material-not-found',
+  [BridgeFailure.MATERIAL_RECORD_UNREADABLE]: 'material-record-unreadable',
+  [BridgeFailure.MATERIAL_MOUNT_UNAVAILABLE]: 'material-mount-unavailable',
+  [BridgeFailure.PLAYBACK_UNSUPPORTED_MEDIA]: 'playback-unsupported-media',
+  [BridgeFailure.PLAYBACK_CAPACITY_REACHED]: 'playback-capacity-reached',
+  [BridgeFailure.PLAYBACK_UNAVAILABLE]: 'playback-unavailable',
+  [BridgeFailure.MATERIAL_REQUEST_INVALID]: 'material-request-invalid',
+  [BridgeFailure.PATH_REJECTED]: 'path-rejected',
+};
+
+/**
+ * A `Map` rather than an index into the record above, because a lookup by a
+ * number this build has never seen must answer `undefined` and not throw.
+ */
+const wireFailureCodesByValue = new Map<number, BridgeErrorCode>(
+  Object.entries(wireFailureCodes).map(([value, code]) => [Number(value), code]),
+);
+
+/** What a transport status means when the bridge attached no code. */
+const transportFailureCodes: Readonly<Record<Code, BridgeErrorCode>> = {
+  [Code.Canceled]: 'canceled',
+  [Code.Unknown]: 'unknown',
+  [Code.InvalidArgument]: 'missing-field',
+  [Code.DeadlineExceeded]: 'deadline-exceeded',
+  [Code.NotFound]: 'entry-not-found',
+  [Code.AlreadyExists]: 'unknown',
+  [Code.PermissionDenied]: 'path-escapes-mount',
+  [Code.ResourceExhausted]: 'playback-capacity-reached',
+  [Code.FailedPrecondition]: 'unknown',
+  [Code.Aborted]: 'unknown',
+  [Code.OutOfRange]: 'unknown',
+  [Code.Unimplemented]: 'unimplemented',
+  [Code.Internal]: 'internal',
+  [Code.Unavailable]: 'unavailable',
+  [Code.DataLoss]: 'internal',
+  [Code.Unauthenticated]: 'unknown',
+};
+
+/**
+ * A bridge refusal as this application reasons about it.
+ *
+ * `message` is developer-facing English from the bridge and is not for display:
+ * it belongs in the diagnostics copy, it has no translation, and the caption an
+ * operator reads is chosen by `code`. `FilesScreen.messageFromBridgeError`
+ * currently prints it, which is what a later wave replaces with a catalogue
+ * lookup on `code`.
+ */
+export class BridgeFileError extends Error {
+  readonly kind: BridgeErrorKind;
+
+  constructor(
+    readonly code: BridgeErrorCode,
+    message: string,
+    options?: { readonly cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = 'BridgeFileError';
+    this.kind = bridgeErrorKinds[code];
+  }
+}
+
+/**
+ * Turns anything a bridge call throws into a coded failure.
+ *
+ * Exported because `BridgeMaterialClient` makes the other half of this
+ * application's bridge calls and needs exactly this classification; it is
+ * declared here, beside the vocabulary, rather than duplicated there.
+ *
+ * Nothing in here may throw. It runs while an error is already being handled,
+ * on a path that ends at a screen an operator is watching during a take.
+ * `findDetails` drops a detail it cannot decode rather than raising, an
+ * unrecognised code number misses the map and falls through, and the transport
+ * table is backed by `?? 'unknown'` for a status outside `Code`.
+ */
+export function toBridgeFileError(error: unknown): BridgeFileError {
+  if (error instanceof BridgeFileError) return error;
+  if (error instanceof ConnectError) {
+    const [detail] = error.findDetails(BridgeFailureDetailSchema);
+    const declared = detail === undefined ? undefined : wireFailureCodesByValue.get(detail.code);
+    const code = declared ?? transportFailureCodes[error.code] ?? 'unknown';
+    return new BridgeFileError(code, error.rawMessage, { cause: error });
+  }
+  // A fetch that never reached the loopback port arrives as a plain error, which
+  // is the ordinary state of a bridge that is not running.
+  return new BridgeFileError(
+    'unavailable',
+    error instanceof Error ? error.message : 'File bridge unreachable.',
+    { cause: error },
+  );
+}
+
 export class BridgeFileSource implements FileSourcePort {
   readonly id = 'file-bridge';
   readonly label = 'GRPC FILE BRIDGE';
@@ -69,13 +273,12 @@ export class BridgeFileSource implements FileSourcePort {
   }
 
   async health(signal?: AbortSignal) {
-    return this.#client.health({}, signal === undefined ? {} : { signal });
+    return call(() => this.#client.health({}, signal === undefined ? {} : { signal }));
   }
 
   async list(path: VirtualPath, signal?: AbortSignal): Promise<readonly ExplorerNode[]> {
-    const response = await this.#client.list(
-      { mountId: this.mountId, path },
-      signal === undefined ? {} : { signal },
+    const response = await call(() =>
+      this.#client.list({ mountId: this.mountId, path }, signal === undefined ? {} : { signal }),
     );
     return response.entries.map((entry): ExplorerNode => {
       const virtualPath = createVirtualPath(entry.path);
@@ -120,13 +323,19 @@ export class BridgeFileSource implements FileSourcePort {
 
   async read(path: VirtualPath, signal?: AbortSignal): Promise<ReadableFile> {
     const node = this.#files.get(path);
-    if (node === undefined) throw new Error(`Bridge file was not listed: ${path}`);
+    if (node === undefined) {
+      throw new BridgeFileError('entry-not-found', `Bridge file was not listed: ${path}`);
+    }
     const chunks: Uint8Array[] = [];
     let totalLength = 0;
-    for await (const chunk of this.#client.readFile(
+    // The stream is coded chunk by chunk: a `ReadFile` that fails after its
+    // first message rejects here, not at the call, so a `try` around the call
+    // alone would let the raw refusal through.
+    const stream = this.#client.readFile(
       { mountId: this.mountId, path: createVirtualPath(path) },
       signal === undefined ? {} : { signal },
-    )) {
+    );
+    for await (const chunk of coded(stream)) {
       chunks.push(chunk.data);
       totalLength += chunk.data.byteLength;
     }
@@ -248,6 +457,22 @@ export class BridgeFileSource implements FileSourcePort {
     const path = toVirtualPath(response.path);
     if (path === null || !isWithin(watched, path)) return null;
     return { type, sourceId: this.id, path };
+  }
+}
+
+async function call<Value>(operation: () => Promise<Value>): Promise<Value> {
+  try {
+    return await operation();
+  } catch (error: unknown) {
+    throw toBridgeFileError(error);
+  }
+}
+
+async function* coded<Value>(stream: AsyncIterable<Value>): AsyncIterable<Value> {
+  try {
+    yield* stream;
+  } catch (error: unknown) {
+    throw toBridgeFileError(error);
   }
 }
 

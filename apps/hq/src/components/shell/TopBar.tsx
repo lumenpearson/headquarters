@@ -15,7 +15,16 @@ export function TopBar() {
   const clockMode = useAppStore((state) => state.operator.clockMode);
   const sceneId = useAppStore((state) => state.scene.activeSceneId);
   const preload = useAppStore((state) => state.scene.preload);
+  const screensById = useAppStore((state) => state.screens.byId);
   const [clock, setClock] = useState(fixedTime);
+
+  // FREEZE and BLACKOUT are one-way from this bar by shoot-day rule (see
+  // docs/release/runbook.md: "обратной кнопки нет, единственный выход — RESET"),
+  // so the buttons stay in place and instead reflect whether either state is
+  // currently active anywhere in the scene, rather than offering a toggle.
+  const screenStates = Object.values(screensById);
+  const isFrozen = screenStates.some((screen) => screen.frozen);
+  const isBlackedOut = screenStates.some((screen) => screen.blackout);
 
   useEffect(() => {
     if (clockMode !== 'real') return;
@@ -58,14 +67,18 @@ export function TopBar() {
         </span>
         <TerminalButton
           tone="quiet"
-          className="quiet-button"
+          className={isFrozen ? 'quiet-button is-active' : 'quiet-button'}
+          aria-pressed={isFrozen}
+          title={isFrozen ? 'FREEZE активен — выход через RESET' : undefined}
           onClick={() => controller?.sceneService.applyFreeze(true)}
         >
           FREEZE
         </TerminalButton>
         <TerminalButton
           tone="critical"
-          className="danger-button"
+          className={isBlackedOut ? 'danger-button is-active' : 'danger-button'}
+          aria-pressed={isBlackedOut}
+          title={isBlackedOut ? 'BLACKOUT активен — выход через RESET' : undefined}
           onClick={() => controller?.sceneService.applyEmergencyBlackout(true)}
         >
           BLACKOUT

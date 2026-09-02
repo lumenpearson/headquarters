@@ -685,7 +685,7 @@ describeIntegration('durable settings storage against real PostgreSQL', () => {
         }),
       ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'PERMISSION_DENIED' });
       await expect(
-        store.listHistory({ actor: stranger.actor, scope: foreignScope, pageSize: 10 }),
+        store.listHistory({ actor: stranger.actor, scope: foreignScope, pageSize: 10, cursor: '' }),
       ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'PERMISSION_DENIED' });
       await expect(
         store.pollChanges({ actor: stranger.actor, scope: foreignScope, afterRevision: 0n }),

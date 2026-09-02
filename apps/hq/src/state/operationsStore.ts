@@ -68,7 +68,10 @@ import {
   type ControlPlaneLinkState,
 } from '../application/sync/connection';
 import { withLinkPatch, withLinksIdle } from '../application/sync/controlPlaneLinks';
-import { publishGroupSettings } from '../application/sync/groupSettingsBus';
+import {
+  publishGroupSettings,
+  publishGroupSettingsReset,
+} from '../application/sync/groupSettingsBus';
 import { publishLiveEdit } from '../infrastructure/browser/LiveEditBus';
 import { operationsSeed } from '../data/operationsSeed';
 import {
@@ -171,6 +174,14 @@ interface OperationsUiState {
   readonly analyticsFilter: string;
   readonly navCompact: boolean;
   readonly productionPanelOpen: boolean;
+  /**
+   * True once {@link StartupSequence} has finished its readout for this
+   * process launch (or plays none at all). Gates the first-launch keybind
+   * intro (R11) so it never paints over the boot readout -- a process-scoped
+   * signal, not a preference, so it is reset on hydrate and pinned against
+   * `advanced.worldSync` the same way `productionPanelOpen`/`drawer` are.
+   */
+  readonly startupComplete: boolean;
 }
 
 /**
@@ -189,6 +200,16 @@ interface EditModeState {
   /** Empty string rather than undefined, matching the other selections here. */
   readonly selectedElementId: string;
   readonly dockEdge: EditDockEdge;
+  /**
+   * Whether the floating panel shows its full body (nav, settings, content
+   * editor, footer) or only its compact button row. Lives here rather than as
+   * a `useState` in `EditPanel` so that selecting an element on screen can
+   * expand it as one store transition -- see `selectEditElement` -- instead
+   * of a component-local reaction to a prop change. Collapsed by default:
+   * `enterEditMode` always resets it to `false`, matching the panel's own
+   * unpersisted, session-scoped defaults below.
+   */
+  readonly panelExpanded: boolean;
 }
 
 export type EditDockEdge = 'left' | 'right' | 'top' | 'bottom';
@@ -404,6 +425,7 @@ export interface OperationsState {
   readonly setAnalyticsFilter: (filter: string) => void;
   readonly toggleNavCompact: () => void;
   readonly toggleProductionPanel: (force?: boolean) => void;
+  readonly markStartupComplete: () => void;
   readonly setProductionOption: <Key extends keyof Omit<ProductionState, 'snapshots'>>(
     key: Key,
     value: ProductionState[Key],
@@ -415,6 +437,7 @@ export interface OperationsState {
   readonly exitEditMode: () => void;
   readonly selectEditElement: (id: string) => void;
   readonly dockEditPanel: (edge: EditDockEdge) => void;
+  readonly setEditPanelExpanded: (expanded: boolean) => void;
   readonly applyContentPatch: (patches: readonly ContentPatch[]) => void;
   readonly resetContentEdits: () => void;
   readonly applySettingsPatch: (patches: readonly SettingsPatch[]) => void;
@@ -584,6 +607,7 @@ function createBaseState() {
       analyticsFilter: 'all',
       navCompact: false,
       productionPanelOpen: false,
+      startupComplete: false,
     },
     materials: { imported: {} as Readonly<Record<string, ImportedMaterial>> },
     production: {
@@ -613,6 +637,7 @@ function createBaseState() {
       // createBaseState has no declared return type, so a bare literal widens
       // to string and stops satisfying EditDockEdge.
       dockEdge: 'right' as const,
+      panelExpanded: false,
     },
     content: { overrides: {} as ContentOverrides },
     connection: initialConnectionState,
@@ -732,6 +757,51 @@ function contentTransition(
   };
 }
 
+/** Every key one side of a content checkpoint holds and the other disagrees about. */
+function contentOverrideChangedIds(record: ContentHistoryCheckpoint): readonly string[] {
+  const keys = new Set([...Object.keys(record.before), ...Object.keys(record.after)]);
+  return [...keys].filter((key) => record.before[key] !== record.after[key]);
+}
+
+/**
+ * Moves the content overrides to `candidate` the way `contentTransition` does,
+ * and -- unlike it -- records the move in the local ledger as its own
+ * reversible entry when it actually changed something.
+ *
+ * This is what `advanced.worldSync`'s receiver calls instead of
+ * `contentTransition` directly (R4 tail). A peer's content snapshot used to
+ * replace this session's `content.overrides` outright with no ledger entry at
+ * all, so a local undo afterward popped whatever this session's own history
+ * held -- silently discarding the neighbor's edit, which was never in that
+ * history to begin with. Landing the move through the ledger, the way
+ * `applyContentPatch` already does for a local edit, makes the neighbor's edit
+ * the most recent entry: undo reverts it specifically, rather than reaching
+ * past it for an entry that predates it.
+ */
+function remoteContentTransition(
+  state: OperationsState,
+  candidate: unknown,
+): Partial<OperationsState> {
+  const content = contentTransition(state, candidate);
+  const changedIds = contentOverrideChangedIds(content.record);
+  if (changedIds.length === 0) return content.patch;
+  const checkpoint = createSettingsDraftCheckpoint(state.personalization.draft);
+  const personalization = appendSettingsHistory(
+    state.personalization,
+    {
+      ...settingsMetadata('SET-HISTORY'),
+      operation: 'patch',
+      category: 'information',
+      changedIds,
+      before: checkpoint,
+      after: checkpoint,
+      content: content.record,
+    },
+    { reversible: true },
+  );
+  return { ...content.patch, personalization };
+}
+
 export const operationsStore = createStore<OperationsState>()((set, get) => ({
   ...createBaseState(),
   setRoute: (route) => set((state) => ({ ui: { ...state.ui, route } })),
@@ -833,6 +903,10 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     set((state) => ({
       ui: { ...state.ui, productionPanelOpen: force ?? !state.ui.productionPanelOpen },
     })),
+  markStartupComplete: () =>
+    set((state) =>
+      state.ui.startupComplete ? state : { ui: { ...state.ui, startupComplete: true } },
+    ),
   setProductionOption: (key, value) =>
     set((state) => ({ production: { ...state.production, [key]: value } })),
   applyPreset: (preset) =>
@@ -903,18 +977,36 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         audit: [auditEntry('ВОССТАНОВЛЕНО СОСТОЯНИЕ СЦЕНЫ', id), ...state.audit].slice(0, 100),
       };
     }),
-  enterEditMode: () => set((state) => ({ edit: { ...state.edit, active: true } })),
+  enterEditMode: () =>
+    // Collapsed every time, regardless of how the panel was left before: a
+    // reopened session starts as a pill, the same way it starts on `right`
+    // and with no selection.
+    set((state) => ({ edit: { ...state.edit, active: true, panelExpanded: false } })),
 
   exitEditMode: () =>
     // The selection belongs to one editing pass and is dropped with it. The
     // dock edge is where the operator parked the panel, so it survives.
     set((state) => ({ edit: { ...state.edit, active: false, selectedElementId: '' } })),
 
-  selectEditElement: (id) => set((state) => ({ edit: { ...state.edit, selectedElementId: id } })),
+  selectEditElement: (id) =>
+    set((state) => ({
+      edit: {
+        ...state.edit,
+        selectedElementId: id,
+        // Pointing at a value on screen is a request to edit it; a collapsed
+        // pill answering that with nothing would make the selection look
+        // ignored. Deselecting (`id === ''`) leaves the panel exactly where
+        // the operator put it rather than collapsing it back.
+        panelExpanded: id === '' ? state.edit.panelExpanded : true,
+      },
+    })),
 
   dockEditPanel: (edge) => set((state) => ({ edit: { ...state.edit, dockEdge: edge } })),
 
-  applyContentPatch: (patches) =>
+  setEditPanelExpanded: (expanded) =>
+    set((state) => ({ edit: { ...state.edit, panelExpanded: expanded } })),
+
+  applyContentPatch: (patches) => {
     set((state) => {
       // Throws for an unknown field, an unseeded entity or a refused value,
       // as applyDraftPatch does for a setting; the updater then never returns
@@ -948,7 +1040,16 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
           100,
         ),
       };
-    }),
+    });
+    // R4/R27: the same door a setting patch leaves by. Outside `set` for the
+    // same reason `applySettingsPatch` publishes outside its own -- sending is
+    // an effect, and a patch `patchContentOverrides` refused (thrown, above)
+    // is never announced as applied. `publishLiveEdit` itself no-ops without
+    // a connected transport, so a local-only session makes no call, and the
+    // `applyingRemote` bracket in `connectLiveEdit` keeps a patch just
+    // received from being echoed straight back onto the wire it arrived on.
+    publishLiveEdit({ kind: 'content', patches });
+  },
 
   resetContentEdits: () =>
     set((state) => {
@@ -1007,7 +1108,7 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     // decides whether anything travels is `advanced.liveEdit`, read by
     // `EditModeRuntime`, which connects a transport only while the group has
     // enabled it; with nothing connected this call does nothing at all.
-    publishLiveEdit(patches);
+    publishLiveEdit({ kind: 'settings', patches });
     // R6, the group half: a group-scoped change is also what the group agreed,
     // and `SettingsService` is where that is recorded. `publishGroupSettings`
     // filters to the definitions whose `scope` says `group` -- derived from
@@ -1017,7 +1118,8 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
     // client makes no call.
     publishGroupSettings(patches);
   },
-  resetSettingsCategory: (category) =>
+  resetSettingsCategory: (category) => {
+    let resetIds: readonly string[] = [];
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
       const draft = resetDraftCategory(
@@ -1025,13 +1127,14 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         category,
         settingsMetadata('SET-CATEGORY-RESET'),
       );
+      resetIds = draft.history.at(-1)?.changedIds ?? [];
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
           ...settingsMetadata('SET-HISTORY'),
           operation: 'reset-category',
           category,
-          changedIds: draft.history.at(-1)?.changedIds ?? [],
+          changedIds: resetIds,
           before,
           after: createSettingsDraftCheckpoint(draft),
         },
@@ -1041,17 +1144,25 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         personalization,
         audit: [auditEntry('СБРОШЕНА КАТЕГОРИЯ НАСТРОЕК', category), ...state.audit].slice(0, 100),
       };
-    }),
-  resetAllSettings: () =>
+    });
+    // R6, the group half: mirrors `applySettingsPatch`, outside `set` for the
+    // same reason. `publishGroupSettingsReset` -- not `publishGroupSettings`
+    // -- because this is a reset and not a patch; see
+    // `GroupSettingsSync.publishGroupResets` for why the two RPCs differ.
+    publishGroupSettingsReset(resetIds);
+  },
+  resetAllSettings: () => {
+    let resetIds: readonly string[] = [];
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
       const draft = resetDraftAll(state.personalization.draft, settingsMetadata('SET-ALL-RESET'));
+      resetIds = draft.history.at(-1)?.changedIds ?? [];
       const personalization = appendSettingsHistory(
         { ...state.personalization, draft },
         {
           ...settingsMetadata('SET-HISTORY'),
           operation: 'reset-all',
-          changedIds: draft.history.at(-1)?.changedIds ?? [],
+          changedIds: resetIds,
           before,
           after: createSettingsDraftCheckpoint(draft),
         },
@@ -1061,7 +1172,10 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
         personalization,
         audit: [auditEntry('СБРОШЕН ВЕСЬ ЧЕРНОВИК НАСТРОЕК', 'ALL'), ...state.audit].slice(0, 100),
       };
-    }),
+    });
+    // R6, the group half: see `resetSettingsCategory` above.
+    publishGroupSettingsReset(resetIds);
+  },
   discardSettingsDraft: () =>
     set((state) => {
       const before = createSettingsDraftCheckpoint(state.personalization.draft);
@@ -1318,14 +1432,25 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
 
       const nodes = Object.values(state.systemNodes);
       const links = Object.values(state.channels);
+      const sensors = Object.values(state.sensors);
+      const cameras = Object.values(state.cameras);
       /*
        * How far apart two consecutive samples of one series sit in the noise
        * generator's index space. Every series scatters from the one seed, so
        * without an ordinal of its own each would take the same offset at the
-       * same step and the whole world would move in lockstep. The two spare
-       * ordinals at the end belong to the tracked object's two axes.
+       * same step and the whole world would move in lockstep. A link now
+       * takes four ordinals (load, latency, signal, packet loss) rather than
+       * three, and a sensor and a camera each take the one their own signal
+       * channel reads. The two spare ordinals at the end belong to the
+       * tracked object's two axes.
        */
-      const stride = sessionMetricNames.length + nodes.length * 2 + links.length * 3 + 2;
+      const stride =
+        sessionMetricNames.length +
+        nodes.length * 2 +
+        links.length * 4 +
+        sensors.length +
+        cameras.length +
+        2;
       let ordinal = 0;
       /*
        * One reading, and the next ordinal. Rounded to whole units because every
@@ -1373,7 +1498,20 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
             load: read('link-load', channel.load).value,
             latency: read('link-latency', channel.latency).value,
             signal: read('link-signal', channel.signal).value,
+            packetLoss: read('packet-loss', channel.packetLoss).value,
           },
+        ]),
+      );
+      const sensorReadings = Object.fromEntries(
+        sensors.map((sensor) => [
+          sensor.id,
+          { ...sensor, signal: read('sensor-signal', sensor.signal).value },
+        ]),
+      );
+      const cameraReadings = Object.fromEntries(
+        cameras.map((camera) => [
+          camera.id,
+          { ...camera, signal: read('camera-signal', camera.signal).value },
         ]),
       );
 
@@ -1433,6 +1571,8 @@ export const operationsStore = createStore<OperationsState>()((set, get) => ({
       return {
         systemNodes,
         channels,
+        sensors: sensorReadings,
+        cameras: cameraReadings,
         objects,
         events:
           generatedEvent === null ? state.events : [generatedEvent, ...state.events].slice(0, 160),
@@ -1630,7 +1770,16 @@ function hydratePersistedState(): void {
         'startup.restoreWorld',
       );
       operationsStore.setState((state) => ({
-        ui: { ...state.ui, ...parsed.ui, productionPanelOpen: false, drawer: null },
+        ui: {
+          ...state.ui,
+          ...parsed.ui,
+          productionPanelOpen: false,
+          drawer: null,
+          // Process-scoped, like the two fields above: a launch that restores
+          // the world must still play its own startup sequence and gate its
+          // own keybind intro, not inherit "already finished" from the blob.
+          startupComplete: false,
+        },
         production: { ...state.production, ...parsed.production },
         alerts: restoreWorld ? (parsed.alerts ?? state.alerts) : state.alerts,
         tasks: restoreWorld ? (parsed.tasks ?? state.tasks) : state.tasks,
@@ -1714,6 +1863,9 @@ export function initializeOperationsClient(): () => void {
           ...remoteUi,
           productionPanelOpen: state.ui.productionPanelOpen,
           drawer: state.ui.drawer,
+          // This window's own startup sequence and keybind-intro gate, not a
+          // fact about the peer's window: see the hydrate reset above.
+          startupComplete: state.ui.startupComplete,
         },
         production: { ...state.production, ...event.data.production },
         alerts: event.data.alerts,
@@ -1737,9 +1889,17 @@ export function initializeOperationsClient(): () => void {
         // build -- and the erasure was then written to storage by the
         // subscriber below. An explicit `{ overrides: {} }` still clears: a
         // peer that reset its content said so, where an omission says nothing.
+        //
+        // `remoteContentTransition` rather than `contentTransition` directly
+        // (R4 tail, corrections register): the plain transition replaced the
+        // whole overrides record with no trace in this session's own ledger,
+        // so a local undo right after had nothing of the neighbor's edit to
+        // pop and reached past it into this session's own history instead.
+        // The remote move is now its own reversible entry, landed the same
+        // way a local content patch already is.
         ...(event.data.content === undefined
           ? {}
-          : contentTransition(state, event.data.content.overrides).patch),
+          : remoteContentTransition(state, event.data.content.overrides)),
         // Personalization is deliberately not taken from the world snapshot.
         // `advanced.liveEdit` is the opt-in that decides whether a settings
         // change reaches the other sessions, and it defaults to off — but this

@@ -8,6 +8,7 @@ import type {
   GroupSettingsHistoryPage,
   GroupSettingsOperation,
   GroupSettingsPort,
+  GroupSettingsWatchEvent,
 } from './groupSettingsPort';
 import { groupScopedSettingIds, GroupSettingsSync, toGroupOperations } from './GroupSettingsSync';
 import type { GroupMirror, GroupMirrorOutcome, GroupMirrorPort } from './localMirror';
@@ -22,14 +23,21 @@ import type { GroupMirror, GroupMirrorOutcome, GroupMirrorPort } from './localMi
  */
 class FakeGroupSettings implements GroupSettingsPort {
   readonly applied: (readonly GroupSettingsOperation[])[] = [];
+  readonly resets: string[] = [];
   publishes = 0;
   readError: unknown = null;
   writeError: unknown = null;
+  resetError: unknown = null;
   document: GroupSettingsDocument = {
     revision: 4,
     values: {},
     updatedAt: '2026-08-26T09:00:00.000Z',
   };
+  /** What `watchSettings` yields, one array of events per call it receives. */
+  watchTicks: (readonly GroupSettingsWatchEvent[])[] = [];
+  /** Thrown after the last configured tick is exhausted, if set. */
+  watchError: unknown = null;
+  readonly watchedFrom: number[] = [];
 
   async getEffectiveSettings(): Promise<GroupSettingsDocument> {
     if (this.readError !== null) throw this.readError;
@@ -50,12 +58,24 @@ class FakeGroupSettings implements GroupSettingsPort {
     return this.document;
   }
 
-  async resetGroupElement(): Promise<GroupSettingsDocument> {
+  async resetGroupElement(elementId: string): Promise<GroupSettingsDocument> {
+    if (this.resetError !== null) throw this.resetError;
+    this.resets.push(elementId);
     return this.document;
   }
 
   async listGroupHistory(): Promise<GroupSettingsHistoryPage> {
     return { entries: [], nextCursor: '', hasMore: false };
+  }
+
+  async *watchSettings(afterRevision: number): AsyncIterable<GroupSettingsWatchEvent> {
+    this.watchedFrom.push(afterRevision);
+    const tick = this.watchTicks.shift();
+    if (tick === undefined) {
+      if (this.watchError !== null) throw this.watchError;
+      return;
+    }
+    for (const event of tick) yield event;
   }
 }
 
@@ -288,6 +308,121 @@ describe('GroupSettingsSync publication', () => {
 
     expect(await test.service.adoptGroupSettings()).toEqual([]);
     expect(test.failures).toEqual([]);
+  });
+});
+
+describe('GroupSettingsSync.publishGroupResets', () => {
+  it('resets each group-scoped id through ResetElement and skips a device-scoped one', async () => {
+    const port = new FakeGroupSettings();
+    const test = sync(port);
+
+    const published = await test.service.publishGroupResets([
+      'telemetry.source',
+      'layout.density',
+      'simulation.preset',
+    ]);
+
+    expect(published).toBe(true);
+    // Order preserved, and never as a value written through `applyGroupDraftPatch`:
+    // a reset forgets the group's override rather than republishing a default.
+    expect(port.resets).toEqual(['telemetry.source', 'simulation.preset']);
+    expect(port.applied).toEqual([]);
+  });
+
+  it('makes no call for ids that are all device-scoped', async () => {
+    const port = new FakeGroupSettings();
+    const test = sync(port);
+
+    expect(await test.service.publishGroupResets(['layout.density'])).toBe(false);
+    expect(port.resets).toEqual([]);
+  });
+
+  it('reports a control plane without a settings store rather than retrying', async () => {
+    const port = new FakeGroupSettings();
+    port.resetError = new ControlPlaneError('unimplemented', 'no settings store');
+    const test = sync(port);
+
+    expect(await test.service.publishGroupResets(['telemetry.source'])).toBe(false);
+    expect(test.failures).toEqual([
+      'CONTROL PLANE БЕЗ ХРАНИЛИЩА НАСТРОЕК — ГРУППОВЫЕ ЗНАЧЕНИЯ НЕДОСТУПНЫ',
+    ]);
+  });
+});
+
+describe('GroupSettingsSync.watchGroupSettings', () => {
+  /**
+   * A `schedule` that never actually waits: it resolves the reconnect delay
+   * on the same tick, so the loop runs to the abort this fake also triggers
+   * instead of a test waiting on real backoff timers.
+   */
+  function immediateSchedule(onCall: (attempt: number) => void) {
+    let calls = 0;
+    return (callback: () => void): (() => void) => {
+      calls += 1;
+      onCall(calls);
+      callback();
+      return () => undefined;
+    };
+  }
+
+  it('adopts the group value for every event the stream yields', async () => {
+    const port = new FakeGroupSettings();
+    port.document = { revision: 5, values: { 'telemetry.source': 'native' }, updatedAt: '' };
+    port.watchTicks = [[{ revision: 5 }]];
+    const draft: Record<string, SettingValue> = { 'telemetry.source': 'simulation' };
+    const applied: (readonly SettingsPatch[])[] = [];
+    const controller = new AbortController();
+    const service = new GroupSettingsSync({
+      port,
+      apply: (patches) => {
+        applied.push(patches);
+        for (const patch of patches) draft[patch.id] = patch.value as SettingValue;
+      },
+      readDraftValue: (id) => draft[id],
+      // Aborted from inside the reconnect wait that follows the one tick
+      // configured above, so the loop makes exactly one pass.
+      schedule: immediateSchedule(() => controller.abort()),
+    });
+
+    await service.watchGroupSettings(controller.signal);
+
+    expect(applied).toEqual([[{ id: 'telemetry.source', value: 'native' }]]);
+    expect(port.watchedFrom).toEqual([0]);
+  });
+
+  it('resumes a reconnect from the highest revision the dropped stream reached', async () => {
+    const port = new FakeGroupSettings();
+    port.watchTicks = [[{ revision: 7 }, { revision: 9 }]];
+    const controller = new AbortController();
+    const service = new GroupSettingsSync({
+      port,
+      apply: () => undefined,
+      readDraftValue: () => undefined,
+      // The first reconnect wait (after the configured tick ends) is let
+      // through; the second (after the now-empty second connection) aborts.
+      schedule: immediateSchedule((attempt) => {
+        if (attempt >= 2) controller.abort();
+      }),
+    });
+
+    await service.watchGroupSettings(controller.signal);
+
+    expect(port.watchedFrom).toEqual([0, 9]);
+  });
+
+  it('retries after the stream throws instead of rejecting the caller', async () => {
+    const port = new FakeGroupSettings();
+    port.watchError = new Error('stream reset');
+    const controller = new AbortController();
+    const service = new GroupSettingsSync({
+      port,
+      apply: () => undefined,
+      readDraftValue: () => undefined,
+      schedule: immediateSchedule(() => controller.abort()),
+    });
+
+    await expect(service.watchGroupSettings(controller.signal)).resolves.toBeUndefined();
+    expect(port.watchedFrom).toEqual([0]);
   });
 });
 

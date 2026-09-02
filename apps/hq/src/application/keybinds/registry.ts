@@ -127,6 +127,17 @@ export const keybindRegistry: readonly Keybind[] = [
     preventsDefault: true,
   },
   {
+    // Dragging picks an edge directly, by where the pointer left the window;
+    // the keybind has no equivalent gesture, so it cycles the same four edges
+    // instead -- see `EditPanelDock.nextDockEdge`.
+    id: 'edit.dockPanel',
+    chord: { code: 'ArrowRight', ctrl: true, shift: true },
+    category: 'editing',
+    descriptionId: 'keybind.edit.dockPanel',
+    whileTyping: false,
+    preventsDefault: true,
+  },
+  {
     id: 'keybinds.list',
     chord: { code: 'Slash', ctrl: true },
     category: 'operation',

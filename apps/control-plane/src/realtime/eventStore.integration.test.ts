@@ -10,6 +10,7 @@ import { runMigrations } from '../db/migrations.js';
 import { DurablePairedDeviceRuntime } from '../sync/durable-runtime.js';
 
 import { DurableRealtimeEventStore } from './eventStore.js';
+import { InProcessFanoutBus } from './fanout.js';
 import { RealtimeHub } from './hub.js';
 
 /**
@@ -188,6 +189,104 @@ describeIntegration('durable realtime event store against real PostgreSQL', () =
 
       expect(live).toEqual([1n]);
       expect(replayed).toEqual([1n]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'pushes one process’s publication to the other process’s socket over the carrier',
+    async () => {
+      const groupId = await bootstrapGroup();
+      // Two hubs, two stores, one database, one channel. This is the two
+      // replicas `compose.yaml` refused to allow: before the carrier existed
+      // the second hub's socket saw nothing the first hub published, and
+      // `deploy.replicas: 1` was the only thing keeping that from happening in
+      // production.
+      const bus = new InProcessFanoutBus();
+      const publisher = new RealtimeHub({
+        store: new DurableRealtimeEventStore({ database }),
+        fanout: bus.join('process-a'),
+      });
+      const subscriber = new RealtimeHub({
+        store: new DurableRealtimeEventStore({ database }),
+        fanout: bus.join('process-b'),
+      });
+
+      const received: bigint[] = [];
+      await subscriber.subscribe({
+        groupId,
+        afterSequence: 0n,
+        connectionId: 'connection-on-the-other-process',
+        send: (frame) => {
+          if (frame.payload.case === 'groupEvent' && frame.payload.value.event !== undefined) {
+            received.push(frame.payload.value.event.sequence);
+          }
+        },
+      });
+
+      await publisher.publish({
+        groupId,
+        kind: syncV1.GroupEventKind.SESSION_COMMAND,
+        sessionCommand: create(syncV1.SessionCommandSchema, {
+          action: syncV1.SessionCommandAction.PLAY,
+          target: 'video:primary',
+        }),
+      });
+      await publisher.publish({ groupId, kind: syncV1.GroupEventKind.GROUP_UPDATED });
+      await subscriber.whenFanoutIdle();
+
+      // Delivered in the order the allocator assigned, and once each: the
+      // announcement carries only a sequence, so what the socket received is
+      // what `sync_events` holds and nothing the channel invented.
+      expect(received).toEqual([1n, 2n]);
+
+      const rows = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM sync_events WHERE group_id = $1',
+        values: [groupId],
+      });
+      expect(rows[0]?.n).toBe(2);
+
+      await Promise.all([publisher.close(), subscriber.close()]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'serves a group only to the process that holds a socket for it',
+    async () => {
+      const watched = await bootstrapGroup();
+      const unwatched = await bootstrapGroup();
+      const bus = new InProcessFanoutBus();
+      const publisher = new RealtimeHub({
+        store: new DurableRealtimeEventStore({ database }),
+        fanout: bus.join('process-a'),
+      });
+      const subscriber = new RealtimeHub({
+        store: new DurableRealtimeEventStore({ database }),
+        fanout: bus.join('process-b'),
+      });
+
+      const received: bigint[] = [];
+      await subscriber.subscribe({
+        groupId: watched,
+        afterSequence: 0n,
+        connectionId: 'connection-on-the-other-process',
+        send: (frame) => {
+          if (frame.payload.case === 'groupEvent' && frame.payload.value.event !== undefined) {
+            received.push(frame.payload.value.event.sequence);
+          }
+        },
+      });
+
+      // One deployment-wide channel means every process hears about every
+      // group. Nothing may cross from a group this process has no audience for.
+      await publisher.publish({ groupId: unwatched, kind: syncV1.GroupEventKind.GROUP_UPDATED });
+      await publisher.publish({ groupId: watched, kind: syncV1.GroupEventKind.GROUP_UPDATED });
+      await subscriber.whenFanoutIdle();
+
+      expect(received).toEqual([1n]);
+
+      await Promise.all([publisher.close(), subscriber.close()]);
     },
     networkTimeoutMs,
   );

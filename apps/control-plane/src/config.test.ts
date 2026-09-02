@@ -586,3 +586,183 @@ describe('object storage configuration', () => {
     ).toBeUndefined();
   });
 });
+
+describe('GitHub egress configuration', () => {
+  const token = 'ghp_do_not_leak_this_github_token_0123456789';
+  const githubEnvironment = {
+    HQ_CONTROL_PLANE_GITHUB_TOKEN: token,
+    HQ_CONTROL_PLANE_GITHUB_REPOSITORY: 'gremuchaya/headquarters',
+  };
+
+  it('keeps the token inside the closure and exposes only what an operator may read back', () => {
+    const github = loadControlPlaneConfig(githubEnvironment).github;
+
+    expect(github).toMatchObject({
+      apiBaseUrl: 'https://api.github.com',
+      repository: 'gremuchaya/headquarters',
+      issueLabels: [],
+      translationPathTemplate: 'translations/proposals/{locale}/{key}.json',
+    });
+    // The same property test the storage group takes: the credential is a
+    // closure variable, so it is not a key, not serializable and not frozen
+    // into the object anything downstream receives.
+    expect(Object.keys(github ?? {}).sort()).toEqual([
+      'apiBaseUrl',
+      'issueLabels',
+      'openToken',
+      'repository',
+      'translationPathTemplate',
+    ]);
+    expect(JSON.stringify(github)).not.toContain(token);
+    expect(Object.isFrozen(github)).toBe(true);
+    // Asking for it by name is the one way to obtain it.
+    expect(github?.openToken()).toBe(token);
+  });
+
+  it('accepts an enterprise base, labels and a translation path within the rules', () => {
+    const github = loadControlPlaneConfig({
+      ...githubEnvironment,
+      HQ_CONTROL_PLANE_GITHUB_API_BASE_URL: 'https://ghe.example.com/api/v3/',
+      HQ_CONTROL_PLANE_GITHUB_ISSUE_LABELS: ' hq , report ,hq, ',
+      HQ_CONTROL_PLANE_GITHUB_TRANSLATION_PATH: 'i18n/{locale}/{key}.json',
+    }).github;
+
+    // The trailing slash is stripped, so a path is appended exactly once.
+    expect(github?.apiBaseUrl).toBe('https://ghe.example.com/api/v3');
+    expect(github?.issueLabels).toEqual(['hq', 'report']);
+    expect(github?.translationPathTemplate).toBe('i18n/{locale}/{key}.json');
+  });
+
+  it('refuses a partial group by naming what is missing, never the token it was given', () => {
+    let error: Error | undefined;
+    try {
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_GITHUB_TOKEN: token });
+    } catch (caught) {
+      error = caught instanceof Error ? caught : new Error(String(caught));
+    }
+    expect(error?.message).toContain('HQ_CONTROL_PLANE_GITHUB_REPOSITORY');
+    expect(error?.message).toContain('must be set when GitHub egress is configured');
+    expect(error?.message).not.toContain(token);
+
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_GITHUB_REPOSITORY: 'gremuchaya/headquarters' }),
+    ).toThrow('HQ_CONTROL_PLANE_GITHUB_TOKEN');
+  });
+
+  it('refuses a value that would steer a request or disclose the token', () => {
+    const withOverride = (overrides: Readonly<Record<string, string>>) =>
+      loadControlPlaneConfig({ ...githubEnvironment, ...overrides });
+
+    expect(() =>
+      withOverride({ HQ_CONTROL_PLANE_GITHUB_REPOSITORY: 'a/b/../../elsewhere' }),
+    ).toThrow('must be owner/name');
+    expect(() => withOverride({ HQ_CONTROL_PLANE_GITHUB_TOKEN: 'ghp_short' })).toThrow(
+      'at least 20 characters',
+    );
+    expect(() =>
+      withOverride({ HQ_CONTROL_PLANE_GITHUB_TOKEN: `${token.slice(0, 25)}\n${token.slice(25)}` }),
+    ).toThrow('no whitespace');
+    // The token travels in a header on every call, so a cleartext base would
+    // disclose the credential itself rather than a signature over one.
+    expect(() =>
+      withOverride({ HQ_CONTROL_PLANE_GITHUB_API_BASE_URL: 'http://api.example.com' }),
+    ).toThrow('must be an HTTPS URL');
+    expect(
+      withOverride({ HQ_CONTROL_PLANE_GITHUB_API_BASE_URL: 'http://127.0.0.1:4200' }).github
+        ?.apiBaseUrl,
+    ).toBe('http://127.0.0.1:4200');
+    expect(() =>
+      withOverride({ HQ_CONTROL_PLANE_GITHUB_TRANSLATION_PATH: 'i18n/{locale}.json' }),
+    ).toThrow('must contain both {locale} and {key}');
+    expect(() =>
+      withOverride({ HQ_CONTROL_PLANE_GITHUB_TRANSLATION_PATH: '../{locale}/{key}.json' }),
+    ).toThrow('must be a relative path');
+  });
+
+  it('leaves GitHub absent when no HQ_CONTROL_PLANE_GITHUB_* value is set', () => {
+    expect(loadControlPlaneConfig({}).github).toBeUndefined();
+    expect(loadControlPlaneConfig({ HQ_CONTROL_PLANE_GITHUB_TOKEN: '  ' }).github).toBeUndefined();
+  });
+});
+
+describe('conversion pipeline configuration', () => {
+  it('leaves conversion absent unless the worker is explicitly switched on', () => {
+    // The default is what every deployment before this pipeline behaved as: the
+    // ladder is queued, nothing consumes it, and every preview is the original.
+    expect(loadControlPlaneConfig({}).conversion).toBeUndefined();
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_FFMPEG_PATH: '/opt/ffmpeg' }).conversion,
+    ).toBeUndefined();
+    expect(
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_WORKER: 'false' }).conversion,
+    ).toBeUndefined();
+  });
+
+  it('carries the executables and the bounds the worker spends', () => {
+    const conversion = loadControlPlaneConfig({
+      HQ_CONTROL_PLANE_CONVERSION_WORKER: 'true',
+      HQ_CONTROL_PLANE_FFMPEG_PATH: 'C:\\ffmpeg\\bin\\ffmpeg.exe',
+      HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS: '600',
+      HQ_CONTROL_PLANE_CONVERSION_TIMEOUT_SECONDS: '300',
+      HQ_CONTROL_PLANE_CONVERSION_POLL_SECONDS: '2',
+      HQ_CONTROL_PLANE_CONVERSION_MAX_ATTEMPTS: '5',
+      HQ_CONTROL_PLANE_CONVERSION_MAX_SOURCE_MEGABYTES: '2048',
+    }).conversion;
+
+    expect(conversion).toEqual({
+      ffmpegPath: 'C:\\ffmpeg\\bin\\ffmpeg.exe',
+      ffprobePath: 'ffprobe',
+      leaseMs: 600_000,
+      maxAttempts: 5,
+      pollIntervalMs: 2_000,
+      renderTimeoutMs: 300_000,
+      maxSourceBytes: 2_147_483_648n,
+    });
+  });
+
+  it('defaults to whatever is on PATH and to bounds a shoot can live with', () => {
+    const conversion = loadControlPlaneConfig({
+      HQ_CONTROL_PLANE_CONVERSION_WORKER: 'true',
+    }).conversion;
+
+    expect(conversion?.ffmpegPath).toBe('ffmpeg');
+    expect(conversion?.ffprobePath).toBe('ffprobe');
+    expect(conversion?.leaseMs).toBe(300_000);
+    // The render budget fits inside the lease, so a healthy slow transcode is
+    // never taken over while it is still running.
+    expect(conversion?.renderTimeoutMs).toBeLessThan(conversion?.leaseMs ?? 0);
+  });
+
+  it('refuses a render budget that would outlive its own lease', () => {
+    expect(() =>
+      loadControlPlaneConfig({
+        HQ_CONTROL_PLANE_CONVERSION_WORKER: 'true',
+        HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS: '60',
+        HQ_CONTROL_PLANE_CONVERSION_TIMEOUT_SECONDS: '120',
+      }),
+    ).toThrow('must not exceed HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS');
+  });
+
+  it('bounds every value, and says so before the worker is ever switched on', () => {
+    // Parsed even with the worker off, so a nonsense bound is refused at
+    // startup rather than at the moment an operator turns the worker on.
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS: '5' }),
+    ).toThrow('HQ_CONTROL_PLANE_CONVERSION_LEASE_SECONDS must be an integer between 30 and 14400');
+    expect(() => loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_MAX_ATTEMPTS: '0' })).toThrow(
+      'must be an integer between 1 and 10',
+    );
+    expect(() => loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_POLL_SECONDS: '0' })).toThrow(
+      'must be an integer between 1 and 600',
+    );
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_MAX_SOURCE_MEGABYTES: '0' }),
+    ).toThrow('must be an integer between 1 and 524288');
+    expect(() =>
+      loadControlPlaneConfig({ HQ_CONTROL_PLANE_FFMPEG_PATH: 'ffmpeg\n-rm -rf' }),
+    ).toThrow('must be an executable name or path on one line');
+    expect(() => loadControlPlaneConfig({ HQ_CONTROL_PLANE_CONVERSION_WORKER: 'yes' })).toThrow(
+      'must be true or false',
+    );
+  });
+});

@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react';
 
 import { dateTimeFormat } from '@/application/localization/intl';
-import { t, useAppLocale } from '@/application/localization/locale';
+import { intlTag, t, useAppLocale } from '@/application/localization/locale';
 import type { MessageId } from '@/application/localization/messages';
 import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { operationsStore, useOperationsStore } from '@/state/operationsStore';
@@ -35,13 +35,13 @@ export type DateTimeMode = (typeof dateTimeModes)[number];
  * **The locale.** `TopBar`, `VirtualExplorer`, `DeveloperPanel`,
  * `SettingsScreen`'s history stamps and the tables and feeds on the cases,
  * files, objects, overview, reports and search screens now take their
- * formatter from `localization/intl.ts` like this module does. Three still
- * hold a `'ru-RU'` literal, all of them owned by another agent while F11 slice
- * one was written: `OperationsShell`'s `formatDateTime` and snapshot button,
- * `CommunicationsScreen`'s event feed and `SystemScreen`'s log. Two more live
- * outside this app and cannot read a client setting at all --
- * `packages/domain/src/explorerTree.ts` is framework-free by design and
- * `apps/file-bridge/src/BridgeService.ts` is a separate process.
+ * formatter from `localization/intl.ts` like this module does.
+ * `OperationsShell`'s `formatDateTime` and snapshot button,
+ * `CommunicationsScreen`'s event feed and `SystemScreen`'s log followed in
+ * F11's chrome-translation pass, closing the last live `'ru-RU'` literals
+ * inside this app. Two live outside it and cannot read a client setting at
+ * all -- `packages/domain/src/explorerTree.ts` is framework-free by design
+ * and `apps/file-bridge/src/BridgeService.ts` is a separate process.
  *
  * **The mode.** Only the shell clock in `OpsTopBar` and the stamp in
  * `OpsStatusLine` follow `dateTime.mode`. Every stamp named above still shows
@@ -229,4 +229,24 @@ export function useShellClock(): string {
     operationSeconds: operationSecondsOfDay({ clockMode, fixedTime }, operationElapsed, now),
     showSeconds,
   });
+}
+
+/**
+ * The topbar's `ДАТА` reading: the calendar date, not the operation's own
+ * clock. `dateTime.mode` picks which clock names the time of day, but there is
+ * no fictional calendar behind it, only a fictional time of day -- `system`
+ * and `utc` both read the machine's date for the same reason they read its
+ * time, and `operation` has no date of its own to offer instead.
+ */
+export function formatShellDate(now: Date): string {
+  const day = dateTimeFormat({ day: '2-digit', month: '2-digit', year: 'numeric' }).format(now);
+  const weekday = dateTimeFormat({ weekday: 'short' }).format(now).toLocaleUpperCase(intlTag());
+  return `${day} / ${weekday}`;
+}
+
+/** `formatShellDate`, ticking and following the locale, the way `useShellClock` does. */
+export function useShellDate(): string {
+  useAppLocale();
+  useSyncExternalStore(subscribeToTick, tickSnapshot, serverTickSnapshot);
+  return formatShellDate(new Date());
 }

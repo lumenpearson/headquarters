@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
+import { t } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import type {
   GroupSettingsHistoryEntry,
   GroupSettingsPort,
@@ -186,38 +188,37 @@ function ledgerKey(
 
 function describe(error: unknown): string {
   const message = error instanceof Error ? error.message.trim() : '';
-  return message.length === 0 ? 'ИСТОРИЯ ГРУППЫ НЕДОСТУПНА' : `ИСТОРИЯ ГРУППЫ: ${message}`;
+  return message.length === 0
+    ? t('settings.groupHistoryUnavailableError')
+    : t('settings.groupHistoryError', { message });
 }
 
 /**
- * The server's operation vocabulary, for the operator.
+ * The server's operation vocabulary, for the operator, keyed by the exact
+ * string the server sends rather than by a union: {@link groupHistoryOperationLabel}
+ * shows an operation this table has no entry for verbatim, which a
+ * `Record<Union, MessageId>` cannot do (there would be no union member to hold
+ * the unknown case).
  *
- * It is not mapped onto the local ledger's words. `RESET_ELEMENT` and
+ * Not mapped onto the local ledger's words. `RESET_ELEMENT` and
  * `REVERT_SETTINGS_VERSION` have no local counterpart, and `undo`/`redo` have
  * no server one; a label that borrowed across would put a word in the history
  * that nothing actually did. An operation this build does not know is shown
  * verbatim rather than as "прочее", because a newer control plane naming a new
  * one is still telling the truth.
  */
+const groupHistoryOperationMessageIds: Readonly<Record<string, MessageId>> = {
+  APPLY_DRAFT_PATCH: 'settings.groupHistoryOperationApplyDraftPatch',
+  DISCARD_DRAFT: 'settings.groupHistoryOperationDiscardDraft',
+  PUBLISH_DRAFT: 'settings.groupHistoryOperationPublishDraft',
+  RESET_CATEGORY: 'settings.groupHistoryOperationResetCategory',
+  RESET_ELEMENT: 'settings.groupHistoryOperationResetElement',
+  RESET_ALL: 'settings.groupHistoryOperationResetAll',
+  IMPORT_SETTINGS: 'settings.groupHistoryOperationImportSettings',
+  REVERT_SETTINGS_VERSION: 'settings.groupHistoryOperationRevertVersion',
+};
+
 export function groupHistoryOperationLabel(operation: string): string {
-  switch (operation) {
-    case 'APPLY_DRAFT_PATCH':
-      return 'ПРАВКА ЧЕРНОВИКА';
-    case 'DISCARD_DRAFT':
-      return 'ЧЕРНОВИК ОТБРОШЕН';
-    case 'PUBLISH_DRAFT':
-      return 'ПУБЛИКАЦИЯ';
-    case 'RESET_CATEGORY':
-      return 'СБРОС КАТЕГОРИИ';
-    case 'RESET_ELEMENT':
-      return 'СБРОС ПАРАМЕТРА';
-    case 'RESET_ALL':
-      return 'ПОЛНЫЙ СБРОС';
-    case 'IMPORT_SETTINGS':
-      return 'ИМПОРТ';
-    case 'REVERT_SETTINGS_VERSION':
-      return 'ВОЗВРАТ К РЕВИЗИИ';
-    default:
-      return operation;
-  }
+  const id = groupHistoryOperationMessageIds[operation];
+  return id === undefined ? operation : t(id);
 }

@@ -1,11 +1,13 @@
-import { projectConfigSchema } from '@gremuchaya/config';
-
 import {
   browserStorage,
   type KeyValueStorage,
 } from '@/infrastructure/controlPlane/DeviceSessionStore';
 
-import { parseControlPlaneAddressList } from './controlPlaneLinks';
+import {
+  parseControlPlaneAddressList,
+  safeParseControlPlaneUrl,
+  validateControlPlaneAddresses,
+} from './controlPlaneLinks';
 
 /**
  * The operator's own control-plane address, entered directly in the pairing
@@ -29,28 +31,6 @@ export type ManualControlPlaneAddressOutcome =
 
 const noAddresses: readonly string[] = [];
 const listeners = new Set<() => void>();
-
-/**
- * `controlPlaneUrl`'s own schema, guarded against a defect in its refine
- * step: `controlPlaneAddressSchema` (`packages/config/src/projectSchemas.ts`)
- * calls `new URL(value)` inside a `.refine`, which throws for a string
- * `z.url()` still accepts -- one with no scheme at all, which is exactly what
- * an operator typing an address without `http://` produces. `.safeParse`
- * catches a validation issue but not an exception a refinement callback
- * throws, so the raw throw would otherwise reach this module's caller as an
- * unhandled rejection or a crashed render for the one input this exists to
- * refuse cleanly.
- */
-export function safeParseControlPlaneUrl(
-  value: unknown,
-): { readonly success: true; readonly data: readonly string[] } | { readonly success: false } {
-  try {
-    const result = projectConfigSchema.shape.controlPlaneUrl.safeParse(value);
-    return result.success ? { success: true, data: result.data } : { success: false };
-  } catch {
-    return { success: false };
-  }
-}
 
 /**
  * The saved address list, or `[]` when there is none or the blob does not
@@ -101,6 +81,11 @@ export function readManualControlPlaneAddress(
  * two different operator intentions, and conflating them would make "save an
  * empty field" silently equivalent to "forget the address", the one outcome
  * `clearManualControlPlaneAddress` exists to make deliberate.
+ *
+ * A repeated address is now refused rather than collapsed. The refusal below
+ * has always ended `БЕЗ ПОВТОРОВ`, and the field could not enforce it while it
+ * deduplicated the list before the schema saw it: the promise was in the text
+ * and nowhere else.
  */
 export function writeManualControlPlaneAddress(
   raw: string,
@@ -110,8 +95,8 @@ export function writeManualControlPlaneAddress(
   if (addresses.length === 0) {
     return { ok: false, message: 'УКАЖИТЕ ХОТЯ БЫ ОДИН АДРЕС CONTROL PLANE' };
   }
-  const parsed = safeParseControlPlaneUrl(addresses);
-  if (!parsed.success) {
+  const outcome = validateControlPlaneAddresses(addresses);
+  if (!outcome.ok) {
     return {
       ok: false,
       message:
@@ -119,13 +104,13 @@ export function writeManualControlPlaneAddress(
     };
   }
   try {
-    storage.setItem(manualControlPlaneAddressStorageKey, JSON.stringify(parsed.data));
+    storage.setItem(manualControlPlaneAddressStorageKey, JSON.stringify(outcome.addresses));
   } catch {
     // Storage blocked or full. The value lives for this process only, the
     // same trade-off `DeviceSessionStore.write` makes for the paired session.
   }
   notify();
-  return { ok: true, addresses: parsed.data };
+  return { ok: true, addresses: outcome.addresses };
 }
 
 /** Forgets the manual address; resolution falls through to the project file and the build variable. */

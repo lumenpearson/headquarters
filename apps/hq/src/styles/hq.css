@@ -127,6 +127,16 @@ button {
 .quiet-button:hover {
   background: var(--accent-soft);
 }
+.quiet-button.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.danger-button.is-active {
+  border-color: var(--critical);
+  color: var(--critical);
+  background: var(--critical-soft);
+}
 .nav-rail {
   z-index: 11;
   grid-row: 2/4;

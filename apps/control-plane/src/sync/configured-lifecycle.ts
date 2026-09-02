@@ -9,6 +9,10 @@ import { readInstallationId } from '../db/installation.js';
 import { runMigrations, type MigrationRunResult } from '../db/migrations.js';
 import { DurableIntegrationStore } from '../integration/store.js';
 import { createIntegrationService } from '../integration/service.js';
+import {
+  createGitHubRestGateway,
+  type GitHubGatewayFactory,
+} from '../integration/github-gateway.js';
 import { DurableMaterialStore } from '../material/store.js';
 import { createMaterialService } from '../material/service.js';
 import { DurableRealtimeEventStore } from '../realtime/eventStore.js';
@@ -19,6 +23,7 @@ import {
   type CoordinationClientFactory,
   type UpstashCoordination,
 } from '../redis/coordination.js';
+import { createRedisRealtimeFanout } from '../redis/fanout.js';
 
 import { CoordinatedPresenceStore } from './coordinated-presence-store.js';
 import { DurablePairedDeviceRuntime } from './durable-runtime.js';
@@ -26,9 +31,20 @@ import { DurablePresenceStore } from './presence-store.js';
 import type { PresenceStore } from './presence-store.js';
 import { createPairedDeviceRealtimeAdmission } from './realtime-admission.js';
 import { createPairedDeviceSyncService } from './service.js';
+import { DurableLayoutStore } from '../settings/layout-store.js';
 import { DurableSettingsStore } from '../settings/store.js';
+import { controlPlaneSettingsSchema } from '../settings/schema.js';
 import { createSettingsService } from '../settings/service.js';
+import { createFfmpegRenditionRenderer } from '../conversion/renderer.js';
+import { DurableConversionStore } from '../conversion/store.js';
+import { MaterialConversionWorker } from '../conversion/worker.js';
 import { createS3GrantIssuer, type StorageGrantIssuerFactory } from '../storage/s3-grant-issuer.js';
+import {
+  createVercelBlobGrantIssuer,
+  type VercelBlobGrantIssuerFactory,
+} from '../storage/vercel-blob-grant-issuer.js';
+import { createS3ObjectStore } from '../storage/s3-object-store.js';
+import { DurableTelemetryMeasurementStore } from '../telemetry/measurement-store.js';
 import { DurableSimulationProfileStore } from '../telemetry/store.js';
 import { createTelemetryService } from '../telemetry/service.js';
 
@@ -61,6 +77,15 @@ export interface ConfiguredPairedDeviceLifecycleOptions {
    * grant-minting RPCs keep refusing.
    */
   readonly storageFactory?: StorageGrantIssuerFactory;
+  /** The same seam for the second issuer, used only when `config.blobStorage` is present. */
+  readonly blobStorageFactory?: VercelBlobGrantIssuerFactory;
+  /**
+   * Optional GitHub-egress seam, so a test can drive the outbound calls against
+   * a scripted GitHub instead of the real API. It is consulted only when
+   * `config.github` is present; without a token no gateway exists and the three
+   * outbound RPCs keep refusing.
+   */
+  readonly githubFactory?: GitHubGatewayFactory;
 }
 
 export interface ConfiguredPairedDeviceLifecycle {
@@ -77,6 +102,16 @@ export interface ConfiguredPairedDeviceLifecycle {
   readonly coordination: UpstashCoordination;
   /** Whether a `StorageGrantIssuer` was built, which is what `Health` and `GetCapabilities` report. */
   readonly storageConfigured: boolean;
+  /** Whether a GitHub gateway was built, which is what `Health` and `GetCapabilities` report. */
+  readonly githubConfigured: boolean;
+  /**
+   * The rendition worker, when this process runs one.
+   *
+   * Returned rather than started here, so whoever owns the process lifetime
+   * decides when a background loop begins and stops; `server.ts` starts it once
+   * the server is listening and stops it on shutdown.
+   */
+  readonly conversionWorker?: MaterialConversionWorker;
   readonly hub: RealtimeHub;
   readonly syncService: ReturnType<typeof createPairedDeviceSyncService>;
   readonly settingsService: ReturnType<typeof createSettingsService>;
@@ -157,22 +192,85 @@ export async function createConfiguredPairedDeviceLifecycle(
   const presence: PresenceStore = coordination.configured
     ? new CoordinatedPresenceStore(durablePresence, coordination)
     : durablePresence;
-  const hub = new RealtimeHub({ store: eventStore });
+  // The cross-process carrier exists exactly when Redis does. Without one the
+  // hub serves only what this process published, which is why a deployment
+  // without Redis still pins itself to a single replica: a second one would
+  // split the audience of every live publication silently.
+  const fanout = createRedisRealtimeFanout({ coordination });
+  const hub = new RealtimeHub({
+    store: eventStore,
+    ...(fanout === undefined ? {} : { fanout }),
+  });
   // Every store shares the runtime's own receipt guard rather than building its
   // own: one request identifier has to mean the same thing whichever service
   // received it, and two guards with two hashers would not agree.
   const receipts = runtime.receiptGuard;
   const settingsStore = new DurableSettingsStore({ database, receipts });
+  // The layout half of `SettingsService`, built on the same terms as the
+  // settings half: reaching this point means the migration gate ran, so
+  // `layout_documents` and `layout_versions` are there to be written.
+  const layoutStore = new DurableLayoutStore({ database, receipts });
   const materialStore = new DurableMaterialStore({ database, receipts });
   const simulationProfiles = new DurableSimulationProfileStore({ database, receipts });
+  // The measurement half needs no receipt guard: none of its three RPCs is a
+  // mutation a client can retry. The one write it does is a capture the server
+  // decides to take, addressed by a sequence the server allocates, so there is
+  // no client-supplied identity for a receipt to be about.
+  const telemetryMeasurements = new DurableTelemetryMeasurementStore({ database });
   const integrationStore = new DurableIntegrationStore({ database, receipts });
   // The issuer is a pure signer over the configured bucket: building it opens no
   // connection, and the first network call is the CreateMultipartUpload of the
   // first real upload. The credentials stay inside `config.storage`'s closures.
+  // A deployment configures one store or the other -- `parseBlobStorage`
+  // refuses both -- so this is a choice between two issuers, never a merge of
+  // them. The Blob issuer is built on the same terms: constructing it opens no
+  // connection, and the read-write token stays inside `config.blobStorage`'s
+  // closures rather than being copied onto the issuer.
+  const blobStorageConfig = config.blobStorage;
   const storage =
-    config.storage === undefined
+    config.storage !== undefined
+      ? (options.storageFactory ?? createS3GrantIssuer)(config.storage)
+      : blobStorageConfig === undefined
+        ? undefined
+        : (options.blobStorageFactory ?? createVercelBlobGrantIssuer)(blobStorageConfig);
+  // Built for the same reason and on the same terms as the storage issuer:
+  // constructing it opens no connection, the first request is the first
+  // outbound call a client asks for, and the deployment token stays inside
+  // `config.github`'s closure rather than being copied onto the gateway.
+  const githubConfig = config.github;
+  const github =
+    githubConfig === undefined
       ? undefined
-      : (options.storageFactory ?? createS3GrantIssuer)(config.storage);
+      : (options.githubFactory ?? createGitHubRestGateway)(githubConfig);
+  // The queue and its results. Built whenever the migration gate ran, because
+  // the producers live on the material service and must record what a library
+  // will need converted even in a deployment that runs no worker of its own --
+  // a second process, or a later one, is what consumes the rows.
+  const conversionStore = new DurableConversionStore({
+    database,
+    ...(config.conversion === undefined
+      ? {}
+      : { leaseMs: config.conversion.leaseMs, maxAttempts: config.conversion.maxAttempts }),
+  });
+  // The worker needs three things at once: a queue, a bucket it can read and
+  // write with the server's own credential, and a renderer. Without object
+  // storage there are no bytes to convert, so the worker exists exactly when
+  // both `HQ_CONTROL_PLANE_CONVERSION_WORKER` and the storage group are set.
+  const conversionConfig = config.conversion;
+  const conversionWorker =
+    conversionConfig === undefined || config.storage === undefined
+      ? undefined
+      : new MaterialConversionWorker({
+          store: conversionStore,
+          objects: createS3ObjectStore(config.storage),
+          renderer: createFfmpegRenditionRenderer({
+            ffmpegPath: conversionConfig.ffmpegPath,
+            ffprobePath: conversionConfig.ffprobePath,
+            timeoutMs: conversionConfig.renderTimeoutMs,
+          }),
+          maxSourceBytes: conversionConfig.maxSourceBytes,
+          pollIntervalMs: conversionConfig.pollIntervalMs,
+        });
 
   return {
     runtime,
@@ -182,6 +280,8 @@ export async function createConfiguredPairedDeviceLifecycle(
     presence,
     coordination,
     storageConfigured: storage !== undefined,
+    githubConfigured: github !== undefined,
+    ...(conversionWorker === undefined ? {} : { conversionWorker }),
     hub,
     syncService: createPairedDeviceSyncService({
       runtime,
@@ -195,17 +295,57 @@ export async function createConfiguredPairedDeviceLifecycle(
     // The material service receives the storage issuer only when a bucket is
     // configured; otherwise the four grant-minting RPCs answer
     // `FAILED_PRECONDITION` naming what is missing while everything else works.
-    // No GitHub gateway is configured here for the same reason: it needs a
-    // deployment secret this composition root does not hold. That is the honest
-    // reduced mode, not a stub.
-    settingsService: createSettingsService({ runtime, store: settingsStore }),
+    // The GitHub gateway is wired on exactly those terms: present when
+    // `HQ_CONTROL_PLANE_GITHUB_*` is, absent otherwise, and the three outbound
+    // RPCs refuse with the variables named rather than pretending to send.
+    // The schema is injected here rather than left absent: `GetSettingsSchema`
+    // needs no database, only the shared registry, so a deployment that reaches
+    // this point can always answer it. Leaving it out made a declared method
+    // answer `unimplemented` in every deployment there has ever been.
+    settingsService: createSettingsService({
+      runtime,
+      store: settingsStore,
+      layouts: layoutStore,
+      schema: controlPlaneSettingsSchema(),
+    }),
+    // The rendition port is supplied unconditionally: reading a rendition and
+    // queueing one need only the database, so a deployment whose worker runs
+    // elsewhere still fills the queue and still serves whatever that worker
+    // built. With no rendition row the preview path is byte-for-byte what it
+    // was -- the original object, reported as the original.
     materialService: createMaterialService({
       runtime,
       store: materialStore,
+      renditions: conversionStore,
       ...(storage === undefined ? {} : { storage }),
     }),
-    telemetryService: createTelemetryService({ runtime, profiles: simulationProfiles }),
-    integrationService: createIntegrationService({ runtime, store: integrationStore }),
+    // The measurement store is always supplied here, because reaching this
+    // point means the migration gate ran and migration 0011 declared the
+    // registry and the sample store. It stays an option of the service rather
+    // than a requirement so a deployment that applies migrations as a separate
+    // step, and a test that exercises the simulation half alone, can build the
+    // service without one and have the three RPCs answer `unimplemented`
+    // honestly instead of failing against tables that are not there.
+    telemetryService: createTelemetryService({
+      runtime,
+      profiles: simulationProfiles,
+      measurements: telemetryMeasurements,
+    }),
+    // The deployment credential is passed as the closure that opens it, not as
+    // a value: `config.github` holds the token and this composition root never
+    // reads it, so nothing between here and the outbound call has a copy.
+    integrationService: createIntegrationService({
+      runtime,
+      store: integrationStore,
+      ...(github === undefined || githubConfig === undefined
+        ? {}
+        : {
+            github,
+            githubCredentials: () => githubConfig.openToken(),
+            issueRepository: githubConfig.repository,
+            issueLabels: githubConfig.issueLabels,
+          }),
+    }),
     realtime: {
       admission: createPairedDeviceRealtimeAdmission(runtime),
       hub,

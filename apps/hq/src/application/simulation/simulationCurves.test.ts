@@ -6,22 +6,27 @@ import {
   getSettingDefinition,
   maximumCurvePoints,
   simulationChannels,
+  simulationPresets,
 } from '@gremuchaya/settings-schema';
 import { describe, expect, it } from 'vitest';
 
 import {
+  absoluteToPercentPoints,
   channelDomain,
   deterministicOffset,
   formatCurveNumber,
+  presetCriticalityFor,
   readChannelCurve,
   readCurvePoints,
   readSimulationSettings,
   restingCurvePoints,
+  scatteredAreaReading,
   sessionMetricChannels,
   sessionMetricNames,
   simulateChannelReading,
   simulationChannelFor,
   simulationChannelRanges,
+  simulationPresetCriticality,
   withChannelCurve,
 } from './simulationCurves';
 
@@ -383,6 +388,7 @@ describe('resolving the simulation settings', () => {
     const resolved = readSimulationSettings({});
 
     expect(resolved.channel).toBe(getSettingDefinition('simulation.channel')?.defaultValue);
+    expect(resolved.preset).toBe(getSettingDefinition('simulation.preset')?.defaultValue);
     expect(resolved.interpolation).toBe(
       getSettingDefinition('simulation.interpolation')?.defaultValue,
     );
@@ -405,12 +411,14 @@ describe('resolving the simulation settings', () => {
   it('falls back for a persisted value of the wrong type, which storage never revalidates', () => {
     const resolved = readSimulationSettings({
       'simulation.channel': 'disk',
+      'simulation.preset': 'apocalypse',
       'simulation.interpolation': 'catmull-rom',
       'simulation.periodSeconds': 'soon',
       'simulation.valueCurve': 'cpu=0,20,0,0',
     } as unknown as Parameters<typeof readSimulationSettings>[0]);
 
     expect(resolved.channel).toBe('cpu');
+    expect(resolved.preset).toBe('normal');
     expect(resolved.interpolation).toBe('linear');
     expect(resolved.periodSeconds).toBe(60);
     expect(resolved.valueCurve).toEqual([]);
@@ -468,5 +476,189 @@ describe('the offset the parts of the world with no channel take', () => {
     expect(deterministicOffset(8n, 3)).not.toBe(first);
     expect(deterministicOffset(7n, 4)).not.toBe(first);
     expect(deterministicOffset(7n, 3)).toBe(first);
+  });
+});
+
+describe('a reading scattered around a channel’s own aggregate', () => {
+  it('stays close to the overall reading rather than wandering off it', () => {
+    const reading = scatteredAreaReading(60, 7n, 3, 15);
+    expect(reading).toBeGreaterThanOrEqual(45);
+    expect(reading).toBeLessThanOrEqual(75);
+  });
+
+  it('gives two ordinals of one overall reading two different areas', () => {
+    expect(scatteredAreaReading(60, 7n, 0, 15)).not.toBe(scatteredAreaReading(60, 7n, 1, 15));
+  });
+
+  it('is the same reading again for the same inputs', () => {
+    expect(scatteredAreaReading(60, 7n, 2, 15)).toBe(scatteredAreaReading(60, 7n, 2, 15));
+  });
+
+  it('never reports outside the display percentage the panel prints', () => {
+    expect(scatteredAreaReading(98, 7n, 5, 40)).toBeLessThanOrEqual(100);
+    expect(scatteredAreaReading(2, 7n, 5, 40)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('a curve read back in the channel’s own units, folded to percent', () => {
+  it('inverts the percent-to-units conversion simulationChannelFor applies', () => {
+    const range = { minimum: 12, maximum: 94 };
+    const percentPoints = [
+      { time: 0, value: 0, inTangent: 0, outTangent: 0 },
+      { time: 1, value: 100, inTangent: 0, outTangent: 0 },
+    ];
+    const settings = readSimulationSettings({
+      'simulation.valueCurve': withChannelCurve([], 'cpu', percentPoints),
+      'simulation.interpolation': 'linear',
+      'simulation.loop': false,
+      'simulation.noise': 0,
+      'simulation.smoothing': 0,
+    } as Parameters<typeof readSimulationSettings>[0]);
+    const assembled = simulationChannelFor(settings, 'cpu', range);
+
+    const back = absoluteToPercentPoints(assembled.valueCurve?.points ?? [], range);
+
+    expect(back[0]?.value).toBe(0);
+    expect(back[1]?.value).toBe(100);
+  });
+
+  it('answers zero on a degenerate range rather than dividing by zero', () => {
+    const back = absoluteToPercentPoints([{ time: 0, value: 5, inTangent: 1, outTangent: 1 }], {
+      minimum: 5,
+      maximum: 5,
+    });
+    expect(back[0]).toEqual({ time: 0, value: 0, inTangent: 0, outTangent: 0 });
+  });
+});
+
+describe('the named preset a marked simulation stands for', () => {
+  const range = { minimum: 0, maximum: 100 };
+  const settingsFor = (preset: string) =>
+    readSimulationSettings({
+      'simulation.preset': preset,
+      'simulation.interpolation': 'linear',
+      'simulation.loop': false,
+      'simulation.noise': 0,
+      'simulation.smoothing': 0,
+    } as Parameters<typeof readSimulationSettings>[0]);
+
+  it('reads simulation.preset into the resolved settings', () => {
+    expect(settingsFor('critical').preset).toBe('critical');
+  });
+
+  it('leaves the world exactly as an unmarked simulation reads it', () => {
+    // `normal` supplies no baseline for any channel: it is not a fourth
+    // uniform level beside `elevated`/`degraded`/`critical`, it is the
+    // absence of one.
+    expect(simulationPresetCriticality.normal).toEqual({});
+    const reading = simulateChannelReading(settingsFor('normal'), 'cpu', range, 0.5, 0, undefined);
+    expect(reading.severity).toBe('normal');
+    expect(reading.value).toBe(50);
+  });
+
+  it('changes an undrawn channel’s reading deterministically when the preset changes', () => {
+    // The whole point of R31's reader: an operator who only ever moves
+    // `simulation.preset` still gets a different, reproducible world.
+    const normal = simulateChannelReading(settingsFor('normal'), 'cpu', range, 0.5, 3, undefined);
+    const critical = simulateChannelReading(
+      settingsFor('critical'),
+      'cpu',
+      range,
+      0.5,
+      3,
+      undefined,
+    );
+
+    expect(critical.severity).toBe('critical');
+    expect(critical.value).not.toBe(normal.value);
+    expect(normal.severity).toBe('normal');
+
+    // Determinism: the same preset, phase and index reads back the same
+    // value and severity on a second, independent call.
+    expect(
+      simulateChannelReading(settingsFor('critical'), 'cpu', range, 0.5, 3, undefined),
+    ).toEqual(critical);
+  });
+
+  it('marks each of the four uniform presets on the severity band its name is', () => {
+    const bandOf = (preset: string) =>
+      simulateChannelReading(settingsFor(preset), 'ram', range, 0.5, 1, undefined).severity;
+
+    expect(bandOf('normal')).toBe('normal');
+    expect(bandOf('elevated')).toBe('elevated');
+    expect(bandOf('degraded')).toBe('degraded');
+    expect(bandOf('critical')).toBe('critical');
+    // `incident` sits inside the same top band as `critical`, at a higher
+    // criticality than the `critical` preset's own.
+    expect(bandOf('incident')).toBe('critical');
+    expect(presetCriticalityFor('incident', 'ram') as number).toBeGreaterThan(
+      presetCriticalityFor('critical', 'ram') as number,
+    );
+    // `recovery` stays inside `normal`, low but not the plain absence a
+    // curveless, presetless reading would be.
+    expect(bandOf('recovery')).toBe('normal');
+    expect(presetCriticalityFor('recovery', 'ram')).toBeGreaterThan(0);
+  });
+
+  it('touches only the channels a scenario preset names, leaving the rest unmarked', () => {
+    // `network-attack` names the comms channels; a channel outside that
+    // scenario, such as `storage`, is read exactly as `normal` reads it.
+    expect(presetCriticalityFor('network-attack', 'link-latency')).toBeGreaterThan(0.5);
+    expect(presetCriticalityFor('network-attack', 'storage')).toBeUndefined();
+
+    const untouched = simulateChannelReading(
+      settingsFor('network-attack'),
+      'storage',
+      range,
+      0.5,
+      2,
+      undefined,
+    );
+    expect(untouched.severity).toBe('normal');
+    expect(untouched.value).toBe(50);
+
+    const attacked = simulateChannelReading(
+      settingsFor('network-attack'),
+      'link-latency',
+      range,
+      0.5,
+      2,
+      undefined,
+    );
+    expect(attacked.severity).toBe('critical');
+  });
+
+  it('never overrides a criticality curve the operator actually drew', () => {
+    // A preset marks the world; an operator's own curve on one channel is
+    // never second-guessed by whichever preset happens to be marked with it.
+    const drawn = readSimulationSettings({
+      'simulation.preset': 'critical',
+      'simulation.interpolation': 'linear',
+      'simulation.loop': false,
+      'simulation.noise': 0,
+      'simulation.smoothing': 0,
+      'simulation.criticalityCurve': ['cpu=0,0.1,0,0', 'cpu=1,0.1,0,0'],
+    } as Parameters<typeof readSimulationSettings>[0]);
+
+    const reading = simulateChannelReading(drawn, 'cpu', range, 0.5, 0, undefined);
+    expect(reading.severity).toBe('normal');
+    // Ceiling 10 (10% of the 0–100 range at criticality 0.1), midpoint 5
+    // since no value curve is drawn either.
+    expect(reading.value).toBeCloseTo(5, 10);
+  });
+
+  it('declares a baseline table for exactly the declared presets', () => {
+    expect(Object.keys(simulationPresetCriticality).sort()).toEqual([...simulationPresets].sort());
+  });
+
+  it('names only channels the roster declares', () => {
+    for (const [preset, baseline] of Object.entries(simulationPresetCriticality)) {
+      for (const channel of Object.keys(baseline)) {
+        expect(
+          (simulationChannels as readonly string[]).includes(channel),
+          `${preset}.${channel}`,
+        ).toBe(true);
+      }
+    }
   });
 });

@@ -1,5 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
+import { BridgeFailure } from '@gremuchaya/protocol';
+
+import { BridgeFailureError, type BridgeFailureCode } from './errors.js';
 import type { MaterialImportEntry } from './MaterialMirror.js';
 
 const defaultGrantIdleTtlMs = 5 * 60 * 1000;
@@ -25,9 +28,13 @@ interface ActiveMaterialPlaybackGrant extends MaterialPlaybackSource {
   expiresAtMs: number;
 }
 
-export class MaterialPlaybackGrantError extends Error {
-  constructor(message: string) {
-    super(message);
+/**
+ * A refusal from the grant registry, carrying the code it crosses the wire
+ * with. The message is for this process's logs, not for a screen.
+ */
+export class MaterialPlaybackGrantError extends BridgeFailureError {
+  constructor(code: BridgeFailureCode, message: string) {
+    super(code, message);
     this.name = 'MaterialPlaybackGrantError';
   }
 }
@@ -47,10 +54,16 @@ export class MaterialPlaybackRegistry {
     private readonly maximumActiveGrants = defaultMaximumActiveGrants,
   ) {
     if (!Number.isSafeInteger(idleTtlMs) || idleTtlMs <= 0) {
-      throw new MaterialPlaybackGrantError('Playback grant TTL must be a positive integer.');
+      throw new MaterialPlaybackGrantError(
+        BridgeFailure.PLAYBACK_UNAVAILABLE,
+        'Playback grant TTL must be a positive integer.',
+      );
     }
     if (!Number.isSafeInteger(maximumActiveGrants) || maximumActiveGrants <= 0) {
-      throw new MaterialPlaybackGrantError('Playback grant capacity must be a positive integer.');
+      throw new MaterialPlaybackGrantError(
+        BridgeFailure.PLAYBACK_UNAVAILABLE,
+        'Playback grant capacity must be a positive integer.',
+      );
     }
   }
 
@@ -59,7 +72,10 @@ export class MaterialPlaybackRegistry {
     const origin = normalizeLoopbackOrigin(loopbackOrigin);
     this.sweepExpired();
     if (this.#grants.size >= this.maximumActiveGrants) {
-      throw new MaterialPlaybackGrantError('Playback grant capacity has been reached.');
+      throw new MaterialPlaybackGrantError(
+        BridgeFailure.PLAYBACK_CAPACITY_REACHED,
+        'Playback grant capacity has been reached.',
+      );
     }
 
     const grantId = randomUUID();
@@ -118,11 +134,15 @@ function assertPlaybackSource(source: MaterialPlaybackSource): void {
   const mimeType = source.material.mimeType.toLocaleLowerCase('en-US');
   if (!mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
     throw new MaterialPlaybackGrantError(
+      BridgeFailure.PLAYBACK_UNSUPPORTED_MEDIA,
       'Only audio and video materials can receive a playback grant.',
     );
   }
   if (!Number.isSafeInteger(source.material.byteSize) || source.material.byteSize < 0) {
-    throw new MaterialPlaybackGrantError('Playback material size is invalid.');
+    throw new MaterialPlaybackGrantError(
+      BridgeFailure.PLAYBACK_UNSUPPORTED_MEDIA,
+      'Playback material size is invalid.',
+    );
   }
 }
 
@@ -142,7 +162,10 @@ function normalizeLoopbackOrigin(value: string): string {
     }
     return url.origin;
   } catch {
-    throw new MaterialPlaybackGrantError('Playback grants require an explicit loopback origin.');
+    throw new MaterialPlaybackGrantError(
+      BridgeFailure.PLAYBACK_UNAVAILABLE,
+      'Playback grants require an explicit loopback origin.',
+    );
   }
 }
 

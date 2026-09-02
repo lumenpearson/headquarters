@@ -87,6 +87,7 @@ const accessibility: ChordTable = {
   'shell.productionPanel': { code: 'F4' },
   'keybinds.list': { code: 'F1' },
   'edit.toggle': { code: 'KeyE', ctrl: true },
+  'edit.dockPanel': { code: 'KeyG', ctrl: true },
   'files.import': { code: 'KeyS', ctrl: true },
   'scene.commandPalette': { code: 'Space', ctrl: true },
   'developer.toggle': { code: 'F10' },

@@ -1,0 +1,65 @@
+import type { CatalogModule } from './catalogTypes';
+
+/**
+ * The shell around every route: the navigation rail, the commands menu, the
+ * top bar, the status line and the title bar.
+ *
+ * These are the strings an operator reads on every screen without having gone
+ * anywhere, which is why they sit together rather than with the surface that
+ * happens to draw them.
+ */
+export const chromeMessages = {
+  'clock.mode.operation': { ru: 'ОПЕР', en: 'OPER' },
+  'clock.mode.system': { ru: 'СИСТ', en: 'SYS' },
+  'menu.record': { ru: 'Действия над записью', en: 'Record actions' },
+  'menu.record.open': { ru: 'Открыть карточку', en: 'Open the card' },
+  'menu.record.search': { ru: 'Найти упоминания', en: 'Find mentions' },
+  'menu.record.select': { ru: 'Выделить строку', en: 'Select the row' },
+  'menu.shell': { ru: 'Команды штаба', en: 'Headquarters commands' },
+  'menu.shell.diagnostics': { ru: 'Скопировать диагностику', en: 'Copy diagnostics' },
+  'menu.shell.edit': { ru: 'Режим редактирования', en: 'Edit mode' },
+  'menu.shell.fullscreen': { ru: 'Полный экран', en: 'Full screen' },
+  'menu.shell.group': { ru: 'Синхронизация группы', en: 'Group synchronisation' },
+  'menu.shell.keybinds': { ru: 'Сочетания клавиш', en: 'Keyboard shortcuts' },
+  'menu.shell.production': { ru: 'Панель режиссёра', en: 'Director panel' },
+  'menu.shell.search': { ru: 'Глобальный поиск', en: 'Global search' },
+  'nav.archive': { ru: 'АРХИВ', en: 'ARCHIVE' },
+  'nav.cases': { ru: 'ДЕЛА', en: 'CASES' },
+  'nav.comms': { ru: 'СВЯЗЬ', en: 'COMMS' },
+  'nav.files': { ru: 'ФАЙЛЫ', en: 'FILES' },
+  'nav.map': { ru: 'КАРТА', en: 'MAP' },
+  'nav.objects': { ru: 'ОБЪЕКТЫ', en: 'OBJECTS' },
+  'nav.overview': { ru: 'ОБЗОР', en: 'OVERVIEW' },
+  'nav.primaryLabel': { ru: 'Основная навигация', en: 'Primary navigation' },
+  'nav.rail': { ru: 'Разделы штаба', en: 'Headquarters sections' },
+  'nav.search': { ru: 'ПОИСК', en: 'SEARCH' },
+  'nav.toggleCompact': { ru: 'Переключить компактную навигацию', en: 'Toggle compact navigation' },
+  'nav.video': { ru: 'ВИДЕО', en: 'VIDEO' },
+  'shell.openLoadAnalytics': { ru: 'Открыть аналитику нагрузки', en: 'Open load analytics' },
+  'shell.openNewAlert': { ru: 'Открыть новую тревогу', en: 'Open the new alert' },
+  'shell.openSystemStatus': { ru: 'Открыть состояние системы', en: 'Open system status' },
+  'shell.toggleClockMode': { ru: 'Переключить режим часов', en: 'Toggle clock mode' },
+  'statuslineElement.alerts': { ru: 'СЧЁТЧИК ТРЕВОГ', en: 'ALERT COUNTER' },
+  'statuslineElement.clock': { ru: 'ЧАСЫ', en: 'CLOCK' },
+  'statuslineElement.cpu': { ru: 'ЗАГРУЗКА ПРОЦЕССОРА', en: 'CPU LOAD' },
+  'statuslineElement.encoding': { ru: 'КОДИРОВКА', en: 'ENCODING' },
+  'statuslineElement.hints': { ru: 'ПОДСКАЗКИ КЛАВИШ', en: 'KEYBIND HINTS' },
+  'statuslineElement.net': { ru: 'СЕТЕВОЙ ТРАФИК', en: 'NETWORK TRAFFIC' },
+  'statuslineElement.probe': { ru: 'ТРАНСПОРТ СЕССИИ', en: 'SESSION TRANSPORT' },
+  'statuslineElement.ram': { ru: 'ЗАГРУЗКА ПАМЯТИ', en: 'MEMORY LOAD' },
+  'statuslineElement.route': { ru: 'ТЕКУЩИЙ МАРШРУТ', en: 'CURRENT ROUTE' },
+  'statuslineElement.system': { ru: 'СИСТЕМА', en: 'SYSTEM' },
+  'titlebarElement.close': { ru: 'ЗАКРЫТЬ', en: 'CLOSE' },
+  'titlebarElement.information': { ru: 'ИНФОРМАЦИОННЫЙ СЛОТ', en: 'INFORMATION SLOT' },
+  'titlebarElement.maximize': { ru: 'РАЗВЕРНУТЬ', en: 'MAXIMIZE' },
+  'titlebarElement.minimize': { ru: 'СВЕРНУТЬ', en: 'MINIMIZE' },
+  'titlebarElement.title': { ru: 'ЗАГОЛОВОК ОКНА', en: 'WINDOW TITLE' },
+  'topbar.brand': { ru: 'ГРЕМУЧАЯ//MESH', en: 'GREMUCHAYA//MESH' },
+  'topbar.commandsLabel': { ru: 'КОМАНДЫ', en: 'COMMANDS' },
+  'topbar.date': { ru: 'ДАТА', en: 'DATE' },
+  'topbar.link': { ru: 'СВЯЗЬ', en: 'LINK' },
+  'topbar.openActiveAlert': { ru: 'Открыть активную тревогу', en: 'Open the active alert' },
+  'topbar.operatorCode': { ru: 'ОП-01', en: 'OP-01' },
+  'topbar.phase': { ru: '{code} / ФАЗА {phase}', en: '{code} / PHASE {phase}' },
+  'topbar.session': { ru: 'СЕССИЯ', en: 'SESSION' },
+} as const satisfies CatalogModule;

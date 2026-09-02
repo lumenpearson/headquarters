@@ -294,6 +294,34 @@ const isSpanList = withEditor(
 );
 
 /**
+ * `screen:tile=full|compact|minimal` and `category=full|compact|minimal`. The
+ * per-tile and per-category ceiling on how rich a tile may be drawn, in the
+ * shape `tiles.animations`/`tiles.categoryAnimations` already carry: a tile
+ * identifier is unique only within a screen, so a per-tile entry has to name
+ * the screen, and a per-category entry does not. `auto` has no spelling here
+ * -- the entry is simply absent, the way an inherited tile motion is.
+ */
+const tilePresentationEntry = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*=(full|compact|minimal)$/;
+const categoryPresentationEntry = /^[a-z][a-z0-9-]*=(full|compact|minimal)$/;
+const isTilePresentationList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string' && tilePresentationEntry.test(item)),
+);
+const isCategoryPresentationList = withEditor(
+  { kind: 'string-list', delimiter: ',' },
+  (value): value is readonly string[] =>
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === 'string' &&
+        categoryPresentationEntry.test(item) &&
+        (tileCategories as readonly string[]).includes(item.split('=')[0] ?? ''),
+    ),
+);
+
+/**
  * The languages the application ships a catalogue for.
  *
  * Written once rather than at each of the two definitions that need it:
@@ -407,10 +435,12 @@ const oneOfNumbers = (values: readonly number[]) =>
  *
  * Declared here with the rest of the vocabulary the safe editor may offer, the
  * way `tileCategories` is. The list is the world the shell already simulates:
- * the seven session metrics, the two a system node reports, and the three a
- * comms channel reports.
+ * the seven session metrics, the two a system node reports, the four a comms
+ * channel reports (load, latency, signal and packet loss), and the two
+ * device-signal readings a sensor and a camera each report.
  */
 export const simulationChannels = [
+  'camera-signal',
   'cpu',
   'gpu',
   'link-latency',
@@ -420,12 +450,37 @@ export const simulationChannels = [
   'network-out',
   'node-load',
   'node-temperature',
+  'packet-loss',
   'ram',
   'readiness',
+  'sensor-signal',
   'storage',
 ] as const;
 
 export type SimulationChannelName = (typeof simulationChannels)[number];
+
+/**
+ * The named simulation presets an operator may mark, in the order the schema
+ * offers them.
+ *
+ * Declared here, next to `simulationChannels`, for the reason that list is:
+ * `simulation.preset`'s reader (`simulationCurves.ts`) has to name the exact
+ * same vocabulary the definition validates, or a preset the schema accepts
+ * could be one the reader has never heard of.
+ */
+export const simulationPresets = [
+  'normal',
+  'elevated',
+  'degraded',
+  'critical',
+  'incident',
+  'recovery',
+  'network-attack',
+  'storage-exhaustion',
+  'cpu-overload',
+] as const;
+
+export type SimulationPresetName = (typeof simulationPresets)[number];
 
 /**
  * The four interpolations `evaluateCurve` implements, offered by name.
@@ -520,7 +575,7 @@ const curveOver = (shape: CurveEditorShape): SettingValidator =>
     (value): value is readonly string[] => isCurveList(value, shape),
   );
 
-export const settingsDefinitions: readonly SettingDefinition[] = [
+const settingsDefinitionsList = [
   definition(
     'general.localOnly',
     'general',
@@ -683,6 +738,14 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     oneOf(['hover', 'always', 'never']),
   ),
   definition(
+    'styles.iconSet',
+    'styles',
+    'terminal',
+    'device',
+    "Which library draws the shell's icons.",
+    oneOf(['terminal', 'lucide', 'hugeicons', 'tabler']),
+  ),
+  definition(
     'styles.cornerLength',
     'styles',
     10,
@@ -794,6 +857,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
       'barber-lines',
       'radar',
       'particles',
+      'bitmap-shader',
       'image',
       'video',
     ]),
@@ -902,6 +966,37 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'Show the optimized startup sequence.',
     isBoolean,
   ),
+  /*
+   * Two device-scoped switches the maintenance surface owns, both off by
+   * default on purpose: a shoot machine decides for itself when it restarts
+   * for an update and whether it comes back on its own after a reboot.
+   * Neither is a group setting -- one operator's machine cannot volunteer
+   * another's for an install mid-take.
+   */
+  definition(
+    'startup.launchOnLogin',
+    'startup',
+    false,
+    'device',
+    'Start the application when this machine signs in. Desktop only.',
+    isBoolean,
+  ),
+  definition(
+    'startup.autoUpdate',
+    'startup',
+    false,
+    'device',
+    'Check for an update on launch and download it without being asked. Desktop only.',
+    isBoolean,
+  ),
+  definition(
+    'layout.settingsLanding',
+    'layout',
+    'cards',
+    'device',
+    'Whether the settings screen opens as category cards or as one continuous list.',
+    oneOf(['cards', 'unified']),
+  ),
   definition(
     'player.defaultRate',
     'player',
@@ -949,6 +1044,14 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Write a snapshot in grayscale, as the feed is drawn.',
     isBoolean,
+  ),
+  definition(
+    'player.controlsHideDelayMs',
+    'player',
+    2500,
+    'device',
+    'How long a media surface waits, after the pointer leaves and no control holds focus, before its overlay controls hide.',
+    numberWithin(500, 5000, 100),
   ),
   definition(
     'cameras.gridDensity',
@@ -1079,6 +1182,14 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     oneOf(['clear', 'standard', 'opaque']),
   ),
   definition(
+    'popups.overlayBlur',
+    'popups',
+    16,
+    'device',
+    'Backdrop blur behind a dialog, drawer or panel scrim, in pixels; 0 disables it.',
+    sliderWithin(0, 24),
+  ),
+  definition(
     'materials.defaultSort',
     'materials',
     'createdAt',
@@ -1109,6 +1220,30 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'device',
     'Largest text material previewed in place, in mebibytes.',
     numberWithin(1, 32),
+  ),
+  definition(
+    'materials.autoplayPreview',
+    'materials',
+    false,
+    'device',
+    'Start a selected material playing as soon as its local preview opens.',
+    isBoolean,
+  ),
+  definition(
+    'materials.loopPreview',
+    'materials',
+    false,
+    'device',
+    'Repeat a previewed material from the start once it ends.',
+    isBoolean,
+  ),
+  definition(
+    'materials.rememberPreviewPosition',
+    'materials',
+    false,
+    'device',
+    'Resume a previewed material where playback last left it, for this browser session.',
+    isBoolean,
   ),
   definition(
     'performance.playbackLeadMs',
@@ -1228,17 +1363,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'normal',
     'group',
     'Marked simulation preset.',
-    oneOf([
-      'normal',
-      'elevated',
-      'degraded',
-      'critical',
-      'incident',
-      'recovery',
-      'network-attack',
-      'storage-exhaustion',
-      'cpu-overload',
-    ]),
+    oneOf(simulationPresets),
   ),
   definition(
     'simulation.channel',
@@ -1742,7 +1867,7 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
     'backgrounds',
     0,
     'device',
-    'Blur applied to a video background, in pixels.',
+    'Blur applied to a video or bitmap-shader background, in pixels, on top of the glow the shader kind already carries.',
     numberWithin(0, 24),
   ),
   definition(
@@ -1836,12 +1961,54 @@ export const settingsDefinitions: readonly SettingDefinition[] = [
   definition(
     'layout.tileMinimumWidth',
     'layout',
-    240,
+    // The range floor on purpose: the default must not move a single stock
+    // tile at any supported viewport, and 240 displaced the reports-kinds
+    // and map-layers tiles at 1440x900 the day the resolver gained this
+    // reader. Raising the floor is the operator's call for their monitor.
+    160,
     'device',
     'Narrowest a tile may be before the layout moves it, in pixels.',
     numberWithin(160, 480),
   ),
+  definition(
+    'tiles.presentationOverrides',
+    'tiles',
+    [],
+    'device',
+    'Presentation cap the operator chose per tile, as `screen:tile=full|compact|minimal` entries; overrides the category and the application ceiling.',
+    isTilePresentationList,
+  ),
+  definition(
+    'tiles.categoryPresentation',
+    'tiles',
+    [],
+    'device',
+    `Presentation cap per tile group, as \`group=full|compact|minimal\`: ${tileCategories.join(', ')}.`,
+    isCategoryPresentationList,
+  ),
 ] as const;
+
+/**
+ * The full union of every definition's id.
+ *
+ * Published the way {@link settingCategories} and {@link simulationChannels}
+ * already are: a vocabulary the schema states once, so a consumer keyed by it
+ * -- `apps/hq`'s per-setting label and description tables -- fails
+ * `pnpm typecheck` rather than falling through to a runtime fallback when a
+ * definition is added with no corresponding entry. Reads no message table
+ * itself, so the trust boundary this file states above `settingsDefinitions`
+ * (`localizationKey: ''` on the wire) is unchanged: the schema still does not
+ * know a translation exists, only that an id does.
+ */
+export type SettingId = (typeof settingsDefinitionsList)[number]['id'];
+
+/**
+ * The public view of the same list, widened back to the shape every existing
+ * consumer already reads. `definition()`'s per-call literal `id` is what
+ * makes {@link SettingId} exact; nothing downstream of this export sees a
+ * different type than it did before that inference existed.
+ */
+export const settingsDefinitions: readonly SettingDefinition[] = settingsDefinitionsList;
 
 const definitionById = new Map(
   settingsDefinitions.map((definition) => [definition.id, definition]),
@@ -2046,14 +2213,23 @@ export class InvalidSettingValueError extends Error {
   }
 }
 
-function definition(
-  id: string,
+/**
+ * `Id` is a `const` type parameter so each call site's literal id string
+ * survives into the return type instead of widening to `string` the way an
+ * ordinary parameter would -- the same device {@link oneOf} already uses for
+ * an enum's option literals. That is what lets {@link SettingId} be a real
+ * union of every id rather than `string`, which a `Record<SettingId, …>`
+ * elsewhere needs to reject a missing key at compile time instead of
+ * accepting any string.
+ */
+function definition<const Id extends string>(
+  id: Id,
   category: SettingCategory,
   defaultValue: SettingValue,
   scope: Exclude<SettingScope, 'factory'>,
   description: string,
   validate: SettingValidator,
-): SettingDefinition {
+): SettingDefinition & { readonly id: Id } {
   return { id, category, defaultValue, scope, description, editor: validate.editor, validate };
 }
 

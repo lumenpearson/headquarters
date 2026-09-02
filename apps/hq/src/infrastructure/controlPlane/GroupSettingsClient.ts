@@ -10,6 +10,7 @@ import type {
   GroupSettingsHistoryQuery,
   GroupSettingsOperation,
   GroupSettingsPort,
+  GroupSettingsWatchEvent,
 } from '@/application/sync/groupSettingsPort';
 
 import { toEpochMs } from './groupEventCodec';
@@ -123,6 +124,15 @@ export interface SettingsRpcClient {
     readonly entries: readonly WireHistoryEntry[];
     readonly page?: { readonly nextCursor: string; readonly hasMore: boolean } | undefined;
   }>;
+  watchSettings(
+    request: { readonly scope: WireScope; readonly afterRevision: bigint },
+    options?: CallOptions,
+  ): AsyncIterable<{ readonly event?: WireSettingsEvent | undefined }>;
+}
+
+/** Only the field this facade reads: `WatchSettingsResponse.event.sequence`. */
+interface WireSettingsEvent {
+  readonly sequence: bigint;
 }
 
 export interface GroupSettingsClientOptions {
@@ -234,6 +244,29 @@ export class GroupSettingsClient implements GroupSettingsPort {
       nextCursor: response.page?.nextCursor ?? '',
       hasMore: response.page?.hasMore ?? false,
     };
+  }
+
+  /**
+   * `SettingsService.WatchSettings`, one `GroupSettingsWatchEvent` per frame.
+   *
+   * A thin pass-through: the wire event carries a document too, but
+   * `GroupSettingsSync` re-reads through `getEffectiveSettings` rather than
+   * consuming it, so nothing here is decoded beyond the revision that says a
+   * read is due.
+   */
+  async *watchSettings(
+    afterRevision: number,
+    signal?: AbortSignal,
+  ): AsyncIterable<GroupSettingsWatchEvent> {
+    const stream = this.#client.watchSettings(
+      { scope: this.#scope(), afterRevision: BigInt(Math.max(0, Math.trunc(afterRevision))) },
+      options(signal),
+    );
+    for await (const response of stream) {
+      const sequence = response.event?.sequence;
+      if (sequence === undefined) continue;
+      yield { revision: Number(sequence) };
+    }
   }
 
   #scope(): WireScope {

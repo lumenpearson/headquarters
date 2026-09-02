@@ -101,6 +101,201 @@ describe('deterministic tile layout resolver', () => {
   });
 });
 
+describe('a minimum tile width decided in pixels, not by shrinking the column count', () => {
+  /**
+   * The approach measured against real screens before this one: reduce
+   * `columns` itself by the container width divided by the floor, and pass
+   * the reduced count to the resolver. A screen's `columns` is a coordinate
+   * system it chose for itself -- twelfths here -- not a pixel promise, so a
+   * tile declared against the real count becomes wider than the reduced grid
+   * has room for and is unplaceable outright. That emptied eleven routes and
+   * failed four `R10` scenarios; `columns` must stay exactly what the screen
+   * declared.
+   */
+  it('keeps the declared column count, even when it would have been reduced past a tile’s span', () => {
+    const request: GridLayoutRequest = {
+      columns: 12,
+      maximumRows: 1,
+      // At a 480px container, the floor divided into it would round to two
+      // or three columns -- far short of the eight this tile actually asks
+      // for in the twelfths this screen measures itself in.
+      containerWidth: 480,
+      minimumTileWidth: 240,
+      tiles: [
+        {
+          id: 'registry',
+          priority: 100,
+          variants: [{ presentation: 'full', columns: 8, rows: 1 }],
+        },
+        // Fills the remaining four columns exactly, so the gap-closing pass
+        // has nothing left to grow `registry` into: the assertion below is
+        // reading the placement decision, not a later pass reshaping it.
+        {
+          id: 'filler',
+          priority: 10,
+          variants: [{ presentation: 'full', columns: 4, rows: 1 }],
+        },
+      ],
+    };
+
+    const result = resolveGridLayout(request);
+
+    expect(result.placed).toEqual([
+      { id: 'registry', x: 0, y: 0, columns: 8, rows: 1, presentation: 'full' },
+      { id: 'filler', x: 8, y: 0, columns: 4, rows: 1, presentation: 'full' },
+    ]);
+    expect(result.relocated).toEqual([]);
+    expect(result.hidden).toEqual([]);
+  });
+
+  it('skips a variant that renders under the floor in favour of a wider, more compact one', () => {
+    const result = resolveGridLayout({
+      columns: 4,
+      maximumRows: 4,
+      containerWidth: 400,
+      minimumTileWidth: 150,
+      tiles: [
+        {
+          id: 'panel',
+          priority: 100,
+          // 100px wide at a 100px column -- under the floor -- ranked above a
+          // 200px-wide variant with less area, which is exactly the ordering
+          // `validateRequest` allows: area may only fall as variants go on.
+          variants: [
+            { presentation: 'full', columns: 1, rows: 4 },
+            { presentation: 'compact', columns: 2, rows: 1 },
+          ],
+        },
+      ],
+    });
+
+    // Placed at the wider compact variant, then grown to fill the row the
+    // gap-closing pass leaves it alone in -- the decision under test is the
+    // presentation and the fact that it was placed at all, not the width the
+    // later pass grew it to.
+    expect(result.placed).toEqual([
+      { id: 'panel', x: 0, y: 0, columns: 4, rows: 1, presentation: 'compact' },
+    ]);
+  });
+
+  it('relocates a tile whose every variant falls under the floor, by name rather than by dropping it', () => {
+    const result = resolveGridLayout({
+      columns: 4,
+      maximumRows: 1,
+      containerWidth: 400,
+      minimumTileWidth: 150,
+      tiles: [
+        { id: 'anchor', priority: 100, variants: [{ presentation: 'full', columns: 3, rows: 1 }] },
+        {
+          id: 'narrow',
+          priority: 90,
+          // 100px wide at a 100px column, under the 150px floor, and no size
+          // this tile ever offers clears it.
+          variants: [{ presentation: 'minimal', columns: 1, rows: 1 }],
+          relocationRoute: '/narrow-details',
+        },
+      ],
+    });
+
+    expect(result.placed).toEqual([
+      { id: 'anchor', x: 0, y: 0, columns: 4, rows: 1, presentation: 'full' },
+    ]);
+    expect(result.relocated).toEqual([{ id: 'narrow', route: '/narrow-details' }]);
+    expect(result.hidden).toEqual([]);
+  });
+
+  it('hides a tile whose every variant falls under the floor when it declares no route', () => {
+    const result = resolveGridLayout({
+      columns: 4,
+      maximumRows: 1,
+      containerWidth: 400,
+      minimumTileWidth: 150,
+      tiles: [
+        { id: 'anchor', priority: 100, variants: [{ presentation: 'full', columns: 3, rows: 1 }] },
+        {
+          id: 'narrow',
+          priority: 90,
+          variants: [{ presentation: 'minimal', columns: 1, rows: 1 }],
+          hideWhenOverflow: true,
+        },
+      ],
+    });
+
+    expect(result.hidden).toEqual([{ id: 'narrow', reason: 'overflow' }]);
+    expect(result.relocated).toEqual([]);
+  });
+
+  /**
+   * The fourth `R10` shape: a tile with no `relocationRoute` and no
+   * `hideWhenOverflow` never leaves silently, because there is nothing that
+   * could take it -- the resolver's existing fails-closed contract for a
+   * tile that does not fit the grid at all. The floor must not invent a new
+   * way for that contract to bite: relocation frees no room when there is
+   * nowhere to send the tile, so it is placed at its normal size instead.
+   */
+  it('places a required tile at its normal size when the floor alone would have excluded it', () => {
+    const result = resolveGridLayout({
+      columns: 4,
+      maximumRows: 1,
+      containerWidth: 400,
+      minimumTileWidth: 150,
+      tiles: [
+        {
+          id: 'required',
+          priority: 100,
+          // 100px wide at a 100px column, under the floor, and no route or
+          // permission to hide -- the grid it fits fine by cell count alone.
+          variants: [{ presentation: 'minimal', columns: 1, rows: 1 }],
+        },
+      ],
+    });
+
+    // Grown to fill the row by the gap-closing pass, same as `panel` above --
+    // the claim under test is that it is placed at all rather than relocated
+    // or hidden.
+    expect(result.placed).toEqual([
+      { id: 'required', x: 0, y: 0, columns: 4, rows: 1, presentation: 'minimal' },
+    ]);
+    expect(result.relocated).toEqual([]);
+    expect(result.hidden).toEqual([]);
+  });
+
+  it('runs exactly as before when neither containerWidth nor minimumTileWidth is given', () => {
+    const tiles: GridLayoutRequest['tiles'] = [
+      { id: 'only', priority: 100, variants: [{ presentation: 'minimal', columns: 1, rows: 1 }] },
+    ];
+
+    expect(resolveGridLayout({ columns: 4, maximumRows: 1, tiles }).placed).toEqual([
+      { id: 'only', x: 0, y: 0, columns: 4, rows: 1, presentation: 'minimal' },
+    ]);
+  });
+
+  it('rejects a container width or a floor that is not a positive finite number', () => {
+    const tiles: GridLayoutRequest['tiles'] = [
+      { id: 'only', priority: 100, variants: [{ presentation: 'minimal', columns: 1, rows: 1 }] },
+    ];
+
+    expect(() =>
+      resolveGridLayout({
+        columns: 4,
+        maximumRows: 1,
+        tiles,
+        containerWidth: 0,
+        minimumTileWidth: 1,
+      }),
+    ).toThrow(/containerWidth/);
+    expect(() =>
+      resolveGridLayout({
+        columns: 4,
+        maximumRows: 1,
+        tiles,
+        containerWidth: 400,
+        minimumTileWidth: Number.NaN,
+      }),
+    ).toThrow(/minimumTileWidth/);
+  });
+});
+
 describe('no empty cell in a bounded grid', () => {
   /**
    * Reproduces the hole the operations overview showed at 2560x1440: the only

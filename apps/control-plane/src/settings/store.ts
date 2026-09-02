@@ -421,8 +421,13 @@ const sharedShape: ScopeShape = {
  *
  * Silently substituting the caller's own scope would be worse than refusing:
  * the client would believe it had read the group it asked for.
+ *
+ * Exported so `DurableLayoutStore` applies this exact rule rather than a second
+ * copy of it: a layout is addressed by the same `SettingsScope`, and two
+ * implementations of one scope check are how a corrected rule stays corrected in
+ * only one of them.
  */
-function requireAddressableScope(actor: SettingsActor, scope: SettingsScopeRef): void {
+export function requireAddressableScope(actor: SettingsActor, scope: SettingsScopeRef): void {
   const requested = scope.resourceId?.trim();
   if (requested === undefined || requested.length === 0) return;
   if (scope.kind === 'GROUP' && requested !== actor.groupId) {

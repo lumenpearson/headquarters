@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gremuchaya/settings/v1/settings.proto.
  */
 export const file_gremuchaya_settings_v1_settings: GenFile = /*@__PURE__*/
-  fileDesc("CiVncmVtdWNoYXlhL3NldHRpbmdzL3YxL3NldHRpbmdzLnByb3RvEhZncmVtdWNoYXlhLnNldHRpbmdzLnYxIn8KDVNldHRpbmdzU2NvcGUSNwoEdHlwZRgBIAEoDjIpLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZVR5cGUSNQoLcmVzb3VyY2VfaWQYAiABKAsyIC5ncmVtdWNoYXlhLmNvbW1vbi52MS5SZXNvdXJjZUlkInMKEVNldHRpbmdDb25zdHJhaW50Eg8KB21pbmltdW0YASABKAESDwoHbWF4aW11bRgCIAEoARIMCgRzdGVwGAMgASgBEhYKDm1heGltdW1fbGVuZ3RoGAQgASgNEhYKDmFsbG93ZWRfdmFsdWVzGAUgAygJIrsCChFTZXR0aW5nRGVzY3JpcHRvchIMCgRwYXRoGAEgASgJEhAKCGNhdGVnb3J5GAIgASgJEhgKEGxvY2FsaXphdGlvbl9rZXkYAyABKAkSPAoKdmFsdWVfdHlwZRgEIAEoDjIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ1ZhbHVlVHlwZRI5Cg1kZWZhdWx0X3ZhbHVlGAUgASgLMiIuZ3JlbXVjaGF5YS5jb21tb24udjEuU2V0dGluZ1ZhbHVlEj0KCmNvbnN0cmFpbnQYBiABKAsyKS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdDb25zdHJhaW50EhoKEmdyb3VwX3N5bmNfYWxsb3dlZBgHIAEoCBIYChByZXF1aXJlc19yZXN0YXJ0GAggASgIInIKDlNldHRpbmdzU2NoZW1hEg8KB3ZlcnNpb24YASABKAkSOwoIc2V0dGluZ3MYAiADKAsyKS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdEZXNjcmlwdG9yEhIKCmNhdGVnb3JpZXMYAyADKAki8QIKEFNldHRpbmdzRG9jdW1lbnQSLAoCaWQYASABKAsyIC5ncmVtdWNoYXlhLmNvbW1vbi52MS5SZXNvdXJjZUlkEjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEkQKBnZhbHVlcxgDIAMoCzI0LmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudC5WYWx1ZXNFbnRyeRIwCghyZXZpc2lvbhgEIAEoCzIeLmdyZW11Y2hheWEuY29tbW9uLnYxLlJldmlzaW9uEi4KCnVwZGF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wGlEKC1ZhbHVlc0VudHJ5EgsKA2tleRgBIAEoCRIxCgV2YWx1ZRgCIAEoCzIiLmdyZW11Y2hheWEuY29tbW9uLnYxLlNldHRpbmdWYWx1ZToCOAEiaQoWU2V0dGluZ3NQYXRjaE9wZXJhdGlvbhIMCgRwYXRoGAEgASgJEjEKBXZhbHVlGAIgASgLMiIuZ3JlbXVjaGF5YS5jb21tb24udjEuU2V0dGluZ1ZhbHVlEg4KBnJlbW92ZRgDIAEoCCKoAwoUU2V0dGluZ3NIaXN0b3J5RW50cnkSLAoCaWQYASABKAsyIC5ncmVtdWNoYXlhLmNvbW1vbi52MS5SZXNvdXJjZUlkEjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEhAKCGNhdGVnb3J5GAMgASgJEhIKCmVsZW1lbnRfaWQYBCABKAkSEQoJb3BlcmF0aW9uGAUgASgJEj0KBXBhdGNoGAYgAygLMi4uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1BhdGNoT3BlcmF0aW9uEjAKCHJldmlzaW9uGAcgASgLMh4uZ3JlbXVjaGF5YS5jb21tb24udjEuUmV2aXNpb24SOQoPYWN0b3JfZGV2aWNlX2lkGAggASgLMiAuZ3JlbXVjaGF5YS5jb21tb24udjEuUmVzb3VyY2VJZBIvCgtvY2N1cnJlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFgoOY29ycmVsYXRpb25faWQYCiABKAkinQEKG0dldEVmZmVjdGl2ZVNldHRpbmdzUmVxdWVzdBIyCghncm91cF9pZBgBIAEoCzIgLmdyZW11Y2hheWEuY29tbW9uLnYxLlJlc291cmNlSWQSMwoJZGV2aWNlX2lkGAIgASgLMiAuZ3JlbXVjaGF5YS5jb21tb24udjEuUmVzb3VyY2VJZBIVCg1pbmNsdWRlX2RyYWZ0GAMgASgIIp4BChxHZXRFZmZlY3RpdmVTZXR0aW5nc1Jlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50EkIKE2NvbnRyaWJ1dGluZ19zY29wZXMYAiADKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUiKwoYR2V0U2V0dGluZ3NTY2hlbWFSZXF1ZXN0Eg8KB3ZlcnNpb24YASABKAkiUwoZR2V0U2V0dGluZ3NTY2hlbWFSZXNwb25zZRI2CgZzY2hlbWEYASABKAsyJi5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NoZW1hIsoBChZBcHBseURyYWZ0UGF0Y2hSZXF1ZXN0EjYKB2NvbnRleHQYASABKAsyJS5ncmVtdWNoYXlhLmNvbW1vbi52MS5NdXRhdGlvbkNvbnRleHQSNAoFc2NvcGUYAiABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUSQgoKb3BlcmF0aW9ucxgDIAMoCzIuLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NQYXRjaE9wZXJhdGlvbiJSChdBcHBseURyYWZ0UGF0Y2hSZXNwb25zZRI3CgVkcmFmdBgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCKDAQoTRGlzY2FyZERyYWZ0UmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlIlMKFERpc2NhcmREcmFmdFJlc3BvbnNlEjsKCWVmZmVjdGl2ZRgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCKDAQoTUHVibGlzaERyYWZ0UmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlIlMKFFB1Ymxpc2hEcmFmdFJlc3BvbnNlEjsKCXB1Ymxpc2hlZBgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCKWAQoUUmVzZXRDYXRlZ29yeVJlcXVlc3QSNgoHY29udGV4dBgBIAEoCzIlLmdyZW11Y2hheWEuY29tbW9uLnYxLk11dGF0aW9uQ29udGV4dBI0CgVzY29wZRgCIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIQCghjYXRlZ29yeRgDIAEoCSJTChVSZXNldENhdGVnb3J5UmVzcG9uc2USOgoIZG9jdW1lbnQYASABKAsyKC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzRG9jdW1lbnQilwEKE1Jlc2V0RWxlbWVudFJlcXVlc3QSNgoHY29udGV4dBgBIAEoCzIlLmdyZW11Y2hheWEuY29tbW9uLnYxLk11dGF0aW9uQ29udGV4dBI0CgVzY29wZRgCIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRISCgplbGVtZW50X2lkGAMgASgJIlIKFFJlc2V0RWxlbWVudFJlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50IpUBCg9SZXNldEFsbFJlcXVlc3QSNgoHY29udGV4dBgBIAEoCzIlLmdyZW11Y2hheWEuY29tbW9uLnYxLk11dGF0aW9uQ29udGV4dBI0CgVzY29wZRgCIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIUCgxjb25maXJtYXRpb24YAyABKAkiTgoQUmVzZXRBbGxSZXNwb25zZRI6Cghkb2N1bWVudBgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCJNChVFeHBvcnRTZXR0aW5nc1JlcXVlc3QSNAoFc2NvcGUYASABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUiZwoWRXhwb3J0U2V0dGluZ3NSZXNwb25zZRIPCgdwYXlsb2FkGAEgASgMEhIKCm1lZGlhX3R5cGUYAiABKAkSFgoOc2NoZW1hX3ZlcnNpb24YAyABKAkSEAoIY2hlY2tzdW0YBCABKAkiuwEKFUltcG9ydFNldHRpbmdzUmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEg8KB3BheWxvYWQYAyABKAwSEgoKbWVkaWFfdHlwZRgEIAEoCRIPCgdkcnlfcnVuGAUgASgIIo4BChZJbXBvcnRTZXR0aW5nc1Jlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50EjgKCnZpb2xhdGlvbnMYAiADKAsyJC5ncmVtdWNoYXlhLmNvbW1vbi52MS5GaWVsZFZpb2xhdGlvbiLFAQocUmV2ZXJ0U2V0dGluZ3NWZXJzaW9uUmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEjcKD3RhcmdldF9yZXZpc2lvbhgDIAEoCzIeLmdyZW11Y2hheWEuY29tbW9uLnYxLlJldmlzaW9uIlsKHVJldmVydFNldHRpbmdzVmVyc2lvblJlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50IoMBChpMaXN0U2V0dGluZ3NIaXN0b3J5UmVxdWVzdBI0CgVzY29wZRgBIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIvCgRwYWdlGAIgASgLMiEuZ3JlbXVjaGF5YS5jb21tb24udjEuUGFnZVJlcXVlc3QiigEKG0xpc3RTZXR0aW5nc0hpc3RvcnlSZXNwb25zZRI9CgdlbnRyaWVzGAEgAygLMiwuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0hpc3RvcnlFbnRyeRIsCgRwYWdlGAIgASgLMh4uZ3JlbXVjaGF5YS5jb21tb24udjEuUGFnZUluZm8iZAoUV2F0Y2hTZXR0aW5nc1JlcXVlc3QSNAoFc2NvcGUYASABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUSFgoOYWZ0ZXJfcmV2aXNpb24YAiABKAQilQIKDVNldHRpbmdzRXZlbnQSEAoIc2VxdWVuY2UYASABKAQSNwoEa2luZBgCIAEoDjIpLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NFdmVudEtpbmQSNAoFc2NvcGUYAyABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUSOgoIZG9jdW1lbnQYBCABKAsyKC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzRG9jdW1lbnQSLwoLb2NjdXJyZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDmNvcnJlbGF0aW9uX2lkGAYgASgJIk0KFVdhdGNoU2V0dGluZ3NSZXNwb25zZRI0CgVldmVudBgBIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NFdmVudCqFAgoRU2V0dGluZ3NTY29wZVR5cGUSIwofU0VUVElOR1NfU0NPUEVfVFlQRV9VTlNQRUNJRklFRBAAEh8KG1NFVFRJTkdTX1NDT1BFX1RZUEVfRkFDVE9SWRABEh0KGVNFVFRJTkdTX1NDT1BFX1RZUEVfVEhFTUUQAhIdChlTRVRUSU5HU19TQ09QRV9UWVBFX0dST1VQEAMSHgoaU0VUVElOR1NfU0NPUEVfVFlQRV9ERVZJQ0UQBBIjCh9TRVRUSU5HU19TQ09QRV9UWVBFX0xPQ0FMX0RSQUZUEAUSJwojU0VUVElOR1NfU0NPUEVfVFlQRV9TRVNTSU9OX1BSRVZJRVcQBir3AQoQU2V0dGluZ1ZhbHVlVHlwZRIiCh5TRVRUSU5HX1ZBTFVFX1RZUEVfVU5TUEVDSUZJRUQQABIdChlTRVRUSU5HX1ZBTFVFX1RZUEVfU1RSSU5HEAESHgoaU0VUVElOR19WQUxVRV9UWVBFX0lOVEVHRVIQAhIdChlTRVRUSU5HX1ZBTFVFX1RZUEVfTlVNQkVSEAMSHgoaU0VUVElOR19WQUxVRV9UWVBFX0JPT0xFQU4QBBIdChlTRVRUSU5HX1ZBTFVFX1RZUEVfQklOQVJZEAUSIgoeU0VUVElOR19WQUxVRV9UWVBFX1NUUklOR19MSVNUEAYq7AEKEVNldHRpbmdzRXZlbnRLaW5kEiMKH1NFVFRJTkdTX0VWRU5UX0tJTkRfVU5TUEVDSUZJRUQQABIlCiFTRVRUSU5HU19FVkVOVF9LSU5EX0RSQUZUX1VQREFURUQQARInCiNTRVRUSU5HU19FVkVOVF9LSU5EX0RSQUZUX0RJU0NBUkRFRBACEiEKHVNFVFRJTkdTX0VWRU5UX0tJTkRfUFVCTElTSEVEEAMSHQoZU0VUVElOR1NfRVZFTlRfS0lORF9SRVNFVBAEEiAKHFNFVFRJTkdTX0VWRU5UX0tJTkRfUkVWRVJURUQQBTLqCwoPU2V0dGluZ3NTZXJ2aWNlEoEBChRHZXRFZmZlY3RpdmVTZXR0aW5ncxIzLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuR2V0RWZmZWN0aXZlU2V0dGluZ3NSZXF1ZXN0GjQuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5HZXRFZmZlY3RpdmVTZXR0aW5nc1Jlc3BvbnNlEngKEUdldFNldHRpbmdzU2NoZW1hEjAuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5HZXRTZXR0aW5nc1NjaGVtYVJlcXVlc3QaMS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkdldFNldHRpbmdzU2NoZW1hUmVzcG9uc2UScgoPQXBwbHlEcmFmdFBhdGNoEi4uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5BcHBseURyYWZ0UGF0Y2hSZXF1ZXN0Gi8uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5BcHBseURyYWZ0UGF0Y2hSZXNwb25zZRJpCgxEaXNjYXJkRHJhZnQSKy5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkRpc2NhcmREcmFmdFJlcXVlc3QaLC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkRpc2NhcmREcmFmdFJlc3BvbnNlEmkKDFB1Ymxpc2hEcmFmdBIrLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuUHVibGlzaERyYWZ0UmVxdWVzdBosLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuUHVibGlzaERyYWZ0UmVzcG9uc2USbAoNUmVzZXRDYXRlZ29yeRIsLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuUmVzZXRDYXRlZ29yeVJlcXVlc3QaLS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlJlc2V0Q2F0ZWdvcnlSZXNwb25zZRJpCgxSZXNldEVsZW1lbnQSKy5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlJlc2V0RWxlbWVudFJlcXVlc3QaLC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlJlc2V0RWxlbWVudFJlc3BvbnNlEl0KCFJlc2V0QWxsEicuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5SZXNldEFsbFJlcXVlc3QaKC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlJlc2V0QWxsUmVzcG9uc2USbwoORXhwb3J0U2V0dGluZ3MSLS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkV4cG9ydFNldHRpbmdzUmVxdWVzdBouLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuRXhwb3J0U2V0dGluZ3NSZXNwb25zZRJvCg5JbXBvcnRTZXR0aW5ncxItLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuSW1wb3J0U2V0dGluZ3NSZXF1ZXN0Gi4uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5JbXBvcnRTZXR0aW5nc1Jlc3BvbnNlEoQBChVSZXZlcnRTZXR0aW5nc1ZlcnNpb24SNC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlJldmVydFNldHRpbmdzVmVyc2lvblJlcXVlc3QaNS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlJldmVydFNldHRpbmdzVmVyc2lvblJlc3BvbnNlEn4KE0xpc3RTZXR0aW5nc0hpc3RvcnkSMi5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkxpc3RTZXR0aW5nc0hpc3RvcnlSZXF1ZXN0GjMuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5MaXN0U2V0dGluZ3NIaXN0b3J5UmVzcG9uc2USbgoNV2F0Y2hTZXR0aW5ncxIsLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuV2F0Y2hTZXR0aW5nc1JlcXVlc3QaLS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLldhdGNoU2V0dGluZ3NSZXNwb25zZTABYgZwcm90bzM", [file_google_protobuf_timestamp, file_gremuchaya_common_v1_common]);
+  fileDesc("CiVncmVtdWNoYXlhL3NldHRpbmdzL3YxL3NldHRpbmdzLnByb3RvEhZncmVtdWNoYXlhLnNldHRpbmdzLnYxIn8KDVNldHRpbmdzU2NvcGUSNwoEdHlwZRgBIAEoDjIpLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZVR5cGUSNQoLcmVzb3VyY2VfaWQYAiABKAsyIC5ncmVtdWNoYXlhLmNvbW1vbi52MS5SZXNvdXJjZUlkInMKEVNldHRpbmdDb25zdHJhaW50Eg8KB21pbmltdW0YASABKAESDwoHbWF4aW11bRgCIAEoARIMCgRzdGVwGAMgASgBEhYKDm1heGltdW1fbGVuZ3RoGAQgASgNEhYKDmFsbG93ZWRfdmFsdWVzGAUgAygJIrsCChFTZXR0aW5nRGVzY3JpcHRvchIMCgRwYXRoGAEgASgJEhAKCGNhdGVnb3J5GAIgASgJEhgKEGxvY2FsaXphdGlvbl9rZXkYAyABKAkSPAoKdmFsdWVfdHlwZRgEIAEoDjIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ1ZhbHVlVHlwZRI5Cg1kZWZhdWx0X3ZhbHVlGAUgASgLMiIuZ3JlbXVjaGF5YS5jb21tb24udjEuU2V0dGluZ1ZhbHVlEj0KCmNvbnN0cmFpbnQYBiABKAsyKS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdDb25zdHJhaW50EhoKEmdyb3VwX3N5bmNfYWxsb3dlZBgHIAEoCBIYChByZXF1aXJlc19yZXN0YXJ0GAggASgIInIKDlNldHRpbmdzU2NoZW1hEg8KB3ZlcnNpb24YASABKAkSOwoIc2V0dGluZ3MYAiADKAsyKS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdEZXNjcmlwdG9yEhIKCmNhdGVnb3JpZXMYAyADKAki8QIKEFNldHRpbmdzRG9jdW1lbnQSLAoCaWQYASABKAsyIC5ncmVtdWNoYXlhLmNvbW1vbi52MS5SZXNvdXJjZUlkEjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEkQKBnZhbHVlcxgDIAMoCzI0LmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudC5WYWx1ZXNFbnRyeRIwCghyZXZpc2lvbhgEIAEoCzIeLmdyZW11Y2hheWEuY29tbW9uLnYxLlJldmlzaW9uEi4KCnVwZGF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wGlEKC1ZhbHVlc0VudHJ5EgsKA2tleRgBIAEoCRIxCgV2YWx1ZRgCIAEoCzIiLmdyZW11Y2hheWEuY29tbW9uLnYxLlNldHRpbmdWYWx1ZToCOAEiaQoWU2V0dGluZ3NQYXRjaE9wZXJhdGlvbhIMCgRwYXRoGAEgASgJEjEKBXZhbHVlGAIgASgLMiIuZ3JlbXVjaGF5YS5jb21tb24udjEuU2V0dGluZ1ZhbHVlEg4KBnJlbW92ZRgDIAEoCCKoAwoUU2V0dGluZ3NIaXN0b3J5RW50cnkSLAoCaWQYASABKAsyIC5ncmVtdWNoYXlhLmNvbW1vbi52MS5SZXNvdXJjZUlkEjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEhAKCGNhdGVnb3J5GAMgASgJEhIKCmVsZW1lbnRfaWQYBCABKAkSEQoJb3BlcmF0aW9uGAUgASgJEj0KBXBhdGNoGAYgAygLMi4uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1BhdGNoT3BlcmF0aW9uEjAKCHJldmlzaW9uGAcgASgLMh4uZ3JlbXVjaGF5YS5jb21tb24udjEuUmV2aXNpb24SOQoPYWN0b3JfZGV2aWNlX2lkGAggASgLMiAuZ3JlbXVjaGF5YS5jb21tb24udjEuUmVzb3VyY2VJZBIvCgtvY2N1cnJlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFgoOY29ycmVsYXRpb25faWQYCiABKAkinQEKG0dldEVmZmVjdGl2ZVNldHRpbmdzUmVxdWVzdBIyCghncm91cF9pZBgBIAEoCzIgLmdyZW11Y2hheWEuY29tbW9uLnYxLlJlc291cmNlSWQSMwoJZGV2aWNlX2lkGAIgASgLMiAuZ3JlbXVjaGF5YS5jb21tb24udjEuUmVzb3VyY2VJZBIVCg1pbmNsdWRlX2RyYWZ0GAMgASgIIp4BChxHZXRFZmZlY3RpdmVTZXR0aW5nc1Jlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50EkIKE2NvbnRyaWJ1dGluZ19zY29wZXMYAiADKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUiKwoYR2V0U2V0dGluZ3NTY2hlbWFSZXF1ZXN0Eg8KB3ZlcnNpb24YASABKAkiUwoZR2V0U2V0dGluZ3NTY2hlbWFSZXNwb25zZRI2CgZzY2hlbWEYASABKAsyJi5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NoZW1hIsoBChZBcHBseURyYWZ0UGF0Y2hSZXF1ZXN0EjYKB2NvbnRleHQYASABKAsyJS5ncmVtdWNoYXlhLmNvbW1vbi52MS5NdXRhdGlvbkNvbnRleHQSNAoFc2NvcGUYAiABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUSQgoKb3BlcmF0aW9ucxgDIAMoCzIuLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NQYXRjaE9wZXJhdGlvbiJSChdBcHBseURyYWZ0UGF0Y2hSZXNwb25zZRI3CgVkcmFmdBgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCKDAQoTRGlzY2FyZERyYWZ0UmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlIlMKFERpc2NhcmREcmFmdFJlc3BvbnNlEjsKCWVmZmVjdGl2ZRgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCKDAQoTUHVibGlzaERyYWZ0UmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlIlMKFFB1Ymxpc2hEcmFmdFJlc3BvbnNlEjsKCXB1Ymxpc2hlZBgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCKWAQoUUmVzZXRDYXRlZ29yeVJlcXVlc3QSNgoHY29udGV4dBgBIAEoCzIlLmdyZW11Y2hheWEuY29tbW9uLnYxLk11dGF0aW9uQ29udGV4dBI0CgVzY29wZRgCIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIQCghjYXRlZ29yeRgDIAEoCSJTChVSZXNldENhdGVnb3J5UmVzcG9uc2USOgoIZG9jdW1lbnQYASABKAsyKC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzRG9jdW1lbnQilwEKE1Jlc2V0RWxlbWVudFJlcXVlc3QSNgoHY29udGV4dBgBIAEoCzIlLmdyZW11Y2hheWEuY29tbW9uLnYxLk11dGF0aW9uQ29udGV4dBI0CgVzY29wZRgCIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRISCgplbGVtZW50X2lkGAMgASgJIlIKFFJlc2V0RWxlbWVudFJlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50IpUBCg9SZXNldEFsbFJlcXVlc3QSNgoHY29udGV4dBgBIAEoCzIlLmdyZW11Y2hheWEuY29tbW9uLnYxLk11dGF0aW9uQ29udGV4dBI0CgVzY29wZRgCIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIUCgxjb25maXJtYXRpb24YAyABKAkiTgoQUmVzZXRBbGxSZXNwb25zZRI6Cghkb2N1bWVudBgBIAEoCzIoLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NEb2N1bWVudCJNChVFeHBvcnRTZXR0aW5nc1JlcXVlc3QSNAoFc2NvcGUYASABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUiZwoWRXhwb3J0U2V0dGluZ3NSZXNwb25zZRIPCgdwYXlsb2FkGAEgASgMEhIKCm1lZGlhX3R5cGUYAiABKAkSFgoOc2NoZW1hX3ZlcnNpb24YAyABKAkSEAoIY2hlY2tzdW0YBCABKAkiuwEKFUltcG9ydFNldHRpbmdzUmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEg8KB3BheWxvYWQYAyABKAwSEgoKbWVkaWFfdHlwZRgEIAEoCRIPCgdkcnlfcnVuGAUgASgIIo4BChZJbXBvcnRTZXR0aW5nc1Jlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50EjgKCnZpb2xhdGlvbnMYAiADKAsyJC5ncmVtdWNoYXlhLmNvbW1vbi52MS5GaWVsZFZpb2xhdGlvbiLFAQocUmV2ZXJ0U2V0dGluZ3NWZXJzaW9uUmVxdWVzdBI2Cgdjb250ZXh0GAEgASgLMiUuZ3JlbXVjaGF5YS5jb21tb24udjEuTXV0YXRpb25Db250ZXh0EjQKBXNjb3BlGAIgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEjcKD3RhcmdldF9yZXZpc2lvbhgDIAEoCzIeLmdyZW11Y2hheWEuY29tbW9uLnYxLlJldmlzaW9uIlsKHVJldmVydFNldHRpbmdzVmVyc2lvblJlc3BvbnNlEjoKCGRvY3VtZW50GAEgASgLMiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0RvY3VtZW50IoMBChpMaXN0U2V0dGluZ3NIaXN0b3J5UmVxdWVzdBI0CgVzY29wZRgBIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIvCgRwYWdlGAIgASgLMiEuZ3JlbXVjaGF5YS5jb21tb24udjEuUGFnZVJlcXVlc3QiigEKG0xpc3RTZXR0aW5nc0hpc3RvcnlSZXNwb25zZRI9CgdlbnRyaWVzGAEgAygLMiwuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc0hpc3RvcnlFbnRyeRIsCgRwYWdlGAIgASgLMh4uZ3JlbXVjaGF5YS5jb21tb24udjEuUGFnZUluZm8iZAoUV2F0Y2hTZXR0aW5nc1JlcXVlc3QSNAoFc2NvcGUYASABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUSFgoOYWZ0ZXJfcmV2aXNpb24YAiABKAQilQIKDVNldHRpbmdzRXZlbnQSEAoIc2VxdWVuY2UYASABKAQSNwoEa2luZBgCIAEoDjIpLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NFdmVudEtpbmQSNAoFc2NvcGUYAyABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUSOgoIZG9jdW1lbnQYBCABKAsyKC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzRG9jdW1lbnQSLwoLb2NjdXJyZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDmNvcnJlbGF0aW9uX2lkGAYgASgJIk0KFVdhdGNoU2V0dGluZ3NSZXNwb25zZRI0CgVldmVudBgBIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NFdmVudCJ6ChNMYXlvdXRUaWxlUGxhY2VtZW50Eg8KB3RpbGVfaWQYASABKAkSDgoGY29sdW1uGAIgASgNEgsKA3JvdxgDIAEoDRITCgtjb2x1bW5fc3BhbhgEIAEoDRIQCghyb3dfc3BhbhgFIAEoDRIOCgZoaWRkZW4YBiABKAgipQIKDkxheW91dERvY3VtZW50EiwKAmlkGAEgASgLMiAuZ3JlbXVjaGF5YS5jb21tb24udjEuUmVzb3VyY2VJZBI0CgVzY29wZRgCIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIRCglzY3JlZW5faWQYAyABKAkSOgoFdGlsZXMYBCADKAsyKy5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkxheW91dFRpbGVQbGFjZW1lbnQSMAoIcmV2aXNpb24YBSABKAsyHi5ncmVtdWNoYXlhLmNvbW1vbi52MS5SZXZpc2lvbhIuCgp1cGRhdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKSAgoYUHV0TGF5b3V0RG9jdW1lbnRSZXF1ZXN0EjYKB2NvbnRleHQYASABKAsyJS5ncmVtdWNoYXlhLmNvbW1vbi52MS5NdXRhdGlvbkNvbnRleHQSNAoFc2NvcGUYAiABKAsyJS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlNldHRpbmdzU2NvcGUSEQoJc2NyZWVuX2lkGAMgASgJEjoKBXRpbGVzGAQgAygLMisuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5MYXlvdXRUaWxlUGxhY2VtZW50EjkKEWV4cGVjdGVkX3JldmlzaW9uGAUgASgLMh4uZ3JlbXVjaGF5YS5jb21tb24udjEuUmV2aXNpb24iVQoZUHV0TGF5b3V0RG9jdW1lbnRSZXNwb25zZRI4Cghkb2N1bWVudBgBIAEoCzImLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuTGF5b3V0RG9jdW1lbnQiYwoYR2V0TGF5b3V0RG9jdW1lbnRSZXF1ZXN0EjQKBXNjb3BlGAEgASgLMiUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5TZXR0aW5nc1Njb3BlEhEKCXNjcmVlbl9pZBgCIAEoCSJVChlHZXRMYXlvdXREb2N1bWVudFJlc3BvbnNlEjgKCGRvY3VtZW50GAEgASgLMiYuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5MYXlvdXREb2N1bWVudCKGAgoSTGF5b3V0SGlzdG9yeUVudHJ5EjAKCHJldmlzaW9uGAEgASgLMh4uZ3JlbXVjaGF5YS5jb21tb24udjEuUmV2aXNpb24SOgoFdGlsZXMYAiADKAsyKy5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkxheW91dFRpbGVQbGFjZW1lbnQSOQoPYWN0b3JfZGV2aWNlX2lkGAMgASgLMiAuZ3JlbXVjaGF5YS5jb21tb24udjEuUmVzb3VyY2VJZBIvCgtvY2N1cnJlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFgoOY29ycmVsYXRpb25faWQYBSABKAkilAEKGExpc3RMYXlvdXRIaXN0b3J5UmVxdWVzdBI0CgVzY29wZRgBIAEoCzIlLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuU2V0dGluZ3NTY29wZRIRCglzY3JlZW5faWQYAiABKAkSLwoEcGFnZRgDIAEoCzIhLmdyZW11Y2hheWEuY29tbW9uLnYxLlBhZ2VSZXF1ZXN0IoYBChlMaXN0TGF5b3V0SGlzdG9yeVJlc3BvbnNlEjsKB2VudHJpZXMYASADKAsyKi5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkxheW91dEhpc3RvcnlFbnRyeRIsCgRwYWdlGAIgASgLMh4uZ3JlbXVjaGF5YS5jb21tb24udjEuUGFnZUluZm8qhQIKEVNldHRpbmdzU2NvcGVUeXBlEiMKH1NFVFRJTkdTX1NDT1BFX1RZUEVfVU5TUEVDSUZJRUQQABIfChtTRVRUSU5HU19TQ09QRV9UWVBFX0ZBQ1RPUlkQARIdChlTRVRUSU5HU19TQ09QRV9UWVBFX1RIRU1FEAISHQoZU0VUVElOR1NfU0NPUEVfVFlQRV9HUk9VUBADEh4KGlNFVFRJTkdTX1NDT1BFX1RZUEVfREVWSUNFEAQSIwofU0VUVElOR1NfU0NPUEVfVFlQRV9MT0NBTF9EUkFGVBAFEicKI1NFVFRJTkdTX1NDT1BFX1RZUEVfU0VTU0lPTl9QUkVWSUVXEAYq9wEKEFNldHRpbmdWYWx1ZVR5cGUSIgoeU0VUVElOR19WQUxVRV9UWVBFX1VOU1BFQ0lGSUVEEAASHQoZU0VUVElOR19WQUxVRV9UWVBFX1NUUklORxABEh4KGlNFVFRJTkdfVkFMVUVfVFlQRV9JTlRFR0VSEAISHQoZU0VUVElOR19WQUxVRV9UWVBFX05VTUJFUhADEh4KGlNFVFRJTkdfVkFMVUVfVFlQRV9CT09MRUFOEAQSHQoZU0VUVElOR19WQUxVRV9UWVBFX0JJTkFSWRAFEiIKHlNFVFRJTkdfVkFMVUVfVFlQRV9TVFJJTkdfTElTVBAGKuwBChFTZXR0aW5nc0V2ZW50S2luZBIjCh9TRVRUSU5HU19FVkVOVF9LSU5EX1VOU1BFQ0lGSUVEEAASJQohU0VUVElOR1NfRVZFTlRfS0lORF9EUkFGVF9VUERBVEVEEAESJwojU0VUVElOR1NfRVZFTlRfS0lORF9EUkFGVF9ESVNDQVJERUQQAhIhCh1TRVRUSU5HU19FVkVOVF9LSU5EX1BVQkxJU0hFRBADEh0KGVNFVFRJTkdTX0VWRU5UX0tJTkRfUkVTRVQQBBIgChxTRVRUSU5HU19FVkVOVF9LSU5EX1JFVkVSVEVEEAUy2A4KD1NldHRpbmdzU2VydmljZRKBAQoUR2V0RWZmZWN0aXZlU2V0dGluZ3MSMy5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkdldEVmZmVjdGl2ZVNldHRpbmdzUmVxdWVzdBo0LmdyZW11Y2hheWEuc2V0dGluZ3MudjEuR2V0RWZmZWN0aXZlU2V0dGluZ3NSZXNwb25zZRJ4ChFHZXRTZXR0aW5nc1NjaGVtYRIwLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuR2V0U2V0dGluZ3NTY2hlbWFSZXF1ZXN0GjEuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5HZXRTZXR0aW5nc1NjaGVtYVJlc3BvbnNlEnIKD0FwcGx5RHJhZnRQYXRjaBIuLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuQXBwbHlEcmFmdFBhdGNoUmVxdWVzdBovLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuQXBwbHlEcmFmdFBhdGNoUmVzcG9uc2USaQoMRGlzY2FyZERyYWZ0EisuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5EaXNjYXJkRHJhZnRSZXF1ZXN0GiwuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5EaXNjYXJkRHJhZnRSZXNwb25zZRJpCgxQdWJsaXNoRHJhZnQSKy5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlB1Ymxpc2hEcmFmdFJlcXVlc3QaLC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlB1Ymxpc2hEcmFmdFJlc3BvbnNlEmwKDVJlc2V0Q2F0ZWdvcnkSLC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLlJlc2V0Q2F0ZWdvcnlSZXF1ZXN0Gi0uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5SZXNldENhdGVnb3J5UmVzcG9uc2USaQoMUmVzZXRFbGVtZW50EisuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5SZXNldEVsZW1lbnRSZXF1ZXN0GiwuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5SZXNldEVsZW1lbnRSZXNwb25zZRJdCghSZXNldEFsbBInLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuUmVzZXRBbGxSZXF1ZXN0GiguZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5SZXNldEFsbFJlc3BvbnNlEm8KDkV4cG9ydFNldHRpbmdzEi0uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5FeHBvcnRTZXR0aW5nc1JlcXVlc3QaLi5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkV4cG9ydFNldHRpbmdzUmVzcG9uc2USbwoOSW1wb3J0U2V0dGluZ3MSLS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkltcG9ydFNldHRpbmdzUmVxdWVzdBouLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuSW1wb3J0U2V0dGluZ3NSZXNwb25zZRKEAQoVUmV2ZXJ0U2V0dGluZ3NWZXJzaW9uEjQuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5SZXZlcnRTZXR0aW5nc1ZlcnNpb25SZXF1ZXN0GjUuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5SZXZlcnRTZXR0aW5nc1ZlcnNpb25SZXNwb25zZRJ+ChNMaXN0U2V0dGluZ3NIaXN0b3J5EjIuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5MaXN0U2V0dGluZ3NIaXN0b3J5UmVxdWVzdBozLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuTGlzdFNldHRpbmdzSGlzdG9yeVJlc3BvbnNlEm4KDVdhdGNoU2V0dGluZ3MSLC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLldhdGNoU2V0dGluZ3NSZXF1ZXN0Gi0uZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5XYXRjaFNldHRpbmdzUmVzcG9uc2UwARJ4ChFQdXRMYXlvdXREb2N1bWVudBIwLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuUHV0TGF5b3V0RG9jdW1lbnRSZXF1ZXN0GjEuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5QdXRMYXlvdXREb2N1bWVudFJlc3BvbnNlEngKEUdldExheW91dERvY3VtZW50EjAuZ3JlbXVjaGF5YS5zZXR0aW5ncy52MS5HZXRMYXlvdXREb2N1bWVudFJlcXVlc3QaMS5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkdldExheW91dERvY3VtZW50UmVzcG9uc2USeAoRTGlzdExheW91dEhpc3RvcnkSMC5ncmVtdWNoYXlhLnNldHRpbmdzLnYxLkxpc3RMYXlvdXRIaXN0b3J5UmVxdWVzdBoxLmdyZW11Y2hheWEuc2V0dGluZ3MudjEuTGlzdExheW91dEhpc3RvcnlSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp, file_gremuchaya_common_v1_common]);
 
 /**
  * @generated from message gremuchaya.settings.v1.SettingsScope
@@ -895,6 +895,304 @@ export const WatchSettingsResponseSchema: GenMessage<WatchSettingsResponse> = /*
   messageDesc(file_gremuchaya_settings_v1_settings, 33);
 
 /**
+ * One tile's place on a screen, as a layout document records it.
+ *
+ * The geometry is the bounded grid `@gremuchaya/layout-engine` packs: a column
+ * and a row, and how many of each the tile spans. It is a typed message rather
+ * than an opaque blob so the stored document can be read back by anything that
+ * speaks this contract, and so a malformed placement is refused by the wire
+ * decoder rather than by whichever screen tried to draw it.
+ *
+ * @generated from message gremuchaya.settings.v1.LayoutTilePlacement
+ */
+export type LayoutTilePlacement = Message<"gremuchaya.settings.v1.LayoutTilePlacement"> & {
+  /**
+   * @generated from field: string tile_id = 1;
+   */
+  tileId: string;
+
+  /**
+   * @generated from field: uint32 column = 2;
+   */
+  column: number;
+
+  /**
+   * @generated from field: uint32 row = 3;
+   */
+  row: number;
+
+  /**
+   * @generated from field: uint32 column_span = 4;
+   */
+  columnSpan: number;
+
+  /**
+   * @generated from field: uint32 row_span = 5;
+   */
+  rowSpan: number;
+
+  /**
+   * A tile the operator hid on this screen. It keeps its place so unhiding it
+   * does not move every other tile.
+   *
+   * @generated from field: bool hidden = 6;
+   */
+  hidden: boolean;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.LayoutTilePlacement.
+ * Use `create(LayoutTilePlacementSchema)` to create a new message.
+ */
+export const LayoutTilePlacementSchema: GenMessage<LayoutTilePlacement> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 34);
+
+/**
+ * The arrangement of one screen, under one scope.
+ *
+ * A layout belongs to a `SettingsScope` for the same reason a settings document
+ * does: a group agrees on how its wall is arranged, and a device may arrange
+ * its own. `FACTORY` and `THEME` have no layout — a scope with no home in
+ * `layout_documents` is refused rather than invented.
+ *
+ * @generated from message gremuchaya.settings.v1.LayoutDocument
+ */
+export type LayoutDocument = Message<"gremuchaya.settings.v1.LayoutDocument"> & {
+  /**
+   * @generated from field: gremuchaya.common.v1.ResourceId id = 1;
+   */
+  id?: ResourceId | undefined;
+
+  /**
+   * @generated from field: gremuchaya.settings.v1.SettingsScope scope = 2;
+   */
+  scope?: SettingsScope | undefined;
+
+  /**
+   * @generated from field: string screen_id = 3;
+   */
+  screenId: string;
+
+  /**
+   * @generated from field: repeated gremuchaya.settings.v1.LayoutTilePlacement tiles = 4;
+   */
+  tiles: LayoutTilePlacement[];
+
+  /**
+   * @generated from field: gremuchaya.common.v1.Revision revision = 5;
+   */
+  revision?: Revision | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp updated_at = 6;
+   */
+  updatedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.LayoutDocument.
+ * Use `create(LayoutDocumentSchema)` to create a new message.
+ */
+export const LayoutDocumentSchema: GenMessage<LayoutDocument> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 35);
+
+/**
+ * Replaces a screen's layout with the tiles the caller sends.
+ *
+ * The whole arrangement travels, not a delta: a layout is small, and a CRDT
+ * merge would need an engine this control plane deliberately does not carry
+ * (correction C32). `expected_revision` is what keeps a whole-document put from
+ * being a lost-update generator — a caller that names the revision it edited is
+ * refused when another device has moved the document since, instead of
+ * silently overwriting that device's arrangement. Zero means "whatever is
+ * there", which is the honest value for the first put of a screen.
+ *
+ * @generated from message gremuchaya.settings.v1.PutLayoutDocumentRequest
+ */
+export type PutLayoutDocumentRequest = Message<"gremuchaya.settings.v1.PutLayoutDocumentRequest"> & {
+  /**
+   * @generated from field: gremuchaya.common.v1.MutationContext context = 1;
+   */
+  context?: MutationContext | undefined;
+
+  /**
+   * @generated from field: gremuchaya.settings.v1.SettingsScope scope = 2;
+   */
+  scope?: SettingsScope | undefined;
+
+  /**
+   * @generated from field: string screen_id = 3;
+   */
+  screenId: string;
+
+  /**
+   * @generated from field: repeated gremuchaya.settings.v1.LayoutTilePlacement tiles = 4;
+   */
+  tiles: LayoutTilePlacement[];
+
+  /**
+   * @generated from field: gremuchaya.common.v1.Revision expected_revision = 5;
+   */
+  expectedRevision?: Revision | undefined;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.PutLayoutDocumentRequest.
+ * Use `create(PutLayoutDocumentRequestSchema)` to create a new message.
+ */
+export const PutLayoutDocumentRequestSchema: GenMessage<PutLayoutDocumentRequest> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 36);
+
+/**
+ * @generated from message gremuchaya.settings.v1.PutLayoutDocumentResponse
+ */
+export type PutLayoutDocumentResponse = Message<"gremuchaya.settings.v1.PutLayoutDocumentResponse"> & {
+  /**
+   * @generated from field: gremuchaya.settings.v1.LayoutDocument document = 1;
+   */
+  document?: LayoutDocument | undefined;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.PutLayoutDocumentResponse.
+ * Use `create(PutLayoutDocumentResponseSchema)` to create a new message.
+ */
+export const PutLayoutDocumentResponseSchema: GenMessage<PutLayoutDocumentResponse> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 37);
+
+/**
+ * @generated from message gremuchaya.settings.v1.GetLayoutDocumentRequest
+ */
+export type GetLayoutDocumentRequest = Message<"gremuchaya.settings.v1.GetLayoutDocumentRequest"> & {
+  /**
+   * @generated from field: gremuchaya.settings.v1.SettingsScope scope = 1;
+   */
+  scope?: SettingsScope | undefined;
+
+  /**
+   * @generated from field: string screen_id = 2;
+   */
+  screenId: string;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.GetLayoutDocumentRequest.
+ * Use `create(GetLayoutDocumentRequestSchema)` to create a new message.
+ */
+export const GetLayoutDocumentRequestSchema: GenMessage<GetLayoutDocumentRequest> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 38);
+
+/**
+ * @generated from message gremuchaya.settings.v1.GetLayoutDocumentResponse
+ */
+export type GetLayoutDocumentResponse = Message<"gremuchaya.settings.v1.GetLayoutDocumentResponse"> & {
+  /**
+   * Absent when this scope has never arranged this screen. An absent document
+   * is not an error: it is the state every screen starts in, and reporting it
+   * as `NOT_FOUND` would make a first-run client treat a normal condition as a
+   * failure.
+   *
+   * @generated from field: gremuchaya.settings.v1.LayoutDocument document = 1;
+   */
+  document?: LayoutDocument | undefined;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.GetLayoutDocumentResponse.
+ * Use `create(GetLayoutDocumentResponseSchema)` to create a new message.
+ */
+export const GetLayoutDocumentResponseSchema: GenMessage<GetLayoutDocumentResponse> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 39);
+
+/**
+ * One recorded revision of a layout, as `layout_versions` holds it.
+ *
+ * @generated from message gremuchaya.settings.v1.LayoutHistoryEntry
+ */
+export type LayoutHistoryEntry = Message<"gremuchaya.settings.v1.LayoutHistoryEntry"> & {
+  /**
+   * @generated from field: gremuchaya.common.v1.Revision revision = 1;
+   */
+  revision?: Revision | undefined;
+
+  /**
+   * @generated from field: repeated gremuchaya.settings.v1.LayoutTilePlacement tiles = 2;
+   */
+  tiles: LayoutTilePlacement[];
+
+  /**
+   * @generated from field: gremuchaya.common.v1.ResourceId actor_device_id = 3;
+   */
+  actorDeviceId?: ResourceId | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp occurred_at = 4;
+   */
+  occurredAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string correlation_id = 5;
+   */
+  correlationId: string;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.LayoutHistoryEntry.
+ * Use `create(LayoutHistoryEntrySchema)` to create a new message.
+ */
+export const LayoutHistoryEntrySchema: GenMessage<LayoutHistoryEntry> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 40);
+
+/**
+ * @generated from message gremuchaya.settings.v1.ListLayoutHistoryRequest
+ */
+export type ListLayoutHistoryRequest = Message<"gremuchaya.settings.v1.ListLayoutHistoryRequest"> & {
+  /**
+   * @generated from field: gremuchaya.settings.v1.SettingsScope scope = 1;
+   */
+  scope?: SettingsScope | undefined;
+
+  /**
+   * @generated from field: string screen_id = 2;
+   */
+  screenId: string;
+
+  /**
+   * @generated from field: gremuchaya.common.v1.PageRequest page = 3;
+   */
+  page?: PageRequest | undefined;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.ListLayoutHistoryRequest.
+ * Use `create(ListLayoutHistoryRequestSchema)` to create a new message.
+ */
+export const ListLayoutHistoryRequestSchema: GenMessage<ListLayoutHistoryRequest> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 41);
+
+/**
+ * @generated from message gremuchaya.settings.v1.ListLayoutHistoryResponse
+ */
+export type ListLayoutHistoryResponse = Message<"gremuchaya.settings.v1.ListLayoutHistoryResponse"> & {
+  /**
+   * @generated from field: repeated gremuchaya.settings.v1.LayoutHistoryEntry entries = 1;
+   */
+  entries: LayoutHistoryEntry[];
+
+  /**
+   * @generated from field: gremuchaya.common.v1.PageInfo page = 2;
+   */
+  page?: PageInfo | undefined;
+};
+
+/**
+ * Describes the message gremuchaya.settings.v1.ListLayoutHistoryResponse.
+ * Use `create(ListLayoutHistoryResponseSchema)` to create a new message.
+ */
+export const ListLayoutHistoryResponseSchema: GenMessage<ListLayoutHistoryResponse> = /*@__PURE__*/
+  messageDesc(file_gremuchaya_settings_v1_settings, 42);
+
+/**
  * @generated from enum gremuchaya.settings.v1.SettingsScopeType
  */
 export enum SettingsScopeType {
@@ -1134,6 +1432,38 @@ export const SettingsService: GenService<{
     methodKind: "server_streaming";
     input: typeof WatchSettingsRequestSchema;
     output: typeof WatchSettingsResponseSchema;
+  },
+  /**
+   * The layout half of this service, added because no method of any other
+   * service could fill `layout_documents` or `layout_versions`: a
+   * `PublishDocumentDelta` with `SYNCHRONIZED_DOCUMENT_TYPE_LAYOUT` carries a
+   * CRDT delta, and merging one needs an engine `apps/control-plane` does not
+   * depend on, so it lands in `sync_snapshots` instead. These three methods are
+   * the alternative correction C32 named: a whole-document put with an expected
+   * revision, its read, and the version log that put appends to.
+   *
+   * @generated from rpc gremuchaya.settings.v1.SettingsService.PutLayoutDocument
+   */
+  putLayoutDocument: {
+    methodKind: "unary";
+    input: typeof PutLayoutDocumentRequestSchema;
+    output: typeof PutLayoutDocumentResponseSchema;
+  },
+  /**
+   * @generated from rpc gremuchaya.settings.v1.SettingsService.GetLayoutDocument
+   */
+  getLayoutDocument: {
+    methodKind: "unary";
+    input: typeof GetLayoutDocumentRequestSchema;
+    output: typeof GetLayoutDocumentResponseSchema;
+  },
+  /**
+   * @generated from rpc gremuchaya.settings.v1.SettingsService.ListLayoutHistory
+   */
+  listLayoutHistory: {
+    methodKind: "unary";
+    input: typeof ListLayoutHistoryRequestSchema;
+    output: typeof ListLayoutHistoryResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_gremuchaya_settings_v1_settings, 0);

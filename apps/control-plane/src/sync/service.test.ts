@@ -3,7 +3,9 @@ import { Code, type HandlerContext, type ServiceImpl } from '@connectrpc/connect
 import { syncV1, type SyncService } from '@gremuchaya/protocol';
 import { describe, expect, it } from 'vitest';
 
-import { InMemoryRealtimeEventStore } from '../realtime/eventStore.js';
+import type { SqlClient, SqlStatement } from '../db/database.js';
+import { maxDocumentBodyBytes } from '../http-policy.js';
+import { DurableRealtimeEventStore, InMemoryRealtimeEventStore } from '../realtime/eventStore.js';
 import { RealtimeHub } from '../realtime/hub.js';
 
 import {
@@ -12,6 +14,7 @@ import {
   type PresenceSnapshot,
   type PresenceStore,
   type RecordPresenceInput,
+  type ReportPresenceDetailInput,
 } from './presence-store.js';
 import { PairedDeviceRuntime } from './runtime.js';
 import { createPairedDeviceSyncService } from './service.js';
@@ -42,6 +45,10 @@ describe('SyncService without its optional collaborators', () => {
       () => service.updateGroup?.(create(syncV1.UpdateGroupRequestSchema, {}), context),
       () => service.setLeader?.(create(syncV1.SetLeaderRequestSchema, {}), context),
       () => service.getPresence?.(create(syncV1.GetPresenceRequestSchema, {}), context),
+      // Reporting needs the same collaborator reading does: without presence
+      // storage there is no row to report into, and an empty success would tell
+      // a client its screen had been recorded when nothing had.
+      () => service.updatePresence?.(create(syncV1.UpdatePresenceRequestSchema, {}), context),
       () =>
         service.publishDocumentDelta?.(
           create(syncV1.PublishDocumentDeltaRequestSchema, {}),
@@ -138,6 +145,273 @@ describe('SyncService presence renewal', () => {
   });
 });
 
+/**
+ * The reporting path R27 was missing.
+ *
+ * `Presence` has carried `active_screen`, `selected_element`,
+ * `clock_offset_ms` and `latency_ms` since the contract was written and the
+ * table has had the columns since the first migration, but no call ever set
+ * them, so every device reported all four empty for as long as it stayed
+ * paired. These scenarios are about what a device can now say, what it still
+ * cannot, and what saying it costs the group log.
+ */
+describe('SyncService presence detail', () => {
+  it('carries the four reported fields from the join into the store and the event', async () => {
+    const { service, events, groupId, editorToken, editorDeviceId } = await authenticatedService();
+
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, {
+        groupId: { value: groupId },
+        detail: {
+          activeScreen: '/operations/map',
+          selectedElement: 'sector-7',
+          clockOffsetMs: -34n,
+          latencyMs: 21,
+        },
+      }),
+      handlerContext(`Bearer ${editorToken}`),
+    );
+
+    // Read back through the RPC a neighbour would call, not from the double:
+    // what matters is that the four fields survive the handler, the store and
+    // the projection back onto `Presence`.
+    const listed = await service.getPresence?.(
+      create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+      handlerContext(`Bearer ${editorToken}`),
+    );
+    expect(listed?.devices?.[0]).toMatchObject({
+      activeScreen: '/operations/map',
+      selectedElement: 'sector-7',
+      clockOffsetMs: -34n,
+      latencyMs: 21,
+    });
+
+    // And the same four reach a subscriber, because the join is already
+    // publishing `PRESENCE_UPDATED`: a neighbour learns which screen the device
+    // arrived on without waiting for its own next poll.
+    const published = (await logEvents(events, groupId)).at(-1);
+    expect(published?.kind).toBe(syncV1.GroupEventKind.PRESENCE_UPDATED);
+    expect(published?.presence).toMatchObject({
+      deviceId: { value: editorDeviceId },
+      activeScreen: '/operations/map',
+      selectedElement: 'sector-7',
+      latencyMs: 21,
+    });
+  });
+
+  it('replaces the four fields on report and writes not one row of the group log', async () => {
+    const { service, events, groupId, editorToken } = await authenticatedService();
+    const editorContext = handlerContext(`Bearer ${editorToken}`);
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, {
+        groupId: { value: groupId },
+        detail: { activeScreen: '/operations/map', selectedElement: 'sector-7' },
+      }),
+      editorContext,
+    );
+    const afterJoin = await logLength(events, groupId);
+
+    const answered = await service.updatePresence?.(
+      create(syncV1.UpdatePresenceRequestSchema, {
+        groupId: { value: groupId },
+        detail: {
+          activeScreen: '/materials',
+          selectedElement: '',
+          clockOffsetMs: 5n,
+          latencyMs: 9,
+        },
+      }),
+      editorContext,
+    );
+
+    // The report answers the same list `GetPresence` does, so a client learns
+    // the effect of its own call without a second round trip — and a second
+    // round trip would be a second renewal as well.
+    expect(answered?.devices?.[0]).toMatchObject({
+      activeScreen: '/materials',
+      // Replaced outright, not merged: the operator deselected the sector, and
+      // a merge would leave it selected on every neighbour's screen forever.
+      selectedElement: '',
+      clockOffsetMs: 5n,
+      latencyMs: 9,
+    });
+    // A screen change happens as often as an operator navigates. An event per
+    // change would append a durable row and spend a sequence number each time,
+    // which is the growth that keeps liveness renewal out of `JoinGroup`.
+    expect(await logLength(events, groupId)).toBe(afterJoin);
+  });
+
+  it('renews the reporting device, so a client that reports cannot forget to stay alive', async () => {
+    const { service, groupId, presence, editorToken, editorDeviceId } =
+      await authenticatedService();
+    const editorContext = handlerContext(`Bearer ${editorToken}`);
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, { groupId: { value: groupId } }),
+      editorContext,
+    );
+
+    await service.updatePresence?.(
+      create(syncV1.UpdatePresenceRequestSchema, {
+        groupId: { value: groupId },
+        detail: { activeScreen: '/materials' },
+      }),
+      editorContext,
+    );
+
+    // The device is the one the bearer token authenticated, in the renewal and
+    // in the report alike: `UpdatePresenceRequest` declares no device field, so
+    // no caller can describe or keep alive a neighbour's session.
+    expect(presence.renewals).toEqual([{ groupId, deviceId: editorDeviceId }]);
+    expect(presence.reports.map((report) => report.deviceId)).toEqual([editorDeviceId]);
+  });
+
+  it('refuses a report from a device that never joined, and creates nothing for it', async () => {
+    const { service, groupId, presence, ownerToken, editorToken, editorDeviceId } =
+      await authenticatedService();
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, { groupId: { value: groupId } }),
+      handlerContext(`Bearer ${editorToken}`),
+    );
+
+    await expect(
+      Promise.resolve(
+        service.updatePresence?.(
+          create(syncV1.UpdatePresenceRequestSchema, {
+            groupId: { value: groupId },
+            detail: { activeScreen: '/system' },
+          }),
+          handlerContext(`Bearer ${ownerToken}`),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.FailedPrecondition });
+
+    // Announcing presence stays `JoinGroup`'s alone. A report that inserted a
+    // row would let a device appear in the group without ever joining it, and
+    // would resurrect one that had left.
+    const listed = await service.getPresence?.(
+      create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+      handlerContext(`Bearer ${editorToken}`),
+    );
+    expect(listed?.devices?.map((entry) => entry.deviceId?.value)).toEqual([editorDeviceId]);
+    expect(presence.records.map((input) => input.deviceId)).toEqual([editorDeviceId]);
+  });
+
+  it('reports nothing for a caller who cannot be authenticated', async () => {
+    const { service, presence, groupId } = await authenticatedService();
+
+    await expect(
+      Promise.resolve(
+        service.updatePresence?.(
+          create(syncV1.UpdatePresenceRequestSchema, {
+            groupId: { value: groupId },
+            detail: { activeScreen: '/materials' },
+          }),
+          handlerContext('Bearer not-a-token'),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.Unauthenticated });
+
+    expect(presence.reports).toEqual([]);
+    expect(presence.renewals).toEqual([]);
+  });
+
+  it('refuses a latency the column cannot hold and an identifier no route is', async () => {
+    const { service, groupId, presence, editorToken } = await authenticatedService();
+    const editorContext = handlerContext(`Bearer ${editorToken}`);
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, { groupId: { value: groupId } }),
+      editorContext,
+    );
+
+    for (const detail of [
+      // `latency_ms` is `uint32` on the wire and `integer` in the table; above
+      // 2^31 - 1 the write fails with a numeric overflow that names nothing.
+      { latencyMs: 4_000_000_000 },
+      { activeScreen: 'x'.repeat(257) },
+      { selectedElement: 'y'.repeat(257) },
+    ]) {
+      await expect(
+        Promise.resolve(
+          service.updatePresence?.(
+            create(syncV1.UpdatePresenceRequestSchema, {
+              groupId: { value: groupId },
+              detail,
+            }),
+            editorContext,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    }
+
+    // Refused before the store, so an argument the table cannot hold never
+    // reaches a statement.
+    expect(presence.reports).toEqual([]);
+
+    // The bound is a ceiling, not a ban: the largest values it admits go
+    // through, so this cannot pass by refusing everything.
+    await expect(
+      Promise.resolve(
+        service.updatePresence?.(
+          create(syncV1.UpdatePresenceRequestSchema, {
+            groupId: { value: groupId },
+            detail: { latencyMs: 300_000, activeScreen: 'z'.repeat(256) },
+          }),
+          editorContext,
+        ),
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('refuses a report aimed at a group the session does not belong to', async () => {
+    const { service, presence, editorToken } = await authenticatedService();
+
+    await expect(
+      Promise.resolve(
+        service.updatePresence?.(
+          create(syncV1.UpdatePresenceRequestSchema, {
+            groupId: { value: '018b2a02-0000-7000-8000-0000000000aa' },
+            detail: { activeScreen: '/materials' },
+          }),
+          handlerContext(`Bearer ${editorToken}`),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.PermissionDenied });
+
+    expect(presence.reports).toEqual([]);
+  });
+
+  it('clears the reported detail when a device leaves', async () => {
+    const { service, groupId, editorToken } = await authenticatedService();
+    const editorContext = handlerContext(`Bearer ${editorToken}`);
+    await service.joinGroup?.(
+      create(syncV1.JoinGroupRequestSchema, {
+        groupId: { value: groupId },
+        detail: { activeScreen: '/operations/map', selectedElement: 'sector-7', latencyMs: 21 },
+      }),
+      editorContext,
+    );
+
+    await service.leaveGroup?.(
+      create(syncV1.LeaveGroupRequestSchema, { groupId: { value: groupId } }),
+      editorContext,
+    );
+
+    // A device that left is not looking at anything. Keeping its last screen
+    // would leave the pairing dialog drawing a live-looking readout for a
+    // device that is gone.
+    const listed = await service.getPresence?.(
+      create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
+      editorContext,
+    );
+    expect(listed?.devices?.[0]).toMatchObject({
+      status: syncV1.DeviceStatus.OFFLINE,
+      activeScreen: '',
+      selectedElement: '',
+      latencyMs: 0,
+    });
+  });
+});
+
 describe('SyncService device revocation', () => {
   it('appends one event naming the device, with the revision the revoke produced', async () => {
     const { service, events, groupId, ownerToken, editorToken, editorDeviceId } =
@@ -203,7 +477,7 @@ describe('SyncService device revocation', () => {
       create(syncV1.GetPresenceRequestSchema, { groupId: { value: groupId } }),
       handlerContext(`Bearer ${ownerToken}`),
     );
-    expect(listed?.devices.map((entry) => entry.deviceId?.value)).toEqual([ownerDeviceId]);
+    expect(listed?.devices?.map((entry) => entry.deviceId?.value)).toEqual([ownerDeviceId]);
   });
 
   it('publishes nothing and withdraws nothing when the revoke is refused', async () => {
@@ -343,6 +617,192 @@ describe('SyncService group event stream', () => {
   });
 });
 
+/**
+ * The document-payload ceiling.
+ *
+ * Mounted in the web build the router runs as a Vercel Function, which refuses
+ * a body over 4.5 MB before any handler is reached; the failure then carries no
+ * method, no group and no document. These scenarios show the control plane
+ * refusing first, and — the part that matters — refusing before it writes:
+ * the recording `SqlClient` is what proves no append was attempted.
+ */
+describe('SyncService document body ceiling', () => {
+  it('refuses an oversized delta before the log is touched, and lets a delta at the ceiling through', async () => {
+    const overSized = await documentService(64);
+    const context = handlerContext(`Bearer ${overSized.editorToken}`);
+
+    await expect(
+      Promise.resolve(
+        overSized.service.publishDocumentDelta?.(
+          deltaRequest(overSized.groupId, new Uint8Array(65), new Uint8Array(0)),
+          context,
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: Code.InvalidArgument,
+      message: expect.stringContaining('65 bytes, above the 64-byte ceiling'),
+    });
+    // Not one statement: the refusal precedes the append, so an oversized
+    // publication consumes neither a sequence number nor a receipt.
+    expect(overSized.statements).toHaveLength(0);
+
+    // The delta and the state vector are summed, because they travel in the
+    // same body: 40 + 24 is over a 64-byte ceiling even though neither is.
+    await expect(
+      Promise.resolve(
+        overSized.service.publishDocumentDelta?.(
+          deltaRequest(overSized.groupId, new Uint8Array(40), new Uint8Array(25)),
+          context,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    expect(overSized.statements).toHaveLength(0);
+
+    // Exactly at the ceiling is allowed: the store is reached, and what it
+    // does with an empty scripted answer is not this test's subject.
+    const atCeiling = await documentService(64);
+    await Promise.resolve(
+      atCeiling.service.publishDocumentDelta?.(
+        deltaRequest(atCeiling.groupId, new Uint8Array(40), new Uint8Array(24)),
+        handlerContext(`Bearer ${atCeiling.editorToken}`),
+      ),
+    ).catch(() => undefined);
+    expect(atCeiling.statements.length).toBeGreaterThan(0);
+  });
+
+  it('refuses a snapshot reply above the ceiling and serves one below it', async () => {
+    const snapshot = new Uint8Array(4096);
+    const large = await documentService(1024, snapshot);
+
+    await expect(
+      Promise.resolve(
+        large.service.getDocumentSnapshot?.(
+          create(syncV1.GetDocumentSnapshotRequestSchema, {
+            groupId: { value: large.groupId },
+            documentId: { value: '018b2a02-0000-7000-8000-0000000000f1' },
+          }),
+          handlerContext(`Bearer ${large.editorToken}`),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      // A reply this deployment cannot deliver, not a request the caller got
+      // wrong: the caller asked for exactly the right document.
+      code: Code.FailedPrecondition,
+      message: expect.stringContaining('above the 1024-byte ceiling'),
+    });
+
+    const small = await documentService(8192, snapshot);
+    const answered = await small.service.getDocumentSnapshot?.(
+      create(syncV1.GetDocumentSnapshotRequestSchema, {
+        groupId: { value: small.groupId },
+        documentId: { value: '018b2a02-0000-7000-8000-0000000000f1' },
+      }),
+      handlerContext(`Bearer ${small.editorToken}`),
+    );
+    expect(answered?.snapshot?.byteLength).toBe(4096);
+  });
+
+  it('defaults to a ceiling below the platform’s and refuses a ceiling that is not one', async () => {
+    const service = await documentService();
+    await expect(
+      Promise.resolve(
+        service.service.publishDocumentDelta?.(
+          deltaRequest(
+            service.groupId,
+            new Uint8Array(maxDocumentBodyBytes + 1),
+            new Uint8Array(0),
+          ),
+          handlerContext(`Bearer ${service.editorToken}`),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    expect(service.statements).toHaveLength(0);
+    // 4.5 MB is the platform's number; the ceiling has to leave room for the
+    // gRPC-Web envelope, the identifiers and the trailers around the payload.
+    expect(maxDocumentBodyBytes).toBeLessThan(4_500_000);
+
+    expect(() =>
+      createPairedDeviceSyncService({
+        runtime: new PairedDeviceRuntime({ tokenPepper }),
+        verifyBootstrapSecret: () => true,
+        maxDocumentBodyBytes: 0,
+      }),
+    ).toThrow('maxDocumentBodyBytes must be a positive safe integer');
+  });
+});
+
+function deltaRequest(groupId: string, delta: Uint8Array, stateVector: Uint8Array) {
+  return create(syncV1.PublishDocumentDeltaRequestSchema, {
+    groupId: { value: groupId },
+    documentId: { value: '018b2a02-0000-7000-8000-0000000000f1' },
+    documentType: syncV1.SynchronizedDocumentType.LAYOUT,
+    delta,
+    stateVector,
+    hybridLogicalClock: 1n,
+  });
+}
+
+/**
+ * A service whose event store is real and whose database is a recorder.
+ *
+ * `DurableRealtimeEventStore` is the only shape `SyncService` accepts, so the
+ * store is the real class over a scripted `SqlClient`; that client answers a
+ * snapshot read with whatever the scenario planted and everything else with no
+ * rows. Nothing here is about SQL — it is about what the handler does before
+ * and after it reaches the store, which is exactly what a recorded statement
+ * list can show.
+ */
+async function documentService(
+  ceiling?: number,
+  snapshot?: Uint8Array,
+): Promise<{
+  readonly service: Partial<ServiceImpl<typeof SyncService>>;
+  readonly statements: readonly SqlStatement[];
+  readonly groupId: string;
+  readonly editorToken: string;
+}> {
+  const statements: SqlStatement[] = [];
+  const database: SqlClient = {
+    query: (statement) => {
+      statements.push(statement);
+      if (snapshot !== undefined && statement.text.includes('FROM sync_snapshots')) {
+        return Promise.resolve([
+          {
+            snapshot,
+            state_vector: new Uint8Array(0),
+            sequence: '7',
+            document_type: 'LAYOUT',
+          },
+        ] as never);
+      }
+      return Promise.resolve([]);
+    },
+    transaction: () => Promise.resolve(),
+  };
+  const runtime = new PairedDeviceRuntime({ tokenPepper });
+  const created = runtime.createGroup({
+    name: 'Document group',
+    initialDevice: {
+      name: 'Primary',
+      publicKey: 'ed25519:document',
+      platform: 'windows',
+      applicationVersion: '0.1.0',
+    },
+  });
+  const service = createPairedDeviceSyncService({
+    runtime,
+    verifyBootstrapSecret: () => true,
+    eventStore: new DurableRealtimeEventStore({ database }),
+    ...(ceiling === undefined ? {} : { maxDocumentBodyBytes: ceiling }),
+  });
+  return {
+    service,
+    statements,
+    groupId: created.group.id,
+    editorToken: created.session.accessToken,
+  };
+}
+
 async function authenticatedService(options: { readonly presence?: boolean } = {}) {
   const runtime = new PairedDeviceRuntime({ tokenPepper });
   const created = runtime.createGroup({
@@ -395,10 +855,24 @@ async function authenticatedService(options: { readonly presence?: boolean } = {
 class RecordingPresenceStore implements PresenceStore {
   readonly renewals: PresenceDeviceInput[] = [];
   readonly forgets: PresenceDeviceInput[] = [];
+  readonly records: RecordPresenceInput[] = [];
+  readonly reports: ReportPresenceDetailInput[] = [];
   readonly #delegate = new InMemoryPresenceStore();
 
   record(input: RecordPresenceInput): Promise<PresenceSnapshot> {
+    this.records.push(input);
     return this.#delegate.record(input);
+  }
+
+  /**
+   * Records what the handler asked for and performs it. Whether an update can
+   * create a row is a property of the store and is proved against PostgreSQL;
+   * what only this layer can show is which device the handler names and what it
+   * passes through from the request.
+   */
+  reportDetail(input: ReportPresenceDetailInput): Promise<PresenceSnapshot | undefined> {
+    this.reports.push(input);
+    return this.#delegate.reportDetail(input);
   }
 
   renew(input: PresenceDeviceInput): Promise<void> {

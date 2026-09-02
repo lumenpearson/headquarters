@@ -7,7 +7,12 @@ import {
 } from '@gremuchaya/domain';
 import * as z from 'zod';
 
-import { moduleIdSchema, modulePayloadSchemas, modulePresetSchema } from './payloadSchemas.js';
+import {
+  localizedTextSchema,
+  moduleIdSchema,
+  modulePayloadSchemas,
+  modulePresetSchema,
+} from './payloadSchemas.js';
 
 export const screenIdSchema = z.enum(screenIds);
 export const sceneIdSchema = z
@@ -84,7 +89,7 @@ export const cueActionSchema = z.discriminatedUnion('type', [
 export const sceneCueSchema = z
   .object({
     id: z.string().trim().min(1).max(80),
-    label: z.string().trim().min(1).max(200),
+    label: localizedTextSchema,
     atMs: z.number().int().nonnegative().optional(),
     action: cueActionSchema,
   })
@@ -94,19 +99,22 @@ export const sceneDefinitionSchema = z
   .object({
     id: sceneIdSchema,
     episode: z.number().int().nonnegative(),
+    // The shooting script's own scene number ('33', '17/18'): a slate
+    // number, not prose, so it stays a plain string rather than
+    // `localizedTextSchema` -- there is no English side of a scene number.
     scene: z.string().trim().min(1),
     shootDate: z.iso.date(),
-    title: z.string().trim().min(1).max(200),
+    title: localizedTextSchema,
     location: z.enum(['HQ', 'KIRILLOV', 'INTERROGATION', 'OTHER']),
     sourceLevel: z.enum(['kpp', 'script', 'derived']),
-    description: z.string().trim().min(1),
+    description: localizedTextSchema,
     screens: z.partialRecord(screenIdSchema, modulePresetSchema),
     cues: z.array(sceneCueSchema),
     requiredScreens: z.array(screenIdSchema).default([]),
     optionalScreens: z.array(screenIdSchema).default([]),
     requiredAssetIds: z.array(assetIdSchema).default([]),
     optionalAssetIds: z.array(assetIdSchema).default([]),
-    notes: z.array(z.string()).default([]),
+    notes: z.array(localizedTextSchema).default([]),
   })
   .check((context) => {
     const cueIds = new Set<string>();

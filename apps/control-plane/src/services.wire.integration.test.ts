@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 
 import { createClient } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
+import { blake3 } from '@noble/hashes/blake3.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import {
   ControlPlaneService,
   IntegrationService,
@@ -88,7 +90,16 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
       const capabilities = await control.getCapabilities({});
       // Every one of these read `enabled: false` before F6, and two of them said
       // so while the service did not exist at all.
-      for (const name of ['settings', 'materials', 'telemetry', 'integration', 'sync']) {
+      for (const name of [
+        'settings',
+        'materials',
+        'telemetry',
+        // The measurement half is reported separately from the simulation half,
+        // because a deployment can serve one without the other.
+        'telemetry.measurement',
+        'integration',
+        'sync',
+      ]) {
         expect(capabilities.capabilities).toContainEqual({
           $typeName: 'gremuchaya.control.v1.Capability',
           name,
@@ -101,10 +112,21 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
         'database',
         'redis',
         'storage',
+        'github',
+        'conversion',
       ]);
       expect(capabilities.capabilities).toContainEqual({
         $typeName: 'gremuchaya.control.v1.Capability',
         name: 'materials.storage-grants',
+        version: 'v1',
+        enabled: false,
+      });
+      // This deployment configures no bucket and no worker, so no variant can
+      // ever be built and the quality menu is told so rather than offering
+      // four entries that all resolve to the original.
+      expect(capabilities.capabilities).toContainEqual({
+        $typeName: 'gremuchaya.control.v1.Capability',
+        name: 'materials.rendition-pipeline',
         version: 'v1',
         enabled: false,
       });
@@ -133,7 +155,7 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
             resourceId: { value: groupId },
           },
           operations: [
-            { path: 'appearance.theme', value: { value: { case: 'stringValue', value: 'dark' } } },
+            { path: 'appearance.theme', value: { kind: { case: 'stringValue', value: 'dark' } } },
           ],
         },
         { headers },
@@ -172,6 +194,13 @@ describeIntegration('every control-plane service over binary gRPC-Web', () => {
         { headers },
       );
       expect(profiles.profiles).toEqual([]);
+
+      // The measurement half answers over the same binary gRPC-Web transport
+      // rather than `unimplemented`, which is what the capability above claims.
+      // The group has published no profile, so it declares no source, and an
+      // empty registry is the honest answer to that.
+      const dataSources = await telemetry.listDataSources({}, { headers });
+      expect(dataSources.sources).toEqual([]);
 
       const status = await integration.getIntegrationStatus(
         { groupId: { value: groupId }, provider: 1 },
@@ -228,7 +257,13 @@ describeIntegration('material grants over binary gRPC-Web with a configured buck
         HQ_CONTROL_PLANE_STORAGE_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
         HQ_CONTROL_PLANE_STORAGE_GRANT_TTL_SECONDS: '300',
       }).storage;
-      const bucket = scriptedBucket();
+      // The declared hash is a real BLAKE3 digest of the bytes the scripted
+      // bucket will serve back, because the completion re-derives it before it
+      // records a version. A placeholder string would now be refused as a
+      // digest this control plane cannot verify.
+      const assembled = Uint8Array.from({ length: 1024 }, (_, index) => (index * 37) & 0xff);
+      const contentHash = bytesToHex(blake3(assembled));
+      const bucket = scriptedBucket(assembled);
       const running = await startControlPlane(
         {
           port: 0,
@@ -288,8 +323,6 @@ describeIntegration('material grants over binary gRPC-Web with a configured buck
       const headers = {
         authorization: `Bearer ${required(created.session?.accessToken, 'access token')}`,
       };
-      const contentHash = 'blake3:services-wire-storage-content';
-
       const upload = await materials.beginUpload(
         {
           groupId: { value: groupId },
@@ -297,7 +330,7 @@ describeIntegration('material grants over binary gRPC-Web with a configured buck
           originalFileName: 'take-01.mp4',
           category: materialV1.MaterialCategory.VIDEO,
           mimeType: 'video/mp4',
-          totalSize: 1024n,
+          totalSize: BigInt(assembled.byteLength),
           contentHash,
         },
         { headers },
@@ -306,7 +339,7 @@ describeIntegration('material grants over binary gRPC-Web with a configured buck
       expect(upload.parts).toHaveLength(1);
       const partUrl = new URL(required(upload.parts[0]?.uploadUrl, 'part url'));
       expect(partUrl.origin).toBe('https://gremuchaya-materials.s3.eu-central-1.amazonaws.com');
-      expect(partUrl.pathname).toBe(`/materials/${groupId}/blake3%3Aservices-wire-storage-content`);
+      expect(partUrl.pathname).toBe(`/materials/${groupId}/${contentHash}`);
       expect(partUrl.searchParams.get('uploadId')).toBe(bucket.uploadId);
       expect(partUrl.searchParams.get('partNumber')).toBe('1');
       expect(partUrl.searchParams.get('X-Amz-Expires')).toBe('300');
@@ -316,7 +349,7 @@ describeIntegration('material grants over binary gRPC-Web with a configured buck
       );
       expect(bucket.calls.map((call) => call.request.method)).toEqual(['POST']);
       expect(bucket.calls[0]?.url).toBe(
-        `https://gremuchaya-materials.s3.eu-central-1.amazonaws.com/materials/${groupId}/blake3%3Aservices-wire-storage-content?uploads=`,
+        `https://gremuchaya-materials.s3.eu-central-1.amazonaws.com/materials/${groupId}/${contentHash}?uploads=`,
       );
 
       const uploadId = required(upload.session?.id?.value, 'upload id');
@@ -329,13 +362,16 @@ describeIntegration('material grants over binary gRPC-Web with a configured buck
         { headers },
       );
       expect(completed.material?.status).toBe(materialV1.MaterialStatus.READY);
-      expect(bucket.calls.map((call) => call.request.method)).toEqual(['POST', 'POST']);
+      // Assembly, then read-back, then the database: the GET is the third call
+      // and it happens on the way to a READY material, not after one.
+      expect(bucket.calls.map((call) => call.request.method)).toEqual(['POST', 'POST', 'GET']);
       expect(new URL(bucket.calls[1]?.url ?? '').searchParams.get('uploadId')).toBe(
         bucket.uploadId,
       );
       expect(bucket.calls[1]?.request.body).toContain(
         '<Part><PartNumber>1</PartNumber><ETag>&quot;wire-etag&quot;</ETag></Part>',
       );
+      expect(new URL(bucket.calls[2]?.url ?? '').search).toBe('');
 
       const materialId = required(completed.material?.id?.value, 'material id');
       const download = await materials.getDownloadGrant(
@@ -373,8 +409,15 @@ interface ScriptedBucket {
   readonly uploadId: string;
 }
 
-/** Answers the three multipart calls the way the S3 API Reference documents them. */
-function scriptedBucket(): ScriptedBucket {
+/**
+ * Answers the multipart calls the way the S3 API Reference documents them, and
+ * hands back `assembled` on the read-back the completion now performs. Serving
+ * the same bytes the content hash was taken over is what lets this scenario
+ * reach a READY material; a bucket that returned anything else would be the
+ * dishonest-upload case, which `material.live-storage.integration.test.ts`
+ * covers against a real store.
+ */
+function scriptedBucket(assembled: Uint8Array): ScriptedBucket {
   const calls: { url: string; request: StorageFetchRequest }[] = [];
   const uploadId = 'wire-multipart-upload-id';
   return {
@@ -383,6 +426,14 @@ function scriptedBucket(): ScriptedBucket {
     fetch: (url, request) => {
       calls.push({ url, request });
       const query = new URL(url).searchParams;
+      if (request.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(''),
+          chunks: () => oneChunk(assembled),
+        };
+      }
       if (request.method === 'POST' && query.has('uploads')) {
         return {
           ok: true,
@@ -413,6 +464,10 @@ function scriptedBucket(): ScriptedBucket {
       };
     },
   };
+}
+
+async function* oneChunk(bytes: Uint8Array): AsyncIterable<Uint8Array> {
+  yield await Promise.resolve(bytes);
 }
 
 function authConfig(): ControlPlaneAuthConfig {

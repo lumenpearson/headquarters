@@ -30,6 +30,7 @@ import { useDocumentLoaded } from './useDocumentLoaded';
  */
 export function StartupSequence() {
   const values = useOperationsStore((state) => state.personalization.draft.values);
+  const markStartupComplete = useOperationsStore((state) => state.markStartupComplete);
   const plan = resolveStartupPlan({
     enabled: booleanSetting(values, 'startup.enabled'),
     animationsEnabled: booleanSetting(values, 'animations.enabled'),
@@ -40,6 +41,17 @@ export function StartupSequence() {
 
   const loaded = useDocumentLoaded();
   const [stageIndex, setStageIndex] = useState(0);
+
+  const stage: StartupStage | undefined = startupStages[stageIndex];
+
+  useEffect(() => {
+    // R11's keybind intro must never paint over this readout. `!plan.play`
+    // covers the sequence being switched off (or suppressed by reduced
+    // motion) -- no overlay ever mounts, so nothing else would signal that
+    // startup is "done" -- and `stage === undefined` covers the sequence
+    // having walked past its last stage.
+    if (!plan.play || stage === undefined) markStartupComplete();
+  }, [plan.play, stage, markStartupComplete]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -64,7 +76,6 @@ export function StartupSequence() {
     return () => window.clearInterval(timer);
   }, [plan.play, plan.stageMs, loaded]);
 
-  const stage: StartupStage | undefined = startupStages[stageIndex];
   if (!plan.play || stage === undefined) return null;
 
   return (

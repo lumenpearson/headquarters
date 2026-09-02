@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { gotoSettingsUnified } from './settingsHelpers';
+
 /**
  * The catalogue at the size R6 asks for.
  *
@@ -11,7 +13,7 @@ import { expect, test } from '@playwright/test';
  */
 test('R6: every setting is reachable through a section or through search', async ({ page }) => {
   await page.setViewportSize({ width: 2560, height: 1440 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   const catalogue = page.locator('.settings-personalization');
   await expect(catalogue).toBeVisible();
 
@@ -38,7 +40,7 @@ test('R26: the catalogue toolbar wraps instead of pushing the page into scroll',
   page,
 }) => {
   await page.setViewportSize({ width: 1024, height: 600 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await expect(page.locator('.settings-catalog-toolbar')).toBeVisible();
 
   // The settings screen is a catalogue, so R26 lets its list scroll — the

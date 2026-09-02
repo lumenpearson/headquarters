@@ -58,6 +58,23 @@ vi.mock('@/infrastructure/materials/BridgeMaterialClient', () => {
       imported.categories.push(this.#category);
       return Promise.resolve({ material: imported.material, deduplicated: false });
     }
+    // Reached once a row's click sets `previewMaterial`: `LocalMaterialPreview`
+    // needs a library, not a real bridge, to render its own bounded preview.
+    renditions(): readonly never[] {
+      return [];
+    }
+    openRendition(): Promise<never> {
+      return Promise.reject(new Error('not used'));
+    }
+    async *readChunks(): AsyncGenerator<{ readonly data: Uint8Array }> {
+      yield { data: new Uint8Array([1, 2, 3]) };
+    }
+    getPlaybackGrant(): Promise<never> {
+      return Promise.reject(new Error('not used'));
+    }
+    revokePlaybackGrant(): Promise<boolean> {
+      return Promise.resolve(true);
+    }
   }
   return { BridgeMaterialClient: FakeBridgeMaterialClient };
 });
@@ -129,7 +146,33 @@ describe('what an import leaves behind', () => {
   });
 });
 
+describe("the import dialog's selected-entry row", () => {
+  beforeEach(() => {
+    imported.categories.length = 0;
+    operationsStore.getState().resetWorld();
+    operationsStore.setState({ materials: { imported: {} } });
+  });
+
+  /*
+   * `aria-current`, not colour alone: a screen reader announces which entry
+   * is the one currently previewed the same way the `.is-active` background
+   * shows it sighted, and only that one row carries the attribute.
+   */
+  it('marks the previewed row aria-current once selected, and no other', async () => {
+    render(<FilesScreen archive={false} />);
+    openImportDialog();
+    await importOneFile();
+
+    const row = await screen.findByRole('button', { name: /perehvat\.mp4/ });
+    expect(row.getAttribute('aria-current')).toBe('false');
+
+    fireEvent.click(row);
+
+    expect(row.getAttribute('aria-current')).toBe('true');
+  });
+});
+
 function registryTotal(): number {
-  const label = screen.getByText('FILES');
-  return Number(label.parentElement?.textContent?.replace('FILES', '') ?? '');
+  const label = screen.getByText('ФАЙЛЫ');
+  return Number(label.parentElement?.textContent?.replace('ФАЙЛЫ', '') ?? '');
 }

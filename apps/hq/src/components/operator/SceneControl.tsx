@@ -3,9 +3,12 @@
 import { useEffect, useState } from 'react';
 import { TerminalButton, TerminalSelect } from '@gremuchaya/ui/primitives';
 import type { TerminalSelectOption } from '@gremuchaya/ui/primitives';
+import { resolveLocalizedText } from '@gremuchaya/domain';
 
 import { sceneMetadata } from '@/config/scenes';
 import { useRuntime } from '@/components/runtime/RuntimeProvider';
+import { readAppLocale } from '@/application/localization/locale';
+import { sourceLocale } from '@/application/localization/messages';
 import { useAppStore } from '@/state/appStore';
 
 const sceneOptions: ReadonlyArray<TerminalSelectOption<string>> = [
@@ -15,6 +18,20 @@ const sceneOptions: ReadonlyArray<TerminalSelectOption<string>> = [
     label: `${scene.shootDate.slice(5)} / ${scene.id} / ${scene.title}`,
   })),
 ];
+
+/**
+ * A cue's label as one string.
+ *
+ * `SceneCue.label` widened to `LocalizedText` when scene content gained a
+ * second language, and this is the only site in the application that had
+ * narrowed it to `string`. The locale is read rather than subscribed because
+ * the labels are captured into state on load; a locale changed afterwards
+ * reaches them on the next scene load, which is when a cue list is rebuilt
+ * anyway.
+ */
+function cueLabelText(label: Parameters<typeof resolveLocalizedText>[0]): string {
+  return resolveLocalizedText(label, readAppLocale(), sourceLocale).text;
+}
 
 export function SceneControl() {
   const { controller } = useRuntime();
@@ -27,7 +44,7 @@ export function SceneControl() {
     if (controller === null || activeSceneId === null) return;
     let active = true;
     void controller.getScene(activeSceneId).then((scene) => {
-      if (active) setCueLabels(scene?.cues.map((cue) => cue.label) ?? []);
+      if (active) setCueLabels(scene?.cues.map((cue) => cueLabelText(cue.label)) ?? []);
     });
     return () => {
       active = false;
@@ -37,7 +54,7 @@ export function SceneControl() {
   const load = async (sceneId: string) => {
     if (controller === null) return;
     const scene = await controller.loadScene(sceneId);
-    setCueLabels(scene.cues.map((cue) => cue.label));
+    setCueLabels(scene.cues.map((cue) => cueLabelText(cue.label)));
   };
 
   return (

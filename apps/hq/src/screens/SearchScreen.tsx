@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { TerminalButton, TerminalInput } from '@gremuchaya/ui/primitives';
 
 import { dateTimeFormat, foldCase } from '@/application/localization/intl';
+import { useTranslate } from '@/application/localization/locale';
 import { useRecordPage } from '@/application/records/useRecordPage';
 import { useTablePageSize } from '@/application/records/useTablePageSize';
 import { EmptyState, Panel, SeverityBadge, StatusBadge } from '@/components/operations/OpsUi';
@@ -26,6 +27,7 @@ type SearchHit = {
 const stampParts = { dateStyle: 'short', timeStyle: 'medium' } as const;
 
 export function SearchScreen() {
+  const translate = useTranslate();
   const router = useRouter();
   const inputRef = useRef<HTMLElement>(null);
   const state = useOperationsStore((value) => value);
@@ -132,7 +134,7 @@ export function SearchScreen() {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'РЕЗУЛЬТАТЫ',
+        title: translate('search.resultsTitle'),
         category: 'records',
         descriptor: {
           id: 'results',
@@ -146,28 +148,32 @@ export function SearchScreen() {
         },
         render: () => (
           <Panel
-            title="РЕЗУЛЬТАТЫ"
-            eyebrow="UNIFIED SEARCH / ALL ENTITIES"
+            title={translate('search.resultsTitle')}
+            eyebrow={translate('search.resultsEyebrow')}
             className="search-results"
           >
             {query.length === 0 ? (
               <div className="search-help">
-                <strong>БЫСТРЫЙ ПОИСК</strong>
+                <strong>{translate('search.quickSearchHeading')}</strong>
                 <p>
-                  Попробуйте:{' '}
+                  {translate('search.tryLabel')}{' '}
                   <TerminalButton onClick={() => state.setSearchQuery('K-17')}>K-17</TerminalButton>{' '}
                   <TerminalButton onClick={() => state.setSearchQuery('S-03')}>S-03</TerminalButton>{' '}
-                  <TerminalButton onClick={() => state.setSearchQuery('сигнал')}>
-                    СИГНАЛ
+                  <TerminalButton
+                    onClick={() => state.setSearchQuery('сигнал')} // i18n-exempt: query value the store searches for, not display text
+                  >
+                    {translate('search.exampleSignal')}
                   </TerminalButton>{' '}
-                  <TerminalButton onClick={() => state.setSearchQuery('альфа')}>
-                    АЛЬФА
+                  <TerminalButton
+                    onClick={() => state.setSearchQuery('альфа')} // i18n-exempt: query value the store searches for, not display text
+                  >
+                    {translate('search.exampleAlpha')}
                   </TerminalButton>
                 </p>
-                <span>CTRL+K — ОТКРЫТЬ ПОИСК ИЗ ЛЮБОГО РАЗДЕЛА</span>
+                <span>{translate('search.ctrlKHint')}</span>
               </div>
             ) : hitPage.total === 0 ? (
-              <EmptyState>СОВПАДЕНИЙ НЕ НАЙДЕНО</EmptyState>
+              <EmptyState>{translate('search.noMatchesFound')}</EmptyState>
             ) : (
               <div className="search-hit-list">
                 {pagedHits.map((hit, index) => (
@@ -203,14 +209,14 @@ export function SearchScreen() {
               <RecordPagination
                 page={hitPage}
                 onPage={goToPage}
-                label="Страницы результатов поиска"
+                label={translate('search.paginationLabel')}
               />
             ) : null}
           </Panel>
         ),
       },
       {
-        title: 'ИНДЕКС',
+        title: translate('search.indexTitle'),
         category: 'summary',
         descriptor: {
           id: 'index',
@@ -223,62 +229,68 @@ export function SearchScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="ИНДЕКС" eyebrow="LOCAL DATASET" className="search-index">
+          <Panel
+            title={translate('search.indexTitle')}
+            eyebrow={translate('search.indexEyebrow')}
+            className="search-index"
+          >
             <dl>
               <div>
-                <dt>ОБЪЕКТЫ</dt>
+                <dt>{translate('field.objects')}</dt>
                 <dd>{Object.keys(state.objects).length}</dd>
               </div>
               <div>
-                <dt>ДЕЛА</dt>
+                <dt>{translate('field.cases')}</dt>
                 <dd>{Object.keys(state.cases).length}</dd>
               </div>
               <div>
-                <dt>МАТЕРИАЛЫ</dt>
+                <dt>{translate('field.materials')}</dt>
                 <dd>{Object.keys(state.attachments).length}</dd>
               </div>
               <div>
-                <dt>СОБЫТИЯ</dt>
+                <dt>{translate('field.events')}</dt>
                 <dd>{state.events.length}</dd>
               </div>
               <div>
-                <dt>ТРЕВОГИ</dt>
+                <dt>{translate('field.alerts')}</dt>
                 <dd>{Object.keys(state.alerts).length}</dd>
               </div>
             </dl>
             <footer>
-              INDEX: READY
+              {translate('search.indexStatusLabel')}
               <br />
-              STORAGE: LOCAL
+              {translate('search.storageStatusLabel')}
               <br />
-              NETWORK: NOT REQUIRED
+              {translate('search.networkStatusLabel')}
             </footer>
           </Panel>
         ),
       },
     ],
-    [goToPage, hitPage, openHit, pagedHits, query, state],
+    [goToPage, hitPage, openHit, pagedHits, query, state, translate],
   );
 
   return (
     <div className="ops-screen search-screen">
       <header className="search-command">
-        <span>GLOBAL INDEX //</span>
+        <span>{translate('search.headerLabel')}</span>
         <label>
           <i>/</i>
           <TerminalInput
             ref={inputRef}
             value={state.ui.searchQuery}
             onChange={(event) => state.setSearchQuery(event.target.value)}
-            aria-label="Глобальный поиск"
-            placeholder="ID, НАЗВАНИЕ, ПОЗЫВНОЙ, СЕКТОР, ТЕГ, ИСТОЧНИК..."
+            aria-label={translate('search.globalSearchAriaLabel')}
+            placeholder={translate('search.searchPlaceholder')}
           />
           <kbd>ESC</kbd>
         </label>
         <small>
           {/* The whole match set, not the page: the count is what the index
               holds, and the footer says which slice of it is on screen. */}
-          {query.length === 0 ? 'ВВЕДИТЕ ЗАПРОС' : `${hitPage.total} СОВПАДЕНИЙ / LOCAL INDEX`}
+          {query.length === 0
+            ? translate('search.enterQueryPrompt')
+            : `${translate('search.matchCount', { count: hitPage.total })} / LOCAL INDEX`}
         </small>
       </header>
       <TileGrid tiles={tiles} columns={12} className="search-layout" screen="search" />

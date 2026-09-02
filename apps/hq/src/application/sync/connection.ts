@@ -218,6 +218,36 @@ export interface PresenceEntry {
   readonly observedAt: string;
 }
 
+/**
+ * What this device reports about itself, before the server fills in
+ * `deviceId`, `status` and `observedAt` (F10 presence publish).
+ *
+ * `JoinGroup` carries it on the way in and `UpdatePresence` carries it on
+ * every report after that -- the same four fields `Presence` above holds for
+ * a neighbour, declared on their own because a client may only ever state
+ * these four about itself.
+ *
+ * Bounded to the server's own limits before it is sent (`sync/service.ts`):
+ * identifiers up to 256 characters, latency up to five minutes. The offset
+ * carries no ceiling, for the same reason the server gives none -- a device
+ * with the wrong year on its clock honestly reports an offset in the
+ * billions.
+ */
+export interface PresenceDetail {
+  readonly activeScreen: string;
+  readonly selectedElement: string;
+  readonly clockOffsetMs: number;
+  readonly latencyMs: number;
+}
+
+/** What a session with nothing to report sends -- the proto3 defaults. */
+export const emptyPresenceDetail: PresenceDetail = {
+  activeScreen: '',
+  selectedElement: '',
+  clockOffsetMs: 0,
+  latencyMs: 0,
+};
+
 export interface GroupDevice {
   readonly deviceId: string;
   readonly name: string;
@@ -442,6 +472,38 @@ export function realtimeStatusLabel(status: RealtimeLinkStatus): string {
       return 'ПЕРЕПОДКЛЮЧЕНИЕ СОКЕТА';
     case 'polling':
       return 'ОПРОС ПО ТАЙМЕРУ — CONTROL PLANE БЕЗ REALTIME';
+  }
+}
+
+/**
+ * What the status line's `SYSTEM:` badge prints, in the same Latin register as
+ * `connectionModeToken` beside it.
+ *
+ * The badge used to be the literal `SYSTEM:READY` regardless of what this
+ * session actually knew -- it opened `/system` but read no state to get
+ * there. This is the runtime signal it now reads instead: `failure` is the
+ * last thing this session's own connection reported going wrong, checked
+ * first because it is worth naming over the mode that produced it, and the
+ * mode after it covers the rest. `local-only` and `online` both read `READY`
+ * -- an operator working alone is not "not ready" for having chosen not to
+ * pair, which is why the mode alone, and not the branch below, decides it.
+ */
+export function systemReadinessToken(
+  connection: Pick<ConnectionState, 'mode' | 'failure'>,
+): string {
+  if (connection.failure !== '') return 'DEGRADED';
+  switch (connection.mode) {
+    case 'offline':
+      return 'OFFLINE';
+    case 'connecting':
+      return 'SYNCING';
+    case 'reauth-required':
+      return 'REAUTH';
+    case 'installation-changed':
+      return 'CONFLICT';
+    case 'local-only':
+    case 'online':
+      return 'READY';
   }
 }
 

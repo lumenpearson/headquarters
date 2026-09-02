@@ -9,7 +9,8 @@ import {
 } from '@gremuchaya/ui/primitives';
 
 import { dateTimeFormat } from '@/application/localization/intl';
-import { useAppLocale } from '@/application/localization/locale';
+import { useAppLocale, t } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useRuntime } from '@/components/runtime/RuntimeProvider';
 import type { NativeMonitor } from '@/infrastructure/tauri/TauriDisplayGateway';
 import { appStore, useAppStore } from '@/state/appStore';
@@ -27,23 +28,41 @@ const tabs = [
   'diagnostics',
 ] as const;
 
+const tabLabelIds: Readonly<Record<(typeof tabs)[number], MessageId>> = {
+  states: 'developer.tabStates',
+  scenes: 'developer.tabScenes',
+  screens: 'developer.tabScreens',
+  data: 'developer.tabData',
+  files: 'developer.tabFiles',
+  media: 'developer.tabMedia',
+  simulation: 'developer.tabSimulation',
+  bridge: 'developer.tabBridge',
+  snapshots: 'developer.tabSnapshots',
+  diagnostics: 'developer.tabDiagnostics',
+};
+
 export function DeveloperPanel() {
   const { controller } = useRuntime();
   const developer = useAppStore((state) => state.developer);
   const runtime = useAppStore((state) => state);
   const [active, setActive] = useState<(typeof tabs)[number]>('states');
+  // `appStore`, unlike `operationsStore`, carries no personalization setting
+  // of its own, so nothing above already re-renders this panel when the
+  // locale moves. This is the one subscription the whole subtree below leans
+  // on, the same way `SnapshotTools` already leans on its own.
+  useAppLocale();
   if (!developer.isUnlocked) return null;
   return (
     <aside className="developer-panel">
       <header>
         <div>
-          <i>DEV</i>
-          <strong>ИНЖЕНЕРНЫЙ КОНТУР</strong>
-          <span>LOCAL ONLY</span>
+          <i>{t('developer.badge')}</i>
+          <strong>{t('developer.panelHeading')}</strong>
+          <span>{t('developer.localOnlyLabel')}</span>
         </div>
         <TerminalButton
           tone="quiet"
-          aria-label="Закрыть инженерный контур"
+          aria-label={t('developer.closeAriaLabel')}
           onClick={() => controller?.toggleDeveloper()}
         >
           ×
@@ -56,7 +75,7 @@ export function DeveloperPanel() {
             className={active === tab ? 'is-active' : ''}
             onClick={() => setActive(tab)}
           >
-            {tab}
+            {t(tabLabelIds[tab])}
           </TerminalButton>
         ))}
       </nav>
@@ -91,16 +110,16 @@ function SimulationControls() {
   const simulation = useAppStore((state) => state.developer.simulation);
   return (
     <div className="dev-controls">
-      <h3>SIMULATION FLAGS</h3>
+      <h3>{t('developer.simulationFlagsHeading')}</h3>
       {Object.entries(simulation).map(([key, enabled]) => (
         <div className="dev-controls__row" key={key}>
           <TerminalCheckbox
             checked={enabled}
             onCheckedChange={() => toggleSimulation(key as keyof typeof simulation)}
-            label={`Симуляция ${key}`}
+            label={t('developer.simulationFlagCheckboxLabel', { flag: key })}
           />
           <span>{key}</span>
-          <b>{enabled ? 'ON' : 'OFF'}</b>
+          <b>{enabled ? t('developer.onLabel') : t('developer.offLabel')}</b>
         </div>
       ))}
     </div>
@@ -116,7 +135,7 @@ function ScreenDiagnostics() {
           <div key={screen.id}>
             <span>{screen.id}</span>
             <strong>{screen.module}</strong>
-            <small>REV {screen.revision}</small>
+            <small>{t('developer.revisionLabel', { revision: screen.revision })}</small>
           </div>
         ))}
       </div>
@@ -159,13 +178,8 @@ function NativeDisplayControls() {
 
   return (
     <div className="dev-controls">
-      <h3>NATIVE DISPLAYS</h3>
-      {available ? null : (
-        <p>
-          НАТИВНАЯ ОБОЛОЧКА НЕДОСТУПНА В ЭТОЙ СЕССИИ: УПРАВЛЕНИЕ ОКНАМИ ЕСТЬ ТОЛЬКО В
-          ДЕСКТОП-СБОРКЕ.
-        </p>
-      )}
+      <h3>{t('developer.nativeDisplaysHeading')}</h3>
+      {available ? null : <p>{t('developer.nativeShellUnavailableNotice')}</p>}
       <div className="dev-controls__row">
         <TerminalButton
           disabled={!available || busy}
@@ -173,11 +187,11 @@ function NativeDisplayControls() {
             run(async () => {
               const found = await controller.listMonitors();
               setMonitors(found);
-              return `МОНИТОРОВ НАЙДЕНО: ${found.length}`;
+              return t('developer.monitorsFoundReport', { count: found.length });
             })
           }
         >
-          ОПРОСИТЬ МОНИТОРЫ
+          {t('developer.pollMonitorsButton')}
         </TerminalButton>
         <TerminalButton
           disabled={!available || busy || planned.length === 0}
@@ -189,12 +203,16 @@ function NativeDisplayControls() {
                 result.status === 'failed' ? [result.reason] : [],
               );
               return failures.length === 0
-                ? `ОКОН ОТКРЫТО: ${opened} ИЗ ${results.length}`
-                : `ОКОН ОТКРЫТО: ${opened} ИЗ ${results.length}. ОТКАЗЫ: ${failures.join('; ')}`;
+                ? t('developer.windowsOpenedReport', { opened, total: results.length })
+                : t('developer.windowsOpenedWithFailuresReport', {
+                    opened,
+                    total: results.length,
+                    failures: failures.join('; '),
+                  });
             })
           }
         >
-          ОТКРЫТЬ ОКНА ЭКРАНОВ ({planned.length})
+          {t('developer.openScreenWindowsButton', { count: planned.length })}
         </TerminalButton>
         <TerminalButton
           tone="critical"
@@ -203,14 +221,14 @@ function NativeDisplayControls() {
             run(async () => {
               const result = await controller.closeManagedWindows();
               return result.status === 'closed'
-                ? 'УПРАВЛЯЕМЫЕ ОКНА ЗАКРЫТЫ'
+                ? t('developer.managedWindowsClosedReport')
                 : result.status === 'failed'
-                  ? `ОТКАЗ: ${result.reason}`
-                  : 'НАТИВНАЯ ОБОЛОЧКА НЕДОСТУПНА';
+                  ? t('developer.closeFailedReport', { reason: result.reason })
+                  : t('developer.nativeShellUnavailableReport');
             })
           }
         >
-          ЗАКРЫТЬ УПРАВЛЯЕМЫЕ ОКНА
+          {t('developer.closeManagedWindowsButton')}
         </TerminalButton>
       </div>
       {report === null ? null : <p>{report}</p>}
@@ -219,14 +237,14 @@ function NativeDisplayControls() {
           {monitors.map((monitor, index) => (
             <div key={`${monitor.x}:${monitor.y}:${String(index)}`}>
               <span>
-                [{index}] {monitor.name ?? 'БЕЗ ИМЕНИ'}
+                [{index}] {monitor.name ?? t('developer.unnamedMonitorLabel')}
               </span>
               <strong>
                 {monitor.width}×{monitor.height}
               </strong>
               <small>
                 {monitor.x},{monitor.y} · ×{monitor.scaleFactor}
-                {monitor.primary ? ' · PRIMARY' : ''}
+                {monitor.primary ? t('developer.primaryMonitorSuffix') : ''}
               </small>
             </div>
           ))}
@@ -253,23 +271,27 @@ function SnapshotTools() {
   };
   const setOpen = (open: boolean) => {
     if (open && name === '')
-      setName(`REHEARSAL ${dateTimeFormat({ timeStyle: 'medium' }).format(new Date())}`);
+      setName(
+        t('developer.rehearsalPrefix', {
+          time: dateTimeFormat({ timeStyle: 'medium' }).format(new Date()),
+        }),
+      );
     setDialogOpen(open);
   };
   return (
     <div className="snapshot-tools">
-      <h3>SNAPSHOTS</h3>
-      <p>Состояние хранится локально и экспортируется как JSON без сетевого запроса.</p>
+      <h3>{t('developer.snapshotsHeading')}</h3>
+      <p>{t('developer.snapshotsDescription')}</p>
       <TerminalDialog
-        title="СОХРАНИТЬ SNAPSHOT"
-        eyebrow="LOCAL STATE / VERSIONED"
-        description="Задайте имя локальной точки восстановления. Данные не отправляются в сеть."
+        title={t('developer.saveSnapshotDialogTitle')}
+        eyebrow={t('developer.saveSnapshotDialogEyebrow')}
+        description={t('developer.saveSnapshotDialogDescription')}
         open={dialogOpen}
         onOpenChange={setOpen}
-        trigger={<TerminalButton>СОХРАНИТЬ SNAPSHOT</TerminalButton>}
+        trigger={<TerminalButton>{t('developer.saveSnapshotDialogTitle')}</TerminalButton>}
         footer={
           <TerminalButton tone="primary" onClick={save} disabled={name.trim() === ''}>
-            [ENTER] СОХРАНИТЬ
+            {t('developer.confirmSaveButton')}
           </TerminalButton>
         }
       >
@@ -279,11 +301,13 @@ function SnapshotTools() {
           onKeyDown={(event) => {
             if (event.code === 'Enter') save();
           }}
-          aria-label="Имя snapshot"
+          aria-label={t('developer.snapshotNameAriaLabel')}
           autoFocus
         />
       </TerminalDialog>
-      <TerminalButton onClick={exportSnapshot}>ЭКСПОРТ ТЕКУЩЕГО СОСТОЯНИЯ</TerminalButton>
+      <TerminalButton onClick={exportSnapshot}>
+        {t('developer.exportCurrentStateButton')}
+      </TerminalButton>
       <div>
         {snapshots.map((snapshot) => (
           <article key={snapshot.name}>
@@ -294,13 +318,13 @@ function SnapshotTools() {
               )}
             </small>
             <TerminalButton onClick={() => void controller?.restoreSnapshot(snapshot.name)}>
-              RESTORE
+              {t('developer.restoreButton')}
             </TerminalButton>
             <TerminalButton
               tone="critical"
               onClick={() => void controller?.removeSnapshot(snapshot.name)}
             >
-              DELETE
+              {t('developer.deleteButton')}
             </TerminalButton>
           </article>
         ))}

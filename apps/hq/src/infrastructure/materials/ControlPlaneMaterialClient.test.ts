@@ -15,7 +15,19 @@ const groupId = '018f0f1a-8000-7000-8000-0000000000a0';
 const deviceId = '018f0f1a-8000-7000-8000-0000000000b0';
 const uploadId = '018f0f1a-8000-7000-8000-0000000000c0';
 const materialId = '018f0f1a-8000-7000-8000-0000000000d0';
+const versionId = '018f0f1a-8000-7000-8000-0000000000e0';
 const contentHash = '6'.repeat(64);
+
+const wireMaterialVersion = {
+  id: { value: versionId },
+  materialId: { value: materialId },
+  sequence: 2n,
+  contentHash,
+  mimeType: 'video/mp4',
+  byteSize: 6n,
+  originalFileName: 'camera-loop-v2.mp4',
+  createdAt: { seconds: 1_800_000_100n, nanos: 0 },
+};
 
 const wireMaterial = {
   id: { value: materialId },
@@ -432,6 +444,180 @@ describe('renditions', () => {
   });
 });
 
+describe('the material lifecycle (R1: versions, metadata, trash, events)', () => {
+  it('reserves a new version through CreateMaterialVersion and completes it on the same part path as import', async () => {
+    const log: string[] = [];
+    const puts: Array<{ readonly url: string; readonly size: number }> = [];
+    const rpc = fakeRpc(log);
+    const client = new ControlPlaneMaterialClient({
+      groupId,
+      deviceId,
+      storageOrigin,
+      client: rpc.client,
+      fetchPart: recordingFetch(puts, ['"etag-1"', '"etag-2"']),
+      fileHasher: fakeHasher,
+      mintRequestId: mintingIds(),
+    });
+
+    const result = await client.createVersion(materialId, browserFile('camera-loop-v2.mp4', 6));
+
+    expect(log).toEqual(['createMaterialVersion', 'getUploadStatus', 'completeUpload']);
+    expect(puts.map((put) => put.url)).toEqual([
+      `${storageOrigin}/bucket/key?part=1`,
+      `${storageOrigin}/bucket/key?part=2`,
+    ]);
+    expect(rpc.completedParts).toEqual([
+      { partNumber: 1, etag: 'etag-1', checksum: '' },
+      { partNumber: 2, etag: 'etag-2', checksum: '' },
+    ]);
+    expect(result).toEqual({ material, deduplicated: false });
+  });
+
+  it('sends every metadata field and reads back the updated material', async () => {
+    const rpc = fakeRpc([]);
+    const client = new ControlPlaneMaterialClient({
+      groupId,
+      deviceId,
+      storageOrigin,
+      client: rpc.client,
+      fileHasher: fakeHasher,
+      mintRequestId: mintingIds(),
+    });
+
+    const updated = await client.updateMetadata(materialId, {
+      displayName: 'renamed.mp4',
+      category: 'photo',
+      metadata: {},
+      tags: ['alpha'],
+    });
+
+    expect(updated.displayName).toBe('renamed.mp4');
+    expect(rpc.updatedMetadata).toEqual({
+      displayName: 'renamed.mp4',
+      category: materialV1.MaterialCategory.IMAGE,
+      tags: ['alpha'],
+    });
+  });
+
+  it('moves a material to trash and restores it, both reading back the record', async () => {
+    const log: string[] = [];
+    const rpc = fakeRpc(log);
+    const client = new ControlPlaneMaterialClient({
+      groupId,
+      deviceId,
+      storageOrigin,
+      client: rpc.client,
+      fileHasher: fakeHasher,
+      mintRequestId: mintingIds(),
+    });
+
+    await client.moveToTrash(materialId);
+    await client.restoreMaterial(materialId);
+
+    expect(log).toEqual(['moveToTrash', 'restoreMaterial']);
+  });
+
+  it('purges with the material id as confirmation, matching what the store requires', async () => {
+    const rpc = fakeRpc([]);
+    const client = new ControlPlaneMaterialClient({
+      groupId,
+      deviceId,
+      storageOrigin,
+      client: rpc.client,
+      fileHasher: fakeHasher,
+      mintRequestId: mintingIds(),
+    });
+
+    await client.purgeMaterial(materialId, materialId);
+
+    expect(rpc.purgeConfirmation).toBe(materialId);
+  });
+
+  it('lists versions and trash, translating both back to client entries', async () => {
+    const rpc = fakeRpc([]);
+    const client = new ControlPlaneMaterialClient({
+      groupId,
+      deviceId,
+      storageOrigin,
+      client: rpc.client,
+      fileHasher: fakeHasher,
+      mintRequestId: mintingIds(),
+    });
+
+    const versions = await client.listVersions(materialId);
+    const trash = await client.listTrash();
+
+    expect(versions.versions).toEqual([
+      {
+        versionId,
+        materialId,
+        sequence: 2,
+        contentHash,
+        mimeType: 'video/mp4',
+        byteSize: 6n,
+        originalFileName: 'camera-loop-v2.mp4',
+        createdAt: new Date(1_800_000_100_000).toISOString(),
+      },
+    ]);
+    expect(trash.materials).toEqual([material]);
+  });
+
+  it('translates the library event stream, one entry per yielded event', async () => {
+    const rpc = fakeRpc([], {
+      watchedEvents: [
+        {
+          sequence: 5n,
+          kind: materialV1.MaterialEventKind.TRASHED,
+          materialId,
+          correlationId: 'corr-5',
+        },
+      ],
+    });
+    const client = new ControlPlaneMaterialClient({
+      groupId,
+      deviceId,
+      storageOrigin,
+      client: rpc.client,
+      fileHasher: fakeHasher,
+      mintRequestId: mintingIds(),
+    });
+
+    const events = [];
+    for await (const event of client.watchEvents(4)) {
+      events.push(event);
+    }
+
+    expect(rpc.watchedAfterSequence).toBe(4n);
+    expect(events).toEqual([
+      {
+        sequence: 5,
+        kind: 'trashed',
+        materialId,
+        occurredAt: new Date(1_800_000_100_000).toISOString(),
+        correlationId: 'corr-5',
+      },
+    ]);
+  });
+
+  it('never asks for a negative cursor even when a caller passes one', async () => {
+    const rpc = fakeRpc([]);
+    const client = new ControlPlaneMaterialClient({
+      groupId,
+      deviceId,
+      storageOrigin,
+      client: rpc.client,
+      fileHasher: fakeHasher,
+      mintRequestId: mintingIds(),
+    });
+
+    for await (const _event of client.watchEvents(-3)) {
+      // draining the fake's single default event
+    }
+
+    expect(rpc.watchedAfterSequence).toBe(0n);
+  });
+});
+
 describe('category mapping', () => {
   it('maps the catalogue identifiers onto the wire enum, photo included', () => {
     expect(toCategoryEnum('photo')).toBe(materialV1.MaterialCategory.IMAGE);
@@ -453,6 +639,12 @@ interface FakeRpcOptions {
   readonly previewHeight?: number;
   readonly downloadByteSize?: bigint;
   readonly onPreviewVariant?: (variant: string) => void;
+  readonly watchedEvents?: readonly {
+    readonly sequence: bigint;
+    readonly kind: materialV1.MaterialEventKind;
+    readonly materialId: string;
+    readonly correlationId: string;
+  }[];
 }
 
 function fakeRpc(log: string[], options: FakeRpcOptions = {}) {
@@ -460,6 +652,11 @@ function fakeRpc(log: string[], options: FakeRpcOptions = {}) {
     completedParts: [] as readonly { partNumber: number; etag: string; checksum: string }[],
     requestIds: [] as string[],
     declaredCategory: materialV1.MaterialCategory.UNSPECIFIED as materialV1.MaterialCategory,
+    updatedMetadata: undefined as
+      | { displayName: string; category: materialV1.MaterialCategory; tags: readonly string[] }
+      | undefined,
+    purgeConfirmation: '',
+    watchedAfterSequence: -1n,
   };
   const partOrigin = options.partOrigin ?? storageOrigin;
   const grantOrigin = options.grantOrigin ?? storageOrigin;
@@ -559,6 +756,101 @@ function fakeRpc(log: string[], options: FakeRpcOptions = {}) {
         },
       });
     },
+    createMaterialVersion: (request) => {
+      log.push('createMaterialVersion');
+      state.requestIds.push(request.context.requestId);
+      return Promise.resolve({
+        session: {
+          id: { value: uploadId },
+          materialId: { value: materialId },
+          versionId: { value: versionId },
+          state: materialV1.UploadState.PENDING,
+          totalSize: 6n,
+          receivedSize: 0n,
+          chunkSize: 4,
+        },
+        parts: [
+          {
+            partNumber: 2,
+            offset: 4n,
+            length: 2n,
+            uploadUrl: `${partOrigin}/bucket/key?part=2`,
+            requiredHeaders: {},
+          },
+          {
+            partNumber: 1,
+            offset: 0n,
+            length: 4n,
+            uploadUrl: `${partOrigin}/bucket/key?part=1`,
+            requiredHeaders: {},
+          },
+        ],
+      });
+    },
+    updateMaterialMetadata: (request) => {
+      log.push('updateMaterialMetadata');
+      state.updatedMetadata = {
+        displayName: request.displayName,
+        category: request.category,
+        tags: request.tags,
+      };
+      return Promise.resolve({
+        material: { ...wireMaterial, displayName: request.displayName },
+      });
+    },
+    moveToTrash: () => {
+      log.push('moveToTrash');
+      return Promise.resolve({
+        material: { ...wireMaterial, status: materialV1.MaterialStatus.TRASHED },
+      });
+    },
+    restoreMaterial: () => {
+      log.push('restoreMaterial');
+      return Promise.resolve({
+        material: { ...wireMaterial, status: materialV1.MaterialStatus.READY },
+      });
+    },
+    purgeMaterial: (request) => {
+      log.push('purgeMaterial');
+      state.purgeConfirmation = request.confirmation;
+      return Promise.resolve({ result: { resourceId: { value: materialId } } });
+    },
+    listVersions: () => {
+      log.push('listVersions');
+      return Promise.resolve({ versions: [wireMaterialVersion], page: undefined });
+    },
+    listTrash: () => {
+      log.push('listTrash');
+      return Promise.resolve({
+        materials: [{ ...wireMaterial, status: materialV1.MaterialStatus.TRASHED }],
+        page: undefined,
+      });
+    },
+    watchMaterialEvents: (request) => {
+      log.push('watchMaterialEvents');
+      state.watchedAfterSequence = request.afterSequence;
+      const events = options.watchedEvents ?? [
+        {
+          sequence: 1n,
+          kind: materialV1.MaterialEventKind.VERSION_ADDED,
+          materialId,
+          correlationId: 'corr-1',
+        },
+      ];
+      return (async function* () {
+        for (const event of events) {
+          yield {
+            event: {
+              sequence: event.sequence,
+              kind: event.kind,
+              materialId: { value: event.materialId },
+              occurredAt: { seconds: 1_800_000_100n, nanos: 0 },
+              correlationId: event.correlationId,
+            },
+          };
+        }
+      })();
+    },
   };
   return {
     client,
@@ -570,6 +862,15 @@ function fakeRpc(log: string[], options: FakeRpcOptions = {}) {
     },
     get declaredCategory() {
       return state.declaredCategory;
+    },
+    get updatedMetadata() {
+      return state.updatedMetadata;
+    },
+    get purgeConfirmation() {
+      return state.purgeConfirmation;
+    },
+    get watchedAfterSequence() {
+      return state.watchedAfterSequence;
     },
   };
 }

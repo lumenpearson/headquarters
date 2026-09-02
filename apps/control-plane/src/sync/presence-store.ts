@@ -41,6 +41,24 @@ export interface RecordPresenceInput {
 }
 
 /**
+ * What a device reports about itself once it is already present.
+ *
+ * The four fields are exactly `gremuchaya.sync.v1.PresenceDetail`, and all four
+ * are required rather than optional: a report replaces what the device last
+ * said, so an omitted field would silently keep a stale screen alive while the
+ * three around it moved on. `status` is absent on purpose — joining and leaving
+ * are the only two things that change it, and a report must not be a third.
+ */
+export interface ReportPresenceDetailInput {
+  readonly groupId: string;
+  readonly deviceId: string;
+  readonly activeScreen: string;
+  readonly selectedElement: string;
+  readonly clockOffsetMs: bigint;
+  readonly latencyMs: number;
+}
+
+/**
  * One device in one group, and nothing else.
  *
  * The two operations shaped like this — keeping a liveness key alive and
@@ -56,6 +74,20 @@ export interface PresenceDeviceInput {
 
 export interface PresenceStore {
   record(input: RecordPresenceInput): Promise<PresenceSnapshot>;
+  /**
+   * Updates what an already-present device is looking at, and creates nothing.
+   *
+   * `record` is the one operation that may bring a device into the session, and
+   * that is deliberate: a report arriving after a device left, or from one that
+   * never joined, must not put it back on the list. So this answers `undefined`
+   * for a device with no presence row rather than inserting one, and the
+   * handler turns that into a failed precondition.
+   *
+   * Like `renew`, and for the same reason, it appends nothing to the group log:
+   * a screen change happens as often as an operator navigates, and a durable
+   * row per navigation is the growth `JoinGroup` already refuses to cause.
+   */
+  reportDetail(input: ReportPresenceDetailInput): Promise<PresenceSnapshot | undefined>;
   /**
    * Keeps an already-announced device alive without reporting anything new.
    *
@@ -166,6 +198,57 @@ export class DurablePresenceStore implements PresenceStore {
   }
 
   /**
+   * Overwrites the four reported fields of a row that already exists.
+   *
+   * An `UPDATE` and not an upsert, because the absence of a row is the answer:
+   * a device that never joined, or that left, has no presence to describe, and
+   * an insert here would let a report take the place of a join. The membership
+   * join repeats the guard `record` makes — one statement, so there is no
+   * window between checking that the device may report and writing what it
+   * reported — and `status` is left alone, because only joining and leaving
+   * move it.
+   */
+  async reportDetail(input: ReportPresenceDetailInput): Promise<PresenceSnapshot | undefined> {
+    const rows = await this.query(
+      sql(
+        `UPDATE presence_snapshots AS presence
+            SET active_screen = $3,
+                selected_element = $4,
+                clock_offset_ms = $5,
+                latency_ms = $6,
+                observed_at = $7
+           FROM group_memberships AS membership
+           JOIN devices ON devices.id = membership.device_id
+          WHERE presence.group_id = $1
+            AND presence.device_id = $2
+            AND membership.group_id = presence.group_id
+            AND membership.device_id = presence.device_id
+            AND membership.revoked_at IS NULL
+            AND devices.status <> 'REVOKED'
+         RETURNING
+           presence.device_id,
+           presence.status,
+           presence.active_screen,
+           presence.selected_element,
+           presence.clock_offset_ms,
+           presence.latency_ms,
+           presence.observed_at`,
+        [
+          input.groupId,
+          input.deviceId,
+          input.activeScreen,
+          input.selectedElement,
+          input.clockOffsetMs.toString(),
+          input.latencyMs,
+          this.#now(),
+        ],
+      ),
+    );
+    const row = rows[0];
+    return row === undefined ? undefined : toPresenceSnapshot(row);
+  }
+
+  /**
    * There is no lease here to keep alive.
    *
    * A `presence_snapshots` row never expires, so without Redis a device stays
@@ -252,6 +335,26 @@ export class InMemoryPresenceStore implements PresenceStore {
     const group = this.#byGroup.get(input.groupId) ?? new Map<string, PresenceSnapshot>();
     group.set(input.deviceId, snapshot);
     this.#byGroup.set(input.groupId, group);
+    return Promise.resolve(snapshot);
+  }
+
+  /**
+   * Changes an entry that is there, and refuses to invent one that is not —
+   * the same answer the durable store's `UPDATE` gives by matching no row.
+   */
+  reportDetail(input: ReportPresenceDetailInput): Promise<PresenceSnapshot | undefined> {
+    const group = this.#byGroup.get(input.groupId);
+    const previous = group?.get(input.deviceId);
+    if (group === undefined || previous === undefined) return Promise.resolve(undefined);
+    const snapshot: PresenceSnapshot = {
+      ...previous,
+      activeScreen: input.activeScreen,
+      selectedElement: input.selectedElement,
+      clockOffsetMs: input.clockOffsetMs,
+      latencyMs: input.latencyMs,
+      observedAt: this.#now(),
+    };
+    group.set(input.deviceId, snapshot);
     return Promise.resolve(snapshot);
   }
 

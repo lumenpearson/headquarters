@@ -4,7 +4,11 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { useBooleanSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { toAuthorityMode } from '@/application/sync/authority';
-import { disconnectedConnection, type ControlPlaneLinkRole } from '@/application/sync/connection';
+import {
+  disconnectedConnection,
+  type ControlPlaneCapabilities,
+  type ControlPlaneLinkRole,
+} from '@/application/sync/connection';
 import { resolveControlPlaneAddresses } from '@/application/sync/controlPlaneAddressResolution';
 import { createLinkStates, isLinkOfSameDatabase } from '@/application/sync/controlPlaneLinks';
 import { ControlPlaneSession } from '@/application/sync/ControlPlaneSession';
@@ -205,10 +209,7 @@ export function ControlPlaneRuntime() {
       }));
       const primary = links[0];
       if (primary === undefined) return;
-      const created = new ControlPlaneSession({
-        client: primary.client,
-        apply: (patch) => operationsStore.getState().patchConnection(patch),
-      });
+      const created = buildControlPlaneSession(primary.client);
       setActiveControlPlane({ session: created, links });
       /*
        * The links are probed *before* the session connects, and that order is
@@ -259,6 +260,46 @@ export function ControlPlaneRuntime() {
     }, clockIntervalMs);
     return () => window.clearInterval(intervalId);
   }, [mode, session]);
+
+  /**
+   * Rebuilds the session on the next configured plane, once the primary has
+   * stopped answering (known-limitations.md:132-138).
+   *
+   * Tried only while the mode is `offline` -- the one state that means the
+   * primary's own probe or a later call failed outright, exactly as
+   * `ControlPlaneSession` draws that line in `connect` and in `#record`. A
+   * session that is `reauth-required` or `installation-changed` names a
+   * different problem, and changing plane fixes neither of them; with fewer
+   * than two configured links there is nowhere to fail over to, and the
+   * existing local-copy effect above is what an operator sees instead.
+   *
+   * Re-tried on the presence timer's own cadence for as long as no candidate
+   * has answered, rather than a new timer of this effect's own: a secondary
+   * that was down the moment the primary failed may still come up before the
+   * primary does.
+   */
+  useEffect(() => {
+    if (mode !== 'offline' || connection === null || connection.links.length < 2) return;
+    const controller = new AbortController();
+    let disposed = false;
+    const attempt = () => {
+      void attemptPlaneFailover(connection.links, controller.signal).then((rebuilt) => {
+        if (disposed || rebuilt === null) return;
+        const promoted = rebuilt[0];
+        if (promoted === undefined) return;
+        const created = buildControlPlaneSession(promoted.client);
+        setActiveControlPlane({ session: created, links: rebuilt });
+        void created.connect(false, controller.signal);
+      });
+    };
+    attempt();
+    const intervalId = window.setInterval(attempt, presenceIntervalMs);
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [connection, mode]);
 
   /*
    * The local copy of the group's state, for the session that cannot reach the
@@ -321,6 +362,41 @@ export function ControlPlaneRuntime() {
 }
 
 /**
+ * One `ControlPlaneSession` bound to one link's client, with what only a
+ * component can supply: the operator's own screen and selection, read fresh
+ * every time presence is reported rather than captured once (F10 presence
+ * publish).
+ *
+ * Shared by the initial mount and by plane failover below, so a session
+ * rebuilt on a second address reports itself exactly as the first one did --
+ * two copies of this closure would be two places for the two to drift.
+ */
+function buildControlPlaneSession(client: ControlPlaneClient): ControlPlaneSession {
+  return new ControlPlaneSession({
+    client,
+    apply: (patch) => operationsStore.getState().patchConnection(patch),
+    readPresenceScreen: () => ({
+      activeScreen: typeof window === 'undefined' ? '' : window.location.pathname,
+      selectedElement: operationsStore.getState().edit.selectedElementId,
+    }),
+  });
+}
+
+/** One link's own probe, or `undefined` when it did not answer. */
+async function probeLink(
+  link: ControlPlaneLink,
+  signal: AbortSignal,
+): Promise<ControlPlaneCapabilities | undefined> {
+  try {
+    return await link.client.probeCapabilities(signal);
+  } catch {
+    // An address that does not answer is not a failure of the connection: the
+    // group is reachable through whatever else answered.
+    return undefined;
+  }
+}
+
+/**
  * Asks every link what its own control plane can do.
  *
  * The answer differs per address by design -- the plane on the set's LAN admits
@@ -340,19 +416,9 @@ export function ControlPlaneRuntime() {
  * watching a configured link silently vanish.
  */
 async function probeLinks(links: readonly ControlPlaneLink[], signal: AbortSignal): Promise<void> {
-  const probe = async (link: ControlPlaneLink) => {
-    try {
-      return await link.client.probeCapabilities(signal);
-    } catch {
-      // An address that does not answer is not a failure of the connection: the
-      // group is reachable through whatever else answered. The link keeps its
-      // `off` status and its unknown delivery, which counts as polling.
-      return undefined;
-    }
-  };
   const primary = links[0];
   if (primary === undefined) return;
-  const primaryCapabilities = await probe(primary);
+  const primaryCapabilities = await probeLink(primary, signal);
   if (signal.aborted) return;
   if (primaryCapabilities !== undefined) {
     operationsStore.getState().patchConnectionLink(primary.linkId, {
@@ -363,7 +429,7 @@ async function probeLinks(links: readonly ControlPlaneLink[], signal: AbortSigna
   const groupInstallationId = primaryCapabilities?.installationId ?? '';
   await Promise.all(
     links.slice(1).map(async (link) => {
-      const capabilities = await probe(link);
+      const capabilities = await probeLink(link, signal);
       if (capabilities === undefined || signal.aborted) return;
       const admitted = isLinkOfSameDatabase(capabilities, groupInstallationId);
       operationsStore.getState().patchConnectionLink(link.linkId, {
@@ -377,4 +443,64 @@ async function probeLinks(links: readonly ControlPlaneLink[], signal: AbortSigna
       });
     }),
   );
+}
+
+/**
+ * Rebuilds the link set with the next answering plane promoted to primary, or
+ * `null` when none of the others answered either (known-limitations.md:132-138).
+ *
+ * Only a plane already known not to share the group's database is skipped
+ * outright; every other candidate is probed fresh, because the plane that
+ * failed just now may not be the one that failed at boot. `deviceLifecycle`
+ * is checked here for the same reason `ControlPlaneSession.connect` checks it
+ * before pairing -- a control plane started without durable auth cannot carry
+ * a session -- and *which* database the promoted plane actually answers for is
+ * left to `connect`'s own `#installationMatches` check, which is the
+ * authoritative one and already lands on `installation-changed` rather than
+ * joining the wrong group.
+ *
+ * Promotion moves the link to the front of the list and swaps which client
+ * holds `owner` credentials, because every downstream consumer --
+ * `GroupChannelRuntime`'s settings and material clients, the snapshot resume,
+ * the socket that refines the clock -- reads `links[0]` as the plane carrying
+ * the session. The demoted primary keeps its place among the rest, tried
+ * again the next time this runs.
+ */
+export async function attemptPlaneFailover(
+  links: readonly ControlPlaneLink[],
+  signal: AbortSignal,
+): Promise<readonly ControlPlaneLink[] | null> {
+  const current = links[0];
+  if (current === undefined || links.length < 2) return null;
+  for (let index = 1; index < links.length; index += 1) {
+    const candidate = links[index];
+    if (candidate === undefined) continue;
+    const known = operationsStore
+      .getState()
+      .connection.links.find((entry) => entry.linkId === candidate.linkId);
+    if (known?.admitted === false) continue;
+    const capabilities = await probeLink(candidate, signal);
+    if (signal.aborted || capabilities === undefined || !capabilities.deviceLifecycle) continue;
+    const promoted: ControlPlaneLink = {
+      linkId: candidate.linkId,
+      baseUrl: candidate.baseUrl,
+      role: 'primary',
+      client: candidate.client.asOwner(),
+    };
+    const demoted: ControlPlaneLink = {
+      linkId: current.linkId,
+      baseUrl: current.baseUrl,
+      role: 'secondary',
+      client: current.client.asReader(),
+    };
+    operationsStore.getState().patchConnectionLink(promoted.linkId, {
+      role: 'primary',
+      capabilities,
+      delivery: capabilities.realtimeAdmission ? 'socket' : 'poll',
+    });
+    operationsStore.getState().patchConnectionLink(demoted.linkId, { role: 'secondary' });
+    const rest = links.filter((_link, position) => position !== 0 && position !== index);
+    return [promoted, demoted, ...rest];
+  }
+  return null;
 }

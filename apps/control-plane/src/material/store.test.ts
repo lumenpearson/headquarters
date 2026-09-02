@@ -431,6 +431,47 @@ describe('durable material store', () => {
     expect(storageKeyFor(groupId, contentHash)).toBe(`materials/${groupId}/${contentHash}`);
   });
 
+  it('refuses a zero-byte upload before any statement is issued, on both paths that open one', async () => {
+    const begin = new ScriptedSqlClient([]);
+    await expect(
+      createStore(begin).beginUpload(authenticatedEditor(), {
+        ...beginUploadInput(),
+        totalSize: 0n,
+      }),
+    ).rejects.toMatchObject({
+      name: 'PairedDeviceRuntimeError',
+      code: 'INVALID_ARGUMENT',
+      message: 'total_size must be greater than zero; a material with no bytes cannot be stored.',
+    });
+    // Nothing reached the database: `planUploadParts` would have returned no
+    // parts, so a material would have been created that no upload could ever
+    // fill and that `CompleteUpload` would nonetheless mark READY.
+    expect(begin.queries).toHaveLength(0);
+
+    const version = new ScriptedSqlClient([]);
+    await expect(
+      createStore(version).createMaterialVersion(authenticatedEditor(), {
+        groupId,
+        materialId,
+        originalFileName: 'take-02.mp4',
+        mimeType: 'video/mp4',
+        totalSize: 0n,
+        contentHash,
+      }),
+    ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'INVALID_ARGUMENT' });
+    expect(version.queries).toHaveLength(0);
+
+    // A negative size is still refused, and one byte is still accepted: the
+    // boundary moved from -1/0 to 0/1 and nowhere else.
+    await expect(
+      createStore(new ScriptedSqlClient([])).beginUpload(authenticatedEditor(), {
+        ...beginUploadInput(),
+        totalSize: -1n,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(planUploadParts(1n, 4)).toEqual([{ partNumber: 1, offset: 0n, length: 1n }]);
+  });
+
   it('refuses a content hash that could address an object outside its own group', async () => {
     const database = new ScriptedSqlClient([]);
     const store = createStore(database);

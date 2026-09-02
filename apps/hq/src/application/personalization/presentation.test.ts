@@ -205,4 +205,26 @@ describe('personalization presentation bindings', () => {
     // bound.
     expect(resolved.customProperties['--ops-pattern-opacity']).toBe('0.25');
   });
+
+  /*
+   * `popups.overlayBlur` (default 16) is the operator-controlled strength
+   * behind every dialog/drawer/panel scrim. Its consumers -- the two `::before`
+   * scrims in `operations.css` and `TERMINAL_*_BACKDROP_UTILITY` in
+   * `packages/ui` -- each carry their own literal `var()` fallback, so the
+   * binding only has to prove it stays silent at the default and carries a
+   * moved value through, the same contract as every other custom property.
+   */
+  it('binds popups.overlayBlur to --ops-overlay-blur, silent at its default of 16', () => {
+    expect(resolvePresentation({}).customProperties['--ops-overlay-blur']).toBeUndefined();
+    expect(
+      resolvePresentation({ 'popups.overlayBlur': 16 }).customProperties['--ops-overlay-blur'],
+    ).toBeUndefined();
+
+    expect(
+      resolvePresentation({ 'popups.overlayBlur': 0 }).customProperties['--ops-overlay-blur'],
+    ).toBe('0px');
+    expect(
+      resolvePresentation({ 'popups.overlayBlur': 24 }).customProperties['--ops-overlay-blur'],
+    ).toBe('24px');
+  });
 });

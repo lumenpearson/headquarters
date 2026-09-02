@@ -10,32 +10,168 @@
  * issuer recorded, and a mutation repeated across the planes is answered by its
  * receipt.
  *
- * Everything here is a pure function of the link set. It owns no client, no
- * timer and no transport: what a device does with several links is a decision
- * that has to be readable and testable on its own, and the components below
- * supply the clients this reasons about.
+ * Everything here is a pure function of the configured addresses or of the link
+ * set they become. It owns no client, no timer and no transport: what a device
+ * does with several links is a decision that has to be readable and testable on
+ * its own, and the components below supply the clients this reasons about.
+ *
+ * The address checks sit at the top of the file rather than in the module that
+ * reads one of the three sources, because all three have to reach the same
+ * verdict and a rule with three homes has three chances to differ.
  */
+
+import {
+  controlPlaneAddressLimit,
+  controlPlaneAddressRefusal,
+  projectConfigSchema,
+  type ControlPlaneAddressRefusal,
+} from '@gremuchaya/config';
 
 import type { ControlPlaneCapabilities, ControlPlaneLinkState } from './connection';
 import type { GroupEventDelivery } from './groupEventFeed';
 
 /**
- * The addresses named by an environment variable, in order.
+ * The entries a configured address list names, in order, before any of them has
+ * been judged an address.
  *
  * Comma-separated, because an environment variable is one string and the web
  * build has nowhere else to name a second plane. Blank entries are dropped
  * rather than refused: a trailing comma in a deployment variable is a typo, not
- * an instruction to build a client against the empty address. Repeats are
- * dropped for the reason the project schema refuses them -- a second client
- * against the same plane doubles the polling bill and delivers nothing new.
+ * an instruction to build a client against the empty address.
+ *
+ * A repeat is *kept* here and refused by {@link validateControlPlaneAddresses}.
+ * Dropping it silently was how `controlPlaneUrl`'s own "must not repeat an
+ * address" rule came to be unreachable from two of the three places an address
+ * is configured: by the time the schema saw the list there was only ever one
+ * entry left, so the in-app field promised a rule in its refusal text that
+ * nothing enforced, and what the operator wrote was not what the client used.
  */
 export function parseControlPlaneAddressList(raw: string): readonly string[] {
-  const seen = new Set<string>();
+  const entries: string[] = [];
   for (const entry of raw.split(',')) {
     const address = entry.trim();
-    if (address.length !== 0) seen.add(address);
+    if (address.length !== 0) entries.push(address);
   }
-  return [...seen];
+  return entries;
+}
+
+/**
+ * `controlPlaneUrl`'s own schema, guarded against a defect in its refine step:
+ * `controlPlaneAddressSchema` (`packages/config/src/projectSchemas.ts`) calls
+ * `new URL(value)` inside a `.refine`, which throws for a string `z.url()`
+ * still accepts -- one with no scheme at all, which is exactly what an operator
+ * typing an address without `http://` produces. `.safeParse` catches a
+ * validation issue but not an exception a refinement callback throws, so the
+ * raw throw would otherwise reach this module's caller as an unhandled
+ * rejection or a crashed render for the one input this exists to refuse
+ * cleanly.
+ */
+export function safeParseControlPlaneUrl(
+  value: unknown,
+): { readonly success: true; readonly data: readonly string[] } | { readonly success: false } {
+  try {
+    const result = projectConfigSchema.shape.controlPlaneUrl.safeParse(value);
+    return result.success ? { success: true, data: result.data } : { success: false };
+  } catch {
+    return { success: false };
+  }
+}
+
+/**
+ * Why a configured address list is not one this device will build clients
+ * against.
+ *
+ * The per-address reasons come from `packages/config`, which owns what an
+ * address is; the three added here are properties of the list rather than of
+ * any one entry. `unclassified` is the deliberate catch-all: the schema is the
+ * authority on whether a list is usable, and a list it refuses for a reason
+ * nothing here can name is still refused rather than let through.
+ */
+export type ControlPlaneAddressListRefusal =
+  ControlPlaneAddressRefusal | 'repeated' | 'too-many' | 'unclassified';
+
+export interface ControlPlaneAddressRefusalReport {
+  readonly reason: ControlPlaneAddressListRefusal;
+  /**
+   * The entry that earned the refusal, or `''` when the list as a whole did.
+   * Carried so the operator is told *which* address was refused: a build
+   * variable holding four of them is otherwise a sentence about none of them.
+   */
+  readonly address: string;
+}
+
+export type ControlPlaneAddressListOutcome =
+  | { readonly ok: true; readonly addresses: readonly string[] }
+  | { readonly ok: false; readonly refusal: ControlPlaneAddressRefusalReport };
+
+/**
+ * The one check every configured address list passes, whichever of the three
+ * places it came from.
+ *
+ * The in-app field and `project.override.json` were already checked against
+ * `controlPlaneUrl`'s schema; `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL` was split on
+ * commas and used as it stood. A build variable is not more trustworthy than a
+ * typed one -- it is less, because nobody sees it after the build -- and the
+ * value that reached `fetch` unexamined was `C:/Program Files/Git/api`, which
+ * Git Bash had made of the documented `/api`. What the operator read was the
+ * browser's `NetworkError`, which describes the symptom of a request that never
+ * left rather than the configuration that could not produce one.
+ *
+ * The order of the checks is the order an operator can act on: a named entry
+ * first, so the sentence points at one address; the list-wide ceiling last,
+ * because a list of five with a malformed first entry is better answered by
+ * naming that entry than by counting.
+ *
+ * The schema runs last and decides. A list nothing above could fault is
+ * accepted only if `controlPlaneUrl` accepts it, so this function can never
+ * widen what the file and the field allow -- it can only explain a refusal
+ * better.
+ */
+export function validateControlPlaneAddresses(
+  entries: readonly string[],
+): ControlPlaneAddressListOutcome {
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const refusal = controlPlaneAddressRefusal(entry);
+    if (refusal !== undefined) {
+      return {
+        ok: false,
+        refusal: { reason: refusal, address: reportableAddress(entry, refusal) },
+      };
+    }
+    if (seen.has(entry)) return { ok: false, refusal: { reason: 'repeated', address: entry } };
+    seen.add(entry);
+  }
+  if (entries.length > controlPlaneAddressLimit) {
+    return { ok: false, refusal: { reason: 'too-many', address: '' } };
+  }
+  const parsed = safeParseControlPlaneUrl(entries);
+  if (parsed.success) return { ok: true, addresses: parsed.data };
+  return { ok: false, refusal: { reason: 'unclassified', address: entries[0] ?? '' } };
+}
+
+/**
+ * The part of a refused entry that may be repeated back to the operator.
+ *
+ * Every reason but one names the entry as it was written, which is what makes
+ * the refusal actionable. `has-credentials` cannot: the entry *is* a
+ * credential, and a password rendered on a status line is a password in the
+ * next photograph of that screen. Its origin says which address was refused and
+ * carries neither the user name nor the password, so the secret stops here
+ * rather than travelling into a message, a store or a diagnostic report.
+ */
+function reportableAddress(entry: string, reason: ControlPlaneAddressRefusal): string {
+  if (reason !== 'has-credentials') return entry;
+  try {
+    return new URL(entry).origin;
+  } catch {
+    return '';
+  }
+}
+
+/** {@link validateControlPlaneAddresses} over one comma-separated string. */
+export function validateControlPlaneAddressList(raw: string): ControlPlaneAddressListOutcome {
+  return validateControlPlaneAddresses(parseControlPlaneAddressList(raw));
 }
 
 /**

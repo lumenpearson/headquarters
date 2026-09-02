@@ -278,6 +278,24 @@ describe('GroupChannelRuntime over two planes of one group', () => {
     expect(settingsCalls[0]?.startsWith(nearPlane)).toBe(true);
   });
 
+  it('opens WatchSettings on the primary plane, so a remote publication arrives live (R6)', async () => {
+    const urls = recordFetch();
+    const { links } = twoLinks();
+    joinGroup([
+      linkState({}),
+      linkState({ linkId: 'link-1', baseUrl: cloudPlane, role: 'secondary' }),
+    ]);
+
+    render(<GroupChannelRuntime links={links} session={sessionStub([])} />);
+    await settle();
+
+    // Same plane as `GetEffectiveSettings`, for the reason given there: one
+    // writer of this machine's draft, not two racing over it.
+    const watchCalls = urls.filter((url) => url.includes('WatchSettings'));
+    expect(watchCalls.length).toBeGreaterThan(0);
+    expect(watchCalls.every((url) => url.startsWith(nearPlane))).toBe(true);
+  });
+
   it('moves publication to the cloud plane while the near one is not carrying, and back', async () => {
     const urls = recordFetch();
     const { links } = twoLinks();

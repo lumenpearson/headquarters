@@ -12,6 +12,12 @@ export type BridgeEventListener = (event: BridgeEvent) => void;
 export class BridgeWatcher {
   readonly #watchers: FSWatcher[] = [];
   readonly #armed: Promise<void>[] = [];
+  // Mirrors `#armed` as plain state. A promise can only be observed by awaiting
+  // it, which cannot tell "already armed" from "arms on the next tick", so the
+  // counter is what lets a caller — and a test — assert that the bridge was
+  // already reporting changes at the moment it opened its port.
+  #pendingArm = 0;
+  #isArmed = false;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -19,6 +25,11 @@ export class BridgeWatcher {
   ) {}
 
   async start(): Promise<void> {
+    // Counted up front, before the first `realpath` is awaited, so a mount whose
+    // scan finishes while a later mount is still being set up cannot arm the
+    // watcher on its own.
+    this.#pendingArm = this.config.mounts.length;
+    this.#isArmed = this.#pendingArm === 0;
     for (const mount of this.config.mounts) {
       const canonicalRoot = await realpath(mount.root);
       const watcher = watch(canonicalRoot, {
@@ -30,12 +41,17 @@ export class BridgeWatcher {
       });
       // `ignoreInitial` suppresses everything the initial scan meets, so a file
       // created before `ready` fires is folded into that scan and never
-      // announced. Startup deliberately does not wait for the scan — a large
-      // media mount would hold the port shut behind it — so the promise is kept
-      // here instead, for a caller that must not miss the first event.
+      // announced. That window is invisible from the outside — a deaf watcher
+      // and a quiet mount look identical over `Watch` — so the readiness of
+      // every mount is kept here, and `startBridge` waits for it before it opens
+      // the port (see the comment at that call site for who owns the wait).
       this.#armed.push(
         new Promise<void>((resolve) => {
-          watcher.once('ready', () => resolve());
+          watcher.once('ready', () => {
+            this.#pendingArm -= 1;
+            if (this.#pendingArm === 0) this.#isArmed = true;
+            resolve();
+          });
         }),
       );
       const emit = (
@@ -65,10 +81,17 @@ export class BridgeWatcher {
     await Promise.all(this.#armed);
   }
 
+  /** Whether every mount's initial scan has finished, without awaiting anything. */
+  isArmed(): boolean {
+    return this.#isArmed;
+  }
+
   async close(): Promise<void> {
     await Promise.all(this.#watchers.map((watcher) => watcher.close()));
     this.#watchers.length = 0;
     this.#armed.length = 0;
+    this.#pendingArm = 0;
+    this.#isArmed = false;
   }
 
   async #emitWhenReady(mountId: string, root: string, physicalPath: string): Promise<void> {

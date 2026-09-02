@@ -94,9 +94,16 @@ export const TERMINAL_DIALOG_DESCRIPTION_UTILITY =
  * carries the same shape with its own, lighter tint (`terminal-drawer__backdrop`
  * in primitives.css overrides the shared rule's background for exactly this
  * reason).
+ *
+ * The blur strength reads `--ops-overlay-blur` (`popups.overlayBlur`) with a
+ * literal `16px` fallback -- this package stays scene-agnostic and may only
+ * see an `--ops-*` property through `var()` with a fallback equal to what the
+ * property replaced, the same contract `--ops-font-size` already keeps above.
+ * `saturate(90%)` and the tints stay literal: the setting governs strength
+ * only.
  */
 export const TERMINAL_DIALOG_BACKDROP_UTILITY =
-  'fixed z-[var(--z-dialog)] inset-0 opacity-100 [backdrop-filter:blur(16px)_saturate(90%)] bg-[rgb(0_0_0_/_42%)] transition-[opacity,backdrop-filter] duration-hq-standard [transition-timing-function:linear,ease] data-[starting-style]:opacity-0 data-[starting-style]:[backdrop-filter:blur(0px)_saturate(100%)] data-[ending-style]:opacity-0 data-[ending-style]:[backdrop-filter:blur(0px)_saturate(100%)]';
+  'fixed z-[var(--z-dialog)] inset-0 opacity-100 [backdrop-filter:blur(var(--ops-overlay-blur,16px))_saturate(90%)] bg-[rgb(0_0_0_/_42%)] transition-[opacity,backdrop-filter] duration-hq-standard [transition-timing-function:linear,ease] data-[starting-style]:opacity-0 data-[starting-style]:[backdrop-filter:blur(0px)_saturate(100%)] data-[ending-style]:opacity-0 data-[ending-style]:[backdrop-filter:blur(0px)_saturate(100%)]';
 
 export const TERMINAL_DRAWER_BACKDROP_UTILITY =
-  'fixed z-[var(--z-dialog)] inset-0 opacity-100 [backdrop-filter:blur(16px)_saturate(90%)] bg-[rgb(0_0_0_/_26%)] transition-[opacity,backdrop-filter] duration-hq-standard [transition-timing-function:linear,ease] data-[starting-style]:opacity-0 data-[starting-style]:[backdrop-filter:blur(0px)_saturate(100%)] data-[ending-style]:opacity-0 data-[ending-style]:[backdrop-filter:blur(0px)_saturate(100%)]';
+  'fixed z-[var(--z-dialog)] inset-0 opacity-100 [backdrop-filter:blur(var(--ops-overlay-blur,16px))_saturate(90%)] bg-[rgb(0_0_0_/_26%)] transition-[opacity,backdrop-filter] duration-hq-standard [transition-timing-function:linear,ease] data-[starting-style]:opacity-0 data-[starting-style]:[backdrop-filter:blur(0px)_saturate(100%)] data-[ending-style]:opacity-0 data-[ending-style]:[backdrop-filter:blur(0px)_saturate(100%)]';

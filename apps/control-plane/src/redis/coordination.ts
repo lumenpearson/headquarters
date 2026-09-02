@@ -48,6 +48,21 @@ interface RedisScript<Result> {
   exec(keys: readonly string[], args: readonly string[]): Promise<Result>;
 }
 
+/**
+ * A live channel subscription, as `@upstash/redis`'s `Subscriber` exposes one.
+ *
+ * Upstash serves it as `POST /subscribe/{channel}` over Server-Sent Events, so
+ * the object is already listening when it is handed back; there is no separate
+ * "connect" step to await. An endpoint that answers commands but not that route
+ * reports the refusal through the `error` event rather than by failing to
+ * construct, which is why both events are part of the port.
+ */
+export interface CoordinationSubscription {
+  on(event: 'message', handler: (data: { readonly message: unknown }) => void): void;
+  on(event: 'error', handler: (error: unknown) => void): void;
+  unsubscribe(): Promise<void>;
+}
+
 export interface CoordinationRedisClient {
   set(
     key: string,
@@ -62,6 +77,19 @@ export interface CoordinationRedisClient {
   mget<Value>(...keys: readonly string[]): Promise<(Value | null)[]>;
   incr(key: string): Promise<number>;
   createScript<Result>(source: string): RedisScript<Result>;
+  /**
+   * Pub/sub, optional on the port and required by nothing else here.
+   *
+   * `@upstash/redis` has both, and a real Upstash database serves both. A REST
+   * endpoint that only answers commands — a proxy standing in for one, an older
+   * deployment — is still a usable coordination client for presence, leases and
+   * rate limits, so a missing pair leaves cross-process fan-out off rather than
+   * refusing to start the control plane. Absence is reported by
+   * {@link UpstashCoordination.subscribeMessages} answering `undefined`, which
+   * is what the hub treats as "no carrier".
+   */
+  publish?(channel: string, message: unknown): Promise<number>;
+  subscribe?(channel: string): CoordinationSubscription;
 }
 
 interface RateLimiter {
@@ -95,6 +123,7 @@ export class UpstashCoordination {
   #client: CoordinationRedisClient | undefined;
   #mutationRateLimiter: RateLimiter | undefined;
   #renewPresenceScript: RedisScript<number> | undefined;
+  #reportPresenceScript: RedisScript<number> | undefined;
   #renewLeaseScript: RedisScript<number> | undefined;
   #releaseLeaseScript: RedisScript<number> | undefined;
 
@@ -156,6 +185,46 @@ export class UpstashCoordination {
       (await this.#renewPresenceScript.exec(
         [presenceKey(input.groupId, input.deviceId), presenceMembershipKey(input.groupId)],
         [String(ttlSeconds)],
+      )) === 1
+    );
+  }
+
+  /**
+   * Rewrites what a live device reported, without being able to revive one.
+   *
+   * `recordPresence` would do the writing, and would also create the key: a
+   * report from a device that left, or whose key already lapsed, would put it
+   * back on the list until its next TTL. So the write is guarded by `EXISTS` in
+   * the same script that performs it — a check made in this process first could
+   * be true and stale by the time the `SET` arrived.
+   *
+   * The value is serialized here rather than by the client, because a script
+   * argument is a string: `listPresence` reads these keys with `mget`, which
+   * parses JSON, so what a script writes has to be the JSON the client's own
+   * `set` would have written.
+   *
+   * The membership set's expiry is extended alongside, exactly as a renewal
+   * does: `listPresence` reads that set first, and a lapsed set reports an
+   * empty group however live the device keys are.
+   */
+  async reportPresence(input: PresenceInput): Promise<boolean> {
+    const ttlSeconds = normalizeTtl(input.ttlSeconds, defaultPresenceTtlSeconds);
+    const client = this.getClient();
+    this.#reportPresenceScript ??= client.createScript<number>(
+      'if redis.call("EXISTS", KEYS[1]) == 1 then redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2]) redis.call("EXPIRE", KEYS[2], ARGV[2]) return 1 else return 0 end',
+    );
+    const record: PresenceRecord = {
+      deviceId: input.deviceId,
+      ...(input.activeScreen === undefined ? {} : { activeScreen: input.activeScreen }),
+      ...(input.selectedElement === undefined ? {} : { selectedElement: input.selectedElement }),
+      clockOffsetMs: input.clockOffsetMs,
+      latencyMs: input.latencyMs,
+      observedAtMs: Date.now(),
+    };
+    return (
+      (await this.#reportPresenceScript.exec(
+        [presenceKey(input.groupId, input.deviceId), presenceMembershipKey(input.groupId)],
+        [JSON.stringify(record), String(ttlSeconds)],
       )) === 1
     );
   }
@@ -223,6 +292,48 @@ export class UpstashCoordination {
 
   nextSequence(groupId: string, stream: string): Promise<number> {
     return this.getClient().incr(sequenceKey(groupId, stream));
+  }
+
+  /**
+   * Publishes on a coordination channel, and says whether it could.
+   *
+   * Nothing is stored: `PUBLISH` reaches whoever is subscribed at that instant
+   * and is then gone. That is the whole reason a channel carries an
+   * announcement rather than an event — a subscriber that was not there gets
+   * the same answer it always got, from the log in PostgreSQL.
+   */
+  async publishMessage(channel: string, message: unknown): Promise<boolean> {
+    const client = this.getClient();
+    if (client.publish === undefined) return false;
+    await client.publish(channel, message);
+    return true;
+  }
+
+  /**
+   * Subscribes to a coordination channel, or answers `undefined` when the
+   * configured endpoint offers no streaming subscribe.
+   *
+   * Errors are handed to the caller rather than thrown: the subscription is a
+   * long-lived stream, and a transport fault on it arrives long after this call
+   * has returned.
+   */
+  subscribeMessages(
+    channel: string,
+    handlers: {
+      readonly onMessage: (message: unknown) => void;
+      readonly onError: (error: unknown) => void;
+    },
+  ): CoordinationSubscription | undefined {
+    const client = this.getClient();
+    if (client.subscribe === undefined) return undefined;
+    const subscription = client.subscribe(channel);
+    subscription.on('message', (data) => {
+      handlers.onMessage(data.message);
+    });
+    subscription.on('error', (error) => {
+      handlers.onError(error);
+    });
+    return subscription;
   }
 
   async limitMutation(

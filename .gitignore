@@ -75,3 +75,13 @@ shared/materials/*
 # a contract: the generated bindings under `packages/protocol/src/gen` are the
 # committed artefact.
 packages/protocol/v3/
+
+# --- Scratch analysis scripts ---
+# A wave that has to measure something writes a throwaway script beside the
+# checks it is measuring against. Those are working notes, not contracts: the
+# committed measurement tools are `scripts/check-*.mjs`, and a `.tmp.` file
+# left behind should never reach a diff or turn the local gate red.
+*.tmp.mjs
+*.tmp.ts
+*-tmp.mjs
+*-tmp.ts

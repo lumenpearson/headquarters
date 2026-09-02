@@ -1,8 +1,10 @@
 import { getSettingDefinition } from '@gremuchaya/settings-schema';
 import type { SettingsPatch } from '@gremuchaya/settings-schema';
 
+import { getContentFieldDefinition, seedContentValue } from '@/application/edit/contentFields';
+import type { ContentPatch } from '@/application/edit/contentFields';
 import type { GroupChannel } from '@/application/sync/groupChannel';
-import type { LiveEditTransport } from '@/infrastructure/browser/LiveEditBus';
+import type { LiveEditPatchSet, LiveEditTransport } from '@/infrastructure/browser/LiveEditBus';
 
 /**
  * The document every live-edit delta is appended under.
@@ -13,16 +15,40 @@ import type { LiveEditTransport } from '@/infrastructure/browser/LiveEditBus';
  * `SettingsService` scope and does not pretend to be one -- this is the group
  * event log, and what it carries is an edit in flight rather than a published
  * value.
+ *
+ * One identifier for both patch kinds, settings and content: the id names the
+ * log, not what is in it, `LiveEditPayload.kind` already tells the two apart
+ * on the wire, and `SynchronizedDocumentType` on the envelope records which
+ * for the server's own bookkeeping. A second document id would only buy a
+ * second filter a subscriber already does by reading `kind`.
  */
 export const liveEditDocumentId = 'settings.live-edit';
 
 /** The envelope inside `delta`, so a future shape can be told from this one. */
 const payloadProtocol = 1 as const;
 
-interface LiveEditPayload {
+/**
+ * `kind` mirrors `LiveEditPatchSet`, and is absent for exactly the payload a
+ * settings patch has always encoded: a peer running before content rode this
+ * channel wrote no such field, and a payload without it is that peer's
+ * settings patch, not an empty content one.
+ */
+interface SettingsLiveEditPayload {
   readonly protocol: typeof payloadProtocol;
+  // Present and `undefined` rather than omitted, so `payload.kind === 'content'`
+  // discriminates the union instead of erroring on a member that lacks the
+  // property outright.
+  readonly kind?: undefined;
   readonly patches: readonly SettingsPatch[];
 }
+
+interface ContentLiveEditPayload {
+  readonly protocol: typeof payloadProtocol;
+  readonly kind: 'content';
+  readonly patches: readonly ContentPatch[];
+}
+
+type LiveEditPayload = SettingsLiveEditPayload | ContentLiveEditPayload;
 
 export interface GroupLiveEditTransportOptions {
   readonly channel: GroupChannel;
@@ -49,20 +75,29 @@ export interface GroupLiveEditTransportOptions {
  * exists at all, and it is group-scoped for the reason `LiveEditBus` states:
  * one operator flipping their own copy of the switch must not reach a session
  * that never agreed.
+ *
+ * Domain-content edits (R4) ride the same channel as a `'content'`-kinded
+ * `LiveEditPatchSet`, closing the gap the plan recorded against this file: a
+ * date or a title corrected in a group with live edit on used to reach no
+ * further than this session, because only settings patches had a wire shape
+ * here. `EditModeRuntime` lands a received content patch through
+ * `applyContentPatch`, the same action a local edit takes, so the receiving
+ * session's undo stack gains its own entry for it rather than the whole
+ * content-overrides set being replaced underneath the ledger.
  */
 export function createGroupLiveEditTransport(
   options: GroupLiveEditTransportOptions,
 ): LiveEditTransport {
   const { channel } = options;
-  const listeners = new Set<(patches: readonly SettingsPatch[]) => void>();
+  const listeners = new Set<(patchSet: LiveEditPatchSet) => void>();
   let closed = false;
 
   const unsubscribe = channel.subscribe((event) => {
     if (closed) return;
     if (event.kind !== 'document-delta' || event.documentId !== liveEditDocumentId) return;
     // The publisher hears its own append back from the log. Applying it would
-    // land the patch twice and, through `applySettingsPatch`, write a second
-    // history entry for one change.
+    // land the patch twice and, through `applySettingsPatch`/`applyContentPatch`,
+    // write a second history entry for one change.
     if (event.actorDeviceId === channel.deviceId) return;
     const payload = decodePayload(event.documentDelta);
     if (payload === null) return;
@@ -70,19 +105,19 @@ export function createGroupLiveEditTransport(
     // `applyDraftPatch` throws on an unknown identifier or a value its
     // definition rejects, so a session running an older or newer catalogue
     // would otherwise take this one down rather than simply disagree with it.
-    const patches = payload.patches.filter(isApplicablePatch);
-    if (patches.length === 0) return;
-    for (const listener of [...listeners]) listener(patches);
+    const patchSet = toPatchSet(payload);
+    if (patchSet === null) return;
+    for (const listener of [...listeners]) listener(patchSet);
   });
 
   return {
-    publish(patches) {
-      if (closed || patches.length === 0) return;
+    publish(patchSet) {
+      if (closed || patchSet.patches.length === 0) return;
       void channel
         .publishDocumentDelta({
           documentId: liveEditDocumentId,
-          documentType: 'settings',
-          delta: encodePayload(patches),
+          documentType: patchSet.kind === 'content' ? 'content' : 'settings',
+          delta: encodePayload(patchSet),
         })
         .catch((error: unknown) => {
           options.onPublishFailed?.(error);
@@ -102,8 +137,11 @@ export function createGroupLiveEditTransport(
   };
 }
 
-function encodePayload(patches: readonly SettingsPatch[]): Uint8Array {
-  const payload: LiveEditPayload = { protocol: payloadProtocol, patches };
+function encodePayload(patchSet: LiveEditPatchSet): Uint8Array {
+  const payload: LiveEditPayload =
+    patchSet.kind === 'content'
+      ? { protocol: payloadProtocol, kind: 'content', patches: patchSet.patches }
+      : { protocol: payloadProtocol, patches: patchSet.patches };
   return new TextEncoder().encode(JSON.stringify(payload));
 }
 
@@ -123,17 +161,33 @@ function isApplicablePatch(patch: SettingsPatch): boolean {
   return definition !== undefined && definition.validate(patch.value);
 }
 
-function isLiveEditPayload(value: unknown): value is LiveEditPayload {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as { protocol?: unknown; patches?: unknown };
-  return (
-    candidate.protocol === payloadProtocol &&
-    Array.isArray(candidate.patches) &&
-    candidate.patches.every(isPatchShape)
-  );
+/** The content twin of `isApplicablePatch`, against the content field registry. */
+function isApplicableContentPatch(patch: ContentPatch): boolean {
+  const definition = getContentFieldDefinition(patch.id);
+  if (definition === undefined) return false;
+  if (seedContentValue(patch.id, patch.entityId) === undefined) return false;
+  return definition.validate(patch.value);
 }
 
-function isPatchShape(value: unknown): value is SettingsPatch {
+/** The typed, filtered patch set a decoded payload carries, or none of it usable. */
+function toPatchSet(payload: LiveEditPayload): LiveEditPatchSet | null {
+  if (payload.kind === 'content') {
+    const patches = payload.patches.filter(isApplicableContentPatch);
+    return patches.length === 0 ? null : { kind: 'content', patches };
+  }
+  const patches = payload.patches.filter(isApplicablePatch);
+  return patches.length === 0 ? null : { kind: 'settings', patches };
+}
+
+function isLiveEditPayload(value: unknown): value is LiveEditPayload {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as { protocol?: unknown; kind?: unknown; patches?: unknown };
+  if (candidate.protocol !== payloadProtocol) return false;
+  if (!Array.isArray(candidate.patches) || !candidate.patches.every(isPatchShape)) return false;
+  return candidate.kind === undefined || candidate.kind === 'content';
+}
+
+function isPatchShape(value: unknown): value is SettingsPatch | ContentPatch {
   return (
     typeof value === 'object' &&
     value !== null &&

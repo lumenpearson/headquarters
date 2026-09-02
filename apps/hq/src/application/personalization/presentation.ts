@@ -414,6 +414,19 @@ export const presentationBindings: readonly PresentationBinding[] = [
   // margin on the first control -- a layout the stylesheet already expresses
   // and a component would only re-express as inline styles.
   { kind: 'attribute', setting: 'titlebar.alignment', attribute: 'data-titlebar-alignment' },
+
+  // How strongly a dialog/drawer/panel scrim blurs the viewport behind it (0
+  // disables it). A custom property rather than a class hook like
+  // `popups.drawerWidth`/`popups.drawerScrim` below: the backdrop elements
+  // that read it include ones `packages/ui` portals straight to
+  // `document.body`, which may see only `--ops-*` values through `var()`
+  // with a literal fallback, never a class this app defines.
+  {
+    kind: 'custom-property',
+    setting: 'popups.overlayBlur',
+    property: '--ops-overlay-blur',
+    toCss: px,
+  },
 ];
 
 /**
@@ -429,6 +442,10 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'tiles.hiddenCategories': 'Read by TileGrid, which drops whole groups before layout.',
   'tiles.animations': 'Read by TileGrid, which gives a cell the motion its own entry names.',
   'tiles.categoryAnimations': 'Read by TileGrid, when no per-tile entry names a motion.',
+  'tiles.presentationOverrides':
+    'Read by TileGrid, which caps a tile’s presentation before the category or the application ceiling.',
+  'tiles.categoryPresentation':
+    'Read by TileGrid, when no per-tile entry names a presentation cap.',
   'backgrounds.imageSource': 'Resolved to a material URL by OperationsShell, not to a token.',
   'backgrounds.videoSource': 'Resolved to a material URL by OperationsShell, not to a token.',
   'animations.enabled': 'Combined with production and accessibility state into one motion gate.',
@@ -436,6 +453,11 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'startup.stageHold': 'Read by resolveStartupPlan, which holds each stage that much longer.',
   'startup.restoreWorld': 'Read by hydratePersistedState from the blob it is restoring.',
   'startup.productionPanel': 'Read by OperationsShell, which opens the panel on launch.',
+  'startup.launchOnLogin':
+    'Read by the maintenance surface, which reconciles it against the desktop shell’s own autostart registration.',
+  'startup.autoUpdate':
+    'Read by the maintenance surface, which decides on launch whether to check and download without being asked.',
+  'layout.settingsLanding': 'Read by SettingsScreen, which opens as cards or as one list.',
   'keybinds.prefixWindow': 'Read by the keybind runtime when a prefix key opens a sequence.',
   'keybinds.firedHighlight': 'Read by KeybindList, which holds the fired mark that long.',
   'keybinds.introOnLaunch':
@@ -451,18 +473,29 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
   'materials.rememberImportCategory': 'Read by FilesScreen when the import dialog opens.',
   'materials.previewLimitMb': 'Passed to the preview reader, which refuses a larger binary.',
   'materials.textPreviewLimitMb': 'Passed to the preview reader, which refuses a larger text.',
+  'materials.autoplayPreview':
+    'Read by LocalMaterialPreview, which passes it to LocalMaterialPlayer as its autoplay prop.',
+  'materials.loopPreview':
+    'Read by LocalMaterialPreview, which passes it to LocalMaterialPlayer as its loop prop.',
+  'materials.rememberPreviewPosition':
+    'Read by LocalMaterialPreview, which seeds and records the in-session position cache by it.',
   'performance.playbackLeadMs': 'Passed to PlaybackSyncCoordinator as its execution delay.',
   'performance.streamRetryBackoff': 'Read by VideoScreen, which picks the native retry ladder.',
-  'player.defaultRate': 'Read by VideoScreen, which starts the media player at this rate.',
+  'player.defaultRate':
+    'Read by VideoScreen and LocalMaterialPlayer, which start their media player at this rate.',
   'player.seekStep': 'Read by VideoScreen and LocalMaterialPlayer, whose skip controls move by it.',
-  'player.defaultVolume': 'Read by VideoScreen, which opens the media surface at this volume.',
+  'player.defaultVolume':
+    'Read by VideoScreen and LocalMaterialPlayer, which open their media surface at this volume.',
   'player.loopDemo': 'Read by VideoScreen, which repeats a finite source when it ends.',
   'player.snapshotGrayscale':
     'Read by VideoScreen, which grades the canvas a snapshot is drawn on.',
+  'player.controlsHideDelayMs':
+    'Read by LocalMaterialPlayer, which waits that long before hiding its overlay controls.',
   'cameras.gridPageSize': 'Read by VideoScreen, which pages the camera registry by it.',
   'cameras.defaultFilter': 'Read by VideoScreen, which seeds the registry filter from it.',
   'cameras.ptzStep': 'Read by PtzPanel, whose pad moves pan and tilt by it.',
-  'player.startMuted': 'Read by VideoScreen, which opens a camera feed muted or not.',
+  'player.startMuted':
+    'Read by VideoScreen, which opens a camera feed muted or not, and by LocalMaterialPlayer for a local material.',
   'privacy.webcamCapture': 'Read inside toggleWebcam, which refuses the machine camera without it.',
   'privacy.frameCapture': 'Read inside takeSnapshot, which refuses to write a frame without it.',
   'performance.webcamResolution': 'Read by VideoScreen, which asks getUserMedia for that size.',
@@ -519,10 +552,17 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
     'Read by simulationChannelFor, so a reading is carried from the one before it.',
   'simulation.seed':
     'Read by simulationChannelFor and by the tracked object’s walk, both seeded from it.',
+  'simulation.preset':
+    'Read by readSimulationSettings; simulateChannelReading falls back to ' +
+    'simulationPresetCriticality for a channel with no drawn criticality curve.',
   'localization.locale':
     'Read by locale.ts, which every label, date and collation in the application goes through.',
   'localization.elementOverrides':
     'Read by elementCaption, which every tile header on every screen is drawn through.',
+  'styles.iconSet':
+    'Read by TerminalIcon call sites across the shell -- TitleBar, WindowLayer, ' +
+    'OpsNavigation, ShellCommandsMenu and settingsCardIcons -- which each pick that ' +
+    "library's mark for the name they render.",
   'titlebar.elements': 'Read by TitleBar, which draws exactly the elements it names, in order.',
   'titlebar.information': 'Read by TitleBar, which picks the reading its information slot shows.',
   'titlebar.dragRegion': 'Read by TitleBar, which marks that much of the bar as a drag region.',
@@ -530,6 +570,9 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
     'Read by OpsStatusLine, which draws exactly the elements it names, in order.',
   'layout.settingsNavSide':
     'Read by SettingsScreen, which puts its section navigation on that side.',
+  'layout.tileMinimumWidth':
+    'Read by TileGrid, which passes it to resolveGridLayout as the floor a ' +
+    "placed tile's rendered width should clear before the resolver moves it.",
 };
 
 /**
@@ -541,23 +584,14 @@ export const settingsReadElsewhere: Readonly<Record<string, string>> = {
  * next reader would believe it and stop looking. Every entry here is a
  * `SettingDefinition` an operator can already change, with no effect, and the
  * only honest thing to do is say so and name the address.
+ *
+ * Empty since `layout.tileMinimumWidth` left it: `resolveGridLayout` gained a
+ * `minimumTileWidth` input, and `TileGrid` now measures its container and
+ * passes both through (@gremuchaya/layout-engine, `TileGrid.tsx`). The type
+ * stays a `Record` rather than becoming `Record<never, string>` so the next
+ * setting that needs this list does not have to widen it back.
  */
-export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {
-  // It was bound to `--ops-tile-min-width`, which no stylesheet and no module
-  // read. Wiring it is not a matter of finding the missing rule: a screen's
-  // `columns` is a coordinate system, not a pixel promise — `/cases` measures
-  // tiles in twelfths — so capping the count makes every tile wider than the cap
-  // unplaceable. Measured, not deduced: doing that emptied eleven routes and
-  // failed four R10 cases. `resolveGridLayout` has to take the minimum width
-  // itself and decide relocation against it.
-  'layout.tileMinimumWidth':
-    'Needs a minimum-width input in @gremuchaya/layout-engine; the resolver has none.',
-  // The last of the twelve `simulation` definitions without a reader. The five
-  // that stood beside it moved to `settingsReadElsewhere` when `simulationTick`
-  // started reading the curves; a preset is a named set of values, and nothing
-  // in the schema or the store maps a name onto one yet.
-  'simulation.preset': 'F12 — no reader maps a preset name onto the values it stands for.',
-};
+export const settingsAwaitingTheirFeature: Readonly<Record<string, string>> = {};
 
 /**
  * Definitions that reach the document, but through a value computed from more
@@ -575,7 +609,9 @@ export const settingsDerivedIntoPresentation: Readonly<Record<string, string>> =
   // stylesheet and no module ever read: the shell takes the value itself and
   // spends it as two durations. The binding was accounting, not a consumer.
   'animations.intensity':
-    'Spent by OperationsShell as `--ops-motion-duration` and `--ops-background-duration`.',
+    'Spent by OperationsShell as `--ops-motion-duration` and `--ops-background-duration`, ' +
+    'and passed to BackgroundShaderLayer, which spends it as the bitmap-shader ' +
+    "background's glow opacity.",
 };
 
 const controlFloorProperty = '--ops-control-floor';

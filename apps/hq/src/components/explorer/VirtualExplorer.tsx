@@ -11,36 +11,77 @@ import type { TerminalSelectOption } from '@gremuchaya/ui/primitives';
 import { useMemo, useState } from 'react';
 
 import { compareText, dateTimeFormat, foldCase } from '@/application/localization/intl';
-import { useAppLocale } from '@/application/localization/locale';
+import { useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import { useRuntime } from '@/components/runtime/RuntimeProvider';
 import { useAppStore } from '@/state/appStore';
 
-const explorerFilterOptions = [
-  { value: 'all', label: 'ВСЕ ТИПЫ' },
-  { value: 'documents', label: 'ДОКУМЕНТЫ' },
-  { value: 'images', label: 'ИЗОБРАЖЕНИЯ' },
-  { value: 'video', label: 'ВИДЕО' },
-] as const;
+const explorerFilterMessageIds = [
+  { value: 'all', id: 'explorer.filterAll' },
+  { value: 'documents', id: 'explorer.filterDocuments' },
+  { value: 'images', id: 'explorer.filterImages' },
+  { value: 'video', id: 'field.kindVideo' },
+] as const satisfies ReadonlyArray<{ readonly value: string; readonly id: MessageId }>;
 
-const explorerSortOptions = [
-  { value: 'name', label: 'ИМЯ' },
-  { value: 'modifiedAt', label: 'ДАТА' },
-  { value: 'size', label: 'РАЗМЕР' },
-  { value: 'kind', label: 'ТИП' },
-] as const;
+const explorerSortMessageIds = [
+  { value: 'name', id: 'explorer.fieldName' },
+  { value: 'modifiedAt', id: 'files.sortDate' },
+  { value: 'size', id: 'field.size' },
+  { value: 'kind', id: 'field.type' },
+] as const satisfies ReadonlyArray<{ readonly value: string; readonly id: MessageId }>;
 
-const screenOptions: ReadonlyArray<TerminalSelectOption<ScreenId>> = screenIds.map((screenId) => ({
-  value: screenId,
-  label: screenId,
-}));
+/*
+ * The four quick-access shortcuts a picker offers, each a virtual path and
+ * the id of the word drawn for it. The path is what `controller.navigate`
+ * takes and stays exactly as `ExplorerService` addresses it in every locale
+ * -- only the label an operator reads changes with `localization.locale`.
+ */
+const quickAccessEntries = [
+  { path: '/ДЕЛА', id: 'field.cases' },
+  { path: '/МЕДИА', id: 'explorer.quickAccessMedia' },
+  { path: '/КАРТЫ', id: 'explorer.quickAccessMaps' },
+  { path: '/ПОДКЛЮЧЕННЫЕ МАТЕРИАЛЫ', id: 'explorer.quickAccessConnectedMaterials' },
+] as const satisfies ReadonlyArray<{ readonly path: string; readonly id: MessageId }>;
+
+type SourceStatus = 'online' | 'offline' | 'permission-required' | 'empty';
+
+const sourceStatusMessageIds: Readonly<Record<SourceStatus, MessageId>> = {
+  online: 'explorer.status.online',
+  offline: 'explorer.status.offline',
+  'permission-required': 'explorer.sourceStatus.permissionRequired',
+  empty: 'explorer.sourceStatus.empty',
+};
+
+type BridgeStatus = 'online' | 'connecting' | 'offline' | 'incompatible';
+
+const bridgeStatusMessageIds: Readonly<Record<BridgeStatus, MessageId>> = {
+  online: 'explorer.status.online',
+  connecting: 'explorer.bridgeStatus.connecting',
+  offline: 'explorer.status.offline',
+  incompatible: 'explorer.bridgeStatus.incompatible',
+};
 
 export function VirtualExplorer() {
-  // The subscription behind `formatDate` and `filterAndSort` below: both read
-  // the locale at the moment they are called, and this component's other
-  // selectors would not notice it moving.
-  useAppLocale();
+  // The subscription behind `formatDate` and `filterAndSort` below, as well
+  // as every `translate` call in this component: all three read the locale at
+  // the moment they are called, and this component's other selectors would
+  // not notice it moving.
+  const translate = useTranslate();
+  const screenOptions: ReadonlyArray<TerminalSelectOption<ScreenId>> = screenIds.map(
+    (screenId) => ({ value: screenId, label: screenId }),
+  );
+  const explorerFilterOptions = explorerFilterMessageIds.map(({ value, id }) => ({
+    value,
+    label: translate(id),
+  }));
+  const explorerSortOptions = explorerSortMessageIds.map(({ value, id }) => ({
+    value,
+    label: translate(id),
+  }));
   const { controller } = useRuntime();
   const explorer = useAppStore((state) => state.explorer);
+  const bridgeStatus = useAppStore((state) => state.connections.bridgeStatus);
+  const lastFilesystemEvent = useAppStore((state) => state.connections.lastFilesystemEvent);
   const [targetScreen, setTargetScreen] = useState<ScreenId>('wall-center');
   const selected = explorer.nodes.find((node) => node.id === explorer.selectedNodeId) ?? null;
   const visibleNodes = useMemo(
@@ -103,35 +144,47 @@ export function VirtualExplorer() {
           <TerminalInput
             value={explorer.searchQuery}
             onChange={(event) => controller?.setExplorerQuery(event.target.value)}
-            aria-label="Поиск в материалах"
-            placeholder="Поиск в материалах"
+            aria-label={translate('explorer.searchLabel')}
+            placeholder={translate('explorer.searchLabel')}
           />
         </label>
         <TerminalButton className="connect-button" onClick={() => void connectDirectory()}>
-          [+] MOUNT DIR
+          {translate('explorer.mountButton')}
         </TerminalButton>
       </header>
       <div className="explorer-layout">
         <aside className="explorer-tree">
-          <span>БЫСТРЫЙ ДОСТУП</span>
-          {['/ДЕЛА', '/МЕДИА', '/КАРТЫ', '/ПОДКЛЮЧЕННЫЕ МАТЕРИАЛЫ'].map((path) => (
-            <TerminalButton key={path} onClick={() => controller && void controller.navigate(path)}>
+          <span>{translate('explorer.quickAccessHeading')}</span>
+          {quickAccessEntries.map((entry) => (
+            <TerminalButton
+              key={entry.path}
+              onClick={() => controller && void controller.navigate(entry.path)}
+            >
               <i>[D]</i>
-              {path.slice(1)}
+              {translate(entry.id)}
             </TerminalButton>
           ))}
-          <span>ИСТОЧНИКИ</span>
+          <span>{translate('explorer.sourcesHeading')}</span>
           {Object.entries(explorer.sourceStatuses).map(([source, status]) => (
             <div className="source-state" key={source}>
               <i className={`source-state--${status}`} />
               {source}
-              <small>{status}</small>
+              <small>{translate(sourceStatusMessageIds[status])}</small>
             </div>
           ))}
+          <div className="source-state source-state--bridge">
+            <i className={`source-state--${bridgeStatus}`} />
+            {translate('explorer.fileBridgeLabel')}
+            <small>{translate(bridgeStatusMessageIds[bridgeStatus])}</small>
+          </div>
+          <span>{translate('explorer.lastEventHeading')}</span>
+          <div className="source-state source-state--last-event">
+            <small>{lastFilesystemEvent ?? translate('explorer.noEvents')}</small>
+          </div>
         </aside>
         <main className="explorer-main">
           <div className="explorer-controls">
-            <span>{visibleNodes.length} ОБЪЕКТОВ</span>
+            <span>{translate('explorer.nodeCount', { count: visibleNodes.length })}</span>
             <div>
               <TerminalSelect
                 value={explorer.filter}
@@ -139,7 +192,7 @@ export function VirtualExplorer() {
                 onValueChange={(value) =>
                   controller?.setExplorerOption('filter', value as typeof explorer.filter)
                 }
-                label="Фильтр материалов"
+                label={translate('explorer.filterSelectLabel')}
               />
               <TerminalSelect
                 value={explorer.sortBy}
@@ -147,26 +200,26 @@ export function VirtualExplorer() {
                 onValueChange={(value) =>
                   controller?.setExplorerOption('sortBy', value as typeof explorer.sortBy)
                 }
-                label="Сортировка материалов"
+                label={translate('files.sortSelectLabel')}
               />
             </div>
           </div>
           {explorer.loading ? (
-            <div className="explorer-empty">СКАНИРОВАНИЕ ИСТОЧНИКОВ…</div>
+            <div className="explorer-empty">{translate('explorer.scanningSources')}</div>
           ) : visibleNodes.length === 0 ? (
             <div className="explorer-empty">
               <i>[ ]</i>
-              <strong>ПАПКА ПУСТА</strong>
-              <span>Подключите источник или вернитесь в корень.</span>
+              <strong>{translate('explorer.emptyFolderTitle')}</strong>
+              <span>{translate('explorer.emptyFolderHint')}</span>
             </div>
           ) : (
             <div className={explorer.viewMode === 'grid' ? 'file-grid' : 'file-list'}>
               {explorer.viewMode === 'list' ? (
                 <div className="file-list__head">
-                  <span>ИМЯ</span>
-                  <span>ИЗМЕНЁН</span>
-                  <span>ТИП</span>
-                  <span>РАЗМЕР</span>
+                  <span>{translate('explorer.fieldName')}</span>
+                  <span>{translate('explorer.fieldModified')}</span>
+                  <span>{translate('field.type')}</span>
+                  <span>{translate('field.size')}</span>
                 </div>
               ) : null}
               {visibleNodes.map((node) => (
@@ -185,7 +238,7 @@ export function VirtualExplorer() {
           {selected === null ? (
             <div className="preview-empty">
               <i>[..]</i>
-              <span>ВЫБЕРИТЕ МАТЕРИАЛ</span>
+              <span>{translate('explorer.selectMaterialPrompt')}</span>
             </div>
           ) : (
             <>
@@ -195,32 +248,32 @@ export function VirtualExplorer() {
               </div>
               <h3>{selected.name}</h3>
               <dl>
-                <dt>ПУТЬ</dt>
+                <dt>{translate('explorer.fieldPath')}</dt>
                 <dd>{selected.path}</dd>
-                <dt>ИСТОЧНИК</dt>
-                <dd>{sourceForNode(selected)}</dd>
-                <dt>РАЗМЕР</dt>
+                <dt>{translate('field.source')}</dt>
+                <dd>{sourceForNode(selected) ?? translate('explorer.emulatedSourceLabel')}</dd>
+                <dt>{translate('field.size')}</dt>
                 <dd>{formatBytes(selected.displaySize)}</dd>
-                <dt>ИЗМЕНЁН</dt>
+                <dt>{translate('explorer.fieldModified')}</dt>
                 <dd>{formatDate(selected.modifiedAt)}</dd>
               </dl>
               <TerminalButton
                 className="primary-action"
                 onClick={() => controller && void controller.openNode(selected)}
               >
-                ОТКРЫТЬ В РАБОЧЕЙ ОБЛАСТИ
+                {translate('explorer.openInWorkspaceButton')}
               </TerminalButton>
               <div className="send-row">
                 <TerminalSelect
                   value={targetScreen}
                   options={screenOptions}
                   onValueChange={setTargetScreen}
-                  label="Целевой экран"
+                  label={translate('explorer.targetScreenLabel')}
                 />
                 <TerminalButton
                   onClick={() => controller?.sendNodeToScreen(selected, targetScreen)}
                 >
-                  &gt; SCREEN
+                  {translate('explorer.sendToScreenButton')}
                 </TerminalButton>
               </div>
             </>
@@ -299,10 +352,14 @@ function iconForNode(node: ExplorerNode): string {
   return '[F]';
 }
 
-function sourceForNode(node: ExplorerNode): string {
+/**
+ * The node's own source id, or `null` for an emulated node -- left for the
+ * caller to translate, since a source id is not itself a message.
+ */
+function sourceForNode(node: ExplorerNode): string | null {
   if (node.kind === 'real-file' || node.kind === 'real-directory' || node.kind === 'mount')
     return node.sourceId;
-  return 'emulated';
+  return null;
 }
 
 function formatBytes(value?: number): string {

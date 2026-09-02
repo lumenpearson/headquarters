@@ -6,10 +6,24 @@ import {
   clearManualControlPlaneAddress,
   writeManualControlPlaneAddress,
 } from '@/application/sync/manualControlPlaneAddress';
+import {
+  ControlPlaneClient,
+  type ControlRpcClient,
+  type SyncRpcClient,
+} from '@/infrastructure/controlPlane/ControlPlaneClient';
+import {
+  DeviceSessionStore,
+  memoryStorage,
+} from '@/infrastructure/controlPlane/DeviceSessionStore';
 import { groupMirrorStorageKey } from '@/infrastructure/controlPlane/GroupSnapshotDownloader';
 import { operationsStore } from '@/state/operationsStore';
 
-import { ControlPlaneRuntime, currentControlPlaneLinks } from './ControlPlaneRuntime';
+import {
+  attemptPlaneFailover,
+  ControlPlaneRuntime,
+  currentControlPlaneLinks,
+  type ControlPlaneLink,
+} from './ControlPlaneRuntime';
 
 /** Lets the mount effect's promise chain settle before the assertion. */
 async function settle(): Promise<void> {
@@ -495,6 +509,184 @@ describe('ControlPlaneRuntime and a broken project override', () => {
     expect(operationsStore.getState().connection.failure).toBe('');
   });
 });
+
+/*
+ * Plane failover (known-limitations.md:132-138): rebuilding the session on
+ * the next configured plane once the primary stops answering. Exercised
+ * against `attemptPlaneFailover` directly, over real `ControlPlaneClient`
+ * instances built with injected RPC clients -- the same idiom
+ * `ControlPlaneClient.test.ts`'s "two links over one session store" section
+ * uses -- rather than through fetch-mocked wire traffic, which is what would
+ * be needed to drive a whole `connect()` through the component.
+ */
+describe('attemptPlaneFailover', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    operationsStore.getState().resetWorld();
+  });
+
+  /** A `SyncService` this suite never calls: `probeCapabilities` never reaches it. */
+  function unreachableSyncClient(): SyncRpcClient {
+    const fail = (): never => {
+      throw new Error('not used by attemptPlaneFailover');
+    };
+    return {
+      createGroup: fail,
+      createPairingCode: fail,
+      updateGroup: fail,
+      setDeviceRole: fail,
+      pairDevice: fail,
+      refreshDeviceSession: fail,
+      listDevices: fail,
+      revokeDevice: fail,
+      joinGroup: fail,
+      leaveGroup: fail,
+      setAuthorityMode: fail,
+      setLeader: fail,
+      timeSync: fail,
+      getPresence: fail,
+      updatePresence: fail,
+      publishDocumentDelta: fail,
+      publishSessionCommand: fail,
+      getDocumentSnapshot: fail,
+      readGroupEvents: fail,
+    };
+  }
+
+  function controlRpcClient(options: {
+    readonly fails?: boolean;
+    readonly deviceLifecycle?: boolean;
+  }): ControlRpcClient {
+    return {
+      async getCapabilities() {
+        if (options.fails === true) throw new Error('connection refused');
+        return {
+          installationId: 'installation-1',
+          capabilities: [
+            { name: 'sync', enabled: true },
+            { name: 'sync.device-lifecycle', enabled: options.deviceLifecycle ?? true },
+            { name: 'sync.realtime-admission', enabled: false },
+            { name: 'settings', enabled: true },
+            { name: 'materials', enabled: false },
+          ],
+        };
+      },
+    };
+  }
+
+  function link(
+    linkId: string,
+    baseUrl: string,
+    role: 'primary' | 'secondary',
+    store: DeviceSessionStore,
+    controlOptions: { readonly fails?: boolean; readonly deviceLifecycle?: boolean } = {},
+  ): ControlPlaneLink {
+    return {
+      linkId,
+      baseUrl,
+      role,
+      client: new ControlPlaneClient({
+        baseUrl,
+        sessionStore: store,
+        credentials: role === 'primary' ? 'owner' : 'reader',
+        clients: { control: controlRpcClient(controlOptions), sync: unreachableSyncClient() },
+      }),
+    };
+  }
+
+  it('promotes the next answering plane when the primary has stopped answering', async () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    const primary = link('link-0', nearPlane, 'primary', store, { fails: true });
+    const secondary = link('link-1', cloudPlane, 'secondary', store);
+    operationsStore
+      .getState()
+      .patchConnection({ links: [describeLink(primary), describeLink(secondary)] });
+
+    const rebuilt = await attemptPlaneFailover([primary, secondary], new AbortController().signal);
+
+    expect(rebuilt?.map((entry) => entry.linkId)).toEqual(['link-1', 'link-0']);
+    // The promoted link owns the credentials; the demoted one only reads them
+    // -- exactly the constraint that keeps two clients from each minting a
+    // refresh request id against the one stored token.
+    expect(rebuilt?.[0]?.client.credentials).toBe('owner');
+    expect(rebuilt?.[1]?.client.credentials).toBe('reader');
+    // The dialog's link rows read `role`, not array position, so both are
+    // updated even though this array's own order never changes.
+    expect(operationsStore.getState().connection.links.map((entry) => entry.role)).toEqual([
+      'secondary',
+      'primary',
+    ]);
+  });
+
+  it('returns null and promotes nothing when every other plane is down too', async () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    const primary = link('link-0', nearPlane, 'primary', store, { fails: true });
+    const secondary = link('link-1', cloudPlane, 'secondary', store, { fails: true });
+    operationsStore
+      .getState()
+      .patchConnection({ links: [describeLink(primary), describeLink(secondary)] });
+
+    const rebuilt = await attemptPlaneFailover([primary, secondary], new AbortController().signal);
+
+    expect(rebuilt).toBeNull();
+    // The local-copy exit stays intact: nothing about the roles moved.
+    expect(operationsStore.getState().connection.links.map((entry) => entry.role)).toEqual([
+      'primary',
+      'secondary',
+    ]);
+  });
+
+  it('never fails over with only one configured plane', async () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    const primary = link('link-0', nearPlane, 'primary', store, { fails: true });
+
+    const rebuilt = await attemptPlaneFailover([primary], new AbortController().signal);
+
+    expect(rebuilt).toBeNull();
+  });
+
+  it('skips a plane already known to answer for another database', async () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    const primary = link('link-0', nearPlane, 'primary', store, { fails: true });
+    const secondary = link('link-1', cloudPlane, 'secondary', store);
+    operationsStore.getState().patchConnection({
+      links: [describeLink(primary), { ...describeLink(secondary), admitted: false }],
+    });
+
+    const rebuilt = await attemptPlaneFailover([primary, secondary], new AbortController().signal);
+
+    // A link the boot-time probe already found in front of a different
+    // database is never promoted, even though it does answer.
+    expect(rebuilt).toBeNull();
+  });
+
+  it('does not promote a plane started without device lifecycle', async () => {
+    const store = new DeviceSessionStore(memoryStorage());
+    const primary = link('link-0', nearPlane, 'primary', store, { fails: true });
+    const secondary = link('link-1', cloudPlane, 'secondary', store, { deviceLifecycle: false });
+    operationsStore
+      .getState()
+      .patchConnection({ links: [describeLink(primary), describeLink(secondary)] });
+
+    const rebuilt = await attemptPlaneFailover([primary, secondary], new AbortController().signal);
+
+    expect(rebuilt).toBeNull();
+  });
+});
+
+function describeLink(entry: ControlPlaneLink) {
+  return {
+    linkId: entry.linkId,
+    baseUrl: entry.baseUrl,
+    role: entry.role,
+    admitted: true,
+    delivery: 'poll' as const,
+    status: 'off' as const,
+    connectionId: '',
+    lastSequence: 0,
+    resyncCount: 0,
+  };
+}
 
 /* Placeholder addresses: the plane on the set's LAN, and the cloud plane. */
 const nearPlane = 'http://127.0.0.1:4100';

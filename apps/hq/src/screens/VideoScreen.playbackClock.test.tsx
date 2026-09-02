@@ -87,7 +87,7 @@ function publishedExecuteAtMs(): number {
 }
 
 /*
- * `[●] LIVE` rather than a seek button: `seekBy` needs a media element to read
+ * `[●] ЭФИР` rather than a seek button: `seekBy` needs a media element to read
  * a position from, and this stub deliberately mounts none. `goLive` reaches
  * the same `requestPlaybackAction`, which is the only part of the path these
  * tests are about.
@@ -98,7 +98,7 @@ function commandOnce(getByText: (text: string) => HTMLElement): {
 } {
   const before = Date.now();
   act(() => {
-    fireEvent.click(getByText('[●] LIVE'));
+    fireEvent.click(getByText('[●] ЭФИР'));
   });
   return { before, after: Date.now() };
 }

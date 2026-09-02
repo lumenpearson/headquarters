@@ -227,6 +227,47 @@ describe('initializeOperationsClient', () => {
     expect(operationsStore.getState().cases['CASE-03']?.title).toBe('МАРШРУТ / СОСЕД');
   });
 
+  /*
+   * R4 tail (corrections register): undo, redo and restore replay the whole
+   * content-overrides record out of this session's own ledger, and a peer's
+   * edit used to reach the world through `advanced.worldSync` without ever
+   * entering that ledger -- so a local undo right after had nothing of the
+   * neighbor's edit to pop and reached past it into this session's own
+   * history, discarding the neighbor's edit outright. The peer's move is now
+   * its own reversible entry, so undo reverts specifically it.
+   */
+  it('records a peer world-sync content edit in the local ledger, so undo reverts specifically it', () => {
+    const channel = installChannel();
+    const seedTitle = operationsStore.getState().cases['CASE-03']?.title;
+    try {
+      dispose = initializeOperationsClient();
+      operationsStore
+        .getState()
+        .applyContentPatch([{ id: 'case.title', entityId: 'CASE-04', value: 'МЕСТНОЕ ИЗМЕНЕНИЕ' }]);
+      const world = channel.posted.at(-1) ?? {};
+
+      channel.deliver({
+        ...world,
+        content: {
+          overrides: {
+            'case.title@CASE-04': 'МЕСТНОЕ ИЗМЕНЕНИЕ',
+            'case.title@CASE-03': 'МАРШРУТ / СОСЕД',
+          },
+        },
+      });
+      expect(operationsStore.getState().cases['CASE-03']?.title).toBe('МАРШРУТ / СОСЕД');
+
+      operationsStore.getState().undoSettingsDraft();
+    } finally {
+      channel.restore();
+    }
+
+    // The neighbor's edit is undone -- it landed last -- and the local edit
+    // that preceded it survives untouched.
+    expect(operationsStore.getState().cases['CASE-03']?.title).toBe(seedTitle);
+    expect(operationsStore.getState().cases['CASE-04']?.title).toBe('МЕСТНОЕ ИЗМЕНЕНИЕ');
+  });
+
   it('drops a stored content override it cannot validate and keeps the rest', () => {
     const state = operationsStore.getState();
     const { snapshots: _snapshots, ...production } = state.production;
@@ -321,4 +362,67 @@ describe('initializeOperationsClient', () => {
       );
     });
   }
+
+  /*
+   * `startupComplete` gates the first-launch keybind intro (R11) off the boot
+   * readout. It is process-scoped like `productionPanelOpen`/`drawer`: a
+   * second launch that restores everything else must still play its own
+   * startup sequence and gate its own intro, not resume with last session's
+   * "already finished".
+   */
+  it('resets startupComplete on hydrate even when the stored blob says it finished', () => {
+    const state = operationsStore.getState();
+    const { snapshots: _snapshots, ...production } = state.production;
+    localStorage.setItem(
+      persistedStateKey,
+      JSON.stringify({
+        version: 5,
+        // `globalFilter` rides in the same `ui` merge as `startupComplete` --
+        // a neighbouring field with no special-cased reset, distinct from its
+        // own default ('all'). Asserting it below proves the blob's `ui` was
+        // actually merged rather than the whole hydrate call being a no-op
+        // that happens to leave `startupComplete` at its own default of
+        // `false` regardless of what this test does.
+        ui: { ...state.ui, startupComplete: true, globalFilter: 'flagged' },
+        production,
+        personalization: state.personalization,
+      }),
+    );
+
+    dispose = initializeOperationsClient();
+
+    expect(operationsStore.getState().ui.startupComplete).toBe(false);
+    expect(operationsStore.getState().ui.globalFilter).toBe('flagged');
+  });
+
+  it('keeps this session startupComplete local when a peer says it already finished', () => {
+    const channel = installChannel();
+    try {
+      dispose = initializeOperationsClient();
+      expect(operationsStore.getState().ui.startupComplete).toBe(false);
+
+      // A harmless local change to obtain a real world snapshot in the shape
+      // the broadcast handler expects, the same way the content-sync cases
+      // above do.
+      operationsStore.getState().setGlobalFilter('all');
+      const world = channel.posted.at(-1) ?? {};
+      channel.deliver({
+        ...world,
+        // `searchQuery` rides in `remoteUi` next to `startupComplete`, at a
+        // value distinct from this session's own default (''). Asserting it
+        // below proves the peer's `ui` was actually applied through this
+        // handler, rather than the assertion on `startupComplete` passing
+        // because the handler discarded the whole message.
+        ui: { ...operationsStore.getState().ui, startupComplete: true, searchQuery: 'peer-marker' },
+      });
+    } finally {
+      channel.restore();
+    }
+
+    expect(operationsStore.getState().ui.searchQuery).toBe('peer-marker');
+    // The peer's own startup readout finishing is not a fact about this
+    // window's; adopting it would let a sibling window silently skip the
+    // gate here.
+    expect(operationsStore.getState().ui.startupComplete).toBe(false);
+  });
 });

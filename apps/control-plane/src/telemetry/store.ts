@@ -19,6 +19,8 @@ import { normalizePageSize as boundPageSize } from '../sync/paging.js';
 import { PairedDeviceRuntimeError } from '../sync/runtime.js';
 import type { Page } from '../sync/runtime.js';
 
+import type { TelemetrySourceDeclaration } from './sources.js';
+
 /**
  * The `simulation_profiles` / `simulation_versions` adapter.
  *
@@ -43,6 +45,11 @@ import type { Page } from '../sync/runtime.js';
  * The Neon HTTP driver has no interactive transaction, so a read-then-write
  * would let two concurrent updates read one revision and write it twice, and
  * would let a device revoked between the read and the write publish anyway.
+ *
+ * A published profile also declares the group's telemetry data sources, and the
+ * same statement writes them. `telemetry_sources` is keyed by the profile, so a
+ * deleted profile takes its declarations with it by cascade and this module
+ * needs no deregistration path of its own.
  */
 
 /** A profile as stored: the authored body plus the three server-owned facts. */
@@ -76,7 +83,25 @@ export interface ListSimulationProfilesInput extends SimulationActor {
   readonly cursor: string;
 }
 
-export interface CreateSimulationProfileInput extends SimulationActor {
+/**
+ * The data sources a written profile declares.
+ *
+ * They travel beside the body rather than being parsed out of it in SQL: the
+ * body is client-authored JSON, and a statement that walked it would have to
+ * cope with a `channels` that is not an array and a `sourceId` that is not an
+ * object. The service has the validated protobuf message and derives them from
+ * that, so the statement receives a shape it can trust.
+ *
+ * They take no part in a mutation's receipt fingerprint. The fingerprint
+ * already covers the whole body, and the declarations are a function of it, so
+ * adding them would change no retry's identity while making the fingerprint
+ * depend on a derivation.
+ */
+export interface DeclaresTelemetrySources {
+  readonly sources: readonly TelemetrySourceDeclaration[];
+}
+
+export interface CreateSimulationProfileInput extends SimulationActor, DeclaresTelemetrySources {
   /** Allocated by the caller, so a retry's fingerprint does not depend on it. */
   readonly profileId: string;
   readonly name: string;
@@ -85,7 +110,7 @@ export interface CreateSimulationProfileInput extends SimulationActor {
   readonly mutation?: MutationReceiptContext;
 }
 
-export interface UpdateSimulationProfileInput extends SimulationActor {
+export interface UpdateSimulationProfileInput extends SimulationActor, DeclaresTelemetrySources {
   readonly profileId: string;
   readonly name: string;
   readonly presetKind: string;
@@ -95,7 +120,7 @@ export interface UpdateSimulationProfileInput extends SimulationActor {
   readonly mutation?: MutationReceiptContext;
 }
 
-export interface ApplySimulationPresetInput extends SimulationActor {
+export interface ApplySimulationPresetInput extends SimulationActor, DeclaresTelemetrySources {
   readonly profileId: string;
   readonly name: string;
   readonly presetKind: string;
@@ -242,6 +267,85 @@ const targetedWriteProjection = `${writeMutationProjection},
            EXISTS (SELECT 1 FROM target) AS target_present,
            (SELECT target.revision FROM target) AS target_revision`;
 
+/**
+ * Brings the group's data-source registry to what the written profile declares,
+ * inside the statement that writes it.
+ *
+ * A profile is the only thing that declares a source, so a registry updated by
+ * a second statement would be a registry that disagrees with the profiles
+ * whenever the first statement succeeded and the second did not. There is no
+ * transaction to put the two in — the Neon HTTP driver has none — so they are
+ * one statement or they are inconsistent.
+ *
+ * The retirement and the declaration address disjoint sets of rows on purpose.
+ * Every data-modifying CTE of one statement reads the same snapshot, so a
+ * `DELETE` of every row of the profile followed by an `INSERT ... ON CONFLICT`
+ * would see the deleted rows as live conflicts and do nothing, losing the new
+ * declaration and keeping none of the old. Retiring only the keys the profile
+ * no longer names, and upserting exactly the ones it does, leaves no row in
+ * both sets.
+ *
+ * `written` is empty whenever the write did not happen — a create whose name
+ * was taken, an update whose expected revision had moved — and both CTEs join
+ * it, so a refused mutation changes no registry row either.
+ */
+function declaredSourcesCte(parameter: number): string {
+  const sources = `$${parameter.toString()}::jsonb`;
+  return `,
+         retired_sources AS (
+           DELETE FROM telemetry_sources AS source
+           USING written
+           WHERE source.profile_id = written.id
+             AND NOT EXISTS (
+               SELECT 1
+               FROM jsonb_to_recordset(${sources}) AS declared(source_key text)
+               WHERE declared.source_key = source.source_key
+             )
+           RETURNING source.source_key
+         ),
+         declared_sources AS (
+           INSERT INTO telemetry_sources (
+             profile_id, source_key, group_id, name, kind, unit, simulated, labels,
+             channel_index, updated_at
+           )
+           SELECT written.id, declared.source_key, written.group_id, declared.name,
+                  declared.kind, declared.unit, true, declared.labels,
+                  declared.channel_index, $3
+           FROM written
+           CROSS JOIN jsonb_to_recordset(${sources})
+             AS declared(
+               source_key text, name text, kind text, unit text,
+               labels jsonb, channel_index integer
+             )
+           ON CONFLICT (profile_id, source_key) DO UPDATE
+             SET group_id = EXCLUDED.group_id,
+                 name = EXCLUDED.name,
+                 kind = EXCLUDED.kind,
+                 unit = EXCLUDED.unit,
+                 labels = EXCLUDED.labels,
+                 channel_index = EXCLUDED.channel_index,
+                 updated_at = EXCLUDED.updated_at
+           RETURNING source_key
+         )`;
+}
+
+/**
+ * The declarations as the recordset above reads them: snake-case keys, because
+ * `jsonb_to_recordset` matches a column name to a JSON key exactly.
+ */
+function encodeDeclaredSources(sources: readonly TelemetrySourceDeclaration[]): string {
+  return JSON.stringify(
+    sources.map((source) => ({
+      source_key: source.sourceKey,
+      name: source.name,
+      kind: source.kind,
+      unit: source.unit,
+      labels: source.labels,
+      channel_index: source.channelIndex,
+    })),
+  );
+}
+
 export class DurableSimulationProfileStore {
   readonly #database: SqlClient;
   readonly #receipts: MutationReceiptGuard;
@@ -351,7 +455,7 @@ export class DurableSimulationProfileStore {
            FROM authorized_writer
            ON CONFLICT (group_id, name) DO NOTHING
            RETURNING id, group_id, profile, revision, updated_at
-         )${writeMutationEpilogue}
+         )${declaredSourcesCte(10)}${writeMutationEpilogue}
          ${writeMutationProjection}`,
         [
           input.groupId,
@@ -363,6 +467,7 @@ export class DurableSimulationProfileStore {
           input.name,
           input.presetKind,
           JSON.stringify(input.profile),
+          encodeDeclaredSources(input.sources),
         ],
       ),
     );
@@ -417,7 +522,7 @@ export class DurableSimulationProfileStore {
              AND ($10::bigint IS NULL OR target.revision = $10::bigint)
            RETURNING
              stored.id, stored.group_id, stored.profile, stored.revision, stored.updated_at
-         )${writeMutationEpilogue}
+         )${declaredSourcesCte(11)}${writeMutationEpilogue}
          ${targetedWriteProjection}`,
         [
           input.groupId,
@@ -430,6 +535,7 @@ export class DurableSimulationProfileStore {
           input.presetKind,
           JSON.stringify(input.profile),
           input.expectedRevision?.toString() ?? null,
+          encodeDeclaredSources(input.sources),
         ],
       ),
     );
@@ -470,7 +576,7 @@ export class DurableSimulationProfileStore {
                  revision = simulation_profiles.revision + 1,
                  updated_at = EXCLUDED.updated_at
            RETURNING id, group_id, profile, revision, updated_at
-         )${writeMutationEpilogue}
+         )${declaredSourcesCte(10)}${writeMutationEpilogue}
          ${writeMutationProjection}`,
         [
           input.groupId,
@@ -482,6 +588,7 @@ export class DurableSimulationProfileStore {
           input.name,
           input.presetKind,
           JSON.stringify(input.profile),
+          encodeDeclaredSources(input.sources),
         ],
       ),
     );
@@ -501,6 +608,11 @@ export class DurableSimulationProfileStore {
    * what a version replays. `jsonb_set` keeps the change to one statement:
    * reading the body out to edit it and writing it back would discard whatever
    * a concurrent update wrote in between.
+   *
+   * It declares no data sources, and that is not an omission: re-timing touches
+   * no channel, so the set of sources the profile names is exactly the set it
+   * named before. Re-declaring them would rewrite every registry row of the
+   * group on a call that changed one number.
    */
   async setTimeScale(input: SetSimulationTimeScaleInput): Promise<SimulationProfileRecord> {
     const now = this.#now();

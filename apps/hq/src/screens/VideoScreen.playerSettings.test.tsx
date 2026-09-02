@@ -77,15 +77,26 @@ vi.mock('@vidstack/react', async () => {
         readonly className?: string;
         readonly children?: ReactNode;
         readonly loop?: boolean;
+        readonly volume?: number;
+        readonly playbackRate?: number;
+        readonly muted?: boolean;
       },
       ref: Ref<unknown>,
     ) {
       const playerRef = useRef<ReturnType<typeof media.createPlayer> | null>(null);
       playerRef.current ??= media.createPlayer();
       const player = playerRef.current;
-      // `loop` is passed as a prop rather than written onto the instance, so the
-      // stub records it the way it records the properties the screen assigns.
+      // `loop`, `volume`, `playbackRate` and `muted` are controlled
+      // `<MediaPlayer>` props, not written onto the instance imperatively --
+      // the real player re-applies them from its own props on every render
+      // (and, in particular, re-applies its own 1/1/false defaults on every
+      // can-play if a caller never passes them). Mirroring that here is what
+      // makes a source change that leaves an imperative-only assignment
+      // stranded show up as a failure instead of passing by construction.
       player.loop = props.loop === true;
+      player.volume = props.volume ?? 1;
+      player.playbackRate = props.playbackRate ?? 1;
+      player.muted = props.muted ?? false;
       useImperativeHandle(ref, () => player, [player]);
       return createElement(
         'div',
@@ -245,6 +256,34 @@ describe('player.defaultVolume', () => {
   });
 });
 
+/*
+ * A camera switch changes `src` and re-renders the surface without touching
+ * `player.defaultRate`/`player.defaultVolume` themselves -- the exact
+ * source-change Vidstack's own `ready()` re-applies its `<MediaPlayer>`
+ * props on, defaulting to 1 when a caller does not pass them as props. An
+ * imperative `player.volume = x`/`player.playbackRate = x` assignment whose
+ * effect dependency list does not include the source loses this race: the
+ * effect does not re-run just because the camera changed, so the value
+ * Vidstack's reset leaves behind (1) stands unless the value reaches the
+ * provider as a controlled prop instead (t5-player-rework, R-defect).
+ */
+describe('player.defaultRate and player.defaultVolume across a source change', () => {
+  it('keeps the configured rate and volume after a camera switch instead of resetting to the Vidstack default', () => {
+    patchSetting('player.defaultRate', 1.5);
+    patchSetting('player.defaultVolume', 80);
+    render(<VideoScreen mode="live" />);
+    expect(latestPlayer().playbackRate).toBe(1.5);
+    expect(latestPlayer().volume).toBeCloseTo(0.8, 5);
+
+    act(() => {
+      operationsStore.getState().selectCamera('CAM-02');
+    });
+
+    expect(latestPlayer().playbackRate).toBe(1.5);
+    expect(latestPlayer().volume).toBeCloseTo(0.8, 5);
+  });
+});
+
 describe('player.loopDemo', () => {
   it('stops repeating a finite source when the operator switches it off', () => {
     render(<VideoScreen mode="live" />);
@@ -260,13 +299,13 @@ describe('player.loopDemo', () => {
 describe('player.seekStep', () => {
   it('names its own step on the control, so the button cannot promise one figure and move another', () => {
     const { getByText } = render(<VideoScreen mode="live" />);
-    expect(getByText('[◀] -10S')).toBeTruthy();
-    expect(getByText('[▶] +10S')).toBeTruthy();
+    expect(getByText('[◀] -10СЕК')).toBeTruthy();
+    expect(getByText('[▶] +10СЕК')).toBeTruthy();
 
     patchSetting('player.seekStep', 30);
 
-    expect(getByText('[◀] -30S')).toBeTruthy();
-    expect(getByText('[▶] +30S')).toBeTruthy();
+    expect(getByText('[◀] -30СЕК')).toBeTruthy();
+    expect(getByText('[▶] +30СЕК')).toBeTruthy();
   });
 
   /*

@@ -7,6 +7,120 @@ import type {
 import type { MaterialSourceClient } from './MaterialSource';
 
 /**
+ * One recorded revision of a material's bytes, as `ListVersions` reports it.
+ *
+ * `sequence` is the material's own revision counter at the moment the version
+ * was created (`store.ts`, `createMaterialVersion`), not a count of versions --
+ * a material trashed and restored between two uploads still has consecutive
+ * sequences, because nothing about that history touches this counter.
+ */
+export interface MaterialVersionEntry {
+  readonly versionId: string;
+  readonly materialId: string;
+  readonly sequence: number;
+  readonly contentHash: string;
+  readonly mimeType: string;
+  readonly byteSize: bigint;
+  readonly originalFileName: string;
+  readonly createdAt: string;
+}
+
+export interface MaterialVersionPage {
+  readonly versions: readonly MaterialVersionEntry[];
+  readonly nextCursor: string;
+}
+
+/** What `UpdateMaterialMetadata` changes; every field is sent, none merged server-side. */
+export interface MaterialMetadataPatch {
+  readonly displayName: string;
+  readonly category: string;
+  readonly metadata: Readonly<Record<string, string>>;
+  readonly tags: readonly string[];
+}
+
+/**
+ * One entry off `WatchMaterialEvents`, translated to the vocabulary the
+ * client already uses elsewhere (`MaterialEventKind` without the wire's
+ * `MATERIAL_EVENT_KIND_` prefix, lower-kebab).
+ */
+export interface MaterialLibraryEvent {
+  readonly sequence: number;
+  readonly kind:
+    | 'unspecified'
+    | 'created'
+    | 'updated'
+    | 'version-added'
+    | 'trashed'
+    | 'restored'
+    | 'purged'
+    | 'conversion-updated';
+  readonly materialId: string;
+  readonly occurredAt: string;
+  readonly correlationId: string;
+}
+
+/**
+ * The material lifecycle beyond import and playback (R1, R2): versions,
+ * metadata, trash/restore/purge and the library's own event stream.
+ *
+ * A separate interface from `MaterialLibraryClient` rather than an extension
+ * of it, because the loopback bridge genuinely has none of this --
+ * `FileBridgeService` names no RPC for any of it -- and a client that answered
+ * every call with "not supported" would be indistinguishable at the type level
+ * from one that actually offers the operation. `ControlPlaneMaterialClient` is
+ * the only implementer; `isMaterialLifecycleClient` is how a caller finds out.
+ */
+export interface MaterialLifecycleClient {
+  /**
+   * Reserves and uploads a new version of an existing material's bytes, on the
+   * same part-grant path `importFile` uses for the first version.
+   */
+  createVersion(
+    materialId: string,
+    file: File,
+    onProgress?: (progress: MaterialImportProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<MaterialImportResult>;
+  updateMetadata(
+    materialId: string,
+    patch: MaterialMetadataPatch,
+    signal?: AbortSignal,
+  ): Promise<MaterialEntry>;
+  moveToTrash(materialId: string, signal?: AbortSignal): Promise<MaterialEntry>;
+  restoreMaterial(materialId: string, signal?: AbortSignal): Promise<MaterialEntry>;
+  /** `confirmation` must name the material id; the store refuses anything else. */
+  purgeMaterial(materialId: string, confirmation: string, signal?: AbortSignal): Promise<void>;
+  listVersions(
+    materialId: string,
+    cursor?: string,
+    pageSize?: number,
+    signal?: AbortSignal,
+  ): Promise<MaterialVersionPage>;
+  listTrash(cursor?: string, pageSize?: number, signal?: AbortSignal): Promise<MaterialPage>;
+  /**
+   * The library's own change feed, from `afterSequence` (`0` for everything the
+   * server still retains). Ends only when `signal` aborts or the connection
+   * does; a caller wanting a bounded read takes its own slice of the yielded
+   * events.
+   */
+  watchEvents(afterSequence: number, signal?: AbortSignal): AsyncGenerator<MaterialLibraryEvent>;
+}
+
+/**
+ * Whether a library offers the lifecycle surface above.
+ *
+ * Origin, not `instanceof`, is the check: `MaterialOrigin` is already the
+ * fact a screen reads to decide what a client can do, and the group library is
+ * `ControlPlaneMaterialClient` by construction (`GroupChannelRuntime`) -- the
+ * one client `material.proto`'s eight extra RPCs exist for.
+ */
+export function isMaterialLifecycleClient(
+  client: MaterialLibraryClient,
+): client is MaterialLibraryClient & MaterialLifecycleClient {
+  return client.origin === 'group-library';
+}
+
+/**
  * Which library holds a material's bytes.
  *
  * Not a cosmetic label: the two answer different questions. The loopback

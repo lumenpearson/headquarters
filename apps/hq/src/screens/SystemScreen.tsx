@@ -4,12 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import type { TilePresentation } from '@gremuchaya/layout-engine';
 import { TerminalButton } from '@gremuchaya/ui/primitives';
 
+import { dateTimeFormat } from '@/application/localization/intl';
+import { t, useTranslate } from '@/application/localization/locale';
+import type { MessageId } from '@/application/localization/messages';
 import {
   useBooleanSetting,
   useNumberSetting,
   useStringSetting,
 } from '@/application/personalization/useSetting';
-import { channelDomain } from '@/application/simulation/simulationCurves';
+import { channelDomain, scatteredAreaReading } from '@/application/simulation/simulationCurves';
+import { useTelemetryMeasurement } from '@/application/telemetry/useTelemetryMeasurement';
 import { TileGrid, type ScreenTile } from '@/components/layout/TileGrid';
 import { Metric, Panel, ProgressBar, Sparkline, StatusBadge } from '@/components/operations/OpsUi';
 import {
@@ -19,7 +23,47 @@ import {
 import { useOperationsStore, type OperationsState } from '@/state/operationsStore';
 
 const storageAreas = ['CORE', 'EVENTS', 'VIDEO', 'EVIDENCE', 'ARCHIVE', 'SNAPSHOTS'] as const;
-const storageUse = [48, 63, 82, 57, 74, 12] as const;
+
+/** `storageAreas`'s six labels, in the operator's language. */
+const storageAreaLabelIds: Readonly<Record<(typeof storageAreas)[number], MessageId>> = {
+  CORE: 'system.storageAreaCore',
+  EVENTS: 'system.storageAreaEvents',
+  VIDEO: 'system.storageAreaVideo',
+  EVIDENCE: 'system.storageAreaEvidence',
+  ARCHIVE: 'nav.archive',
+  SNAPSHOTS: 'system.storageAreaSnapshots',
+};
+
+const clockParts = { timeStyle: 'medium' } as const;
+
+/**
+ * How far a storage area's reading may scatter from the contour's own
+ * `storage` channel, in display percentage points either side of it.
+ */
+const storageAreaSpread = 18;
+
+/** How often the measured telemetry panel re-reads the registered client. */
+const telemetryMeasurementPollMs = 5_000;
+
+/**
+ * `gremuchaya.telemetry.v1.TelemetrySeverity`'s four bands, read into the
+ * tones `Metric` draws — the same fold `apps/control-plane` applies to its
+ * own operational log (`operationsStore.ts`, `eventSeverities`): `elevated`
+ * reads calmly, alongside `normal`, because a four-band severity and a
+ * three-tone metric cannot both keep their own vocabulary. `unspecified` — a
+ * source the registry names but no sample reached, or a channel a stored
+ * profile no longer carries (`apps/control-plane/src/telemetry/service.ts`,
+ * `readSource`) — reads as the metric's own `normal` tone, never as `ok`: it
+ * is not a measurement of a calm reading, it is the absence of one.
+ */
+function metricToneFor(
+  severity: 'normal' | 'elevated' | 'degraded' | 'critical' | 'unspecified',
+): 'normal' | 'ok' | 'warning' | 'critical' {
+  if (severity === 'critical') return 'critical';
+  if (severity === 'degraded') return 'warning';
+  if (severity === 'normal' || severity === 'elevated') return 'ok';
+  return 'normal';
+}
 
 /**
  * How often the native media gateway is re-read.
@@ -123,24 +167,23 @@ function sampleValue(reading: number | undefined): string {
 function readTelemetry(source: string, simulated: HostSample): TelemetryReading {
   if (source === 'native') {
     return {
-      caption: 'NATIVE / ИСТОЧНИК НЕДОСТУПЕН',
-      seriesTag: 'N/A',
+      caption: t('system.telemetryNativeCaption'),
+      seriesTag: t('system.telemetrySeriesTagNative'),
       sample: null,
-      notice:
-        'ИСТОЧНИК ТЕЛЕМЕТРИИ NATIVE НЕ ЧИТАЕТСЯ В ЭТОЙ СБОРКЕ: СЧЁТЧИКОВ ХОСТА НЕТ НИ В ВЕБ-, НИ В ДЕСКТОП-СЛОЕ. ВЫБЕРИТЕ SIMULATION ИЛИ HYBRID.',
+      notice: t('system.telemetryNativeNotice'),
     };
   }
   if (source === 'hybrid') {
     return {
-      caption: 'HYBRID / ЗАМЕЩЕНО СИМУЛЯЦИЕЙ',
-      seriesTag: 'SIM',
+      caption: t('system.telemetryHybridCaption'),
+      seriesTag: t('system.telemetrySeriesTagSimulated'),
       sample: simulated,
-      notice: 'СЧЁТЧИКИ ХОСТА НЕДОСТУПНЫ: ВСЕ РЯДЫ ВЗЯТЫ ИЗ СИМУЛЯЦИИ.',
+      notice: t('system.telemetryHybridNotice'),
     };
   }
   return {
-    caption: 'SIM / ДЕТЕРМИНИРОВАННЫЙ МИР',
-    seriesTag: 'SIM',
+    caption: t('system.telemetrySimulationCaption'),
+    seriesTag: t('system.telemetrySeriesTagSimulated'),
     sample: simulated,
     notice: null,
   };
@@ -154,43 +197,47 @@ function NativeMediaGatewayReport({
   readonly presentation: TilePresentation;
 }) {
   if (reading.error !== null) {
-    return <p className="system-native-media__notice">ШЛЮЗ НЕ ОТВЕЧАЕТ: {reading.error}</p>;
+    return (
+      <p className="system-native-media__notice">
+        {t('system.mediaGatewayNoResponse', { error: reading.error })}
+      </p>
+    );
   }
   const status = reading.status;
   if (status === null) {
-    return (
-      <p className="system-native-media__notice">
-        НАТИВНЫЙ МЕДИАШЛЮЗ ЕСТЬ ТОЛЬКО В ДЕСКТОП-СБОРКЕ: В ВЕБ-СЕССИИ СЧЁТЧИКОВ ШЛЮЗА НЕТ.
-      </p>
-    );
+    return <p className="system-native-media__notice">{t('system.mediaGatewayWebOnlyNotice')}</p>;
   }
   return (
     <>
       {status.available ? null : (
-        <p className="system-native-media__notice">ШЛЮЗ ОСТАНОВЛЕН: ПОТОКИ НЕ ОБСЛУЖИВАЮТСЯ.</p>
+        <p className="system-native-media__notice">{t('system.mediaGatewayStoppedNotice')}</p>
       )}
       <div className="metric-grid metric-grid--four">
         <Metric
-          label="ИСТОЧНИКОВ"
+          label={t('system.mediaGatewaySourcesLabel')}
           value={status.configuredStreams}
-          detail={`ЛИМИТ ${status.maxWorkers}`}
+          detail={t('system.mediaGatewayLimitDetail', { limit: status.maxWorkers })}
         />
         <Metric
-          label="АКТИВНО"
+          label={t('system.mediaGatewayActiveLabel')}
           value={status.activeStreams}
-          detail={status.startingStreams > 0 ? `ЗАПУСК ${status.startingStreams}` : 'УСТОЙЧИВО'}
+          detail={
+            status.startingStreams > 0
+              ? t('system.mediaGatewayStartingDetail', { count: status.startingStreams })
+              : t('system.mediaGatewayStableDetail')
+          }
           tone={status.activeStreams > 0 ? 'ok' : 'normal'}
         />
         <Metric
-          label="ПЕРЕПОДКЛЮЧЕНИЕ"
+          label={t('system.mediaGatewayReconnectingLabel')}
           value={status.reconnectingStreams}
-          detail="BACKOFF"
+          detail={t('system.mediaGatewayBackoffDetail')}
           tone={status.reconnectingStreams > 0 ? 'warning' : 'normal'}
         />
         <Metric
-          label="ОТКАЗ"
+          label={t('system.mediaGatewayFailedLabel')}
           value={status.failedStreams}
-          detail="DEGRADED"
+          detail={t('system.mediaGatewayDegradedDetail')}
           tone={status.failedStreams > 0 ? 'critical' : 'normal'}
         />
       </div>
@@ -198,11 +245,11 @@ function NativeMediaGatewayReport({
         <table className="ops-table">
           <thead>
             <tr>
-              <th>КАМЕРА</th>
-              <th>СОСТОЯНИЕ</th>
-              <th>ЗРИТЕЛИ</th>
-              <th>СБОЕВ / ПЕРЕЗАПУСКОВ</th>
-              <th>МАНИФЕСТ</th>
+              <th>{t('system.mediaGatewayColumnCamera')}</th>
+              <th>{t('system.mediaGatewayColumnState')}</th>
+              <th>{t('system.mediaGatewayColumnViewers')}</th>
+              <th>{t('system.mediaGatewayColumnFailuresRestarts')}</th>
+              <th>{t('system.mediaGatewayColumnManifest')}</th>
             </tr>
           </thead>
           <tbody>
@@ -221,21 +268,30 @@ function NativeMediaGatewayReport({
                 </td>
                 <td>
                   {stream.manifestAgeMs === null
-                    ? 'НЕТ'
-                    : `${Math.round(stream.manifestAgeMs / 1000)} С`}
+                    ? t('system.mediaGatewayManifestNone')
+                    : `${Math.round(stream.manifestAgeMs / 1000)} ${t('systemUnit.seconds')}`}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       ) : null}
-      <p className="system-native-media__notice">ORIGIN: {status.origin}</p>
+      <p className="system-native-media__notice">
+        {t('system.mediaGatewayOriginLabel', { origin: status.origin })}
+      </p>
     </>
   );
 }
 
 export function SystemScreen() {
   const state = useOperationsStore((value) => value);
+  // Subscribed, unlike `t`: `measuredTelemetryTile` below is memoised on
+  // `measurement` alone, and its `title` field is a plain property rather
+  // than a closure, fixed at build time. Without this the tile would keep
+  // whichever language was in force when the measurement client first
+  // answered, since nothing about a locale change would otherwise touch that
+  // memo's dependency list.
+  const translate = useTranslate();
   const nodes = Object.values(state.systemNodes);
   const channels = Object.values(state.channels);
 
@@ -251,9 +307,54 @@ export function SystemScreen() {
   const signalFloorPercent = useNumberSetting('telemetry.signalFloorPercent');
   const showCharts = useBooleanSetting('telemetry.showCharts');
   const auditRows = useNumberSetting('diagnostics.auditRows');
+  const simulationSeed = useNumberSetting('simulation.seed');
   const telemetry = readTelemetry(telemetrySource, state.metrics);
   const sample = telemetry.sample;
   const nativeMedia = useNativeMediaGateway();
+  const measurement = useTelemetryMeasurement(telemetryMeasurementPollMs);
+  const measuredTelemetryTile: ScreenTile | null = useMemo(
+    () =>
+      measurement !== null && measurement.available
+        ? {
+            title: translate('system.measuredTelemetryTitle'),
+            category: 'telemetry',
+            descriptor: {
+              id: 'measured-telemetry',
+              priority: 65,
+              variants: [
+                { presentation: 'full', columns: 2, rows: 1 },
+                { presentation: 'minimal', columns: 1, rows: 1 },
+              ],
+              canStretchHorizontally: true,
+              hideWhenOverflow: true,
+            },
+            render: () => (
+              <Panel
+                title={translate('system.measuredTelemetryTitle')}
+                eyebrow={translate('system.measuredTelemetryEyebrow')}
+                className="system-measured-telemetry"
+              >
+                <div className="metric-grid metric-grid--four">
+                  {measurement.sources.map((source) => (
+                    <Metric
+                      key={source.sourceKey}
+                      label={source.name}
+                      value={source.value === undefined ? '—' : `${source.value}${source.unit}`}
+                      detail={
+                        source.simulated
+                          ? translate('system.simulatedSourceDetail')
+                          : translate('system.hostSourceDetail')
+                      }
+                      tone={metricToneFor(source.severity)}
+                    />
+                  ))}
+                </div>
+              </Panel>
+            ),
+          }
+        : null,
+    [measurement, translate],
+  );
 
   /*
    * `systemNodes` and `audit` are read by this screen and no other, so both
@@ -264,7 +365,7 @@ export function SystemScreen() {
   const tiles: readonly ScreenTile[] = useMemo(
     () => [
       {
-        title: 'РЕСУРСЫ РАБОЧЕЙ СТАНЦИИ',
+        title: t('system.resourcesTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'resources',
@@ -277,8 +378,8 @@ export function SystemScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="РЕСУРСЫ РАБОЧЕЙ СТАНЦИИ"
-            eyebrow={`HOST / ${telemetry.caption}`}
+            title={t('system.resourcesTitle')}
+            eyebrow={`${t('system.resourcesHostPrefix')} / ${telemetry.caption}`}
             className="system-resources"
           >
             {telemetry.notice === null ? null : (
@@ -286,31 +387,39 @@ export function SystemScreen() {
             )}
             <div className="metric-grid metric-grid--four">
               <Metric
-                label="CPU"
+                label={t('system.metricLabelCpu')}
                 value={sampleValue(sample?.cpu)}
-                detail={sample === null ? 'ОТСЧЁТА НЕТ' : '16C / 4.8 GHZ'}
+                detail={
+                  sample === null ? t('system.metricNoSampleDetail') : t('system.cpuSpecDetail')
+                }
                 tone={
                   sample === null ? 'normal' : sample.cpu > loadWarningPercent ? 'critical' : 'ok'
                 }
               />
               <Metric
-                label="RAM"
+                label={t('system.metricLabelRam')}
                 value={sampleValue(sample?.ram)}
-                detail={sample === null ? 'ОТСЧЁТА НЕТ' : '43.5 / 64 GB'}
+                detail={
+                  sample === null ? t('system.metricNoSampleDetail') : t('system.ramSpecDetail')
+                }
                 tone={
                   sample === null ? 'normal' : sample.ram > loadWarningPercent ? 'warning' : 'ok'
                 }
               />
               <Metric
-                label="GPU"
+                label={t('system.metricLabelGpu')}
                 value={sampleValue(sample?.gpu)}
-                detail={sample === null ? 'ОТСЧЁТА НЕТ' : 'VIDEO PIPELINE'}
+                detail={
+                  sample === null ? t('system.metricNoSampleDetail') : t('system.gpuSpecDetail')
+                }
                 tone={sample === null ? 'normal' : 'ok'}
               />
               <Metric
-                label="STORAGE"
+                label={t('system.metricLabelStorage')}
                 value={sampleValue(sample?.storage)}
-                detail={sample === null ? 'ОТСЧЁТА НЕТ' : '2.8 / 4.0 TB'}
+                detail={
+                  sample === null ? t('system.metricNoSampleDetail') : t('system.storageSpecDetail')
+                }
                 tone={sample === null ? 'normal' : 'warning'}
               />
             </div>
@@ -326,22 +435,41 @@ export function SystemScreen() {
               <div className="resource-charts">
                 <div>
                   <span>
-                    CPU / {state.metricsHistory.cpu.length} SMP / {telemetry.seriesTag}
+                    {t('system.metricLabelCpu')} / {state.metricsHistory.cpu.length}{' '}
+                    {t('systemUnit.samples')} / {telemetry.seriesTag}
                   </span>
                   <Sparkline
                     values={state.metricsHistory.cpu}
                     domain={channelDomain('cpu')}
-                    label={`CPU / ${telemetry.seriesTag}`}
+                    label={`${t('system.metricLabelCpu')} / ${telemetry.seriesTag}`}
                   />
                 </div>
                 <div>
                   <span>
-                    NETWORK IN / {state.metricsHistory.networkIn.length} SMP / {telemetry.seriesTag}
+                    {t('system.networkInLabel')} / {state.metricsHistory.networkIn.length}{' '}
+                    {t('systemUnit.samples')} / {telemetry.seriesTag}
                   </span>
                   <Sparkline
                     values={state.metricsHistory.networkIn}
                     domain={channelDomain('network-in')}
-                    label={`Входящий трафик / ${telemetry.seriesTag}`}
+                    label={`${t('system.networkInSparklineLabel')} / ${telemetry.seriesTag}`}
+                  />
+                </div>
+                {/*
+                 * The outbound half. Before this the panel drew only
+                 * `network-in`, so an operator reading `/system` saw one side
+                 * of the graph and had no way to tell a quiet uplink from one
+                 * this screen never showed.
+                 */}
+                <div>
+                  <span>
+                    {t('system.networkOutLabel')} / {state.metricsHistory.networkOut.length}{' '}
+                    {t('systemUnit.samples')} / {telemetry.seriesTag}
+                  </span>
+                  <Sparkline
+                    values={state.metricsHistory.networkOut}
+                    domain={channelDomain('network-out')}
+                    label={`${t('system.networkOutSparklineLabel')} / ${telemetry.seriesTag}`}
                   />
                 </div>
               </div>
@@ -350,7 +478,7 @@ export function SystemScreen() {
         ),
       },
       {
-        title: 'СИСТЕМНЫЕ УЗЛЫ',
+        title: t('system.nodesTitle'),
         category: 'records',
         descriptor: {
           id: 'nodes',
@@ -365,15 +493,19 @@ export function SystemScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="СИСТЕМНЫЕ УЗЛЫ" eyebrow="LOCAL INFRASTRUCTURE" className="system-nodes">
+          <Panel
+            title={t('system.nodesTitle')}
+            eyebrow={t('system.nodesEyebrow')}
+            className="system-nodes"
+          >
             <table className="ops-table">
               <thead>
                 <tr>
-                  <th>NODE</th>
-                  <th>TYPE / IP</th>
-                  <th>STATUS</th>
-                  <th>LOAD</th>
-                  <th>TEMP</th>
+                  <th>{t('system.nodesColumnNode')}</th>
+                  <th>{t('system.nodesColumnTypeIp')}</th>
+                  <th>{t('system.nodesColumnStatus')}</th>
+                  <th>{t('system.nodesColumnLoad')}</th>
+                  <th>{t('system.nodesColumnTemp')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -404,7 +536,7 @@ export function SystemScreen() {
         ),
       },
       {
-        title: 'СЕТЕВЫЕ КАНАЛЫ',
+        title: t('system.networkTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'network',
@@ -417,7 +549,11 @@ export function SystemScreen() {
           relocationRoute: '/communications',
         },
         render: (presentation) => (
-          <Panel title="СЕТЕВЫЕ КАНАЛЫ" eyebrow="ENCRYPTED LINKS" className="system-network">
+          <Panel
+            title={t('system.networkTitle')}
+            eyebrow={t('system.networkEyebrow')}
+            className="system-network"
+          >
             {channels.slice(0, presentation === 'full' ? 7 : 3).map((channel) => (
               <TerminalButton
                 key={channel.id}
@@ -428,7 +564,8 @@ export function SystemScreen() {
                     {channel.id} / {channel.name}
                   </strong>
                   <small>
-                    {channel.encryption} · {channel.latency} MS · LOSS {channel.packetLoss}%
+                    {channel.encryption} · {channel.latency} {t('unit.ms')} ·{' '}
+                    {t('system.packetLossLabel')} {channel.packetLoss}%
                   </small>
                 </span>
                 <ProgressBar
@@ -441,7 +578,7 @@ export function SystemScreen() {
         ),
       },
       {
-        title: 'ЖУРНАЛ АУДИТА',
+        title: t('system.auditTitle'),
         category: 'events',
         descriptor: {
           id: 'audit',
@@ -455,14 +592,14 @@ export function SystemScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="ЖУРНАЛ АУДИТА"
-            eyebrow="OPERATOR ACTIONS / APPEND ONLY"
+            title={t('system.auditTitle')}
+            eyebrow={t('system.auditEyebrow')}
             className="system-audit"
           >
             <div className="audit-log">
               {state.audit.slice(0, presentation === 'full' ? auditRows : 6).map((entry) => (
                 <div key={entry.id}>
-                  <time>{new Date(entry.timestamp).toLocaleTimeString('ru-RU')}</time>
+                  <time>{dateTimeFormat(clockParts).format(new Date(entry.timestamp))}</time>
                   <i>{entry.operator}</i>
                   <strong>{entry.action}</strong>
                   <span>{entry.entityId}</span>
@@ -473,7 +610,7 @@ export function SystemScreen() {
         ),
       },
       {
-        title: 'КОНТУР ХРАНЕНИЯ',
+        title: t('system.storageTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'storage',
@@ -486,22 +623,34 @@ export function SystemScreen() {
           hideWhenOverflow: true,
         },
         render: () => (
-          <Panel title="КОНТУР ХРАНЕНИЯ" eyebrow="LOCAL / OFFLINE" className="system-storage">
+          <Panel
+            title={t('system.storageTitle')}
+            eyebrow={t('system.storageEyebrow')}
+            className="system-storage"
+          >
             <div className="storage-map">
               {storageAreas.map((item, index) => (
                 <div key={item}>
                   <i>[{String(index + 1).padStart(2, '0')}]</i>
-                  <span>{item}</span>
-                  <b>{storageUse[index]}%</b>
+                  <span>{t(storageAreaLabelIds[item])}</span>
+                  <b>
+                    {scatteredAreaReading(
+                      state.metrics.storage,
+                      BigInt(Math.trunc(simulationSeed)),
+                      state.metrics.simulationStep * storageAreas.length + index,
+                      storageAreaSpread,
+                    )}
+                    %
+                  </b>
                 </div>
               ))}
             </div>
-            <p>ЦЕЛОСТНОСТЬ: VERIFIED / РЕПЛИКА: LOCAL-02 / ПОСЛЕДНЯЯ ПРОВЕРКА: 07:41:52</p>
+            <p>{t('system.storageIntegrityNote')}</p>
           </Panel>
         ),
       },
       {
-        title: 'НАТИВНЫЙ МЕДИАШЛЮЗ',
+        title: t('system.nativeMediaTitle'),
         category: 'telemetry',
         descriptor: {
           id: 'native-media',
@@ -515,25 +664,36 @@ export function SystemScreen() {
         },
         render: (presentation) => (
           <Panel
-            title="НАТИВНЫЙ МЕДИАШЛЮЗ"
-            eyebrow="NATIVE GATEWAY / RTSP TO HLS"
+            title={t('system.nativeMediaTitle')}
+            eyebrow={t('system.nativeMediaEyebrow')}
             className="system-native-media"
           >
             <NativeMediaGatewayReport reading={nativeMedia} presentation={presentation} />
           </Panel>
         ),
       },
+      /*
+       * The measured half beside the simulated readings above (R31). Present
+       * only once a `TelemetryClient` is registered
+       * (`application/telemetry/telemetryMeasurementClient.ts`) and answers
+       * with real sources: no deployment does yet, so this screen degrades to
+       * exactly what it drew before the measurement half existed, tile
+       * absent rather than a panel reporting "not built" on every session.
+       */
+      ...(measuredTelemetryTile === null ? [] : [measuredTelemetryTile]),
     ],
     [
       auditRows,
       channels,
       loadWarningPercent,
+      measuredTelemetryTile,
       nativeMedia,
       nodeTemperatureLimit,
       nodes,
       sample,
       showCharts,
       signalFloorPercent,
+      simulationSeed,
       state,
       telemetry,
     ],
@@ -543,14 +703,19 @@ export function SystemScreen() {
     <div className="ops-screen system-screen">
       <header className="ops-screen__title">
         <div>
-          <span>CONTROL NODE / {state.production.screenId}</span>
-          <h1>СИСТЕМА И РЕСУРСЫ</h1>
+          <span>
+            {t('system.controlNodeLabel')} / {state.production.screenId}
+          </span>
+          <h1>{t('system.screenTitle')}</h1>
         </div>
         <div className="system-health">
           <i />
-          КОНТУР СТАБИЛЕН /{' '}
-          {nodes.filter((node) => node.status === 'NORMAL' || node.status === 'ACTIVE').length}/
-          {nodes.length} УЗЛОВ В НОРМЕ
+          {t('system.contourStableLabel')} /{' '}
+          {t('system.nodesNormalCount', {
+            normal: nodes.filter((node) => node.status === 'NORMAL' || node.status === 'ACTIVE')
+              .length,
+            count: nodes.length,
+          })}
         </div>
       </header>
       <TileGrid tiles={tiles} columns={3} className="system-layout" screen="system" />

@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "maintenance",
+  "description": "Update-check and autostart permissions, granted to the control window only. A screen-* display window never checks for updates or touches the autostart registry entry, so it carries none of this -- a grant no caller spends is privilege the shell does not need (see nativeWindowControls.ts). Only updater:allow-check is granted, not updater:default's full allow-download/allow-install/allow-download-and-install set: the frontend only ever calls the plugin's check() (@tauri-apps/plugin-updater); downloading and installing go through this crate's own app_updater commands instead (see that module's doc), which are gated by app_updater::refuse_unless_control_window rather than the ACL, since a plain #[tauri::command] carries no permission identifier for this file to grant in the first place.",
+  "windows": ["control"],
+  "permissions": [
+    "updater:allow-check",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}

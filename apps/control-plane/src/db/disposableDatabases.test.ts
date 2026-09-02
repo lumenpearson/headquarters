@@ -18,9 +18,13 @@ function recordingClient(names: readonly string[]): {
 } {
   const statements: SqlStatement[] = [];
   const client: SqlClient = {
-    query: async (statement) => {
+    // The port's `query` is generic in its row type; a double answering one fixed shape
+    // satisfies it only through an explicit cast on the double, never by widening the port.
+    query: async <Row extends Record<string, unknown>>(statement: SqlStatement) => {
       statements.push(statement);
-      return statement.text.includes('pg_database') ? names.map((datname) => ({ datname })) : [];
+      return (statement.text.includes('pg_database')
+        ? names.map((datname) => ({ datname }))
+        : []) as unknown as readonly Row[];
     },
     transaction: async () => undefined,
   };

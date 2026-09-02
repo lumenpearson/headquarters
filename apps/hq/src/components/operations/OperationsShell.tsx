@@ -10,6 +10,7 @@ import {
 } from '@gremuchaya/settings-schema';
 import {
   TerminalButton,
+  TerminalIcon,
   TerminalInput,
   TerminalMenu,
   TerminalPopover,
@@ -17,7 +18,14 @@ import {
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
 
-import { dateTimeModeLabel, useDateTimeMode, useShellClock } from '@/application/dateTime';
+import {
+  dateTimeModeLabel,
+  useDateTimeMode,
+  useShellClock,
+  useShellDate,
+} from '@/application/dateTime';
+import { dateTimeFormat } from '@/application/localization/intl';
+import { t, useAppLocale } from '@/application/localization/locale';
 import { useActiveKeybinds } from '@/application/keybinds/activeScheme';
 import { formatChord } from '@/application/keybinds/match';
 import { primaryNavigation, routeLabels } from '@/application/navigation';
@@ -26,7 +34,7 @@ import {
   numberSetting,
   stringSetting,
 } from '@/application/personalization/settingValue';
-import { useStringListSetting } from '@/application/personalization/useSetting';
+import { useStringListSetting, useStringSetting } from '@/application/personalization/useSetting';
 import { contextMenuFor } from '@/application/contextMenus/registry';
 import {
   buildContextMenuItems,
@@ -60,15 +68,21 @@ import {
   connectionModeToken,
   realtimeStatusLabel,
   realtimeStatusToken,
+  systemReadinessToken,
 } from '@/application/sync/connection';
 import { linkStatusTokens } from '@/application/sync/controlPlaneLinks';
 
+import { BackgroundShaderLayer } from '@/components/background/BackgroundShaderLayer';
 import { EditableContent } from '@/components/edit/EditableContent';
 import { TitleBar } from '@/components/shell/TitleBar';
+import { toMaterialEntry } from '@/application/materials/importedMaterials';
+import { useMaterialLibrary } from '@/application/materials/useMaterialLibrary';
 
 import { BackgroundVideoLayer, useBackgroundMaterialUrl } from './BackgroundSource';
+import { LocalMaterialPreview } from './LocalMaterialPreview';
 import { Drawer, Gauge, ProgressBar, SeverityBadge, StatusBadge } from './OpsUi';
 import { resolveMotionDurationMs } from './ShellMotion';
+import { clearanceReadout, secureLinkReadout, sectorFocus } from './TopBarReadouts';
 
 const routePaths: Readonly<Partial<Record<OperationsRoute, string>>> = {
   overview: '/overview',
@@ -152,6 +166,7 @@ export function OperationsShell({
   const selectCase = useOperationsStore((state) => state.selectCase);
   const personalization = useOperationsStore((state) => state.personalization);
   const editActive = useOperationsStore((state) => state.edit.active);
+  const videoPlaying = useOperationsStore((state) => state.ui.videoPlaying);
   // Every setting that becomes an attribute or a custom property comes from one
   // table, so a new one is added by declaring it rather than by editing this
   // JSX — and a definition that reaches nothing is caught by a test instead of
@@ -167,6 +182,7 @@ export function OperationsShell({
   const animationIntensity = numberSetting(values, 'animations.intensity');
   const draftAnimations = booleanSetting(values, 'animations.enabled');
   const reducedMotion = booleanSetting(values, 'accessibility.reducedMotion');
+  const backgroundMotionSetting = booleanSetting(values, 'animations.backgroundMotion');
 
   // Only the selected kind resolves a material; the other resolves nothing.
   const backgroundImageUrl = useBackgroundMaterialUrl(
@@ -176,6 +192,22 @@ export function OperationsShell({
     background === 'video' ? backgroundVideoSource : '',
   );
   const motionAllowed = production.animations && draftAnimations && !reducedMotion;
+
+  // R13: high-contrast themes exist to remove decoration that competes with
+  // legibility, so the shader never mounts under either -- not muted, absent,
+  // the same stance `data-background-kind='solid'` already reads as safe.
+  const shellTheme = presentation.attributes['data-theme'];
+  const shaderActive =
+    background === 'bitmap-shader' &&
+    shellTheme !== 'high-contrast-dark' &&
+    shellTheme !== 'high-contrast-light';
+  // The player and the map already spend the GPU budget this ambient layer
+  // would otherwise share, so it holds still while either is the reason the
+  // route exists rather than only while a setting says so.
+  const shaderRouteBusy =
+    route === 'map' ||
+    ((route === 'video' || route === 'cameras' || route === 'video-archive') && videoPlaying);
+  const shaderMotionAllowed = motionAllowed && backgroundMotionSetting && !shaderRouteBusy;
 
   useEffect(() => {
     setRoute(route);
@@ -324,6 +356,13 @@ export function OperationsShell({
       {backgroundVideoUrl === null ? null : (
         <BackgroundVideoLayer source={backgroundVideoUrl} paused={!motionAllowed} />
       )}
+      {!shaderActive ? null : (
+        <BackgroundShaderLayer
+          paused={!shaderMotionAllowed}
+          speed={numberSetting(values, 'backgrounds.motionSpeed')}
+          intensity={animationIntensity}
+        />
+      )}
       <pre className="ops-shell__ascii" aria-hidden="true">
         {asciiSignalField}
       </pre>
@@ -350,6 +389,8 @@ function scaleOf(presentation: ResolvedPresentation, property: string): number {
 function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
   const operation = useOperationsStore((state) => state.operation);
   const production = useOperationsStore((state) => state.production);
+  const sectors = useOperationsStore((state) => state.sectors);
+  const connection = useOperationsStore((state) => state.connection);
   const activeAlerts = useOperationsStore((state) =>
     Object.values(state.alerts).filter((alert) => alert.lifecycle !== 'RESOLVED'),
   );
@@ -359,13 +400,16 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
   // is why `dateTime.mode` could be set to `system` or `utc` and the header
   // would go on showing the operation's own time.
   const clock = useShellClock();
+  const date = useShellDate();
+  const sector = sectorFocus(sectors);
+  const clearance = clearanceReadout(connection.session);
 
   return (
     <header className="ops-topbar">
       <Link href="/overview" className="ops-brand">
         <i aria-hidden="true">◈</i>
         <span>
-          <strong>ГРЕМУЧАЯ//MESH</strong>
+          <strong>{t('topbar.brand')}</strong>
           <small>OPERATIONS CONTROL / ZERO REST</small>
         </span>
       </Link>
@@ -376,36 +420,40 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
             governs. They are marked rather than conditionally rendered so the
             setting changes the shell without remounting the header. */}
         <small data-operational-context="operation">
-          {operation.code} / ФАЗА {operation.currentPhase}
+          {t('topbar.phase', { code: operation.code, phase: operation.currentPhase })}
         </small>
       </div>
       <div className="ops-topbar__metadata">
         <span data-header-entry="date">
-          <small>ДАТА</small>
-          <b>12.09.2026 / СБ</b>
+          <small>{t('topbar.date')}</small>
+          <b>{date}</b>
         </span>
         <span data-operational-context="sector">
-          <small>СЕКТОР</small>
-          <b>S-03 / ТУ</b>
+          <small>{t('field.sector')}</small>
+          <b>{sector === undefined ? '—' : `${sector.code} / ${sector.abbreviation}`}</b>
         </span>
         <span>
-          <small>СЕССИЯ</small>
-          <b>{production.screenId} / ОП-01</b>
+          <small>{t('topbar.session')}</small>
+          <b>
+            {production.screenId} / {t('topbar.operatorCode')}
+          </b>
         </span>
         <span>
-          <small>ДОПУСК</small>
-          <b>АЛЬФА / А1</b>
+          <small>{t('field.clearance')}</small>
+          <b>
+            {clearance.tier} / {clearance.code}
+          </b>
         </span>
         <span className="is-secure">
-          <small>СВЯЗЬ</small>
-          <b>ЗАЩИЩЕНА</b>
+          <small>{t('topbar.link')}</small>
+          <b>{secureLinkReadout(connection.mode)}</b>
         </span>
         <TerminalButton
           onClick={() => {
             const firstAlert = activeAlerts[0];
             if (firstAlert !== undefined) openDrawer('alert', firstAlert.id);
           }}
-          title="Открыть активную тревогу"
+          title={t('topbar.openActiveAlert')}
         >
           <small>ALERT</small>
           <b>{String(activeAlerts.length).padStart(2, '0')}</b>
@@ -430,6 +478,10 @@ function OpsTopBar({ route }: { readonly route: OperationsRoute }) {
  * is mounted at that moment.
  */
 function ShellCommandsMenu() {
+  // Same reason as `OpsNavigation`: the trigger button's own text needs a
+  // subscription nothing else here provides.
+  useAppLocale();
+  const iconSet = useStringSetting('styles.iconSet');
   // Subscribed, not read during render: claims are made in effects, so a list
   // built from a plain table read is the list from the first render, when
   // nothing is claimed and every command draws itself disabled.
@@ -444,9 +496,9 @@ function ShellCommandsMenu() {
       side="bottom"
       align="end"
       trigger={
-        <TerminalButton className="ops-topbar__commands" aria-label="Команды штаба">
-          <small>КОМАНДЫ</small>
-          <b>[≡]</b>
+        <TerminalButton className="ops-topbar__commands" aria-label={t('menu.shell')}>
+          <small>{t('topbar.commandsLabel')}</small>
+          <TerminalIcon name="menu" iconSet={iconSet} />
         </TerminalButton>
       }
     />
@@ -454,18 +506,23 @@ function ShellCommandsMenu() {
 }
 
 function OpsNavigation({ route }: { readonly route: OperationsRoute }) {
+  // Neither selector below touches `personalization`, so the aria-labels this
+  // component translates need their own subscription to follow a locale
+  // switch the way the rest of the shell already does.
+  useAppLocale();
   const compact = useOperationsStore((state) => state.ui.navCompact);
   const hiddenRoutes = useStringListSetting('general.hiddenRoutes');
+  const iconSet = useStringSetting('styles.iconSet');
   const toggle = useOperationsStore((state) => state.toggleNavCompact);
   const screenId = useOperationsStore((state) => state.production.screenId);
   return (
-    <nav className="ops-nav" aria-label="Основная навигация">
+    <nav className="ops-nav" aria-label={t('nav.primaryLabel')}>
       <TerminalButton
         className="ops-nav__compact"
         onClick={toggle}
-        aria-label="Переключить компактную навигацию"
+        aria-label={t('nav.toggleCompact')}
       >
-        {compact ? '[+]' : '[−]'}
+        <TerminalIcon name={compact ? 'expand' : 'collapse'} iconSet={iconSet} />
       </TerminalButton>
       <div>
         {primaryNavigation
@@ -496,9 +553,11 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
   const router = useRouter();
   const metrics = useOperationsStore((state) => state.metrics);
   const alerts = useOperationsStore((state) => state.alerts);
+  const connection = useOperationsStore((state) => state.connection);
   const openDrawer = useOperationsStore((state) => state.openDrawer);
   const elements = useStringListSetting('statusline.elements');
-  const bus = typeof BroadcastChannel === 'undefined' ? 'FALLBACK' : 'BROADCAST';
+  const bus =
+    typeof BroadcastChannel === 'undefined' ? t('token.busFallback') : t('token.busBroadcast');
   const mode = useDateTimeMode();
   const clock = useShellClock();
   const keybinds = useActiveKeybinds();
@@ -540,15 +599,20 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
    * the system badge opens `/system`, the load counters open `/analytics`,
    * the alert counter opens the newest unhandled alert, and the clock cycles
    * `dateTime.mode` through the same enum the settings screen offers.
+   *
+   * The system badge used to print `SYSTEM:READY` regardless of what this
+   * session's connection was doing; `systemReadinessToken` is what it reads
+   * now, from the same `connection` slice `TransportProbe` already reports on
+   * below.
    */
   const entries: Readonly<Record<StatuslineElement, ReactNode>> = {
     system: (
       <TerminalButton
         className="ops-statusline__action"
-        title="Открыть состояние системы"
+        title={t('shell.openSystemStatus')}
         onClick={() => router.push('/system')}
       >
-        <strong>[ SYSTEM:READY ]</strong>
+        <strong>[ SYSTEM:{systemReadinessToken(connection)} ]</strong>
       </TerminalButton>
     ),
     route: <span>~/{route}</span>,
@@ -556,7 +620,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
       <TerminalButton
         className="ops-statusline__action"
         data-detail="standard"
-        title="Открыть аналитику нагрузки"
+        title={t('shell.openLoadAnalytics')}
         onClick={() => router.push('/analytics')}
       >
         CPU {metrics.cpu}%
@@ -566,7 +630,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
       <TerminalButton
         className="ops-statusline__action"
         data-detail="standard"
-        title="Открыть аналитику нагрузки"
+        title={t('shell.openLoadAnalytics')}
         onClick={() => router.push('/analytics')}
       >
         RAM {metrics.ram}%
@@ -576,7 +640,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
       <TerminalButton
         className="ops-statusline__action"
         data-detail="verbose"
-        title="Открыть аналитику нагрузки"
+        title={t('shell.openLoadAnalytics')}
         onClick={() => router.push('/analytics')}
       >
         NET {metrics.networkIn}/{metrics.networkOut}
@@ -586,7 +650,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
     alerts: (
       <TerminalButton
         className="ops-statusline__action"
-        title="Открыть новую тревогу"
+        title={t('shell.openNewAlert')}
         disabled={newAlerts.length === 0}
         onClick={() => {
           const first = newAlerts[0];
@@ -596,7 +660,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
         AL:{newAlerts.length}
       </TerminalButton>
     ),
-    encoding: <span data-detail="verbose">UTF-8</span>,
+    encoding: <span data-detail="verbose">{t('token.utf8')}</span>,
     /* The marker names which clock this is, because the same digits mean
        different things in the three modes and the header shows only the
        digits. */
@@ -604,7 +668,7 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
       <TerminalButton
         className="ops-statusline__action"
         data-detail="standard"
-        title="Переключить режим часов"
+        title={t('shell.toggleClockMode')}
         onClick={cycleDateTimeMode}
       >
         <span data-clock-label>{dateTimeModeLabel(mode)}</span> {clock}
@@ -653,6 +717,9 @@ function OpsStatusLine({ route }: { readonly route: OperationsRoute }) {
  * `ONLINE/POLL` catches up on a timer, and `ONLINE/RETRY` is between attempts.
  */
 function TransportProbe({ bus }: { readonly bus: string }) {
+  // Same reason as `OpsNavigation`: nothing else this component reads
+  // re-renders it when the operator switches `localization.locale`.
+  useAppLocale();
   const screenId = useOperationsStore((state) => state.production.screenId);
   const connection = useOperationsStore((state) => state.connection);
   // One token rather than two adjacent expressions, so the slash between the
@@ -661,43 +728,43 @@ function TransportProbe({ bus }: { readonly bus: string }) {
   return (
     <TerminalPopover
       side="top"
-      title="ТРАНСПОРТ СЕССИИ"
-      description="Чем этот экран синхронизируется с остальными"
+      title={t('statuslineElement.probe')}
+      description={t('transport.description')}
       trigger={
-        <TerminalButton className="ops-statusline__probe" aria-label="Подробности транспорта">
-          BUS:{bus} RPC:GRPC-WEB SYNC:{syncToken}
+        <TerminalButton className="ops-statusline__probe" aria-label={t('transport.detailsLabel')}>
+          BUS:{bus} {t('token.rpcGrpcWeb')} SYNC:{syncToken}
         </TerminalButton>
       }
     >
       <dl className="ops-transport-detail">
         <div>
-          <dt>ШИНА ЭКРАНОВ</dt>
+          <dt>{t('transport.busLabel')}</dt>
           <dd>
-            {bus === 'BROADCAST'
-              ? 'BroadcastChannel — вкладки одного браузера'
-              : 'storage-события — BroadcastChannel недоступен'}
+            {bus === t('token.busBroadcast')
+              ? t('transport.busBroadcastDetail')
+              : t('transport.busFallbackDetail')}
           </dd>
         </div>
         <div>
           <dt>RPC</dt>
-          <dd>ConnectRPC поверх бинарного gRPC-Web</dd>
+          <dd>{t('transport.rpcDetail')}</dd>
         </div>
         <div>
-          <dt>ЭКРАН</dt>
+          <dt>{t('transport.screenLabel')}</dt>
           <dd>{screenId}</dd>
         </div>
         <div>
-          <dt>ГРУППОВАЯ СИНХРОНИЗАЦИЯ</dt>
+          <dt>{t('transport.groupSyncLabel')}</dt>
           <dd>
             {connectionModeLabel(connection.mode)}
             {connection.groupName === undefined ? '' : ` — ${connection.groupName}`}
           </dd>
         </div>
         <div>
-          <dt>АВТОРИТЕТ</dt>
+          <dt>{t('transport.authorityLabel')}</dt>
           <dd>
             {connection.authority === undefined
-              ? 'Группа не назначена'
+              ? t('transport.noGroupAssigned')
               : authorityModeLabel(connection.authority)}
           </dd>
         </div>
@@ -709,31 +776,40 @@ function TransportProbe({ bus }: { readonly bus: string }) {
             row the block had before there was a set. */}
         {connection.links.length === 0 ? (
           <div>
-            <dt>КАНАЛ СОБЫТИЙ</dt>
+            <dt>{t('transport.eventChannelLabel')}</dt>
             <dd>{realtimeStatusLabel('off')}</dd>
           </div>
         ) : (
           connection.links.map((link) => (
             <div key={link.linkId}>
-              <dt>{link.role === 'primary' ? 'СВЯЗЬ · ОСНОВНАЯ' : 'СВЯЗЬ · ЗАПАСНАЯ'}</dt>
+              <dt>
+                {link.role === 'primary'
+                  ? t('transport.linkPrimary')
+                  : t('transport.linkSecondary')}
+              </dt>
               <dd>
                 {link.baseUrl}
                 {' — '}
-                {link.admitted
-                  ? realtimeStatusLabel(link.status)
-                  : 'ДРУГАЯ БАЗА CONTROL PLANE — НЕ ИСПОЛЬЗУЕТСЯ'}
-                {link.lastSequence === 0 ? '' : ` — событие ${link.lastSequence}`}
-                {link.resyncCount === 0 ? '' : `, пересинхронизаций ${link.resyncCount}`}
+                {link.admitted ? realtimeStatusLabel(link.status) : t('transport.otherPlaneUnused')}
+                {link.lastSequence === 0
+                  ? ''
+                  : t('transport.eventMarker', { sequence: link.lastSequence })}
+                {link.resyncCount === 0
+                  ? ''
+                  : t('transport.resyncMarker', { count: link.resyncCount })}
               </dd>
             </div>
           ))
         )}
         <div>
-          <dt>ЧАСЫ ГРУППЫ</dt>
+          <dt>{t('transport.groupClockLabel')}</dt>
           <dd>
             {connection.clock.sampledAt === ''
-              ? 'Не измерены'
-              : `Сдвиг ${connection.clock.offsetMs} мс, задержка ${connection.clock.latencyMs} мс`}
+              ? t('transport.notMeasured')
+              : t('transport.clockOffset', {
+                  offset: connection.clock.offsetMs,
+                  latency: connection.clock.latencyMs,
+                })}
           </dd>
         </div>
         {/* The third fact of the row, beside the mode and the link: whether
@@ -743,11 +819,14 @@ function TransportProbe({ bus }: { readonly bus: string }) {
             compiled-in constants, which are different states to be in on a
             shoot day. */}
         <div>
-          <dt>ЛОКАЛЬНАЯ КОПИЯ</dt>
+          <dt>{t('transport.localMirrorLabel')}</dt>
           <dd>
             {connection.mirror.refreshedAt === ''
-              ? 'Нет — значения берутся из сборки'
-              : `Обновлена ${formatDateTime(connection.mirror.refreshedAt)}, ревизия ${connection.mirror.revision}`}
+              ? t('transport.mirrorNotPresent')
+              : t('transport.mirrorUpdated', {
+                  at: formatDateTime(connection.mirror.refreshedAt),
+                  revision: connection.mirror.revision,
+                })}
           </dd>
         </div>
       </dl>
@@ -815,23 +894,23 @@ function OperationsDrawer() {
         <SeverityBadge severity={alert.level} />
         <dl className="ops-definition-list">
           <div>
-            <dt>ИСТОЧНИК</dt>
+            <dt>{t('field.source')}</dt>
             <dd>{alert.source}</dd>
           </div>
           <div>
-            <dt>СЕКТОР</dt>
+            <dt>{t('field.sector')}</dt>
             <dd>{alert.sectorId}</dd>
           </div>
           <div>
-            <dt>ОБЪЕКТ</dt>
+            <dt>{t('field.object')}</dt>
             <dd>{alert.linkedEntityId}</dd>
           </div>
           <div>
-            <dt>СТАТУС</dt>
+            <dt>{t('field.status')}</dt>
             <dd>{alert.lifecycle}</dd>
           </div>
           <div>
-            <dt>КООРДИНАТЫ</dt>
+            <dt>{t('field.coordinates')}</dt>
             <dd>
               {alert.coordinates.lat}, {alert.coordinates.lng}
             </dd>
@@ -844,7 +923,7 @@ function OperationsDrawer() {
           onClick={() => state.acknowledgeAlert(alert.id)}
           disabled={alert.lifecycle !== 'NEW'}
         >
-          [A] ПОДТВЕРДИТЬ ТРЕВОГУ
+          {t('drawer.confirmAlert')}
         </TerminalButton>
       </Drawer>
     );
@@ -867,7 +946,7 @@ function OperationsDrawer() {
            * one. The title is repeated here as a row for that reason.
            */}
           <div>
-            <dt>НАЗВАНИЕ</dt>
+            <dt>{t('field.name')}</dt>
             <dd>
               <EditableContent field="event.title" entityId={event.id}>
                 {event.title}
@@ -875,7 +954,7 @@ function OperationsDrawer() {
             </dd>
           </div>
           <div>
-            <dt>ВРЕМЯ</dt>
+            <dt>{t('field.time')}</dt>
             <dd>
               <EditableContent field="event.date" entityId={event.id}>
                 {formatDate(event.timestamp)}
@@ -887,15 +966,15 @@ function OperationsDrawer() {
             </dd>
           </div>
           <div>
-            <dt>ИСТОЧНИК</dt>
+            <dt>{t('field.source')}</dt>
             <dd>{event.source}</dd>
           </div>
           <div>
-            <dt>ОБЪЕКТЫ</dt>
+            <dt>{t('field.objects')}</dt>
             <dd>{event.linkedObjectIds.join(', ')}</dd>
           </div>
           <div>
-            <dt>ДЕЛА</dt>
+            <dt>{t('field.cases')}</dt>
             <dd>{event.linkedCaseIds.join(', ')}</dd>
           </div>
         </dl>
@@ -908,14 +987,14 @@ function OperationsDrawer() {
     return (
       <Drawer title={task.title} eyebrow={`TASK / ${task.id}`} onClose={close}>
         <ProgressBar value={task.progress} label={task.direction.toUpperCase()} />
-        <p>Связанные объекты: {task.linkedObjectIds.join(', ')}</p>
+        <p>{t('drawer.linkedObjects', { list: task.linkedObjectIds.join(', ') })}</p>
         <TerminalButton
           tone="primary"
           className="ops-action ops-action--primary"
           onClick={() => state.completeTask(task.id)}
           disabled={task.status === 'completed'}
         >
-          [X] ОТМЕТИТЬ ВЫПОЛНЕННЫМ
+          {t('drawer.completeTask')}
         </TerminalButton>
       </Drawer>
     );
@@ -928,17 +1007,17 @@ function OperationsDrawer() {
         <StatusBadge status={camera.status} />
         <dl className="ops-definition-list">
           <div>
-            <dt>СИГНАЛ</dt>
+            <dt>{t('field.signal')}</dt>
             <dd>{camera.signal}%</dd>
           </div>
           <div>
-            <dt>ПОТОК</dt>
+            <dt>{t('field.stream')}</dt>
             <dd>
               {camera.resolution} / {camera.fps} FPS
             </dd>
           </div>
           <div>
-            <dt>КОДЕК</dt>
+            <dt>{t('field.codec')}</dt>
             <dd>{camera.codec}</dd>
           </div>
           <div>
@@ -946,7 +1025,7 @@ function OperationsDrawer() {
             <dd>{camera.uptime}</dd>
           </div>
         </dl>
-        <Gauge value={camera.signal} label="УРОВЕНЬ СИГНАЛА" />
+        <Gauge value={camera.signal} label={t('drawer.signalLevel')} />
       </Drawer>
     );
   }
@@ -956,18 +1035,22 @@ function OperationsDrawer() {
     return (
       <Drawer title={tacticalRoute.name} eyebrow={`ROUTE / ${tacticalRoute.id}`} onClose={close}>
         <StatusBadge status={tacticalRoute.status} />
-        <ProgressBar value={tacticalRoute.progress} label="ПРОХОЖДЕНИЕ" />
+        <ProgressBar value={tacticalRoute.progress} label={t('drawer.progression')} />
         <dl className="ops-definition-list">
           <div>
-            <dt>ДЛИНА</dt>
-            <dd>{tacticalRoute.lengthKm} КМ</dd>
+            <dt>{t('field.length')}</dt>
+            <dd>
+              {tacticalRoute.lengthKm} {t('unit.km')}
+            </dd>
           </div>
           <div>
             <dt>ETA</dt>
-            <dd>{tacticalRoute.etaMinutes} МИН</dd>
+            <dd>
+              {tacticalRoute.etaMinutes} {t('unit.min')}
+            </dd>
           </div>
           <div>
-            <dt>РИСК</dt>
+            <dt>{t('field.risk')}</dt>
             <dd>{tacticalRoute.risk}%</dd>
           </div>
         </dl>
@@ -982,11 +1065,11 @@ function OperationsDrawer() {
         <StatusBadge status={channel.status} />
         <dl className="ops-definition-list">
           <div>
-            <dt>ШИФРОВАНИЕ</dt>
+            <dt>{t('field.encryption')}</dt>
             <dd>{channel.encryption}</dd>
           </div>
           <div>
-            <dt>ЗАДЕРЖКА</dt>
+            <dt>{t('field.latency')}</dt>
             <dd>{channel.latency} MS</dd>
           </div>
           <div>
@@ -1000,31 +1083,36 @@ function OperationsDrawer() {
   }
   if (drawer.kind === 'file') {
     const file = state.attachments[drawer.id];
-    if (file === undefined) return null;
-    return (
-      <Drawer title={file.title} eyebrow={`FILE / ${file.id}`} onClose={close}>
-        <StatusBadge status={file.status} />
-        <div className={`ops-file-preview ops-file-preview--${file.kind}`}>
-          <i>[{file.kind.toUpperCase()}]</i>
-          <strong>{file.preview}</strong>
-        </div>
-        <dl className="ops-definition-list">
-          <div>
-            <dt>ДОПУСК</dt>
-            <dd>{file.classification}</dd>
+    if (file !== undefined) {
+      return (
+        <Drawer title={file.title} eyebrow={`FILE / ${file.id}`} onClose={close} variant="card">
+          <StatusBadge status={file.status} />
+          <div className={`ops-file-preview ops-file-preview--${file.kind}`}>
+            <i>[{file.kind.toUpperCase()}]</i>
+            <strong>{file.preview}</strong>
           </div>
-          <div>
-            <dt>РАЗМЕР</dt>
-            <dd>{file.sizeLabel}</dd>
-          </div>
-          <div>
-            <dt>ТЕГИ</dt>
-            <dd>{file.tags.join(', ')}</dd>
-          </div>
-        </dl>
-        <TerminalButton className="ops-action">[+] ПРИКРЕПИТЬ К ДЕЛУ</TerminalButton>
-      </Drawer>
-    );
+          <dl className="ops-definition-list">
+            <div>
+              <dt>{t('field.clearance')}</dt>
+              <dd>{file.classification}</dd>
+            </div>
+            <div>
+              <dt>{t('field.size')}</dt>
+              <dd>{file.sizeLabel}</dd>
+            </div>
+            <div>
+              <dt>{t('field.tags')}</dt>
+              <dd>{file.tags.join(', ')}</dd>
+            </div>
+          </dl>
+          <TerminalButton className="ops-action">{t('drawer.attachToCase')}</TerminalButton>
+        </Drawer>
+      );
+    }
+    // An imported material has no `attachments` record -- it lives in
+    // `materials.imported` instead -- so the branch above found nothing and
+    // this one is what actually opens the file viewer for it (t5-player-rework).
+    return <ImportedMaterialDrawer materialId={drawer.id} onClose={close} />;
   }
   const insight = state.insights[drawer.id];
   if (insight === undefined) return null;
@@ -1032,7 +1120,55 @@ function OperationsDrawer() {
     <Drawer title={insight.title} eyebrow={`INSIGHT / ${insight.id}`} onClose={close}>
       <SeverityBadge severity={insight.priority} />
       <p>{insight.explanation}</p>
-      <p>Связанные объекты: {insight.linkedObjectIds.join(', ')}</p>
+      <p>{t('drawer.linkedObjects', { list: insight.linkedObjectIds.join(', ') })}</p>
+    </Drawer>
+  );
+}
+
+/**
+ * The file drawer for a material that lives in `materials.imported` rather
+ * than `state.attachments` -- every material an operator has imported through
+ * `FilesScreen`. `OperationsDrawer`'s file branch used to read `attachments`
+ * only, so `[ENTER] FILE VIEWER` on an import opened nothing at all
+ * (t5-player-rework).
+ *
+ * Exported (unlike the rest of this file's internal components) so
+ * `OperationsShell.test.tsx` can hold it to the re-render resilience
+ * `OperationsDrawer`'s broad `useOperationsStore((value) => value)`
+ * subscription demands of it, without mounting the whole shell.
+ */
+export function ImportedMaterialDrawer({
+  materialId,
+  onClose,
+}: {
+  readonly materialId: string;
+  readonly onClose: () => void;
+}) {
+  const imported = useOperationsStore((state) => state.materials.imported[materialId]);
+  const materialClient = useMaterialLibrary();
+  // `imported` is a stable reference from the store unless the record itself
+  // changes; memoizing against it (rather than recomputing every render) is
+  // what keeps `material`'s identity stable across the unrelated store
+  // mutations `OperationsDrawer`'s broad subscription re-renders this on --
+  // an unstable identity here re-triggers LocalMaterialPreview's source
+  // effect, which revokes the object URL / playback grant it is still
+  // serving (t5-player-rework regression).
+  const material = useMemo(
+    () => (imported === undefined ? undefined : toMaterialEntry(imported)),
+    [imported],
+  );
+  if (material === undefined) return null;
+  return (
+    <Drawer
+      title={material.displayName}
+      eyebrow={`FILE / ${material.materialId}`}
+      onClose={onClose}
+      variant="card"
+    >
+      {/* Keyed by materialId the same way FilesScreen.tsx keys the registry's
+          preview, so a switch between two imports remounts cleanly instead of
+          reusing an instance mid-load. */}
+      <LocalMaterialPreview key={material.materialId} material={material} client={materialClient} />
     </Drawer>
   );
 }
@@ -1046,12 +1182,12 @@ function ProductionPanel() {
       className="production-panel"
       role="dialog"
       aria-modal="true"
-      aria-label="Панель съёмочного режима"
+      aria-label={t('production.panelLabel')}
     >
       <header>
         <div>
           <span>PRODUCTION / LOCAL ONLY</span>
-          <strong>УПРАВЛЕНИЕ СЪЁМОЧНЫМ СОСТОЯНИЕМ</strong>
+          <strong>{t('production.heading')}</strong>
         </div>
         <TerminalButton tone="quiet" onClick={() => state.toggleProductionPanel(false)}>
           [ESC] CLOSE
@@ -1064,7 +1200,7 @@ function ProductionPanel() {
             value={state.production.preset}
             options={productionPresetOptions}
             onValueChange={state.applyPreset}
-            label="Сценарный preset"
+            label={t('production.presetLabel')}
           />
           <TerminalButton onClick={() => state.resetWorld()}>[R] RESET WORLD</TerminalButton>
         </section>
@@ -1075,7 +1211,7 @@ function ProductionPanel() {
             <TerminalInput
               value={state.production.fixedTime}
               onChange={(event) => state.setProductionOption('fixedTime', event.target.value)}
-              aria-label="Фиксированное время production"
+              aria-label={t('production.fixedTimeLabel')}
             />
           </label>
           <label>
@@ -1086,7 +1222,7 @@ function ProductionPanel() {
               onValueChange={(value) =>
                 state.setProductionOption('clockSpeed', Number(value) as 0.5 | 1 | 2 | 5)
               }
-              label="Скорость часов"
+              label={t('production.clockSpeedLabel')}
             />
           </label>
           <TerminalButton
@@ -1149,9 +1285,13 @@ function ProductionPanel() {
         <section className="production-panel__snapshots">
           <h3>CONTINUITY SNAPSHOTS</h3>
           <TerminalButton
-            onClick={() => state.saveSnapshot(`SCENE ${new Date().toLocaleTimeString('ru-RU')}`)}
+            onClick={() =>
+              state.saveSnapshot(
+                `SCENE ${dateTimeFormat({ timeStyle: 'medium' }).format(new Date())}`,
+              )
+            }
           >
-            [S] СОХРАНИТЬ СОСТОЯНИЕ СЦЕНЫ
+            {t('production.saveSnapshot')}
           </TerminalButton>
           {state.production.snapshots.map((snapshot) => (
             <article key={snapshot.id}>
@@ -1192,25 +1332,15 @@ function Toggle({
   );
 }
 
-const dateFormat = new Intl.DateTimeFormat('ru-RU', {
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
-
-const timeFormat = new Intl.DateTimeFormat('ru-RU', {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false,
-});
+const dateParts = { day: '2-digit', month: '2-digit', year: 'numeric' } as const;
+const timeParts = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false } as const;
 
 function formatDate(value: string): string {
-  return dateFormat.format(new Date(value));
+  return dateTimeFormat(dateParts).format(new Date(value));
 }
 
 function formatTime(value: string): string {
-  return timeFormat.format(new Date(value));
+  return dateTimeFormat(timeParts).format(new Date(value));
 }
 
 // The two halves are separate because the event card edits them separately;

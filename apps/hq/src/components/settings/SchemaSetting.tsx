@@ -1,7 +1,16 @@
 'use client';
 
-import type { SettingCategory, SettingDefinition, SettingValue } from '@gremuchaya/settings-schema';
 import {
+  statuslineElements,
+  titlebarElements,
+  type SettingCategory,
+  type SettingDefinition,
+  type SettingValue,
+} from '@gremuchaya/settings-schema';
+import {
+  TerminalColorPicker,
+  TerminalElementsConstructor,
+  TerminalIcon,
   TerminalInput,
   TerminalNumberField,
   TerminalSelect,
@@ -10,13 +19,41 @@ import {
 } from '@gremuchaya/ui/primitives';
 import { useEffect, type ReactNode } from 'react';
 
-import { t } from '@/application/localization/locale';
-import type { MessageId } from '@/application/localization/messages';
+import { t, useAppLocale } from '@/application/localization/locale';
+import type { AppLocale, MessageId } from '@/application/localization/messages';
+import {
+  localizedEnumOptionLabel,
+  localizedSettingDescription,
+  localizedSettingLabel,
+  localizedSettingScope,
+  settingLabel,
+} from '@/application/localization/settingLocalization';
+import { statuslineElementLabel } from '@/application/localization/statuslineLabels';
+import { titlebarElementLabel } from '@/application/localization/titlebarLabels';
 import type { SettingGroup } from '@/application/personalization/catalog';
+import { settingsAwaitingTheirFeature } from '@/application/personalization/presentation';
 
 import { CurveSetting } from './CurveSetting';
 import { useMaterialCatalog } from './MaterialCatalog';
 import { materialOptionsFor, unsetMaterialOption } from './MaterialOptions';
+
+/**
+ * What each `colors.accent` member actually looks like, for the picker below.
+ *
+ * Taken from `operations.css`'s own `body[data-accent='…']` overrides rather
+ * than invented: every regular theme (every theme but the two high-contrast
+ * ones, which replace the accent outright) repaints `--ops-orange` to exactly
+ * these five values. `orange` itself has no such override -- it is the
+ * unmarked default -- so it takes the accent token every theme is built
+ * against instead (`packages/ui/src/styles/tokens.css`).
+ */
+const accentSwatches: Readonly<Record<string, string>> = {
+  orange: '#ff3d00',
+  green: '#53b979',
+  amber: '#d8a547',
+  cyan: '#45b9c6',
+  red: '#dc5c57',
+};
 
 /**
  * Shared between `SettingsScreen` and the edit-mode floating panel, which both
@@ -35,8 +72,13 @@ export function SchemaSetting({
   readonly changed: boolean;
   readonly onValueChange: (value: SettingValue) => void;
 }) {
-  const label = settingLabel(definition.id);
   const editor = definition.editor;
+  // Subscribed rather than read once: a label, a description or an enum
+  // option translated by `settingLocalization.ts` must follow
+  // `localization.locale` the way every other row on this screen already
+  // does.
+  const locale = useAppLocale();
+  const label = localizedSettingLabel(definition, locale);
 
   // Called unconditionally, as a hook must be, but the catalogue only loads
   // when a picker over it is actually on screen.
@@ -59,6 +101,57 @@ export function SchemaSetting({
           />
         );
       case 'enum':
+        // `colors.accent` is a picker over five fixed swatches, never
+        // arbitrary CSS (the definition says so), so it draws the color the
+        // operator is actually choosing rather than the token's own name --
+        // every other enum still reads as a dropdown of its options.
+        if (definition.id === 'colors.accent') {
+          return (
+            <TerminalColorPicker
+              label={label}
+              value={String(value)}
+              onValueChange={onValueChange}
+              options={editor.options.map((option) => ({
+                value: option,
+                label: localizedEnumOptionLabel(definition, option, locale),
+                swatch: accentSwatches[option] ?? option,
+              }))}
+            />
+          );
+        }
+        // `styles.iconSet`: the operator has no reason to recognise a
+        // library's name, only what it draws, so this row gets a preview
+        // strip beside the dropdown -- each option's own close/system/menu
+        // marks, read from that option's adapter regardless of which one is
+        // currently active.
+        if (definition.id === 'styles.iconSet') {
+          return (
+            <span className="settings-iconset-setting">
+              <TerminalSelect
+                label={label}
+                value={String(value)}
+                onValueChange={onValueChange}
+                options={editor.options.map((option) => ({
+                  value: option,
+                  label: localizedEnumOptionLabel(definition, option, locale),
+                }))}
+              />
+              <span className="settings-iconset-preview" aria-hidden="true">
+                {editor.options.map((option) => (
+                  <span
+                    key={option}
+                    className="settings-iconset-preview__option"
+                    data-selected={option === String(value)}
+                  >
+                    <TerminalIcon name="close" iconSet={option} size={16} />
+                    <TerminalIcon name="system" iconSet={option} size={16} />
+                    <TerminalIcon name="menu" iconSet={option} size={16} />
+                  </span>
+                ))}
+              </span>
+            </span>
+          );
+        }
         return (
           <TerminalSelect
             label={label}
@@ -70,7 +163,7 @@ export function SchemaSetting({
             }
             options={editor.options.map((option) => ({
               value: option,
-              label: option.toUpperCase(),
+              label: localizedEnumOptionLabel(definition, option, locale),
             }))}
           />
         );
@@ -124,6 +217,40 @@ export function SchemaSetting({
           <CurveSetting editor={editor} label={label} value={value} onValueChange={onValueChange} />
         );
       case 'string-list':
+        // `titlebar.elements` and `statusline.elements` are each an
+        // arrangement of one fixed, small roster (R25's titlebar
+        // constructor), which the generic comma-delimited text field below
+        // let the operator type badly -- a misspelled or repeated id was
+        // silently dropped rather than refused. `TerminalElementsConstructor`
+        // is the pick-and-order control that replaces it for these two;
+        // every other `string-list` setting has no such roster and keeps the
+        // text field.
+        if (definition.id === 'titlebar.elements') {
+          return (
+            <TerminalElementsConstructor
+              label={label}
+              value={Array.isArray(value) ? value.map(String) : []}
+              onValueChange={onValueChange}
+              options={titlebarElements.map((element) => ({
+                value: element,
+                label: titlebarElementLabel(element),
+              }))}
+            />
+          );
+        }
+        if (definition.id === 'statusline.elements') {
+          return (
+            <TerminalElementsConstructor
+              label={label}
+              value={Array.isArray(value) ? value.map(String) : []}
+              onValueChange={onValueChange}
+              options={statuslineElements.map((element) => ({
+                value: element,
+                label: statuslineElementLabel(element),
+              }))}
+            />
+          );
+        }
         return (
           <TerminalInput
             aria-label={label}
@@ -140,42 +267,92 @@ export function SchemaSetting({
     }
   })();
 
+  const awaitingFeature = settingsAwaitingTheirFeature[definition.id];
+
   return (
     <Setting
+      settingId={definition.id}
       label={`${label}${changed ? ' *' : ''}`}
-      detail={`${definition.scope.toUpperCase()} · ${definition.description}`}
+      detail={`${localizedSettingScope(definition.scope, locale)} · ${settingDescription(definition, locale)}`}
+      notice={awaitingFeature === undefined ? undefined : t('settings.awaitingFeature')}
     >
       {control}
     </Setting>
   );
 }
 
+/**
+ * The row's own description, in the operator's language where one has been
+ * authored, save for the two settings whose description is a bare
+ * `join(', ')` over their member ids: `titlebar.elements` and
+ * `statusline.elements` are each edited as a comma list (`string-list` has no
+ * per-value catalogue the way `enum` does), so their definitions fall back to
+ * naming their members in the schema's own English rather than the
+ * operator's language. These are the two detail lines that read through
+ * `titlebarElementLabel`/`statuslineElementLabel` instead of the raw
+ * description for that reason; every other setting reads through
+ * `localizedSettingDescription`, which itself falls back to the schema's own
+ * English line for a definition this pass has not yet translated.
+ */
+function settingDescription(definition: SettingDefinition, locale: AppLocale): string {
+  if (definition.id === 'titlebar.elements') {
+    return titlebarElements.map((element) => titlebarElementLabel(element)).join(', ');
+  }
+  if (definition.id === 'statusline.elements') {
+    return statuslineElements.map((element) => statuslineElementLabel(element)).join(', ');
+  }
+  return localizedSettingDescription(definition, locale);
+}
+
 export function Setting({
+  settingId,
   label,
   detail,
+  notice,
   children,
 }: {
+  /**
+   * The definition id this row edits, published to the DOM so a caller can
+   * find the row without reading its label.
+   *
+   * The label is now translated, and a locale is a thing an operator changes.
+   * Anything that located a control by the words next to it -- the end-to-end
+   * specs did, through the English `TILES / PRESENTATION` that
+   * `settingLabel` used to generate -- was therefore asserting about one
+   * language rather than about the setting, and broke the moment the label
+   * became Russian. The id is the contract the schema already keys
+   * everything else off, and it is the same in every locale.
+   *
+   * Optional because `Setting` also draws rows that edit no definition (the
+   * group and address panels compose it directly); those carry no id rather
+   * than an invented one.
+   */
+  readonly settingId?: string | undefined;
   readonly label: string;
   readonly detail: string;
+  readonly notice?: string | undefined;
   readonly children: ReactNode;
 }) {
   return (
-    <div className="settings-row">
+    <div className="settings-row" data-setting-id={settingId}>
       <span>
         <strong>{label}</strong>
         <small>{detail}</small>
+        {notice === undefined ? null : <small className="settings-row__notice">{notice}</small>}
       </span>
       {children}
     </div>
   );
 }
 
-export function settingLabel(id: string): string {
-  return id
-    .replaceAll('.', ' / ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .toUpperCase();
-}
+/**
+ * Re-exported so the existing `import { settingLabel } from './SchemaSetting'`
+ * call sites (`EditPanel.test.tsx`, `SchemaSetting.test.tsx`) keep working.
+ * The implementation moved to `settingLocalization.ts`: it is the last-resort
+ * fallback {@link localizedSettingLabel} falls back to, and living beside that
+ * function keeps the two from having to import back across each other.
+ */
+export { settingLabel };
 
 /**
  * The name of a section, in the words an operator would use to look for it.

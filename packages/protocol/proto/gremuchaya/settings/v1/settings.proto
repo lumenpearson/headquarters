@@ -230,6 +230,93 @@ message WatchSettingsResponse {
   SettingsEvent event = 1;
 }
 
+// One tile's place on a screen, as a layout document records it.
+//
+// The geometry is the bounded grid `@gremuchaya/layout-engine` packs: a column
+// and a row, and how many of each the tile spans. It is a typed message rather
+// than an opaque blob so the stored document can be read back by anything that
+// speaks this contract, and so a malformed placement is refused by the wire
+// decoder rather than by whichever screen tried to draw it.
+message LayoutTilePlacement {
+  string tile_id = 1;
+  uint32 column = 2;
+  uint32 row = 3;
+  uint32 column_span = 4;
+  uint32 row_span = 5;
+  // A tile the operator hid on this screen. It keeps its place so unhiding it
+  // does not move every other tile.
+  bool hidden = 6;
+}
+
+// The arrangement of one screen, under one scope.
+//
+// A layout belongs to a `SettingsScope` for the same reason a settings document
+// does: a group agrees on how its wall is arranged, and a device may arrange
+// its own. `FACTORY` and `THEME` have no layout — a scope with no home in
+// `layout_documents` is refused rather than invented.
+message LayoutDocument {
+  gremuchaya.common.v1.ResourceId id = 1;
+  SettingsScope scope = 2;
+  string screen_id = 3;
+  repeated LayoutTilePlacement tiles = 4;
+  gremuchaya.common.v1.Revision revision = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// Replaces a screen's layout with the tiles the caller sends.
+//
+// The whole arrangement travels, not a delta: a layout is small, and a CRDT
+// merge would need an engine this control plane deliberately does not carry
+// (correction C32). `expected_revision` is what keeps a whole-document put from
+// being a lost-update generator — a caller that names the revision it edited is
+// refused when another device has moved the document since, instead of
+// silently overwriting that device's arrangement. Zero means "whatever is
+// there", which is the honest value for the first put of a screen.
+message PutLayoutDocumentRequest {
+  gremuchaya.common.v1.MutationContext context = 1;
+  SettingsScope scope = 2;
+  string screen_id = 3;
+  repeated LayoutTilePlacement tiles = 4;
+  gremuchaya.common.v1.Revision expected_revision = 5;
+}
+
+message PutLayoutDocumentResponse {
+  LayoutDocument document = 1;
+}
+
+message GetLayoutDocumentRequest {
+  SettingsScope scope = 1;
+  string screen_id = 2;
+}
+
+message GetLayoutDocumentResponse {
+  // Absent when this scope has never arranged this screen. An absent document
+  // is not an error: it is the state every screen starts in, and reporting it
+  // as `NOT_FOUND` would make a first-run client treat a normal condition as a
+  // failure.
+  LayoutDocument document = 1;
+}
+
+// One recorded revision of a layout, as `layout_versions` holds it.
+message LayoutHistoryEntry {
+  gremuchaya.common.v1.Revision revision = 1;
+  repeated LayoutTilePlacement tiles = 2;
+  gremuchaya.common.v1.ResourceId actor_device_id = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  string correlation_id = 5;
+}
+
+message ListLayoutHistoryRequest {
+  SettingsScope scope = 1;
+  string screen_id = 2;
+  gremuchaya.common.v1.PageRequest page = 3;
+}
+
+message ListLayoutHistoryResponse {
+  repeated LayoutHistoryEntry entries = 1;
+  gremuchaya.common.v1.PageInfo page = 2;
+}
+
 service SettingsService {
   rpc GetEffectiveSettings(GetEffectiveSettingsRequest) returns (GetEffectiveSettingsResponse);
   rpc GetSettingsSchema(GetSettingsSchemaRequest) returns (GetSettingsSchemaResponse);
@@ -244,4 +331,14 @@ service SettingsService {
   rpc RevertSettingsVersion(RevertSettingsVersionRequest) returns (RevertSettingsVersionResponse);
   rpc ListSettingsHistory(ListSettingsHistoryRequest) returns (ListSettingsHistoryResponse);
   rpc WatchSettings(WatchSettingsRequest) returns (stream WatchSettingsResponse);
+  // The layout half of this service, added because no method of any other
+  // service could fill `layout_documents` or `layout_versions`: a
+  // `PublishDocumentDelta` with `SYNCHRONIZED_DOCUMENT_TYPE_LAYOUT` carries a
+  // CRDT delta, and merging one needs an engine `apps/control-plane` does not
+  // depend on, so it lands in `sync_snapshots` instead. These three methods are
+  // the alternative correction C32 named: a whole-document put with an expected
+  // revision, its read, and the version log that put appends to.
+  rpc PutLayoutDocument(PutLayoutDocumentRequest) returns (PutLayoutDocumentResponse);
+  rpc GetLayoutDocument(GetLayoutDocumentRequest) returns (GetLayoutDocumentResponse);
+  rpc ListLayoutHistory(ListLayoutHistoryRequest) returns (ListLayoutHistoryResponse);
 }

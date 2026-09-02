@@ -4,13 +4,26 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { contentElementId } from '../../application/edit/contentFields';
+import { localizedSettingLabel } from '../../application/localization/settingLocalization';
 import { settingGroups } from '../../application/personalization/catalog';
 import { operationsStore } from '../../state/operationsStore';
-import { settingLabel } from '../settings/SchemaSetting';
+import { fireKeybind } from '../keybinds/KeybindRuntime';
 import { EditPanel } from './EditPanel';
 
 function button(name: RegExp): HTMLButtonElement {
   return screen.getByRole('button', { name }) as HTMLButtonElement;
+}
+
+/**
+ * The row label the panel actually draws, for the id given: `SchemaSetting`
+ * reads it through `localizedSettingLabel`, not through the raw id-surgery
+ * `settingLabel()` falls back to -- every definition has a translated label
+ * as of this pass, so the two would no longer agree.
+ */
+function rowLabel(id: string): string {
+  const definition = settingsDefinitions.find((candidate) => candidate.id === id);
+  if (definition === undefined) throw new Error(`${id} is not declared`);
+  return localizedSettingLabel(definition, 'ru');
 }
 
 describe('EditPanel', () => {
@@ -33,6 +46,76 @@ describe('EditPanel', () => {
     operationsStore.getState().dockEditPanel('left');
     const { container } = render(<EditPanel />);
     expect(container.querySelector('.edit-panel')?.getAttribute('data-edge')).toBe('left');
+  });
+
+  it('opens as the collapsed pill, and its own control expands it', () => {
+    operationsStore.getState().enterEditMode();
+    const { container } = render(<EditPanel />);
+    const panel = () => container.querySelector('.edit-panel');
+    expect(panel()?.getAttribute('data-expanded')).toBe('false');
+
+    const toggle = screen.getByRole('button', { name: 'Развернуть панель' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(toggle);
+
+    expect(operationsStore.getState().edit.panelExpanded).toBe(true);
+    expect(panel()?.getAttribute('data-expanded')).toBe('true');
+    expect(
+      screen.getByRole('button', { name: 'Свернуть панель' }).getAttribute('aria-expanded'),
+    ).toBe('true');
+  });
+
+  it('docks to the next edge from the keyboard, alongside the pointer drag', () => {
+    // The keyboard equivalent of the magnetic edge dragging snaps to: there is
+    // no pointer release position to read, so the chord cycles the same four
+    // edges instead of picking one directly. The panel starts collapsed here,
+    // which is the state this chord has to keep working in -- the docking
+    // machinery is on the one root shared with the expanded body, not on a
+    // second component.
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().dockEditPanel('left');
+    const { container } = render(<EditPanel />);
+    const panel = () => container.querySelector('.edit-panel');
+    expect(panel()?.getAttribute('data-expanded')).toBe('false');
+    expect(panel()?.getAttribute('data-edge')).toBe('left');
+
+    act(() => {
+      fireKeybind('edit.dockPanel');
+    });
+    expect(panel()?.getAttribute('data-edge')).toBe('top');
+
+    act(() => {
+      fireKeybind('edit.dockPanel');
+    });
+    expect(panel()?.getAttribute('data-edge')).toBe('right');
+  });
+
+  it('docks to the next edge from the keyboard while the panel is expanded too', () => {
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().dockEditPanel('left');
+    operationsStore.getState().setEditPanelExpanded(true);
+    const { container } = render(<EditPanel />);
+    const panel = () => container.querySelector('.edit-panel');
+    expect(panel()?.getAttribute('data-expanded')).toBe('true');
+    expect(panel()?.getAttribute('data-edge')).toBe('left');
+
+    act(() => {
+      fireKeybind('edit.dockPanel');
+    });
+    expect(panel()?.getAttribute('data-edge')).toBe('top');
+  });
+
+  it('does nothing while edit mode is off, though there is no panel to dock', () => {
+    // `EditPanel` is mounted whether or not edit mode is active -- it only
+    // renders `null` -- so the chord stays claimed and `fireKeybind` reports
+    // it ran; the guard inside the handler is what keeps it a no-op here,
+    // the same way the panel's own placement effects guard themselves.
+    operationsStore.getState().dockEditPanel('left');
+    render(<EditPanel />);
+
+    expect(fireKeybind('edit.dockPanel')).toBe(true);
+    expect(operationsStore.getState().edit.dockEdge).toBe('left');
   });
 
   it('disables undo and the issue draft until something is actually changed', () => {
@@ -82,8 +165,8 @@ describe('EditPanel', () => {
     expect(headings).toContain('ТИПОГРАФИКА');
 
     // Settings from more than one of those categories are on screen together.
-    expect(screen.getByText(settingLabel('themes.id'))).toBeTruthy();
-    expect(screen.getByText(settingLabel('typography.weight'))).toBeTruthy();
+    expect(screen.getByText(rowLabel('themes.id'))).toBeTruthy();
+    expect(screen.getByText(rowLabel('typography.weight'))).toBeTruthy();
   });
 
   it('offers seven sections rather than thirty-two categories', () => {
@@ -101,7 +184,7 @@ describe('EditPanel', () => {
     render(<EditPanel />);
 
     // `advanced.liveEdit` lives in `system`; the panel is open on `appearance`.
-    expect(screen.queryByText(settingLabel('advanced.liveEdit'))).toBeNull();
+    expect(screen.queryByText(rowLabel('advanced.liveEdit'))).toBeNull();
 
     fireEvent.change(screen.getByLabelText('Поиск по настройкам'), {
       target: { value: 'liveedit' },
@@ -110,8 +193,8 @@ describe('EditPanel', () => {
     // A search scoped to the open section would answer "no such setting" for a
     // setting that exists, which is the failure a section grouping creates and
     // has to answer for.
-    expect(screen.getByText(settingLabel('advanced.liveEdit'))).toBeTruthy();
-    expect(screen.queryByText(settingLabel('themes.id'))).toBeNull();
+    expect(screen.getByText(rowLabel('advanced.liveEdit'))).toBeTruthy();
+    expect(screen.queryByText(rowLabel('themes.id'))).toBeNull();
   });
 
   it('says so when a search matches nothing, instead of showing an empty panel', () => {
@@ -138,9 +221,12 @@ describe('EditPanel', () => {
     // actually opens; this proves the search half over all of it.
     for (const definition of settingsDefinitions) {
       fireEvent.change(box, { target: { value: definition.id } });
-      expect(screen.queryByText(settingLabel(definition.id))).not.toBeNull();
+      expect(screen.queryByText(localizedSettingLabel(definition, 'ru'))).not.toBeNull();
     }
-  });
+    // One render per definition over the whole catalogue is the point of the
+    // test and legitimately outgrows the default five-second budget as the
+    // panel and the registry gain sections; the walk is linear, not hung.
+  }, 30000);
 
   it('closing from the panel leaves the draft intact, so edits survive reopening', () => {
     operationsStore.getState().enterEditMode();
@@ -181,6 +267,21 @@ describe('EditPanel content editing (R4)', () => {
     fireEvent.click(button(/отменить/i));
     expect(operationsStore.getState().content.overrides).toEqual({});
     expect(screen.getByText('0 ИЗМЕНЕНИЙ')).toBeTruthy();
+  });
+
+  it('expands the collapsed pill the moment an element is selected, not only before it mounts', () => {
+    operationsStore.getState().enterEditMode();
+    const { container } = render(<EditPanel />);
+    expect(container.querySelector('.edit-panel')?.getAttribute('data-expanded')).toBe('false');
+
+    act(() => {
+      operationsStore.getState().selectEditElement(contentElementId('case.title', 'CASE-01'));
+    });
+
+    // A collapsed pill answering a selection with nothing would make it look
+    // ignored; this is the live transition, not the panel mounting already
+    // expanded because the selection was made before it rendered.
+    expect(container.querySelector('.edit-panel')?.getAttribute('data-expanded')).toBe('true');
   });
 
   it('shows the editor for the content field selected on screen and applies a date at once', () => {

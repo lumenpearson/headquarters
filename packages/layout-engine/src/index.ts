@@ -31,6 +31,40 @@ export interface GridLayoutRequest {
   readonly columns: number;
   readonly maximumRows: number;
   readonly tiles: readonly TileDescriptor[];
+  /**
+   * The width, in the same unit as {@link minimumTileWidth}, that the
+   * `columns` axis currently spans. Optional together with
+   * `minimumTileWidth`: a caller that has not measured a container yet, or
+   * never intends to enforce a floor, gets exactly the placement this
+   * resolver always gave — decided by cell count alone.
+   */
+  readonly containerWidth?: number;
+  /**
+   * The floor a placed tile's rendered width should clear, in the same unit
+   * as {@link containerWidth}.
+   *
+   * This is not `columns` reduced by a computed minimum count. `columns` is
+   * a coordinate system a screen declares for itself, not a pixel promise —
+   * one screen places its registry in twelfths of the row, another in
+   * quarters — and shrinking the total column count to fit a pixel floor
+   * makes every tile whose declared span assumed the original count
+   * unplaceable outright, which is what emptied eleven routes and failed
+   * four `R10` scenarios when it was tried as a stylesheet rule instead.
+   * `columns` itself is never touched here: the floor is checked per
+   * candidate variant against the real `containerWidth`, and a tile that
+   * fails it is handed to exactly the policy an ordinary overflow already
+   * uses — `relocationRoute` or `hideWhenOverflow` — so it is relocated or
+   * hidden by name, never silently dropped (`R10`).
+   *
+   * A tile with **no** overflow policy is placed anyway even when every
+   * variant falls under the floor: relocation frees no room when there is
+   * nowhere to send the tile and no permission to hide it, so the floor is
+   * never the reason a required tile disappears. That is what keeps this
+   * engine's existing fails-closed contract for a genuinely oversized tile
+   * — `LayoutOverflowError` — reserved for a tile that does not fit the grid
+   * at all, rather than one that merely renders narrower than preferred.
+   */
+  readonly minimumTileWidth?: number;
 }
 
 export interface PlacedTile extends TileSize {
@@ -75,11 +109,32 @@ export function resolveGridLayout(request: GridLayoutRequest): GridLayoutResult 
   const ordered = request.tiles
     .map((tile, index) => ({ tile, index }))
     .sort((left, right) => right.tile.priority - left.tile.priority || left.index - right.index);
+  const columnWidth =
+    request.containerWidth === undefined ? undefined : request.containerWidth / request.columns;
 
   for (const { tile } of ordered) {
-    const candidate = findPlacement(tile, placed, request.columns, request.maximumRows);
+    const candidate = findPlacement(
+      tile,
+      placed,
+      request.columns,
+      request.maximumRows,
+      columnWidth,
+      request.minimumTileWidth,
+    );
     if (candidate !== undefined) {
       placed.push(candidate);
+      continue;
+    }
+    const canLeave = tile.relocationRoute !== undefined || tile.hideWhenOverflow === true;
+    // Failed only against the floor, and with nowhere to send it: placed at
+    // its normal size rather than treated as an overflow that policy alone
+    // decides, which is `minimumTileWidth`'s own contract (see the field's
+    // doc comment).
+    const withoutFloor = canLeave
+      ? undefined
+      : findPlacement(tile, placed, request.columns, request.maximumRows, undefined, undefined);
+    if (withoutFloor !== undefined) {
+      placed.push(withoutFloor);
       continue;
     }
     if (tile.relocationRoute !== undefined) {
@@ -131,6 +186,18 @@ function validateRequest(request: GridLayoutRequest): void {
   }
   if (!Number.isInteger(request.maximumRows) || request.maximumRows < 1) {
     throw new Error('Grid maximumRows must be a positive integer.');
+  }
+  if (
+    request.containerWidth !== undefined &&
+    (!Number.isFinite(request.containerWidth) || request.containerWidth <= 0)
+  ) {
+    throw new Error('Grid containerWidth must be a positive finite number.');
+  }
+  if (
+    request.minimumTileWidth !== undefined &&
+    (!Number.isFinite(request.minimumTileWidth) || request.minimumTileWidth <= 0)
+  ) {
+    throw new Error('Grid minimumTileWidth must be a positive finite number.');
   }
   const ids = new Set<string>();
   for (const tile of request.tiles) {
@@ -184,9 +251,18 @@ function findPlacement(
   placed: readonly MutablePlacedTile[],
   columns: number,
   maximumRows: number,
+  columnWidth: number | undefined,
+  minimumTileWidth: number | undefined,
 ): MutablePlacedTile | undefined {
   for (const variant of tile.variants) {
     if (variant.columns > columns || variant.rows > maximumRows) continue;
+    if (
+      columnWidth !== undefined &&
+      minimumTileWidth !== undefined &&
+      variant.columns * columnWidth < minimumTileWidth
+    ) {
+      continue;
+    }
     for (let y = 0; y <= maximumRows - variant.rows; y += 1) {
       for (let x = 0; x <= columns - variant.columns; x += 1) {
         const candidate: MutablePlacedTile = { id: tile.id, ...variant, x, y };

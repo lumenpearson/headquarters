@@ -4,6 +4,7 @@ import { t } from './locale';
 import type { MessageId } from './messages';
 
 import type { TileMotion } from '@/application/personalization/tileMotion';
+import type { TilePresentationLevel } from '@/application/personalization/tilePresentation';
 
 /**
  * What a tile group and a tile motion are called, once.
@@ -45,4 +46,15 @@ const motionMessages: Readonly<Record<TileMotion, MessageId>> = {
 
 export function tileMotionLabel(motion: TileMotion): string {
   return t(motionMessages[motion]);
+}
+
+const presentationMessages: Readonly<Record<TilePresentationLevel | 'auto', MessageId>> = {
+  auto: 'tilePresentation.auto',
+  full: 'tilePresentation.full',
+  compact: 'tilePresentation.compact',
+  minimal: 'tilePresentation.minimal',
+};
+
+export function tilePresentationLabel(level: TilePresentationLevel | 'auto'): string {
+  return t(presentationMessages[level]);
 }

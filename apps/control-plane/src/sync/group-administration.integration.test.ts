@@ -92,7 +92,7 @@ describeIntegration('durable group administration against real PostgreSQL', () =
       // announcement reads.
       const [first, second] = await Promise.all([rename(), rename()]);
 
-      expect([first.replayed, second.replayed].toSorted()).toEqual([false, true]);
+      expect([first.replayed, second.replayed].sort()).toEqual([false, true]);
       expect(second.group.revision).toBe(first.group.revision);
       const stored = await database.query<{ revision: string }>({
         text: 'SELECT revision::text AS revision FROM groups WHERE id = $1',
@@ -357,6 +357,55 @@ describeIntegration('durable group administration against real PostgreSQL', () =
   );
 
   it(
+    'stores a publication whose document id is a name rather than a UUID',
+    async () => {
+      /*
+       * The one document the application actually publishes is
+       * `settings.live-edit` (`GroupLiveEditTransport`), and every other test
+       * here mints `crypto.randomUUID()` -- which is exactly why the uuid
+       * column type behind `document_id` (migration 0014 widens it to text)
+       * held for so long: against real PostgreSQL every real publication
+       * failed `invalid input syntax for type uuid` while every test passed.
+       */
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const events = new DurableRealtimeEventStore({ database });
+      const documentId = 'settings.live-edit';
+
+      const appended = await events.appendAuthorized({
+        groupId: owner.groupId,
+        actorDeviceId: owner.authenticated.device.id,
+        kind: syncV1.GroupEventKind.DOCUMENT_DELTA,
+        documentId,
+        documentType: syncV1.SynchronizedDocumentType.SETTINGS,
+        documentDelta: Uint8Array.from([1, 2, 3]),
+        stateVector: Uint8Array.from([4, 5]),
+      });
+      expect(appended.event.sequence).toBe(1n);
+
+      const snapshot = await events.readDocumentSnapshot(owner.groupId, documentId);
+      expect(snapshot?.sequence).toBe(1n);
+      expect(snapshot?.documentType).toBe(syncV1.SynchronizedDocumentType.SETTINGS);
+      // A document nobody published stays a miss, not an error: the client
+      // maps NOT_FOUND to null and `GroupSnapshotDownloader.absorb` keeps the
+      // sequence it holds. An error here is what kept the group mirror from
+      // ever being written.
+      expect(await events.readDocumentSnapshot(owner.groupId, 'settings.never-published')).toBe(
+        undefined,
+      );
+      // The unauthorized append path binds the same column without a cast
+      // and must take the column's own type.
+      const plain = await events.append({
+        groupId: owner.groupId,
+        kind: syncV1.GroupEventKind.DOCUMENT_DELTA,
+        documentId,
+      });
+      expect(plain.sequence).toBe(2n);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'refuses a publication from a viewer and writes nothing',
     async () => {
       const runtime = createRuntime();
@@ -424,6 +473,110 @@ describeIntegration('durable group administration against real PostgreSQL', () =
         name: 'PairedDeviceRuntimeError',
         code: 'PERMISSION_DENIED',
       });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'updates a reported screen in place, and reports nothing for a device the group no longer has',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const second = await pairDevice(runtime, owner);
+      const presence = new DurablePresenceStore({ database });
+      await presence.record({
+        groupId: owner.groupId,
+        deviceId: owner.authenticated.device.id,
+        status: 'ONLINE',
+        activeScreen: '/overview',
+        latencyMs: 40,
+      });
+      await presence.record({
+        groupId: owner.groupId,
+        deviceId: second.deviceId,
+        status: 'ONLINE',
+        activeScreen: '/overview',
+      });
+
+      const reported = await presence.reportDetail({
+        groupId: owner.groupId,
+        deviceId: owner.authenticated.device.id,
+        activeScreen: '/materials',
+        selectedElement: 'case-12',
+        clockOffsetMs: -34n,
+        latencyMs: 11,
+      });
+
+      // The four columns the table has carried since the first migration, now
+      // written by something other than a join, and read back from the row
+      // rather than from the value the store returned.
+      expect(reported).toMatchObject({
+        activeScreen: '/materials',
+        selectedElement: 'case-12',
+        clockOffsetMs: -34n,
+        latencyMs: 11,
+      });
+      const stored = await database.query<{
+        status: string;
+        active_screen: string;
+        selected_element: string;
+        clock_offset_ms: string;
+        latency_ms: number;
+      }>({
+        text: `SELECT status, active_screen, selected_element,
+                      clock_offset_ms::text AS clock_offset_ms, latency_ms
+                 FROM presence_snapshots WHERE group_id = $1 AND device_id = $2`,
+        values: [owner.groupId, owner.authenticated.device.id],
+      });
+      expect(stored[0]).toEqual({
+        // Untouched by the report: joining and leaving are the only two things
+        // that move it, and a report that could set it would be a third way
+        // into the session.
+        status: 'ONLINE',
+        active_screen: '/materials',
+        selected_element: 'case-12',
+        clock_offset_ms: '-34',
+        latency_ms: 11,
+      });
+
+      await runtime.revokeDevice(owner.authenticated, owner.groupId, second.deviceId);
+      const afterRevocation = await presence.reportDetail({
+        groupId: owner.groupId,
+        deviceId: second.deviceId,
+        activeScreen: '/materials',
+        selectedElement: '',
+        clockOffsetMs: 0n,
+        latencyMs: 5,
+      });
+
+      // The membership join inside the statement is what refuses it, so the
+      // check cannot be stale by the time the row is written; a revoked device
+      // holding a token that outlived its membership updates nothing.
+      expect(afterRevocation).toBeUndefined();
+      const revokedRow = await database.query<{ active_screen: string }>({
+        text: 'SELECT active_screen FROM presence_snapshots WHERE group_id = $1 AND device_id = $2',
+        values: [owner.groupId, second.deviceId],
+      });
+      expect(revokedRow[0]?.active_screen).toBe('/overview');
+
+      // And a device with no presence row at all gets none: the statement is an
+      // `UPDATE`, so there is nothing for it to insert.
+      const third = await pairDevice(runtime, owner);
+      expect(
+        await presence.reportDetail({
+          groupId: owner.groupId,
+          deviceId: third.deviceId,
+          activeScreen: '/system',
+          selectedElement: '',
+          clockOffsetMs: 0n,
+          latencyMs: 5,
+        }),
+      ).toBeUndefined();
+      const rows = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM presence_snapshots WHERE group_id = $1 AND device_id = $2',
+        values: [owner.groupId, third.deviceId],
+      });
+      expect(rows[0]?.n).toBe(0);
     },
     networkTimeoutMs,
   );

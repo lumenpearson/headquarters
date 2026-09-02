@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { Code, ConnectError, cors, type ConnectRouter } from '@connectrpc/connect';
+import { cors, type ConnectRouter } from '@connectrpc/connect';
 import { connectNodeAdapter } from '@connectrpc/connect-node';
 import {
   bridgeConfigSchema,
@@ -11,19 +11,19 @@ import {
   type BridgeEvent,
   type BridgeEntry,
 } from '@gremuchaya/config';
-import { EntryKind, FileBridgeService, FileEventKind } from '@gremuchaya/protocol';
+import { BridgeFailure, EntryKind, FileBridgeService, FileEventKind } from '@gremuchaya/protocol';
 
 import { BridgeEventHub } from './BridgeEventHub.js';
 import { BridgeService } from './BridgeService.js';
 import { BridgeWatcher } from './BridgeWatcher.js';
 import { loadBridgeConfig } from './config.js';
-import { MaterialMirror, MaterialMirrorError, type MaterialImportEntry } from './MaterialMirror.js';
+import { BridgeFailureError, bridgeFailureInterceptor, toBridgeConnectError } from './errors.js';
+import { MaterialMirror, type MaterialImportEntry } from './MaterialMirror.js';
 import {
   MaterialPlaybackGrantError,
   MaterialPlaybackRegistry,
   type MaterialPlaybackSource,
 } from './MaterialPlaybackRegistry.js';
-import { PathSecurityError } from './pathSecurity.js';
 
 const protocolVersion = bridgeProtocolVersion;
 const chunkSize = 64 * 1024;
@@ -47,6 +47,10 @@ export async function startBridge(config: BridgeConfig) {
     connect: false,
     grpc: false,
     grpcWeb: true,
+    // Applied to every registered method, so a handler that raises without a
+    // `try` of its own still answers with a code rather than with Connect's
+    // `unknown` and the raw exception text.
+    interceptors: [bridgeFailureInterceptor],
     routes: (router) =>
       registerBridgeRoutes(router, service, materials, playback, events, startedAt, () =>
         requireBridgeOrigin(bridgeOrigin),
@@ -68,6 +72,17 @@ export async function startBridge(config: BridgeConfig) {
 
   if (normalizedConfig.materialImport.enabled) await materials.initialize();
   await watcher.start();
+  // The arming wait belongs to bridge startup, and this is where it is paid.
+  // The watcher ignores its initial scan, so between `start()` and readiness it
+  // announces nothing while `Watch` reports a healthy stream — a client cannot
+  // tell that window from a mount where nothing happened, and a file created in
+  // it is lost for good. Opening the port only once every mount is armed makes
+  // "the bridge answered" mean "the bridge is reporting changes". The price is
+  // the one the alternative avoided: a large media mount delays the listening
+  // socket for the length of its scan, during which the client sees a bridge
+  // that is not up yet — an honest state it already handles, unlike silence
+  // that looks like a quiet disk.
+  await watcher.whenArmed();
   await new Promise<void>((resolveListening, rejectListening) => {
     server.once('error', rejectListening);
     server.listen(normalizedConfig.port, '127.0.0.1', () => {
@@ -84,7 +99,21 @@ export async function startBridge(config: BridgeConfig) {
     activeWatchSubscriberCount: () => events.subscriberCount(),
     close: async () => {
       playback.clear();
+      // Order matters. `server.close()` below resolves only once every response
+      // has finished, and an open `Watch` response never finishes on its own, so
+      // the hub is closed first: each subscription's `for await` unwinds, the
+      // streaming handler returns, and those responses complete normally. The
+      // watcher is stopped next so nothing is published into a hub nobody reads.
+      events.close();
       await watcher.close();
+      // One macro task, and it is load-bearing. The subscriptions end on the
+      // turn after `events.close()`, and only then does their response finish
+      // and its keep-alive socket fall idle. `server.close()` reaps a connection
+      // that is already idle but leaves an active one to time out on its own,
+      // which cost three seconds of shutdown when it was called on the same turn
+      // as the hub. Yielding here costs nothing and asks the runtime for no
+      // special treatment of a socket with a request still in flight.
+      await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
       await new Promise<void>((resolveClose, rejectClose) =>
         server.close((error) => (error === undefined ? resolveClose() : rejectClose(error))),
       );
@@ -116,7 +145,7 @@ function registerBridgeRoutes(
         const entries = await service.list(required(request.mountId, 'mount_id'), request.path);
         return { entries: entries.map(toRpcEntry) };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async *readFile(request, context) {
@@ -147,7 +176,7 @@ function registerBridgeRoutes(
           };
         }
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async *watch(request, context) {
@@ -169,7 +198,7 @@ function registerBridgeRoutes(
           ),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async uploadMaterialChunk(request) {
@@ -184,7 +213,7 @@ function registerBridgeRoutes(
           ),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     getMaterialImportStatus(request) {
@@ -193,7 +222,7 @@ function registerBridgeRoutes(
           session: toRpcImportSession(materials.status(required(request.uploadId, 'upload_id'))),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async completeMaterialImport(request) {
@@ -204,7 +233,7 @@ function registerBridgeRoutes(
           deduplicated: completed.deduplicated,
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async cancelMaterialImport(request) {
@@ -215,7 +244,7 @@ function registerBridgeRoutes(
           ),
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async listImportedMaterials(request) {
@@ -230,7 +259,7 @@ function registerBridgeRoutes(
           nextCursor: page.nextCursor,
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async *readImportedMaterial(request, context) {
@@ -257,7 +286,7 @@ function registerBridgeRoutes(
           };
         }
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     async getMaterialPlaybackGrant(request) {
@@ -277,7 +306,7 @@ function registerBridgeRoutes(
           },
         };
       } catch (error: unknown) {
-        throw toConnectError(error);
+        throw toBridgeConnectError(error);
       }
     },
     revokeMaterialPlaybackGrant(request) {
@@ -434,7 +463,12 @@ function respondNotFound(response: ServerResponse): void {
 }
 
 function requireBridgeOrigin(value: string | undefined): string {
-  if (value === undefined) throw new MaterialPlaybackGrantError('Bridge is not listening yet.');
+  if (value === undefined) {
+    throw new MaterialPlaybackGrantError(
+      BridgeFailure.PLAYBACK_UNAVAILABLE,
+      'Bridge is not listening yet.',
+    );
+  }
   return value;
 }
 
@@ -530,36 +564,20 @@ function toRpcImportedMaterial(material: MaterialImportEntry) {
   };
 }
 
+/**
+ * The field name is not sent.
+ *
+ * `Missing field: mount_id` named a contract field, which is harmless, but it
+ * was also the last place a bridge error text was assembled rather than chosen,
+ * and a caption cannot be built out of an interpolated identifier. The code says
+ * a required field was empty; which one is a client defect, visible in the
+ * client's own stack.
+ */
 function required(value: string, field: string): string {
-  if (value.length === 0) throw new ConnectError(`Missing field: ${field}`, Code.InvalidArgument);
+  if (value.length === 0) {
+    throw new BridgeFailureError(BridgeFailure.MISSING_FIELD, `Missing field: ${field}`);
+  }
   return value;
-}
-
-function toConnectError(error: unknown): ConnectError {
-  if (error instanceof ConnectError) return error;
-  if (error instanceof PathSecurityError) {
-    return new ConnectError(error.message, Code.PermissionDenied);
-  }
-  if (error instanceof MaterialMirrorError) {
-    return new ConnectError(error.message, Code.InvalidArgument);
-  }
-  if (error instanceof MaterialPlaybackGrantError) {
-    return new ConnectError(error.message, Code.FailedPrecondition);
-  }
-  if (hasCode(error, 'ENOENT')) {
-    return new ConnectError(
-      error instanceof Error ? error.message : 'File not found',
-      Code.NotFound,
-    );
-  }
-  return new ConnectError(
-    error instanceof Error ? error.message : 'Unknown bridge error',
-    Code.InvalidArgument,
-  );
-}
-
-function hasCode(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 if (

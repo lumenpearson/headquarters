@@ -1,5 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { messagesFor } from '../src/application/localization/messages';
+import { expandEditPanel } from './editPanelHelpers';
+import { gotoSettingsUnified, optionByValue, settingControl } from './settingsHelpers';
+
+/** The shipped Russian text a test needs to prove an override replaced, read from the catalogue rather than pasted. */
+const ru = messagesFor('ru');
+
+function shippedText(id: keyof ReturnType<typeof messagesFor>): string {
+  const value = ru[id];
+  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
+  return value;
+}
+
 test('an operator opens edit mode, docks the panel and edits without the page scrolling', async ({
   page,
 }) => {
@@ -16,6 +29,9 @@ test('an operator opens edit mode, docks the panel and edits without the page sc
   const panel = page.locator('.edit-panel');
   await expect(panel).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-edit-mode', 'on');
+  // The panel opens as the collapsed pill, the same way it opens docked
+  // right: both are pinned defaults, not incidental starting points.
+  await expect(panel).toHaveAttribute('data-expanded', 'false');
 
   // R26: opening edit mode must not make the document scrollable.
   await expect
@@ -51,8 +67,11 @@ test('an operator opens edit mode, docks the panel and edits without the page sc
   await expect(panel).toHaveAttribute('data-edge', 'left');
 
   // Undo is disabled until an edit exists, and the issue draft with it.
+  // ОТМЕНИТЬ sits in the header and is reachable collapsed; ЧЕРНОВИК ISSUE is
+  // in the body, so the panel has to be expanded before it can be asserted.
   const undo = page.getByRole('button', { name: 'ОТМЕНИТЬ' });
   await expect(undo).toBeDisabled();
+  await expandEditPanel(page);
   await expect(page.getByRole('button', { name: 'ЧЕРНОВИК ISSUE' })).toBeDisabled();
 
   await page.keyboard.press('Control+Shift+E');
@@ -78,6 +97,7 @@ test('R6: every section is reachable from the floating panel and shows its categ
   await page.keyboard.press('Control+Shift+E');
   const panel = page.locator('.edit-panel');
   await expect(panel).toBeVisible();
+  await expandEditPanel(page);
 
   const section = panel.getByRole('combobox', { name: 'Раздел' });
   const sections = [
@@ -118,6 +138,7 @@ test('R6/R26: the panel navigates and scrolls its own body on a short window', a
   await page.keyboard.press('Control+Shift+E');
   const panel = page.locator('.edit-panel');
   await expect(panel).toBeVisible();
+  await expandEditPanel(page);
 
   const search = panel.getByLabel('Поиск по настройкам');
   await search.fill('liveedit');
@@ -125,7 +146,7 @@ test('R6/R26: the panel navigates and scrolls its own body on a short window', a
   // `advanced.liveEdit` is in `system`; the panel opens on `appearance`. One
   // search box answering across every section is what replaces the screen's
   // section-scoped search plus its separate "found elsewhere" block.
-  await expect(panel.getByText('ADVANCED / LIVE EDIT')).toBeVisible();
+  await expect(panel.locator('[data-setting-id="advanced.liveEdit"]')).toBeVisible();
 
   await search.fill('');
   await expect
@@ -263,20 +284,20 @@ test('R4: an event card opened in edit mode is edited from inside the card', asy
 // element looks like. Three of the seven -- brackets (the default), barber and
 // scan -- used to change only the data attribute, so the setting was a control
 // that did nothing.
-for (const [option, attribute] of [
-  ['BRACKETS', 'brackets'],
-  ['BARBER', 'barber'],
-  ['SCAN', 'scan'],
-] as const) {
+// The pattern is named once, by the value `patterns.focus` stores: it is both
+// what the option carries and what the shell publishes as
+// `data-focus-pattern`. The option's visible label is translated and no longer
+// names it.
+for (const attribute of ['brackets', 'barber', 'scan'] as const) {
   test(`R13: the ${attribute} focus pattern paints a focused control`, async ({ page }) => {
-    await page.goto('/settings');
+    await gotoSettingsUnified(page);
 
     const category = page.getByRole('combobox', { name: 'Категория персонализации' });
     await category.click();
     await page.getByRole('option', { name: 'ПАТТЕРНЫ', exact: true }).click();
-    const pattern = page.getByRole('combobox', { name: 'PATTERNS / FOCUS' });
+    const pattern = settingControl(page, 'patterns.focus', 'combobox');
     await pattern.click();
-    await page.getByRole('option', { name: option, exact: true }).click();
+    await optionByValue(page, attribute).click();
     await expect(page.locator('.ops-shell')).toHaveAttribute('data-focus-pattern', attribute);
 
     // Leave the settings screen through a client-side link. The select keeps
@@ -393,7 +414,12 @@ async function openSection(page: Page, section: string): Promise<void> {
  */
 const routesNamedAfterNoScreen = [
   { route: '/archive', screen: 'files', tile: 'categories', shipped: 'КАТЕГОРИИ' },
-  { route: '/cases/CASE-01', screen: 'cases', tile: 'registry', shipped: 'РЕЕСТР ДЕЛ' },
+  {
+    route: '/cases/CASE-01',
+    screen: 'cases',
+    tile: 'registry',
+    shipped: shippedText('cases.registryTitle'),
+  },
 ] as const;
 
 for (const subject of routesNamedAfterNoScreen) {
@@ -448,7 +474,7 @@ test('R28: the same gesture still lands on a route that shares its name with the
   // Reading the address off the tile registry must not cost them anything.
   await page.goto('/overview');
   const heading = page.locator('[data-tile="brief"] .ops-panel__header h2');
-  await expect(heading).toHaveText('ОБЗОР ОПЕРАЦИИ');
+  await expect(heading).toHaveText(shippedText('overview.briefTitle'));
 
   await selectTile(page, 'brief');
   await openSection(page, 'ИНФОРМАЦИЯ');

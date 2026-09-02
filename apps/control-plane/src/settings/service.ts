@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 
 import { create, fromJson, toJson, type JsonValue } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
-import { Code, ConnectError, type HandlerContext, type ServiceImpl } from '@connectrpc/connect';
-import { SettingValueSchema, settingsV1 } from '@gremuchaya/protocol';
+import type { HandlerContext, ServiceImpl } from '@connectrpc/connect';
+import { ControlPlaneFailure, SettingValueSchema, settingsV1 } from '@gremuchaya/protocol';
 import type { SettingValue, SettingsService } from '@gremuchaya/protocol';
+
+import { controlPlaneFailure, withRuntimeErrors } from '../errors.js';
 
 import type { Awaitable, PairedDeviceLifecycle } from '../sync/lifecycle.js';
 import {
@@ -14,6 +16,12 @@ import {
 } from '../sync/receipts.js';
 import { PairedDeviceRuntimeError, type AuthenticatedDevice } from '../sync/runtime.js';
 
+import type {
+  LayoutDocumentRecord,
+  LayoutHistoryEntryRecord,
+  LayoutStore,
+  LayoutTilePlacementInput,
+} from './layout-store.js';
 import {
   categoryOfPath,
   unknownSchemaVersion,
@@ -38,11 +46,26 @@ export interface SettingsServiceOptions {
    */
   readonly store?: SettingsStore;
   /**
-   * The descriptor set `GetSettingsSchema` serves. The control plane owns no
-   * schema of its own — the shipped schema lives with the client that renders
-   * it — so a deployment injects one or the RPC stays unimplemented.
+   * The descriptor set `GetSettingsSchema` serves.
+   *
+   * The control plane authors no schema of its own: the configured composition
+   * root injects `controlPlaneSettingsSchema()`, which is the shared
+   * `@gremuchaya/settings-schema` registry mapped onto the wire messages, so
+   * this process and the client that renders the controls read one registry.
+   * It stays optional because a service assembled without it -- a test double,
+   * or a future reduced assembly -- must answer `unimplemented` rather than an
+   * empty schema a client could not tell from a real one.
    */
   readonly schema?: settingsV1.SettingsSchema;
+  /**
+   * The layout half, absent on the same terms as {@link SettingsServiceOptions.store}.
+   *
+   * It is a second store rather than three more methods on the first because
+   * `layout_documents` is a different shape with a different key — a scope *and*
+   * a screen — and its history is `layout_versions`, not the settings history
+   * `ListSettingsHistory` pages.
+   */
+  readonly layouts?: LayoutStore;
   /** How often `WatchSettings` re-reads the scope's revision. */
   readonly watchPollIntervalMs?: number;
 }
@@ -129,10 +152,7 @@ export function createSettingsService(
       return withRuntimeErrors(() => {
         const schema = options.schema;
         if (schema === undefined) {
-          throw new ConnectError(
-            'This control plane was started without a settings schema.',
-            Code.Unimplemented,
-          );
+          throw controlPlaneFailure(ControlPlaneFailure.SETTINGS_SCHEMA_UNAVAILABLE);
         }
         const requested = request.version.trim();
         if (requested.length > 0 && requested !== schema.version) {
@@ -440,6 +460,77 @@ export function createSettingsService(
         if (changes.length === 0) await waitForNextPoll(pollIntervalMs, context.signal);
       }
     },
+
+    /**
+     * Writes one screen's whole arrangement.
+     *
+     * The layout half is separate from the settings half at every level — its
+     * own store, its own tables, its own receipt scope — because a layout is not
+     * a setting: it has a screen, it is replaced whole rather than patched by
+     * path, and it must not appear in the settings history a group reads.
+     */
+    async putLayoutDocument(request, context) {
+      return withRuntimeErrors(async () => {
+        const layouts = requireLayouts(options.layouts);
+        const authenticated = await authenticateRequest(options.runtime, context);
+        assertContextActor(authenticated, request.context?.actorDeviceId?.value);
+        const scope = resolveWritableScope(request.scope, authenticated);
+        const document = await layouts.putDocument({
+          actor: toActor(authenticated),
+          scope,
+          screenId: request.screenId,
+          tiles: request.tiles.map(toTilePlacement),
+          // Absent is zero on the wire and zero means unconditional, which is
+          // the honest reading: a client that sends no revision is not claiming
+          // to have edited one.
+          expectedRevision: request.expectedRevision?.number ?? 0n,
+          correlationId: request.context?.correlationId ?? '',
+          ...toMutationInput(request.context?.requestId),
+        });
+        return { document: toProtocolLayoutDocument(document) };
+      });
+    },
+
+    async getLayoutDocument(request, context) {
+      return withRuntimeErrors(async () => {
+        const layouts = requireLayouts(options.layouts);
+        const authenticated = await authenticateRequest(options.runtime, context);
+        const scope = resolveWritableScope(request.scope, authenticated);
+        const document = await layouts.readDocument({
+          actor: toActor(authenticated),
+          scope,
+          screenId: request.screenId,
+        });
+        // An absent document is the state every screen starts in, so it is an
+        // empty response rather than `NOT_FOUND`: a first-run client must not
+        // have to treat the normal case as a failure.
+        return document === undefined ? {} : { document: toProtocolLayoutDocument(document) };
+      });
+    },
+
+    async listLayoutHistory(request, context) {
+      return withRuntimeErrors(async () => {
+        const layouts = requireLayouts(options.layouts);
+        const authenticated = await authenticateRequest(options.runtime, context);
+        const scope = resolveWritableScope(request.scope, authenticated);
+        const page = await layouts.listHistory({
+          actor: toActor(authenticated),
+          scope,
+          screenId: request.screenId,
+          pageSize: request.page?.pageSize ?? 0,
+          cursor: request.page?.cursor ?? '',
+        });
+        return {
+          entries: page.entries.map(toProtocolLayoutHistoryEntry),
+          page: {
+            nextCursor: page.nextCursor,
+            previousCursor: '',
+            hasMore: page.hasMore,
+            approximateTotal: 0n,
+          },
+        };
+      });
+    },
   };
 }
 
@@ -454,7 +545,7 @@ function readBearerToken(context: HandlerContext): string {
   const header = context.requestHeader.get('authorization');
   const match = header === null ? undefined : /^Bearer ([^\s]+)$/u.exec(header.trim());
   if (match?.[1] === undefined) {
-    throw new ConnectError('A bearer access token is required.', Code.Unauthenticated);
+    throw controlPlaneFailure(ControlPlaneFailure.BEARER_TOKEN_REQUIRED);
   }
   return match[1];
 }
@@ -813,12 +904,80 @@ function requireText(value: string, field: string): string {
 
 function requireStore(store: SettingsStore | undefined): SettingsStore {
   if (store === undefined) {
-    throw new ConnectError(
-      'This control plane was started without durable settings storage.',
-      Code.Unimplemented,
-    );
+    throw controlPlaneFailure(ControlPlaneFailure.SETTINGS_STORAGE_UNAVAILABLE);
   }
   return store;
+}
+
+function requireLayouts(layouts: LayoutStore | undefined): LayoutStore {
+  if (layouts === undefined) {
+    // Layouts share the settings-storage code because they are refused for the
+    // same reason and an operator acts on it the same way; the sentence stays
+    // specific so a developer reading the diagnostics copy knows which store
+    // was missing.
+    throw controlPlaneFailure(ControlPlaneFailure.SETTINGS_STORAGE_UNAVAILABLE, {
+      developerMessage: 'This control plane was started without durable layout storage.',
+    });
+  }
+  return layouts;
+}
+
+/**
+ * Reads one placement off the wire.
+ *
+ * The bounds are not applied here: `DurableLayoutStore.normalizeTiles` owns
+ * them, so one rule decides what a stored layout may contain no matter which
+ * caller reaches the store.
+ */
+function toTilePlacement(tile: settingsV1.LayoutTilePlacement): LayoutTilePlacementInput {
+  return {
+    tileId: tile.tileId,
+    column: tile.column,
+    row: tile.row,
+    columnSpan: tile.columnSpan,
+    rowSpan: tile.rowSpan,
+    hidden: tile.hidden,
+  };
+}
+
+function toProtocolTilePlacement(tile: LayoutTilePlacementInput) {
+  return {
+    tileId: tile.tileId,
+    column: tile.column,
+    row: tile.row,
+    columnSpan: tile.columnSpan,
+    rowSpan: tile.rowSpan,
+    hidden: tile.hidden,
+  };
+}
+
+function toProtocolLayoutDocument(document: LayoutDocumentRecord) {
+  return {
+    id: { value: document.id },
+    scope: toProtocolScope(document.scope),
+    screenId: document.screenId,
+    tiles: document.tiles.map(toProtocolTilePlacement),
+    revision: {
+      number: document.revision,
+      // The etag names the document and its revision, exactly as the settings
+      // documents' does, so a client caching both cannot confuse them.
+      etag: `layout-${document.id}-revision-${document.revision.toString()}`,
+    },
+    updatedAt: timestampFromDate(document.updatedAt),
+  };
+}
+
+function toProtocolLayoutHistoryEntry(entry: LayoutHistoryEntryRecord) {
+  return {
+    revision: {
+      number: entry.revision,
+      etag: `layout-history-revision-${entry.revision.toString()}`,
+    },
+    tiles: entry.tiles.map(toProtocolTilePlacement),
+    actorDeviceId: { value: entry.actorDeviceId },
+    occurredAt: timestampFromDate(entry.occurredAt),
+    correlationId: entry.correlationId,
+  };
 }
 
 function requirePollInterval(value: number): number {
@@ -847,26 +1006,4 @@ function waitForNextPoll(intervalMs: number, signal: AbortSignal): Promise<void>
     timer.unref?.();
     signal.addEventListener('abort', onAbort, { once: true });
   });
-}
-
-async function withRuntimeErrors<T>(operation: () => Awaitable<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: unknown) {
-    if (error instanceof ConnectError) throw error;
-    if (error instanceof PairedDeviceRuntimeError) {
-      throw new ConnectError(error.message, toConnectCode(error.code));
-    }
-    throw error;
-  }
-}
-
-function toConnectCode(code: PairedDeviceRuntimeError['code']): Code {
-  if (code === 'ABORTED') return Code.Aborted;
-  if (code === 'ALREADY_EXISTS') return Code.AlreadyExists;
-  if (code === 'FAILED_PRECONDITION') return Code.FailedPrecondition;
-  if (code === 'INVALID_ARGUMENT') return Code.InvalidArgument;
-  if (code === 'NOT_FOUND') return Code.NotFound;
-  if (code === 'PERMISSION_DENIED') return Code.PermissionDenied;
-  return Code.Unauthenticated;
 }

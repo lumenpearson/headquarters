@@ -272,6 +272,16 @@ body.terminal-theme .danger-button:hover {
   background: var(--critical);
 }
 
+body.terminal-theme .quiet-button.is-active {
+  background: var(--accent-strong);
+  color: var(--text-inverse);
+}
+
+body.terminal-theme .danger-button.is-active {
+  background: var(--critical);
+  color: var(--text-inverse);
+}
+
 body.terminal-theme .system-state--ready {
   background: var(--accent-strong);
   color: var(--text-inverse);
@@ -1110,9 +1120,14 @@ body.terminal-theme .developer-panel > nav button.is-active {
   color: var(--text-inverse);
 }
 
+/* Blur reads `--ops-overlay-blur` (`popups.overlayBlur`), the same scrim
+   family the drawer/production-panel scrims in operations.css read, with a
+   `16px` fallback matching the setting's own default -- an operator who
+   turns blur down on a weak machine should not still pay for the palette's
+   own, previously hard-coded, blur. */
 body.terminal-theme .palette-backdrop {
   background: rgb(0 0 0 / 42%);
-  backdrop-filter: blur(16px) saturate(90%);
+  backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(90%);
 }
 
 body.terminal-theme .command-palette {

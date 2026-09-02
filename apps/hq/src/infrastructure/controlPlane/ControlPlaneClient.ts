@@ -1,21 +1,30 @@
 import { Code, ConnectError, createClient, type Transport } from '@connectrpc/connect';
-import { ControlPlaneService, SyncService, syncV1 } from '@gremuchaya/protocol';
+import {
+  ControlPlaneFailure,
+  ControlPlaneFailureDetailSchema,
+  ControlPlaneService,
+  SyncService,
+  syncV1,
+} from '@gremuchaya/protocol';
 
-import type {
-  AuthorityMode,
-  ConnectionSession,
-  ControlPlaneCapabilities,
-  DeviceRole,
-  GroupDevice,
-  GroupSummary,
-  PairingRole,
-  PresenceEntry,
+import {
+  emptyPresenceDetail,
+  type AuthorityMode,
+  type ConnectionSession,
+  type ControlPlaneCapabilities,
+  type DeviceRole,
+  type GroupDevice,
+  type GroupSummary,
+  type PairingRole,
+  type PresenceDetail,
+  type PresenceEntry,
 } from '@/application/sync/connection';
 import {
   ControlPlaneError,
+  controlPlaneErrorKinds,
   isControlPlaneError,
   type ClockSample,
-  type ControlPlaneErrorKind,
+  type ControlPlaneErrorCode,
   type ControlPlanePort,
   type CreateGroupRequest,
   type PairingCodeGrant,
@@ -32,10 +41,12 @@ import type {
 import type { GroupEventPage } from '@/application/sync/groupEventFeed';
 
 import { createBearerInterceptor } from './authInterceptor';
+import { BrowserDeviceIdentity, type DeviceIdentity } from './DeviceIdentity';
 import { DeviceSessionStore, type StoredDeviceSession } from './DeviceSessionStore';
 import {
   fromDeviceRole,
   fromGroupSessionAction,
+  fromPresenceDetail,
   fromSynchronizedDocumentType,
   toDeviceRole,
   toEpochMs,
@@ -49,6 +60,7 @@ import {
   type WireDevice,
   type WireGroup,
   type WirePresence,
+  type WirePresenceDetail,
   type WireResourceId,
   type WireTimestamp,
 } from './groupEventCodec';
@@ -211,7 +223,11 @@ export interface SyncRpcClient {
     options?: CallOptions,
   ): Promise<unknown>;
   joinGroup(
-    request: { readonly context: WireMutationContext; readonly groupId: WireResourceId },
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly detail: WirePresenceDetail;
+    },
     options?: CallOptions,
   ): Promise<{ readonly group?: WireGroup | undefined }>;
   leaveGroup(
@@ -247,6 +263,14 @@ export interface SyncRpcClient {
   }>;
   getPresence(
     request: { readonly groupId: WireResourceId },
+    options?: CallOptions,
+  ): Promise<{ readonly devices: readonly WirePresence[] }>;
+  updatePresence(
+    request: {
+      readonly context: WireMutationContext;
+      readonly groupId: WireResourceId;
+      readonly detail: WirePresenceDetail;
+    },
     options?: CallOptions,
   ): Promise<{ readonly devices: readonly WirePresence[] }>;
   publishDocumentDelta(
@@ -324,6 +348,12 @@ export interface ControlPlaneClientOptions {
     readonly sync: SyncRpcClient;
   };
   readonly device?: { readonly platform: string; readonly applicationVersion: string };
+  /**
+   * What pairing presents as `public_key`; the browser-persisted keypair when
+   * absent. The control plane refuses an empty key, so a test that stubs the
+   * sync client but not this still pairs.
+   */
+  readonly identity?: DeviceIdentity;
   readonly mintRequestId?: () => string;
   /** Wall clock, epoch milliseconds. */
   readonly now?: () => number;
@@ -348,6 +378,7 @@ export class ControlPlaneClient implements ControlPlanePort {
   readonly #control: ControlRpcClient;
   readonly #sync: SyncRpcClient;
   readonly #device: { readonly platform: string; readonly applicationVersion: string };
+  readonly #identity: DeviceIdentity;
   readonly #mintRequestId: () => string;
   readonly #now: () => number;
   readonly #transport: Transport | undefined;
@@ -365,6 +396,7 @@ export class ControlPlaneClient implements ControlPlanePort {
     this.credentials = options.credentials ?? 'owner';
     this.#store = options.sessionStore ?? new DeviceSessionStore();
     this.#device = options.device ?? { platform: 'web', applicationVersion: '' };
+    this.#identity = options.identity ?? new BrowserDeviceIdentity();
     this.#mintRequestId = options.mintRequestId ?? (() => crypto.randomUUID());
     this.#now = options.now ?? (() => Date.now());
     if (options.clients !== undefined) {
@@ -502,6 +534,7 @@ export class ControlPlaneClient implements ControlPlanePort {
    */
   async createGroup(request: CreateGroupRequest, signal?: AbortSignal): Promise<PairingResult> {
     this.#requireCredentialOwner('create a group');
+    const publicKey = await this.#identity.publicKey();
     const response = await call(() =>
       this.#sync.createGroup(
         {
@@ -509,7 +542,7 @@ export class ControlPlaneClient implements ControlPlanePort {
           name: request.name.trim(),
           initialDevice: {
             name: request.deviceName.trim(),
-            publicKey: '',
+            publicKey,
             platform: this.#device.platform,
             applicationVersion: this.#device.applicationVersion,
           },
@@ -536,12 +569,13 @@ export class ControlPlaneClient implements ControlPlanePort {
     signal?: AbortSignal,
   ): Promise<PairingResult> {
     this.#requireCredentialOwner('pair');
+    const publicKey = await this.#identity.publicKey();
     const response = await call(() =>
       this.#sync.pairDevice(
         {
           pairingCode: pairingCode.trim(),
           deviceName: deviceName.trim(),
-          publicKey: '',
+          publicKey,
           platform: this.#device.platform,
           applicationVersion: this.#device.applicationVersion,
           context: { requestId: this.#mintRequestId() },
@@ -709,12 +743,23 @@ export class ControlPlaneClient implements ControlPlanePort {
     return { deviceId: next.deviceId, groupId: next.groupId, role: next.role };
   }
 
-  /** Enters the group's session: participation, not membership. */
-  async join(signal?: AbortSignal): Promise<GroupSummary> {
+  /**
+   * Enters the group's session, and reports what this device is showing on
+   * the same call (F10 presence publish): participation, not membership.
+   *
+   * `detail` defaults to nothing to report, so a caller that supplies none --
+   * a test, or a client from before this existed -- still joins exactly as it
+   * always did; the wire message carries the proto3 defaults either way.
+   */
+  async join(detail?: PresenceDetail, signal?: AbortSignal): Promise<GroupSummary> {
     const stored = this.#requireSession();
     const response = await call(() =>
       this.#sync.joinGroup(
-        { context: this.#mutation(stored), groupId: { value: stored.groupId } },
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          detail: fromPresenceDetail(detail ?? emptyPresenceDetail),
+        },
         options(signal),
       ),
     );
@@ -826,6 +871,33 @@ export class ControlPlaneClient implements ControlPlanePort {
     const stored = this.#requireSession();
     const response = await call(() =>
       this.#sync.getPresence({ groupId: { value: stored.groupId } }, options(signal)),
+    );
+    return response.devices.map(toPresenceEntry);
+  }
+
+  /**
+   * Reports what this device is currently showing, and renews its liveness
+   * with the same call (F10 presence publish).
+   *
+   * The answer is the group's presence after the report, exactly as
+   * `getPresence` would answer it, so `ControlPlaneSession.refreshPresence`
+   * learns both a neighbour's change and the effect of its own report from
+   * one round trip.
+   */
+  async updatePresence(
+    detail: PresenceDetail,
+    signal?: AbortSignal,
+  ): Promise<readonly PresenceEntry[]> {
+    const stored = this.#requireSession();
+    const response = await call(() =>
+      this.#sync.updatePresence(
+        {
+          context: this.#mutation(stored),
+          groupId: { value: stored.groupId },
+          detail: fromPresenceDetail(detail),
+        },
+        options(signal),
+      ),
     );
     return response.devices.map(toPresenceEntry);
   }
@@ -979,6 +1051,46 @@ export class ControlPlaneClient implements ControlPlanePort {
   }
 
   /**
+   * A sibling client for the same address, store and RPC clients, with
+   * `owner` credentials (F14 stage 7, plane failover).
+   *
+   * A no-op when this client already owns the credentials. Otherwise a new
+   * instance, because `credentials` is declared `readonly` and stays that way
+   * -- the refusal it gates protects the one property a stolen-token replay
+   * depends on: exactly one client minting refresh request ids against the
+   * stored token at a time. Promoting a link is therefore building the client
+   * failover needs and retiring the old one, never mutating one in place.
+   */
+  asOwner(): ControlPlaneClient {
+    return this.#withCredentials('owner');
+  }
+
+  /** The same sibling, demoted to `reader` -- the plane failover retired. */
+  asReader(): ControlPlaneClient {
+    return this.#withCredentials('reader');
+  }
+
+  #withCredentials(role: ControlPlaneCredentialRole): ControlPlaneClient {
+    if (this.credentials === role) return this;
+    return new ControlPlaneClient({
+      baseUrl: this.baseUrl,
+      sessionStore: this.#store,
+      credentials: role,
+      device: this.#device,
+      identity: this.#identity,
+      mintRequestId: this.#mintRequestId,
+      now: this.#now,
+      // A test injects RPC clients rather than a transport; the sibling reuses
+      // the very same fakes, so it answers exactly as the client it replaces
+      // would have. A real deployment rebuilds the transport instead, which is
+      // cheap next to the round trip every call on it will make anyway.
+      ...(this.#transport === undefined
+        ? { clients: { control: this.#control, sync: this.#sync } }
+        : {}),
+    });
+  }
+
+  /**
    * Refuses an act that writes credentials on a client that may only read them.
    *
    * `failed-precondition` rather than `permission-denied`: nothing was refused
@@ -1017,40 +1129,113 @@ async function call<Value>(operation: () => Promise<Value>): Promise<Value> {
   }
 }
 
+/**
+ * What each wire code is called on this side.
+ *
+ * Total over `ControlPlaneFailure` except its zero value, so a code added to
+ * `control.proto` and regenerated fails to compile here until this build knows
+ * what to call it. That is one half of the guarantee; the other half is that a
+ * code this build has *not* been rebuilt for still arrives safely, which is
+ * what `toFailureCode` is for.
+ */
+const wireFailureCodes: Readonly<
+  Record<Exclude<ControlPlaneFailure, ControlPlaneFailure.UNSPECIFIED>, ControlPlaneErrorCode>
+> = {
+  [ControlPlaneFailure.INTERNAL]: 'internal',
+  [ControlPlaneFailure.BEARER_TOKEN_REQUIRED]: 'bearer-token-required',
+  [ControlPlaneFailure.BOOTSTRAP_AUTHORIZATION_REQUIRED]: 'bootstrap-authorization-required',
+  [ControlPlaneFailure.SESSION_UNAUTHENTICATED]: 'session-unauthenticated',
+  [ControlPlaneFailure.PERMISSION_DENIED]: 'permission-denied',
+  [ControlPlaneFailure.NOT_FOUND]: 'not-found',
+  [ControlPlaneFailure.ALREADY_EXISTS]: 'already-exists',
+  [ControlPlaneFailure.INVALID_ARGUMENT]: 'invalid-argument',
+  [ControlPlaneFailure.FAILED_PRECONDITION]: 'failed-precondition',
+  [ControlPlaneFailure.CONCURRENT_MODIFICATION]: 'concurrent-modification',
+  [ControlPlaneFailure.RATE_LIMITED]: 'rate-limited',
+  [ControlPlaneFailure.REPLAY_WINDOW_EXCEEDED]: 'replay-window-exceeded',
+  [ControlPlaneFailure.GROUP_ADMINISTRATION_UNAVAILABLE]: 'group-administration-unavailable',
+  [ControlPlaneFailure.PRESENCE_UNAVAILABLE]: 'presence-unavailable',
+  [ControlPlaneFailure.EVENT_LOG_UNAVAILABLE]: 'event-log-unavailable',
+  [ControlPlaneFailure.REALTIME_HUB_UNAVAILABLE]: 'realtime-hub-unavailable',
+  [ControlPlaneFailure.SETTINGS_SCHEMA_UNAVAILABLE]: 'settings-schema-unavailable',
+  [ControlPlaneFailure.SETTINGS_STORAGE_UNAVAILABLE]: 'settings-storage-unavailable',
+  [ControlPlaneFailure.INTEGRATION_STORAGE_UNAVAILABLE]: 'integration-storage-unavailable',
+  [ControlPlaneFailure.INTEGRATION_GITHUB_UNAVAILABLE]: 'integration-github-unavailable',
+  [ControlPlaneFailure.INTEGRATION_GITHUB_UNREACHABLE]: 'integration-github-unreachable',
+};
+
+/**
+ * A `Map` rather than an index into the record above, because a lookup by a
+ * number this build has never seen must answer `undefined` and not throw. The
+ * record stays the source of truth and stays exhaustive; this is only how it is
+ * read.
+ */
+const wireFailureCodesByValue = new Map<number, ControlPlaneErrorCode>(
+  Object.entries(wireFailureCodes).map(([value, code]) => [Number(value), code]),
+);
+
+/** What a transport status means when the control plane attached no code. */
+const transportFailureCodes: Readonly<Record<Code, ControlPlaneErrorCode>> = {
+  [Code.Canceled]: 'canceled',
+  [Code.Unknown]: 'unknown',
+  [Code.InvalidArgument]: 'invalid-argument',
+  [Code.DeadlineExceeded]: 'deadline-exceeded',
+  [Code.NotFound]: 'not-found',
+  [Code.AlreadyExists]: 'already-exists',
+  [Code.PermissionDenied]: 'permission-denied',
+  [Code.ResourceExhausted]: 'rate-limited',
+  [Code.FailedPrecondition]: 'failed-precondition',
+  [Code.Aborted]: 'concurrent-modification',
+  [Code.OutOfRange]: 'invalid-argument',
+  [Code.Unimplemented]: 'unimplemented',
+  [Code.Internal]: 'internal',
+  [Code.Unavailable]: 'unavailable',
+  [Code.DataLoss]: 'internal',
+  [Code.Unauthenticated]: 'session-unauthenticated',
+};
+
 export function toControlPlaneError(error: unknown): ControlPlaneError {
   if (error instanceof ControlPlaneError) return error;
   if (error instanceof ConnectError) {
-    return new ControlPlaneError(toKind(error.code), error.rawMessage, { cause: error });
+    const code = toFailureCode(error);
+    /*
+     * `rawMessage` stays as the message, and stays developer-facing. It is what
+     * the diagnostics copy needs in order to name the exact refusal, and it is
+     * deliberately no longer the only thing this error carries: `code` is what a
+     * surface keys a Russian caption off, and rewording the server's English
+     * must not change what the operator reads.
+     */
+    return new ControlPlaneError(controlPlaneErrorKinds[code], error.rawMessage, {
+      cause: error,
+      code,
+    });
   }
   // A fetch that never reached the host arrives as a plain error; to the
   // session that is the same fact as an `Unavailable` code.
   return new ControlPlaneError(
     'unavailable',
     error instanceof Error ? error.message : 'Control plane unreachable.',
-    { cause: error },
+    { cause: error, code: 'unavailable' },
   );
 }
 
-function toKind(code: Code): ControlPlaneErrorKind {
-  switch (code) {
-    case Code.Unauthenticated:
-      return 'unauthenticated';
-    case Code.PermissionDenied:
-      return 'permission-denied';
-    case Code.Unimplemented:
-      return 'unimplemented';
-    case Code.Unavailable:
-    case Code.DeadlineExceeded:
-      return 'unavailable';
-    case Code.InvalidArgument:
-      return 'invalid-argument';
-    case Code.NotFound:
-      return 'not-found';
-    case Code.FailedPrecondition:
-      return 'failed-precondition';
-    default:
-      return 'unknown';
-  }
+/**
+ * The code a refusal carries, from its detail when it has one and from its
+ * transport status when it does not.
+ *
+ * Nothing in here may throw. This runs while an error is already being handled,
+ * on a path that ends at a screen an operator is watching during a take, and an
+ * exception raised here would replace a refused request with a blank surface.
+ * Three things are therefore true by construction: `findDetails` drops a detail
+ * it cannot decode rather than raising, an unrecognised code number misses the
+ * map and falls through, and the transport table is total over `Code` with a
+ * final `?? 'unknown'` for a status outside it -- which the gRPC-Web decoder can
+ * produce, since it parses `grpc-status` as an integer.
+ */
+function toFailureCode(error: ConnectError): ControlPlaneErrorCode {
+  const [detail] = error.findDetails(ControlPlaneFailureDetailSchema);
+  const declared = detail === undefined ? undefined : wireFailureCodesByValue.get(detail.code);
+  return declared ?? transportFailureCodes[error.code] ?? 'unknown';
 }
 
 function options(signal: AbortSignal | undefined): CallOptions {

@@ -20,13 +20,15 @@ import {
   type SettingGroup,
 } from '@/application/personalization/catalog';
 import { repositorySlug } from '@/application/repository';
+import { useKeybind } from '@/components/keybinds/KeybindRuntime';
 import { categoryLabel, groupLabel, SchemaSetting } from '@/components/settings/SchemaSetting';
 import { operationsStore, useOperationsStore, type EditDockEdge } from '@/state/operationsStore';
 
 import { ContentEditor } from './ContentEditor';
-import { resolveDockEdge } from './EditPanelDock';
+import { nextDockEdge, resolveDockEdge } from './EditPanelDock';
 import { ElementTranslation } from './ElementTranslation';
 import { TileMotionPicker } from './TileMotionPicker';
+import { TilePresentationPicker } from './TilePresentationPicker';
 import { TileVisibility } from './TileVisibility';
 
 const dockThresholdPx = 120;
@@ -73,14 +75,21 @@ function dockedPosition(
  * ledger and the same undo stack, and `ContentEditor` is its surface here.
  *
  * The panel is a compact strip parked against an edge rather than a column
- * stretched along it. Its header is the whole collapsed state; the body below
- * is a disclosure that grows along Y with what it holds and caps at
+ * stretched along it. Its header is the whole collapsed state -- a floating
+ * pill of a grip, a change count, undo and close, and the control that
+ * expands it, translating the devtools idiom into this design system's own
+ * square-cornered, blurred-glass vocabulary rather than copying a rounded
+ * one wholesale (`--radius-1`/`--radius-2` are 0 here, on purpose). The body
+ * below is a disclosure that grows along Y with what it holds and caps at
  * `min(56vh, 540px)`, past which it scrolls internally -- a few settings make
  * a short panel, a whole section makes a capped one, and the document never
- * scrolls either way (R26). Dragging follows the pointer with a transform and
- * the release animates the snap to the nearest edge; positioning is one
- * transform throughout, so the drag and the docking cannot fight over who
- * places the panel.
+ * scrolls either way (R26). `edit.panelExpanded` starts every session
+ * collapsed (`enterEditMode` resets it), and selecting an element on screen
+ * opens it back up -- see `selectEditElement` in the store, which is also
+ * why the flag lives there rather than as a `useState` here. Dragging
+ * follows the pointer with a transform and the release animates the snap to
+ * the nearest edge; positioning is one transform throughout, so the drag and
+ * the docking cannot fight over who places the panel.
  *
  * It navigates the same catalogue as the settings screen and through the same
  * functions -- `queryCatalog` and `searchEverySetting` -- but not through the
@@ -103,7 +112,7 @@ function dockedPosition(
 export function EditPanel() {
   const active = useOperationsStore((state) => state.edit.active);
   const dockEdge = useOperationsStore((state) => state.edit.dockEdge);
-  const selectedElementId = useOperationsStore((state) => state.edit.selectedElementId);
+  const panelExpanded = useOperationsStore((state) => state.edit.panelExpanded);
   const draft = useOperationsStore((state) => state.personalization.draft);
   const overrides = useOperationsStore((state) => state.content.overrides);
   const canUndo = useOperationsStore((state) => state.personalization.undoStack.length > 0);
@@ -113,7 +122,6 @@ export function EditPanel() {
   const [group, setGroup] = useState<SettingGroup>('appearance');
   const [search, setSearch] = useState('');
   const [changedOnly, setChangedOnly] = useState(false);
-  const [expanded, setExpanded] = useState(true);
   const [dragging, setDragging] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const position = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -158,6 +166,19 @@ export function EditPanel() {
    * transform transitions in CSS, so a re-dock glides rather than teleports,
    * and `data-dragging` switches the transition off while the pointer is the
    * one deciding where the panel is.
+   *
+   * The root's own width never changes between the collapsed pill and the
+   * expanded panel -- only the body's height does, through the grid-rows
+   * technique below. That is deliberate: the `ResizeObserver` a few lines
+   * down re-centres on every box-size change it sees, including the
+   * intermediate frames of a running CSS transition, so a *width* transition
+   * here would feed this callback a different panel width each frame and the
+   * docked position would chase a box that has not finished changing size --
+   * visible as the panel overshooting or trembling against the viewport edge
+   * mid-expand, exactly where R26's no-scroll poll would catch it. Holding
+   * the width constant keeps that measurement to one call per state change;
+   * the existing transform transition is what does the animating, gliding
+   * the panel to its new centred position around the height it already has.
    */
   const place = useCallback(() => {
     const element = rootRef.current;
@@ -175,7 +196,7 @@ export function EditPanel() {
   useLayoutEffect(() => {
     if (!active || dragging) return;
     place();
-  }, [active, dragging, expanded, place]);
+  }, [active, dragging, panelExpanded, place]);
 
   useEffect(() => {
     if (!active) return;
@@ -195,16 +216,6 @@ export function EditPanel() {
       observer?.disconnect();
     };
   }, [active, place]);
-
-  // Pointing at a value on screen is a request to edit it; a collapsed strip
-  // answering that with nothing would make the selection look ignored.
-  // Adjusted during render rather than in an effect: the expansion belongs to
-  // the same commit as the selection, not to a second render after it.
-  const [expandedFor, setExpandedFor] = useState(selectedElementId);
-  if (selectedElementId !== expandedFor) {
-    setExpandedFor(selectedElementId);
-    if (selectedElementId !== '') setExpanded(true);
-  }
 
   /*
    * The drag starts on the panel header and nowhere else -- and not on the
@@ -294,6 +305,21 @@ export function EditPanel() {
     setDragging(false);
   }, []);
 
+  /*
+   * The keyboard equivalent of the magnetic edge dragging snaps to.
+   * `resolveDockEdge` reads where the pointer left the window, and a keypress
+   * has no such position to read, so this cycles the same four edges instead
+   * of guessing one -- see `EditPanelDock.nextDockEdge`. Guarded on `active`
+   * rather than left unclaimed while the panel is closed: the panel mounts
+   * regardless of it, and an unclaimed keybind would let the chord fall
+   * through to whatever the browser does with it instead of being silently
+   * absorbed here.
+   */
+  useKeybind('edit.dockPanel', () => {
+    if (!active) return;
+    operationsStore.getState().dockEditPanel(nextDockEdge(dockEdge));
+  });
+
   if (!active) return null;
 
   const changeCount = draft.changedIds.length + Object.keys(overrides).length;
@@ -303,31 +329,79 @@ export function EditPanel() {
   return (
     <div
       ref={rootRef}
-      className="edit-panel group fixed top-0 left-0 z-[var(--z-dialog)] grid grid-rows-[auto_auto] w-[clamp(300px,22vw,380px)] border border-hq-line-2 bg-hq-panel-raised will-change-transform [transition:transform_320ms_cubic-bezier(0.22,1,0.36,1),box-shadow_var(--motion-standard)_ease] shadow-[0_14px_44px_rgb(0_0_0_/_42%),0_0_0_1px_color-mix(in_srgb,var(--accent)_10%,transparent)] data-[dragging=true]:shadow-[0_22px_64px_rgb(0_0_0_/_55%),0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)] data-[dragging=true]:transition-none"
+      // `color-mix` over `--panel-raised` plus a blur read from
+      // `--ops-overlay-blur` (the same variable and literal-fallback idiom
+      // as the dialog/drawer scrims) is the floating-glass half of the
+      // Vercel-devtools translation; the square corners and hairline
+      // `--line-2` border are what keep it this design system's own rather
+      // than a copy of theirs.
+      //
+      // The width grew from the pre-pill `clamp(300px,22vw,380px)`: the
+      // header now carries five interactive children (grip aside) instead of
+      // one, and measured against the live layout, that row's own min-content
+      // width (~440px at the default type scale) already exceeds the old
+      // 380px ceiling before `typography.weight`'s R19 range or a longer `en`
+      // label is even in play. The header's own `flex-wrap` (below) is the
+      // structural backstop for whatever this clamp does not cover -- a
+      // locale, a font scale or a narrow window this number was not measured
+      // against wraps the row onto a second line instead of pushing a button
+      // past the viewport edge, which is the failure a fixed width alone
+      // cannot rule out.
+      className="edit-panel group fixed top-0 left-0 z-[var(--z-dialog)] grid grid-rows-[auto_auto] w-[clamp(320px,32vw,460px)] border border-hq-line-2 bg-[color-mix(in_srgb,var(--panel-raised)_88%,transparent)] [backdrop-filter:blur(var(--ops-overlay-blur,16px))_saturate(90%)] will-change-transform [transition:transform_320ms_cubic-bezier(0.22,1,0.36,1),box-shadow_var(--motion-standard)_ease] shadow-[0_14px_44px_rgb(0_0_0_/_42%),0_0_0_1px_color-mix(in_srgb,var(--accent)_10%,transparent)] data-[dragging=true]:shadow-[0_22px_64px_rgb(0_0_0_/_55%),0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)] data-[dragging=true]:transition-none"
       data-edge={dockEdge}
       data-dragging={dragging}
-      data-expanded={expanded}
+      data-expanded={panelExpanded}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
     >
-      <header className="edit-panel__header flex gap-hq-2 items-center py-hq-2 px-hq-3 text-hq-accent text-hq-xs tracking-[0.12em] cursor-grab group-data-[dragging=true]:cursor-grabbing">
+      <header className="edit-panel__header flex flex-wrap gap-hq-2 items-center py-hq-2 px-hq-3 text-hq-accent text-hq-xs tracking-[0.12em] cursor-grab group-data-[dragging=true]:cursor-grabbing">
         <span className="edit-panel__grip text-hq-text-2 tracking-[0em]" aria-hidden="true">
           ⠿
         </span>
         <strong>РЕДАКТИРОВАНИЕ</strong>
         <span className="edit-panel__count ml-auto text-hq-text-2">{changeCount} ИЗМЕНЕНИЙ</span>
+        {/*
+         * The pill's own actions, next to the control that expands it: the
+         * two the footer below holds that stay useful without opening the
+         * body at all. ОТМЕНИТЬ needs no context to matter -- it is one step
+         * back, whatever that step was -- and ЗАКРЫТЬ is how an operator who
+         * is done, or opened edit mode by mistake, leaves it without
+         * expanding first. ЧЕРНОВИК ISSUE stays in the footer only: it opens
+         * a browser tab, which a glance at the pill should never trigger.
+         * One instance of each, not a pill copy and a footer copy -- moved
+         * here rather than duplicated, so `ОТМЕНИТЬ`/`ЗАКРЫТЬ` stay reachable
+         * by name regardless of `data-expanded`.
+         */}
+        <TerminalButton
+          size="small"
+          disabled={!canUndo}
+          onClick={() => {
+            operationsStore.getState().undoSettingsDraft();
+          }}
+        >
+          ОТМЕНИТЬ
+        </TerminalButton>
         <TerminalButton
           size="small"
           tone="quiet"
-          aria-label={expanded ? 'Свернуть панель' : 'Развернуть панель'}
-          aria-expanded={expanded}
           onClick={() => {
-            setExpanded((current) => !current);
+            operationsStore.getState().exitEditMode();
           }}
         >
-          {expanded ? '[▾]' : '[▸]'}
+          ЗАКРЫТЬ
+        </TerminalButton>
+        <TerminalButton
+          size="small"
+          tone="quiet"
+          aria-label={panelExpanded ? 'Свернуть панель' : 'Развернуть панель'}
+          aria-expanded={panelExpanded}
+          onClick={() => {
+            operationsStore.getState().setEditPanelExpanded(!panelExpanded);
+          }}
+        >
+          {panelExpanded ? '[▾]' : '[▸]'}
         </TerminalButton>
       </header>
 
@@ -383,7 +457,12 @@ export function EditPanel() {
                  * search is the operator naming one setting, and answering it with
                  * a picker over every tile on the screen would bury the answer.
                  */}
-                {!searching && run.category === 'tiles' ? <TileVisibility /> : null}
+                {!searching && run.category === 'tiles' ? (
+                  <>
+                    <TileVisibility />
+                    <TilePresentationPicker />
+                  </>
+                ) : null}
                 {!searching && run.category === 'animations' ? <TileMotionPicker /> : null}
                 {!searching && run.category === 'localization' ? <ElementTranslation /> : null}
                 {run.definitions.map((definition) => (
@@ -401,16 +480,13 @@ export function EditPanel() {
             ))}
           </TerminalScrollArea>
 
+          {/*
+           * ОТМЕНИТЬ and ЗАКРЫТЬ moved to the header, which is reachable
+           * whether the panel is collapsed or not; this footer keeps the one
+           * action that belongs to the expanded body, since it opens a
+           * browser tab and should never fire from a glance at the pill.
+           */}
           <footer className="edit-panel__actions flex gap-hq-2">
-            <TerminalButton
-              size="small"
-              disabled={!canUndo}
-              onClick={() => {
-                operationsStore.getState().undoSettingsDraft();
-              }}
-            >
-              ОТМЕНИТЬ
-            </TerminalButton>
             <TerminalButton
               size="small"
               disabled={!hasChanges}
@@ -423,15 +499,6 @@ export function EditPanel() {
               }}
             >
               ЧЕРНОВИК ISSUE
-            </TerminalButton>
-            <TerminalButton
-              size="small"
-              tone="quiet"
-              onClick={() => {
-                operationsStore.getState().exitEditMode();
-              }}
-            >
-              ЗАКРЫТЬ
             </TerminalButton>
           </footer>
         </div>

@@ -22,6 +22,13 @@ interface Recorded {
    * rather than off a single spy.
    */
   readonly bootstrapHeaders: string[];
+  /**
+   * What each pairing call presented as `public_key`. The control plane
+   * refuses an empty one (`durable-runtime.ts`, `normalizeDeviceInput`), so
+   * an empty entry here is a pairing that fails against every deployed
+   * plane.
+   */
+  readonly publicKeys: string[];
 }
 
 /** What the transport would actually have put on the wire for this call. */
@@ -40,6 +47,7 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
     async createGroup(request, options) {
       recorded.mutationContexts.push({ requestId: request.context.requestId });
       recorded.bootstrapHeaders.push(`createGroup:${bootstrapHeader(options)}`);
+      recorded.publicKeys.push(request.initialDevice.publicKey);
       return {
         group: {
           id: { value: 'group-a' },
@@ -118,6 +126,7 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
     async pairDevice(request, options) {
       recorded.mutationContexts.push({ requestId: request.context.requestId });
       recorded.bootstrapHeaders.push(`pairDevice:${bootstrapHeader(options)}`);
+      recorded.publicKeys.push(request.publicKey);
       return {
         group: {
           id: { value: 'group-a' },
@@ -241,6 +250,26 @@ function syncClient(recorded: Recorded, overrides: Partial<SyncRpcClient> = {}):
         ],
       };
     },
+    async updatePresence(request) {
+      recorded.mutationContexts.push({
+        requestId: request.context.requestId,
+        ...(request.context.actorDeviceId === undefined
+          ? {}
+          : { actorDeviceId: request.context.actorDeviceId.value }),
+      });
+      return {
+        devices: [
+          {
+            deviceId: { value: 'device-a' },
+            status: syncV1.DeviceStatus.ONLINE,
+            activeScreen: request.detail.activeScreen,
+            clockOffsetMs: request.detail.clockOffsetMs,
+            latencyMs: request.detail.latencyMs,
+            observedAt: timestamp(2_000),
+          },
+        ],
+      };
+    },
     async readGroupEvents() {
       return {
         events: [],
@@ -279,6 +308,7 @@ function client(options: { readonly sync?: SyncRpcClient; readonly now?: () => n
     refreshRequestIds: [],
     mutationContexts: [],
     bootstrapHeaders: [],
+    publicKeys: [],
   };
   const store = new DeviceSessionStore(memoryStorage());
   let minted = 0;
@@ -332,6 +362,7 @@ describe('ControlPlaneClient', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const sync = syncClient(recorded, {
       async refreshDeviceSession(request) {
@@ -389,6 +420,7 @@ describe('ControlPlaneClient', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const sync = syncClient(recorded, {
       async refreshDeviceSession() {
@@ -454,7 +486,12 @@ describe('ControlPlaneClient', () => {
       sessionStore: store,
       clients: {
         control: controlRpcClient(''),
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
+        sync: syncClient({
+          refreshRequestIds: [],
+          mutationContexts: [],
+          bootstrapHeaders: [],
+          publicKeys: [],
+        }),
       },
     });
 
@@ -471,7 +508,12 @@ describe('ControlPlaneClient', () => {
       sessionStore: new DeviceSessionStore(memoryStorage()),
       clients: {
         control: controlClient,
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
+        sync: syncClient({
+          refreshRequestIds: [],
+          mutationContexts: [],
+          bootstrapHeaders: [],
+          publicKeys: [],
+        }),
       },
     });
 
@@ -499,7 +541,12 @@ describe('ControlPlaneClient', () => {
       sessionStore: store,
       clients: {
         control: controlClient,
-        sync: syncClient({ refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] }),
+        sync: syncClient({
+          refreshRequestIds: [],
+          mutationContexts: [],
+          bootstrapHeaders: [],
+          publicKeys: [],
+        }),
       },
     });
 
@@ -522,7 +569,7 @@ describe('ControlPlaneClient', () => {
 
   it('turns a transport failure that never reached the host into an unavailable kind', async () => {
     const sync = syncClient(
-      { refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [] },
+      { refreshRequestIds: [], mutationContexts: [], bootstrapHeaders: [], publicKeys: [] },
       {
         async getPresence() {
           throw new TypeError('Failed to fetch');
@@ -557,6 +604,74 @@ describe('ControlPlaneClient', () => {
       },
     ]);
   });
+
+  it('joins with nothing to report when no detail is given, exactly as before this existed', async () => {
+    const { client: created } = client();
+    await created.pair('CODE-1', 'MON-01');
+
+    // No throw, no argument: a caller from before F10 presence publish still
+    // joins, and the wire message carries the proto3 defaults.
+    await expect(created.join()).resolves.toBeDefined();
+  });
+
+  it('reports the screen it is given on join and on UpdatePresence, and reads the roster back', async () => {
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+      publicKeys: [],
+    };
+    let lastJoinDetail: { readonly activeScreen: string } | null = null;
+    const sync = syncClient(recorded, {
+      async joinGroup(request) {
+        lastJoinDetail = { activeScreen: request.detail.activeScreen };
+        return {
+          group: {
+            id: { value: 'group-a' },
+            name: 'ШТАБ',
+            authorityMode: syncV1.AuthorityMode.MULTI_AUTHORITY,
+            leaderDeviceId: { value: 'device-a' },
+          },
+        };
+      },
+    });
+    const store = new DeviceSessionStore(memoryStorage());
+    const created = new ControlPlaneClient({
+      baseUrl: 'http://127.0.0.1:4100',
+      sessionStore: store,
+      clients: { control: controlClient, sync },
+      mintRequestId: () => 'request-1',
+      now: () => 0,
+    });
+    await created.pair('CODE-1', 'MON-01');
+
+    await created.join({
+      activeScreen: '/video',
+      selectedElement: 'camera-1',
+      clockOffsetMs: 12,
+      latencyMs: 34,
+    });
+
+    expect(lastJoinDetail).toEqual({ activeScreen: '/video' });
+
+    const roster = await created.updatePresence({
+      activeScreen: '/system',
+      selectedElement: '',
+      clockOffsetMs: 5,
+      latencyMs: 6,
+    });
+
+    expect(roster).toEqual([
+      {
+        deviceId: 'device-a',
+        status: 'ONLINE',
+        activeScreen: '/system',
+        clockOffsetMs: 5,
+        latencyMs: 6,
+        observedAt: new Date(2_000).toISOString(),
+      },
+    ]);
+  });
 });
 
 /**
@@ -577,6 +692,7 @@ describe('two links over one session store', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const store = new DeviceSessionStore(memoryStorage());
     const sync = syncClient(recorded);
@@ -666,6 +782,42 @@ describe('two links over one session store', () => {
     expect(store.read()?.controlPlaneInstallationId).toBe('');
     expect(reader.session()).not.toBeNull();
   });
+
+  /*
+   * The rebuild plane failover performs: the plane that used to carry the
+   * session stopped answering, and the one that did takes over -- presenting
+   * the same stored session, because the store is shared and scoped by
+   * database rather than by address.
+   */
+  it('promotes a reader to owner and demotes the owner to reader, over the same session', async () => {
+    const { owner, reader, recorded } = pair(() => 0);
+    await owner.pair('CODE-1', 'MON-01');
+
+    const promoted = reader.asOwner();
+    const demoted = owner.asReader();
+
+    expect(promoted.credentials).toBe('owner');
+    expect(demoted.credentials).toBe('reader');
+    // The address moves with the client, not with the role: promoting the
+    // link the operator configured as secondary must not make it answer as
+    // if it were the primary's own address.
+    expect(promoted.baseUrl).toBe(reader.baseUrl);
+    expect(demoted.baseUrl).toBe(owner.baseUrl);
+    // Same store, so the tokens the original owner earned are exactly what
+    // the promoted sibling presents -- no re-pairing.
+    expect(promoted.session()).toEqual(owner.session());
+
+    await expect(demoted.refresh()).rejects.toMatchObject({ kind: 'failed-precondition' });
+    await promoted.refresh();
+    expect(recorded.refreshRequestIds).toHaveLength(1);
+  });
+
+  it('answers itself from asOwner and asReader when the role already matches', () => {
+    const { owner, reader } = pair(() => 0);
+
+    expect(owner.asOwner()).toBe(owner);
+    expect(reader.asReader()).toBe(reader);
+  });
 });
 
 /**
@@ -713,6 +865,7 @@ describe('ControlPlaneClient over the group administration calls', () => {
       refreshRequestIds: [],
       mutationContexts: [],
       bootstrapHeaders: [],
+      publicKeys: [],
     };
     const reader = new ControlPlaneClient({
       baseUrl: 'https://plane.example',
@@ -799,5 +952,51 @@ describe('ControlPlaneClient over the group administration calls', () => {
     });
 
     expect(recorded.mutationContexts).toEqual([]);
+  });
+});
+
+/**
+ * Pairing carried `public_key: ''` from the day the client existed, and the
+ * control plane's durable runtime refuses an empty one -- so every real
+ * pairing this client made against a live plane with durable auth failed
+ * outright. The claim here is behavioural: what actually crosses the wire on
+ * the two pairing calls is the device's one identity, and it is never empty.
+ */
+describe('ControlPlaneClient presents the device identity when pairing', () => {
+  it('sends one non-empty public key on CreateGroup and the same one on PairDevice', async () => {
+    const { client: created, recorded } = client();
+
+    await created.createGroup({
+      name: 'ШТАБ',
+      deviceName: 'MON-01',
+      bootstrapSecret: 'secret-value',
+    });
+    await created.pair('PAIR-0001', 'MON-02');
+
+    expect(recorded.publicKeys).toHaveLength(2);
+    const [onCreate, onPair] = recorded.publicKeys;
+    expect(onCreate).toMatch(/^(ecdsa-p256|opaque):.+/u);
+    expect(onPair).toBe(onCreate);
+  });
+
+  it('sends an injected identity verbatim, so a paired session can present a chosen key', async () => {
+    const recorded: Recorded = {
+      refreshRequestIds: [],
+      mutationContexts: [],
+      bootstrapHeaders: [],
+      publicKeys: [],
+    };
+    const created = new ControlPlaneClient({
+      baseUrl: 'http://127.0.0.1:4100',
+      sessionStore: new DeviceSessionStore(memoryStorage()),
+      clients: { control: controlClient, sync: syncClient(recorded) },
+      identity: { publicKey: async () => 'ed25519:analyst' },
+      mintRequestId: () => 'request-1',
+      now: () => 0,
+    });
+
+    await created.pair('PAIR-0001', 'MON-02');
+
+    expect(recorded.publicKeys).toEqual(['ed25519:analyst']);
   });
 });

@@ -63,7 +63,10 @@ describe('authenticated paired-device SyncService', () => {
     const ownerSession = required(created.session, 'createGroup.session');
     expect(owner.role).toBe(syncV1.DeviceRole.ADMIN);
     expect(group.leaderDeviceId?.value).toBe(owner.id?.value);
-    expect(created.accessToken).toBeUndefined();
+    // No credential travels at the top level of the response: the tokens live inside
+    // the session message alone. Asserting on a field the message never declared would
+    // be vacuous, so the response's own key set is what is inspected.
+    expect(Object.keys(created).filter((key) => /token/iu.test(key))).toEqual([]);
 
     await expect(
       sync.createPairingCode({

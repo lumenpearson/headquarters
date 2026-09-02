@@ -50,4 +50,34 @@ describe('StartupSequence', () => {
     const second = render(<StartupSequence />);
     expect(overlay(second.container)?.dataset.stage).toBe(startupStages[0]);
   });
+
+  /*
+   * `markStartupComplete` is the producer R11's keybind intro (`KeybindIntro`)
+   * waits on: that consumer is tested against the flag already being true or
+   * false, never against this component actually setting it. Deleting the
+   * effect that calls it (StartupSequence.tsx:47-54) would leave every test
+   * above green -- they only assert on the overlay disappearing -- while the
+   * card never auto-opens again on any launch.
+   */
+  it('calls markStartupComplete straight away when the sequence does not play', () => {
+    act(() =>
+      operationsStore.getState().applySettingsPatch([{ id: 'startup.enabled', value: false }]),
+    );
+    expect(operationsStore.getState().ui.startupComplete).toBe(false);
+
+    render(<StartupSequence />);
+
+    expect(operationsStore.getState().ui.startupComplete).toBe(true);
+  });
+
+  it('calls markStartupComplete once every stage has played', () => {
+    render(<StartupSequence />);
+    expect(operationsStore.getState().ui.startupComplete).toBe(false);
+
+    act(() => void vi.advanceTimersByTime(309 * (startupStages.length - 1)));
+    expect(operationsStore.getState().ui.startupComplete).toBe(false);
+
+    act(() => void vi.advanceTimersByTime(309));
+    expect(operationsStore.getState().ui.startupComplete).toBe(true);
+  });
 });

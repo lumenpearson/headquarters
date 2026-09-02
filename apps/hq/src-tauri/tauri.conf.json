@@ -4,9 +4,9 @@
   "version": "0.5.0",
   "identifier": "ru.gremuchaya.hq",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm --workspace-root dev:hq",
     "devUrl": "http://127.0.0.1:3000",
-    "beforeBuildCommand": "pnpm build:desktop",
+    "beforeBuildCommand": "pnpm --workspace-root build:desktop:web",
     "frontendDist": "../out"
   },
   "app": {
@@ -36,6 +36,18 @@
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "category": "Productivity",
     "shortDescription": "Offline operational monitor system",
-    "longDescription": "Local-first multi-screen production system for Gremuchaya Smes"
+    "longDescription": "Local-first multi-screen production system for Gremuchaya Smes",
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/lumenpearson/headquarters/releases/latest/download/latest.json"
+      ],
+      "pubkey": "PLACEHOLDER-NOT-A-REAL-MINISIGN-KEY-SEE-apps/hq/src-tauri/src/app_updater.rs",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

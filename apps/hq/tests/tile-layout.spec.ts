@@ -1,5 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { messagesFor, type MessageId } from '../src/application/localization/messages';
+import { expandEditPanel } from './editPanelHelpers';
+import { gotoSettingsUnified, settingControl } from './settingsHelpers';
+
+/** The shipped Russian text a selector needs to find a tile by its title, read from the catalogue rather than pasted. */
+function shippedText(id: MessageId): string {
+  const value = messagesFor('ru')[id];
+  if (value === undefined) throw new Error(`the catalogue has no ru text for ${id}`);
+  return value;
+}
+
 /**
  * Reads the grid back the way the resolver wrote it: every cell carries its
  * own `grid-column`/`grid-row` inline, so the occupancy of the grid can be
@@ -122,20 +133,18 @@ test('R10: no screen can be left blank by a size the operator is allowed to set'
   page.on('pageerror', (error) => failures.push(error.message));
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page
-    .getByRole('textbox', { name: 'TILES / SPANS' })
-    .fill(
-      [
-        'cases:registry=12x1',
-        'objects:registry=12x1',
-        'reports:registry=12x1',
-        'files:registry=12x1',
-        'search:results=12x1',
-      ].join(','),
-    );
+  await settingControl(page, 'tiles.spans', 'textbox').fill(
+    [
+      'cases:registry=12x1',
+      'objects:registry=12x1',
+      'reports:registry=12x1',
+      'files:registry=12x1',
+      'search:results=12x1',
+    ].join(','),
+  );
 
   // The shortest grid the runtime can produce: one row.
   await page.setViewportSize({ width: 1280, height: 400 });
@@ -152,10 +161,10 @@ test('R3: a tile hidden on one screen stays on the screens that share its name',
   page,
 }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('cases:registry');
+  await settingControl(page, 'tiles.hiddenIds', 'textbox').fill('cases:registry');
 
   /*
    * `registry` is the record table on four screens. While the settings were
@@ -178,10 +187,10 @@ test('R3: switching a group off takes every tile in it, on every screen', async 
   await expect(page.locator('[data-tile="threats"]')).toBeVisible();
   await expect(page.locator('[data-tile="sector"]')).toBeVisible();
 
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN CATEGORIES' }).fill('geo');
+  await settingControl(page, 'tiles.hiddenCategories', 'textbox').fill('geo');
 
   await page.goto('/overview');
   await expect(page.locator('[data-tile="brief"]')).toBeVisible();
@@ -200,11 +209,14 @@ test('R3: the operator can cap how rich a tile is drawn', async ({ page }) => {
   await page.goto('/overview');
   await expect(page.locator('[data-tile="brief"]')).toHaveAttribute('data-presentation', 'full');
 
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('combobox', { name: 'TILES / PRESENTATION' }).click();
-  await page.getByRole('option', { name: 'MINIMAL', exact: true }).click();
+  await settingControl(page, 'tiles.presentation', 'combobox').click();
+  // The dropdown reuses the presentation picker's own phrases
+  // (`localizedEnumOptionLabel` -> `tilePresentationLabel`), not the bare
+  // uppercased identifier it showed before the chrome read the catalogue.
+  await page.getByRole('option', { name: 'МИНИМАЛЬНЫЙ ВИД', exact: true }).click();
 
   await page.goto('/overview');
   const brief = page.locator('[data-tile="brief"]');
@@ -240,6 +252,8 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   await expect(page.locator('.edit-mode-frame')).toBeVisible();
 
   const panel = page.locator('.edit-panel');
+  // The panel opens as a collapsed pill; its section select is in the body.
+  await expandEditPanel(page);
   // The panel navigates by section and shows the whole of one at once, so the
   // tiles category is a heading inside `layout` rather than an entry in a flat
   // list of all thirty-two categories.
@@ -249,7 +263,7 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   const list = panel.locator('.edit-tiles');
   await expect(list).toBeVisible();
   // Named as the panel is titled, not as the setting keys it.
-  const objectives = list.getByRole('switch', { name: 'ЦЕЛИ ОПЕРАЦИИ' });
+  const objectives = list.getByRole('switch', { name: shippedText('overview.objectivesTitle') });
   await expect(objectives).toBeChecked();
 
   await objectives.click();
@@ -261,7 +275,9 @@ test('R3: edit mode offers the tiles by name instead of asking for identifiers',
   const geo = list.getByRole('switch', { name: 'ГЕОГРАФИЯ' });
   await geo.click();
   await expect(page.locator('[data-tile="threats"]')).toHaveCount(0);
-  await expect(list.getByRole('switch', { name: 'УРОВЕНЬ УГРОЗЫ ПО СЕКТОРАМ' })).toBeDisabled();
+  await expect(
+    list.getByRole('switch', { name: shippedText('overview.threatsTitle') }),
+  ).toBeDisabled();
 });
 
 test('R10: a tile that does not fit goes to the screen of its own', async ({ page }) => {
@@ -274,7 +290,7 @@ test('R10: a tile that does not fit goes to the screen of its own', async ({ pag
 
   // `sector` shows the operation's ground, and `/map` shows the same ground in
   // full. The link is the claim: what left the overview is still reachable.
-  const relocated = notice.getByRole('button', { name: 'СЕКТОР ОПЕРАЦИИ' });
+  const relocated = notice.getByRole('button', { name: shippedText('overview.sectorTitle') });
   await expect(relocated).toBeVisible();
   await expect(page.locator('[data-tile="sector"]')).toHaveCount(0);
 
@@ -291,8 +307,10 @@ test('R10: a tile with no screen of its own is named rather than dropped', async
   // `state.tasks` is read by the overview alone, so there is no route to send
   // the operator to. It is listed without a link instead of pointing at a
   // screen that shows something else.
-  await expect(notice.locator('b', { hasText: 'АКТИВНЫЕ ЗАДАЧИ' })).toBeVisible();
-  await expect(notice.getByRole('button', { name: 'АКТИВНЫЕ ЗАДАЧИ' })).toHaveCount(0);
+  await expect(notice.locator('b', { hasText: shippedText('overview.tasksTitle') })).toBeVisible();
+  await expect(
+    notice.getByRole('button', { name: shippedText('overview.tasksTitle') }),
+  ).toHaveCount(0);
 });
 
 test('R10: a tile shows less at a smaller presentation, not the same list in a smaller box', async ({
@@ -330,10 +348,10 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
   // in the notice instead.
   await expect(page.locator('[data-tile="objectives"]')).toBeVisible();
 
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
   await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
   await page.getByRole('option', { name: 'ПЛИТКИ', exact: true }).click();
-  await page.getByRole('textbox', { name: 'TILES / HIDDEN IDS' }).fill('overview:objectives');
+  await settingControl(page, 'tiles.hiddenIds', 'textbox').fill('overview:objectives');
 
   await page.goto('/overview');
   /*
@@ -352,5 +370,63 @@ test('R3: hiding a tile by id removes it from the screen', async ({ page }) => {
    * absence from a list that exists rather than the absence of the list.
    */
   await expect(page.locator('.tile-grid__displaced')).toBeVisible();
-  await expect(page.locator('.tile-grid__displaced', { hasText: 'ЦЕЛИ ОПЕРАЦИИ' })).toHaveCount(0);
+  await expect(
+    page.locator('.tile-grid__displaced', { hasText: shippedText('overview.objectivesTitle') }),
+  ).toHaveCount(0);
+});
+
+test('R10: layout.tileMinimumWidth changes which tiles fit, without emptying the screen', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/overview');
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+
+  const placedBefore = await page
+    .locator('.tile-grid__cell')
+    .evaluateAll((cells) => cells.map((cell) => cell.dataset['tile']));
+  expect(placedBefore.length).toBeGreaterThan(0);
+
+  /*
+   * Measured, not guessed. `/overview` places its tiles in four columns
+   * (`OverviewScreen.tsx`), so this is the width one column actually renders
+   * at. A floor set to one and a half of it sits strictly between a
+   * one-column variant, which now falls under it, and a two-column one,
+   * which still clears it -- the setting has something to move without every
+   * tile losing its widest variant at once.
+   */
+  const columnWidth = await page
+    .locator('.tile-grid')
+    .evaluate((element) => element.getBoundingClientRect().width / 4);
+  const target = Math.round(Math.min(480, Math.max(160, columnWidth * 1.5)));
+
+  await gotoSettingsUnified(page);
+  await page.getByRole('combobox', { name: 'Категория персонализации' }).click();
+  await page.getByRole('option', { name: 'МАКЕТ', exact: true }).click();
+  await settingControl(page, 'layout.tileMinimumWidth', 'textbox').fill(String(target));
+
+  await page.goto('/overview');
+  await expect(page.locator('.tile-grid__cell').first()).toBeVisible();
+
+  const placedAfter = await page
+    .locator('.tile-grid__cell')
+    .evaluateAll((cells) => cells.map((cell) => cell.dataset['tile']));
+  // The screen the setting used to leave inert, still not empty: some tile
+  // clears the new floor and stays on the grid.
+  expect(placedAfter.length).toBeGreaterThan(0);
+  // The packing actually changed -- the claim `settingsAwaitingTheirFeature`
+  // used to record as unmet.
+  expect(placedAfter).not.toEqual(placedBefore);
+
+  const left = placedBefore.filter(
+    (id): id is string => id !== undefined && !placedAfter.includes(id),
+  );
+  expect(left.length).toBeGreaterThan(0);
+
+  // Whatever left the grid is named in the overflow notice rather than
+  // dropped -- R10's rule, regardless of why a tile stopped fitting.
+  const displacedCount = await page
+    .locator('.tile-grid__displaced > button, .tile-grid__displaced > b')
+    .count();
+  expect(displacedCount).toBeGreaterThanOrEqual(left.length);
 });

@@ -3,15 +3,23 @@ import { randomBytes } from 'node:crypto';
 import { create, fromJson, type JsonValue } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
 import type { HandlerContext } from '@connectrpc/connect';
+import {
+  channelSeverity,
+  channelValue,
+  curvePhaseAt,
+  type SimulationChannelLike,
+  type TelemetrySeverityKind,
+} from '@gremuchaya/domain';
 import { ResourceIdSchema, RevisionSchema, telemetryV1 } from '@gremuchaya/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import type { SqlClient } from '../db/database.js';
+import type { SqlClient, SqlStatement, SqlTransactionResults } from '../db/database.js';
 import { DisposableDatabasePool, liveTestDatabaseUrl } from '../db/liveDatabase.js';
 import { runMigrations } from '../db/migrations.js';
 import { DurablePairedDeviceRuntime } from '../sync/durable-runtime.js';
 import type { AuthenticatedDevice } from '../sync/runtime.js';
 
+import { DurableTelemetryMeasurementStore } from './measurement-store.js';
 import { createTelemetryService } from './service.js';
 import { DurableSimulationProfileStore } from './store.js';
 
@@ -61,6 +69,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name: `Смена ${uniqueSuffix()}`,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Смена'),
       });
 
@@ -75,6 +84,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
           profileId: profile.id,
           name: `Смена ${uniqueSuffix()}`,
           presetKind: 'CUSTOM',
+          sources: [],
           profile: profileBody('Смена A'),
         }),
         store.update({
@@ -83,6 +93,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
           profileId: profile.id,
           name: `Смена ${uniqueSuffix()}`,
           presetKind: 'CUSTOM',
+          sources: [],
           profile: profileBody('Смена B'),
         }),
       ]);
@@ -114,6 +125,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Смена'),
       });
       const requestId = `simulation-update-${uniqueSuffix()}`;
@@ -123,6 +135,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: profile.id,
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Смена, переписанная'),
         mutation: { requestId },
       };
@@ -202,6 +215,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Исходная'),
       });
       await store.update({
@@ -209,6 +223,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: original.id,
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Переписанная'),
       });
 
@@ -222,6 +237,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: original.id,
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: rewound.profile,
       });
 
@@ -256,6 +272,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Первая'),
       });
 
@@ -265,6 +282,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
           profileId: crypto.randomUUID(),
           name,
           presetKind: 'CUSTOM',
+          sources: [],
           profile: profileBody('Вторая'),
         }),
       ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'ALREADY_EXISTS' });
@@ -276,6 +294,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name: `${name}-2`,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Вторая'),
       });
       await expect(
@@ -284,6 +303,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
           profileId: other.id,
           name,
           presetKind: 'CUSTOM',
+          sources: [],
           profile: profileBody('Вторая'),
         }),
       ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'ALREADY_EXISTS' });
@@ -294,6 +314,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Первая'),
       });
       expect(elsewhere.revision).toBe(1n);
@@ -319,6 +340,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name: `Смена ${uniqueSuffix()}`,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Первая'),
       });
       const viewerActor = { groupId: owner.groupId, deviceId: viewer.deviceId };
@@ -329,6 +351,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
           profileId: crypto.randomUUID(),
           name: `Смена ${uniqueSuffix()}`,
           presetKind: 'CUSTOM',
+          sources: [],
           profile: profileBody('Своя'),
         }),
       ).rejects.toMatchObject({ name: 'PairedDeviceRuntimeError', code: 'PERMISSION_DENIED' });
@@ -366,6 +389,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Первая'),
       });
       await store.update({
@@ -373,6 +397,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: profile.id,
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Вторая'),
       });
 
@@ -402,6 +427,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: crypto.randomUUID(),
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Первая'),
       });
       await store.update({
@@ -409,6 +435,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
         profileId: profile.id,
         name,
         presetKind: 'CUSTOM',
+        sources: [],
         profile: profileBody('Вторая'),
       });
 
@@ -418,6 +445,7 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
           profileId: profile.id,
           name,
           presetKind: 'CUSTOM',
+          sources: [],
           profile: profileBody('Третья'),
           expectedRevision: 1n,
         }),
@@ -612,6 +640,532 @@ describeIntegration('durable simulation profiles against real PostgreSQL', () =>
     networkTimeoutMs,
   );
 
+  /*
+   * The measurement half, against the engine.
+   *
+   * Everything below is a property a scripted `SqlClient` cannot show. The
+   * registry follows the profile only because migration 0011's foreign key
+   * really cascades; two concurrent captures land on consecutive sequences only
+   * because the allocator's row lock really serializes them; a pruned snapshot
+   * really takes its samples with it; and a reading is the published curve only
+   * because the body that comes back out of `jsonb` is the body that went in.
+   */
+
+  it(
+    'declares a group’s data sources with its profile and retires them with it',
+    async () => {
+      const runtime = createRuntime();
+      const service = createMeasuringService(runtime);
+      const owner = await bootstrapGroup(runtime);
+      const createProfile = requireMethod(service.createSimulationProfile);
+      const updateProfile = requireMethod(service.updateSimulationProfile);
+      const deleteProfile = requireMethod(service.deleteSimulationProfile);
+      const name = `Смена ${uniqueSuffix()}`;
+
+      const published = requireProfile(
+        await createProfile(
+          create(telemetryV1.CreateSimulationProfileRequestSchema, {
+            profile: measuredProfile(owner.groupId, name, ['cpu.total', 'network.uplink']),
+          }),
+          bearer(owner.accessToken),
+        ),
+      );
+
+      expect(await registeredSources(owner.groupId)).toEqual([
+        { source_key: 'cpu.total', kind: 'CPU', unit: '%' },
+        { source_key: 'network.uplink', kind: 'NETWORK', unit: 'Mbit/s' },
+      ]);
+
+      // The second channel is replaced. The registry has to lose the key the
+      // profile stopped naming and gain the one it started naming, in the same
+      // statement that wrote the profile.
+      await updateProfile(
+        create(telemetryV1.UpdateSimulationProfileRequestSchema, {
+          profile: measuredProfile(owner.groupId, name, ['cpu.total', 'memory.used'], {
+            id: published.id?.value ?? '',
+          }),
+        }),
+        bearer(owner.accessToken),
+      );
+      expect(await registeredSources(owner.groupId)).toEqual([
+        { source_key: 'cpu.total', kind: 'CPU', unit: '%' },
+        { source_key: 'memory.used', kind: 'MEMORY', unit: '%' },
+      ]);
+
+      await deleteProfile(
+        create(telemetryV1.DeleteSimulationProfileRequestSchema, {
+          profileId: { value: published.id?.value ?? '' },
+        }),
+        bearer(owner.accessToken),
+      );
+      // Nothing deregisters a source explicitly. The cascade on `profile_id` is
+      // the whole of that path, which is why there is no second one to forget.
+      expect(await registeredSources(owner.groupId)).toEqual([]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'lists a group’s sources and refuses a device the group does not hold',
+    async () => {
+      const runtime = createRuntime();
+      const service = createMeasuringService(runtime);
+      const owner = await bootstrapGroup(runtime);
+      const neighbour = await bootstrapGroup(runtime);
+      const listSources = requireMethod(service.listDataSources);
+      await requireMethod(service.createSimulationProfile)(
+        create(telemetryV1.CreateSimulationProfileRequestSchema, {
+          profile: measuredProfile(owner.groupId, `Смена ${uniqueSuffix()}`, [
+            'cpu.total',
+            'network.uplink',
+          ]),
+        }),
+        bearer(owner.accessToken),
+      );
+
+      const listed = (await listSources(
+        create(telemetryV1.ListDataSourcesRequestSchema, {}),
+        bearer(owner.accessToken),
+      )) as telemetryV1.ListDataSourcesResponse;
+
+      expect(listed.sources.map((source) => source.id?.value)).toEqual([
+        'cpu.total',
+        'network.uplink',
+      ]);
+      expect(listed.sources[0]).toMatchObject({
+        kind: telemetryV1.DataSourceKind.CPU,
+        unit: '%',
+        simulated: true,
+      });
+      // The labels are facts about the declaration, which is what tells an
+      // operator which profile a source came from.
+      expect(listed.sources[0]?.labels.preset).toBe('CPU_OVERLOAD');
+      expect(listed.page?.approximateTotal).toBe(2n);
+
+      // A valid token for another group reads its own registry, which is empty,
+      // and never this one's.
+      const foreign = (await listSources(
+        create(telemetryV1.ListDataSourcesRequestSchema, {}),
+        bearer(neighbour.accessToken),
+      )) as telemetryV1.ListDataSourcesResponse;
+      expect(foreign.sources).toEqual([]);
+
+      // Naming a device of another group is refused rather than answered, so
+      // `device_id` cannot become a way to ask whether an identifier exists.
+      await expect(
+        listSources(
+          create(telemetryV1.ListDataSourcesRequestSchema, {
+            deviceId: { value: neighbour.authenticated.device.id },
+          }),
+          bearer(owner.accessToken),
+        ),
+      ).rejects.toMatchObject({ name: 'ConnectError' });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'reads the published curve at the phase the shared function gives, and keeps its chain',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const publishedAt = new Date('2026-08-29T09:00:00.000Z');
+      let readingAt = new Date(publishedAt.getTime() + 1_000);
+      const service = createMeasuringService(runtime, {
+        profileNow: () => publishedAt,
+        now: () => readingAt,
+      });
+      await requireMethod(service.createSimulationProfile)(
+        create(telemetryV1.CreateSimulationProfileRequestSchema, {
+          profile: measuredProfile(owner.groupId, `Смена ${uniqueSuffix()}`, ['cpu.total']),
+        }),
+        bearer(owner.accessToken),
+      );
+      const readSnapshot = requireMethod(service.getTelemetrySnapshot);
+
+      const first = (await readSnapshot(
+        create(telemetryV1.GetTelemetrySnapshotRequestSchema, {}),
+        bearer(owner.accessToken),
+      )) as telemetryV1.GetTelemetrySnapshotResponse;
+
+      // The timeline's origin is the profile's own `updated_at`, so the index
+      // and the phase are a function of the profile and the clock alone.
+      const firstIndex = 1_000 / 250;
+      const firstPhase = curvePhaseAt({ periodSeconds: 120, timeScale: 2 }, firstIndex * 250);
+      const firstValue = channelValue(measuredChannel, firstPhase, firstIndex, undefined);
+      expect(first.snapshot?.sequence).toBe(1n);
+      expect(first.snapshot?.simulated).toBe(true);
+      expect(first.snapshot?.samples[0]?.sourceId?.value).toBe('cpu.total');
+      expect(first.snapshot?.samples[0]?.value).toBe(firstValue);
+      expect(first.snapshot?.samples[0]?.unit).toBe('%');
+      expect(first.snapshot?.samples[0]?.severity).toBe(
+        expectedSeverity(channelSeverity(measuredChannel, firstPhase)),
+      );
+
+      // Three seconds on, well past the 125 ms cadence `update_interval_ms: 250`
+      // at `time_scale: 2` asks for, so this is a fresh capture and not a re-read.
+      readingAt = new Date(publishedAt.getTime() + 3_000);
+      const second = (await readSnapshot(
+        create(telemetryV1.GetTelemetrySnapshotRequestSchema, {}),
+        bearer(owner.accessToken),
+      )) as telemetryV1.GetTelemetrySnapshotResponse;
+
+      // The previous reading comes out of the store, which is what makes a
+      // channel's smoothing a property of the group's history rather than of
+      // whichever process answered.
+      const secondIndex = 3_000 / 250;
+      const secondPhase = curvePhaseAt({ periodSeconds: 120, timeScale: 2 }, secondIndex * 250);
+      expect(second.snapshot?.sequence).toBe(2n);
+      expect(second.snapshot?.samples[0]?.value).toBe(
+        channelValue(measuredChannel, secondPhase, secondIndex, firstValue),
+      );
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'serves one reading to every device that asks inside the group’s own cadence',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const second = await pairDevice(runtime, owner);
+      const publishedAt = new Date('2026-08-29T09:00:00.000Z');
+      const service = createMeasuringService(runtime, {
+        profileNow: () => publishedAt,
+        // Both reads happen at one instant, which is inside any cadence.
+        now: () => new Date(publishedAt.getTime() + 1_000),
+      });
+      await requireMethod(service.createSimulationProfile)(
+        create(telemetryV1.CreateSimulationProfileRequestSchema, {
+          profile: measuredProfile(owner.groupId, `Смена ${uniqueSuffix()}`, ['cpu.total']),
+        }),
+        bearer(owner.accessToken),
+      );
+      const readSnapshot = requireMethod(service.getTelemetrySnapshot);
+      const request = create(telemetryV1.GetTelemetrySnapshotRequestSchema, {});
+
+      const owned = (await readSnapshot(
+        request,
+        bearer(owner.accessToken),
+      )) as telemetryV1.GetTelemetrySnapshotResponse;
+      const paired = (await readSnapshot(
+        request,
+        bearer(second.accessToken),
+      )) as telemetryV1.GetTelemetrySnapshotResponse;
+
+      // Two screens of one shoot must draw one number. The second read takes no
+      // capture at all, which is why the sequence has not moved.
+      expect(owned.snapshot?.sequence).toBe(1n);
+      expect(paired.snapshot?.sequence).toBe(1n);
+      expect(paired.snapshot?.samples[0]?.value).toBe(owned.snapshot?.samples[0]?.value);
+      const stored = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM telemetry_snapshots WHERE group_id = $1',
+        values: [owner.groupId],
+      });
+      expect(stored[0]?.n).toBe(1);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'gives two concurrent captures consecutive sequences and leaves no snapshot without samples',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const measurements = createMeasurements();
+      const capturedAt = new Date('2026-08-29T09:00:00.000Z');
+      const sample = {
+        sourceKey: 'cpu.total',
+        value: 12.5,
+        unit: '%',
+        severity: 'NORMAL',
+        labels: {},
+      };
+
+      // Both writers start from an empty allocator. Only the row lock the
+      // upsert takes stops them from claiming sequence 1 twice, and the primary
+      // key on (group_id, sequence) would turn that into a failure rather than
+      // a silent overwrite.
+      const [first, second] = await Promise.all([
+        measurements.record({
+          groupId: owner.groupId,
+          deviceId: owner.authenticated.device.id,
+          capturedAt,
+          samples: [sample],
+        }),
+        measurements.record({
+          groupId: owner.groupId,
+          deviceId: owner.authenticated.device.id,
+          capturedAt,
+          samples: [sample],
+        }),
+      ]);
+
+      expect([first.sequence, second.sequence].sort()).toEqual([1n, 2n]);
+      const counted = await database.query<{ snapshots: number; samples: number; last: string }>({
+        text: `SELECT
+                 (SELECT count(*)::int FROM telemetry_snapshots WHERE group_id = $1) AS snapshots,
+                 (SELECT count(*)::int FROM telemetry_samples WHERE group_id = $1) AS samples,
+                 (SELECT last_sequence::text FROM telemetry_sample_sequences WHERE group_id = $1)
+                   AS last`,
+        values: [owner.groupId],
+      });
+      expect(counted[0]).toEqual({ snapshots: 2, samples: 2, last: '2' });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'resumes a stream from the sequence it names, in order and without repeats',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const publishedAt = new Date('2026-08-29T09:00:00.000Z');
+      const measurements = createMeasurements();
+      const service = createMeasuringService(runtime, {
+        profileNow: () => publishedAt,
+        now: () => new Date(publishedAt.getTime() + 1_000),
+        measurements,
+      });
+      await requireMethod(service.createSimulationProfile)(
+        create(telemetryV1.CreateSimulationProfileRequestSchema, {
+          profile: measuredProfile(owner.groupId, `Смена ${uniqueSuffix()}`, ['cpu.total']),
+        }),
+        bearer(owner.accessToken),
+      );
+      // Three snapshots the client has partly seen already, all older than the
+      // cadence so the stream's own preparation takes a fourth.
+      for (let index = 0; index < 3; index += 1) {
+        await measurements.record({
+          groupId: owner.groupId,
+          deviceId: owner.authenticated.device.id,
+          capturedAt: new Date(publishedAt.getTime() - (3 - index) * 1_000),
+          samples: [
+            { sourceKey: 'cpu.total', value: index, unit: '%', severity: 'NORMAL', labels: {} },
+          ],
+        });
+      }
+
+      const controller = new AbortController();
+      const stream = requireMethod(service.streamTelemetry)(
+        create(telemetryV1.StreamTelemetryRequestSchema, {
+          afterSequence: 1n,
+          intervalMs: 60_000,
+        }),
+        bearer(owner.accessToken, controller.signal),
+      ) as AsyncIterable<telemetryV1.StreamTelemetryResponse>;
+
+      const delivered: bigint[] = [];
+      for await (const response of stream) {
+        delivered.push(response.snapshot?.sequence ?? 0n);
+        if (delivered.length === 3) break;
+      }
+      controller.abort();
+
+      // Sequence 1 was already seen and is not repeated; the capture the
+      // preparation took arrives in sequence order behind the backlog rather
+      // than ahead of what the client has not seen.
+      expect(delivered).toEqual([2n, 3n, 4n]);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'reads nothing further once the consumer stops taking snapshots',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const publishedAt = new Date('2026-08-29T09:00:00.000Z');
+      const counting = new CountingSqlClient(database);
+      const measurements = new DurableTelemetryMeasurementStore({ database: counting });
+      const service = createMeasuringService(runtime, {
+        profileNow: () => publishedAt,
+        now: () => new Date(publishedAt.getTime() + 1_000),
+        measurements,
+      });
+      await requireMethod(service.createSimulationProfile)(
+        create(telemetryV1.CreateSimulationProfileRequestSchema, {
+          profile: measuredProfile(owner.groupId, `Смена ${uniqueSuffix()}`, ['cpu.total']),
+        }),
+        bearer(owner.accessToken),
+      );
+      for (let index = 0; index < 4; index += 1) {
+        await measurements.record({
+          groupId: owner.groupId,
+          deviceId: owner.authenticated.device.id,
+          capturedAt: new Date(publishedAt.getTime() - (4 - index) * 1_000),
+          samples: [
+            { sourceKey: 'cpu.total', value: index, unit: '%', severity: 'NORMAL', labels: {} },
+          ],
+        });
+      }
+
+      const controller = new AbortController();
+      const stream = requireMethod(service.streamTelemetry)(
+        create(telemetryV1.StreamTelemetryRequestSchema, {
+          afterSequence: 0n,
+          intervalMs: 60_000,
+        }),
+        bearer(owner.accessToken, controller.signal),
+      ) as AsyncIterable<telemetryV1.StreamTelemetryResponse>;
+
+      let taken = 0;
+      let queriesAtStop = 0;
+      for await (const response of stream) {
+        taken += 1;
+        expect(response.snapshot?.sequence).toBe(BigInt(taken));
+        if (taken === 2) {
+          queriesAtStop = counting.count;
+          break;
+        }
+      }
+      controller.abort();
+
+      // Five snapshots were waiting and two were taken. A generator that read
+      // ahead of its consumer would have issued another statement by now; this
+      // one suspends at every `yield`, which is the whole of the backpressure.
+      expect(taken).toBe(2);
+      expect(counting.count).toBe(queriesAtStop);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'refuses a snapshot for a group that has declared no data source',
+    async () => {
+      const runtime = createRuntime();
+      const service = createMeasuringService(runtime);
+      const owner = await bootstrapGroup(runtime);
+
+      // An empty success here would let a client draw a healthy wall for a
+      // shoot nothing is measuring, so the answer names what is missing.
+      await expect(
+        requireMethod(service.getTelemetrySnapshot)(
+          create(telemetryV1.GetTelemetrySnapshotRequestSchema, {}),
+          bearer(owner.accessToken),
+        ),
+      ).rejects.toMatchObject({ name: 'ConnectError' });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'keeps only the retained snapshots and takes their samples with them',
+    async () => {
+      const runtime = createRuntime();
+      const owner = await bootstrapGroup(runtime);
+      const measurements = createMeasurements(2);
+      for (let index = 0; index < 4; index += 1) {
+        await measurements.record({
+          groupId: owner.groupId,
+          deviceId: owner.authenticated.device.id,
+          capturedAt: new Date(`2026-08-29T09:0${index.toString()}:00.000Z`),
+          samples: [
+            { sourceKey: 'cpu.total', value: index, unit: '%', severity: 'NORMAL', labels: {} },
+          ],
+        });
+      }
+
+      const remaining = await database.query<{ sequence: string }>({
+        text: `SELECT sequence::text AS sequence
+               FROM telemetry_snapshots
+               WHERE group_id = $1
+               ORDER BY sequence`,
+        values: [owner.groupId],
+      });
+      expect(remaining.map((row) => row.sequence)).toEqual(['3', '4']);
+      // The samples go with the snapshot because the composite foreign key
+      // cascades, not because a second statement remembered to remove them.
+      const orphans = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM telemetry_samples WHERE group_id = $1 AND sequence < 3',
+        values: [owner.groupId],
+      });
+      expect(orphans[0]?.n).toBe(0);
+    },
+    networkTimeoutMs,
+  );
+
+  it(
+    'takes a group’s registry, snapshots and samples away with the group',
+    async () => {
+      const runtime = createRuntime();
+      const service = createMeasuringService(runtime);
+      const owner = await bootstrapGroup(runtime);
+      await requireMethod(service.createSimulationProfile)(
+        create(telemetryV1.CreateSimulationProfileRequestSchema, {
+          profile: measuredProfile(owner.groupId, `Смена ${uniqueSuffix()}`, ['cpu.total']),
+        }),
+        bearer(owner.accessToken),
+      );
+      await requireMethod(service.getTelemetrySnapshot)(
+        create(telemetryV1.GetTelemetrySnapshotRequestSchema, {}),
+        bearer(owner.accessToken),
+      );
+
+      await database.query({ text: 'DELETE FROM groups WHERE id = $1', values: [owner.groupId] });
+
+      const left = await database.query<{
+        sources: number;
+        snapshots: number;
+        samples: number;
+        sequences: number;
+      }>({
+        text: `SELECT
+                 (SELECT count(*)::int FROM telemetry_sources WHERE group_id = $1) AS sources,
+                 (SELECT count(*)::int FROM telemetry_snapshots WHERE group_id = $1) AS snapshots,
+                 (SELECT count(*)::int FROM telemetry_samples WHERE group_id = $1) AS samples,
+                 (SELECT count(*)::int FROM telemetry_sample_sequences WHERE group_id = $1)
+                   AS sequences`,
+        values: [owner.groupId],
+      });
+      expect(left[0]).toEqual({ sources: 0, snapshots: 0, samples: 0, sequences: 0 });
+    },
+    networkTimeoutMs,
+  );
+
+  function createMeasurements(retainedSnapshots?: number): DurableTelemetryMeasurementStore {
+    return new DurableTelemetryMeasurementStore({
+      database,
+      ...(retainedSnapshots === undefined ? {} : { retainedSnapshots }),
+    });
+  }
+
+  /**
+   * The service with both halves wired, and with both clocks under the test's
+   * control: the profile's `updated_at` is the timeline's origin and the
+   * service's `now` is where on that timeline a reading is taken, so a test
+   * that could not set them apart could not assert a phase at all.
+   */
+  function createMeasuringService(
+    runtime: DurablePairedDeviceRuntime,
+    options: {
+      readonly profileNow?: () => Date;
+      readonly now?: () => Date;
+      readonly measurements?: DurableTelemetryMeasurementStore;
+    } = {},
+  ): ReturnType<typeof createTelemetryService> {
+    return createTelemetryService({
+      runtime,
+      profiles: new DurableSimulationProfileStore({
+        database,
+        receipts: runtime.receiptGuard,
+        ...(options.profileNow === undefined ? {} : { now: options.profileNow }),
+      }),
+      measurements: options.measurements ?? createMeasurements(),
+      ...(options.now === undefined ? {} : { now: options.now }),
+    });
+  }
+
+  function registeredSources(groupId: string): Promise<readonly Record<string, unknown>[]> {
+    return database.query({
+      text: `SELECT source_key, kind, unit
+             FROM telemetry_sources
+             WHERE group_id = $1
+             ORDER BY source_key`,
+      values: [groupId],
+    });
+  }
+
   function createRuntime(): DurablePairedDeviceRuntime {
     return new DurablePairedDeviceRuntime({ database, tokenPepper });
   }
@@ -707,9 +1261,122 @@ function publishedProfile(groupId: string, name: string): telemetryV1.Simulation
   });
 }
 
-function bearer(accessToken: string): HandlerContext {
+/**
+ * A profile whose channels declare the named data sources.
+ *
+ * Every channel carries the same curve and seed, so the arithmetic is the one
+ * `measuredChannel` below describes and a test can compute what a reading must
+ * be through `@gremuchaya/domain` rather than through this module's own copy of
+ * the formula.
+ */
+function measuredProfile(
+  groupId: string,
+  name: string,
+  sourceKeys: readonly string[],
+  options: { readonly id?: string } = {},
+): telemetryV1.SimulationProfile {
+  return create(telemetryV1.SimulationProfileSchema, {
+    ...(options.id === undefined ? {} : { id: { value: options.id } }),
+    groupId: { value: groupId },
+    name,
+    presetKind: telemetryV1.SimulationPresetKind.CPU_OVERLOAD,
+    periodSeconds: 120,
+    updateIntervalMs: 250,
+    timeScale: 2,
+    channels: sourceKeys.map((sourceKey) => ({
+      sourceId: { value: sourceKey },
+      minimum: 0,
+      maximum: 100,
+      noise: 0.05,
+      smoothing: 0.4,
+      seed: 42n,
+      valueCurve: {
+        interpolation: telemetryV1.CurveInterpolation.HERMITE,
+        loop: true,
+        points: [
+          { time: 0, value: 12, inTangent: 0, outTangent: 40 },
+          { time: 1, value: 96, inTangent: 10, outTangent: 0 },
+        ],
+      },
+      criticalityCurve: {
+        interpolation: telemetryV1.CurveInterpolation.LINEAR,
+        loop: false,
+        points: [
+          { time: 0, value: 0.1, inTangent: 0, outTangent: 0 },
+          { time: 1, value: 0.9, inTangent: 0, outTangent: 0 },
+        ],
+      },
+    })),
+  });
+}
+
+/** The channel above as the shared arithmetic sees it, after the enum mapping. */
+const measuredChannel: SimulationChannelLike = {
+  minimum: 0,
+  maximum: 100,
+  noise: 0.05,
+  smoothing: 0.4,
+  seed: 42n,
+  valueCurve: {
+    interpolation: 'hermite',
+    loop: true,
+    points: [
+      { time: 0, value: 12, inTangent: 0, outTangent: 40 },
+      { time: 1, value: 96, inTangent: 10, outTangent: 0 },
+    ],
+  },
+  criticalityCurve: {
+    interpolation: 'linear',
+    loop: false,
+    points: [
+      { time: 0, value: 0.1, inTangent: 0, outTangent: 0 },
+      { time: 1, value: 0.9, inTangent: 0, outTangent: 0 },
+    ],
+  },
+};
+
+function expectedSeverity(severity: TelemetrySeverityKind): telemetryV1.TelemetrySeverity {
+  switch (severity) {
+    case 'normal':
+      return telemetryV1.TelemetrySeverity.NORMAL;
+    case 'elevated':
+      return telemetryV1.TelemetrySeverity.ELEVATED;
+    case 'degraded':
+      return telemetryV1.TelemetrySeverity.DEGRADED;
+    case 'critical':
+      return telemetryV1.TelemetrySeverity.CRITICAL;
+  }
+}
+
+/**
+ * A live client that counts the statements issued through it.
+ *
+ * It is the only way to observe backpressure from outside: a generator that
+ * read ahead of its consumer would show up here as statements issued after the
+ * consumer stopped pulling, and nothing about the rows it returned would.
+ */
+class CountingSqlClient implements SqlClient {
+  count = 0;
+
+  constructor(private readonly inner: SqlClient) {}
+
+  query<Row extends Record<string, unknown>>(statement: SqlStatement): Promise<readonly Row[]> {
+    this.count += 1;
+    return this.inner.query<Row>(statement);
+  }
+
+  transaction(statements: readonly SqlStatement[]): Promise<SqlTransactionResults | void> {
+    this.count += 1;
+    return this.inner.transaction(statements);
+  }
+}
+
+function bearer(accessToken: string, signal?: AbortSignal): HandlerContext {
   return {
     requestHeader: new Headers({ authorization: `Bearer ${accessToken}` }),
+    // A streaming handler reads the signal on every turn of its loop, so a
+    // context without one would make every stream test a leak.
+    signal: signal ?? new AbortController().signal,
   } as unknown as HandlerContext;
 }
 

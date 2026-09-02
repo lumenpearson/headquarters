@@ -8,9 +8,17 @@ import {
   TerminalSelect,
   TerminalSwitch,
 } from '@gremuchaya/ui/primitives';
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 
 import { dateTimeFormat } from '@/application/localization/intl';
+import { t, useAppLocale } from '@/application/localization/locale';
 import { useBooleanSetting } from '@/application/personalization/useSetting';
 import {
   authorityModeLabel,
@@ -25,6 +33,7 @@ import {
   type DeviceRole,
   type GroupDevice,
   type PairingRole,
+  type PresenceEntry,
 } from '@/application/sync/connection';
 import type { PairingCodeGrant } from '@/application/sync/controlPlanePort';
 import {
@@ -50,6 +59,20 @@ export function openGroupPairing(): void {
 }
 
 /**
+ * The screen an unpaired device is on inside the join-or-create wizard
+ * (session 2026-08-30 continued, R27 rework). `choose` is where the wizard
+ * always opens: it decides which of the two paths below applies, and neither
+ * path is a fact about the fields it holds -- an operator either already has
+ * a code, or is the one about to issue the first one. `join` and `create`
+ * each end in the one submit their path needs, which is why the whole path is
+ * two actions deep: choosing a path is the first, submitting the step it led
+ * to is the second. Every field a step reads is lifted into
+ * {@link GroupPairingDialog} rather than owned by the step itself, so
+ * `onBack` never discards what the operator already typed.
+ */
+type PairingPathStep = 'choose' | 'join' | 'create';
+
+/**
  * The group this session belongs to, and how to make, join, staff or leave one
  * (R27).
  *
@@ -72,13 +95,18 @@ export function openGroupPairing(): void {
  * and a pairing code is a one-shot credential with a deadline.
  */
 export function GroupPairingDialog() {
+  // The one subscription this whole surface needs: every string below reads
+  // `t` directly rather than taking its own `useAppLocale`, because none of
+  // the components between here and a leaf field are memoized -- a locale
+  // change re-renders this function and its entire returned tree together.
+  useAppLocale();
   const [open, setOpen] = useState(false);
   const connection = useOperationsStore((state) => state.connection);
   const screenId = useOperationsStore((state) => state.production.screenId);
   const [pairingCode, setPairingCode] = useState('');
   const [deviceName, setDeviceName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [wizardStep, setWizardStep] = useState<PairingPathStep>('choose');
   const [newGroupName, setNewGroupName] = useState('');
   /*
    * The deployment's bootstrap secret, for as long as the operator is typing it
@@ -86,7 +114,7 @@ export function GroupPairingDialog() {
    * to `localStorage`, broadcast over the screen bus and copied into diagnostic
    * reports, and none of those may ever carry it. `changeOpen` below clears it
    * when the dialog closes, and the field itself is not rendered until the
-   * operator asks to create a group.
+   * operator reaches the `create` step.
    */
   const [bootstrapSecret, setBootstrapSecret] = useState('');
   const [renameDraft, setRenameDraft] = useState('');
@@ -170,8 +198,8 @@ export function GroupPairingDialog() {
       open={open}
       onOpenChange={changeOpen}
       eyebrow={`SYNC / ${connection.mode.toUpperCase()}`}
-      title="СИНХРОНИЗАЦИЯ ГРУППЫ"
-      description="Общая группа сессий: одна главная или все главные, с общими часами"
+      title={t('pairing.dialog.title')}
+      description={t('pairing.dialog.description')}
       className="group-pairing"
       footer={
         <div className="group-pairing__actions flex flex-wrap gap-hq-2">
@@ -185,7 +213,7 @@ export function GroupPairingDialog() {
                 setPairingCode('');
               }}
             >
-              [U] ЗАБЫТЬ СЕССИЮ И СПАРИТЬСЯ ЗАНОВО
+              {t('pairing.action.forgetAndRepair')}
             </TerminalButton>
           ) : null}
           {paired ? (
@@ -197,7 +225,7 @@ export function GroupPairingDialog() {
                   if (session !== null) void run(() => session.leave());
                 }}
               >
-                [L] ВЫЙТИ ИЗ ГРУППЫ
+                {t('pairing.action.leaveGroup')}
               </TerminalButton>
               <TerminalButton
                 className="ops-action ops-action--danger"
@@ -208,7 +236,7 @@ export function GroupPairingDialog() {
                   setPairingCode('');
                 }}
               >
-                [U] ЗАБЫТЬ ПАРУ
+                {t('pairing.action.forgetPair')}
               </TerminalButton>
             </>
           ) : null}
@@ -221,10 +249,7 @@ export function GroupPairingDialog() {
 
       {foreignInstallation ? (
         <p className="group-pairing__failure" role="status">
-          АДРЕС ОТВЕЧАЕТ, НО ЗА НИМ ДРУГАЯ БАЗА CONTROL PLANE — НЕ ТА, С КОТОРОЙ СПАРЕНО ЭТО
-          УСТРОЙСТВО. СОХРАНЁННАЯ СЕССИЯ ОСТАВЛЕНА НЕТРОНУТОЙ, ГРУППА НЕ ЧИТАЕТСЯ, ЛОКАЛЬНЫЕ
-          НАСТРОЙКИ НЕ ПЕРЕЗАПИСАНЫ. ЕСЛИ БАЗУ ДЕЙСТВИТЕЛЬНО ПЕРЕСОЗДАЛИ — ЗАБУДЬТЕ СЕССИЮ И
-          ЗАПРОСИТЕ НОВЫЙ КОД ПАРЫ.
+          {t('pairing.foreignInstallation.body')}
         </p>
       ) : null}
 
@@ -242,7 +267,7 @@ export function GroupPairingDialog() {
               return;
             }
             setAddressDraft(outcome.addresses.join(', '));
-            setAddressFeedback('АДРЕС СОХРАНЁН');
+            setAddressFeedback(t('pairing.address.saved'));
           }}
           onClear={() => {
             clearManualControlPlaneAddress();
@@ -258,102 +283,40 @@ export function GroupPairingDialog() {
       ) : null}
 
       {session !== null && !paired && !foreignInstallation ? (
-        <div className="group-pairing__form grid gap-hq-2 mt-hq-3">
-          <TerminalField label="КОД ПАРЫ" description="Код выдаёт администратор группы">
-            <TerminalInput
-              aria-label="Код пары"
-              placeholder="XXXX-XXXX"
-              value={pairingCode}
-              onValueChange={setPairingCode}
-            />
-          </TerminalField>
-          <TerminalField label="ИМЯ УСТРОЙСТВА" description="Как эта сессия видна остальным">
-            <TerminalInput
-              aria-label="Имя устройства"
-              placeholder={screenId}
-              value={deviceName}
-              onValueChange={setDeviceName}
-            />
-          </TerminalField>
-          <TerminalButton
-            className="ops-action ops-action--primary"
-            tone="primary"
-            disabled={busy || pairingCode.trim().length === 0}
-            onClick={() =>
-              void run(() =>
-                session.pair(pairingCode, deviceName.trim().length === 0 ? screenId : deviceName),
-              )
-            }
-          >
-            [P] ПОДКЛЮЧИТЬСЯ К ГРУППЕ
-          </TerminalButton>
-
-          {/* The other way in, and the one that has to exist first: a group
-              nobody has created yet issues no codes. It is folded away because
-              it is done once per production, and because the field below asks
-              for a deployment secret that has no business being on screen
-              while an operator is simply pairing. */}
-          <TerminalButton
-            className="ops-action"
-            onClick={() => {
-              setCreatingGroup((value) => !value);
+        <GroupJoinWizard
+          step={wizardStep}
+          busy={busy}
+          screenId={screenId}
+          pairingCode={pairingCode}
+          deviceName={deviceName}
+          newGroupName={newGroupName}
+          bootstrapSecret={bootstrapSecret}
+          onPairingCodeChange={setPairingCode}
+          onDeviceNameChange={setDeviceName}
+          onNewGroupNameChange={setNewGroupName}
+          onBootstrapSecretChange={setBootstrapSecret}
+          onChooseJoin={() => setWizardStep('join')}
+          onChooseCreate={() => setWizardStep('create')}
+          onBack={() => setWizardStep('choose')}
+          onSubmitJoin={() =>
+            void run(() =>
+              session.pair(pairingCode, deviceName.trim().length === 0 ? screenId : deviceName),
+            )
+          }
+          onSubmitCreate={() =>
+            void run(() =>
+              session.createGroup({
+                name: newGroupName,
+                deviceName: deviceName.trim().length === 0 ? screenId : deviceName,
+                bootstrapSecret,
+              }),
+            ).then((created) => {
+              if (!created) return;
               setBootstrapSecret('');
-            }}
-          >
-            {creatingGroup ? '[N] СКРЫТЬ СОЗДАНИЕ ГРУППЫ' : '[N] СОЗДАТЬ НОВУЮ ГРУППУ'}
-          </TerminalButton>
-
-          {creatingGroup ? (
-            <>
-              <TerminalField
-                label="ИМЯ НОВОЙ ГРУППЫ"
-                description="Как группа названа для всех её устройств"
-              >
-                <TerminalInput
-                  aria-label="Имя новой группы"
-                  placeholder="ШТАБ"
-                  value={newGroupName}
-                  onValueChange={setNewGroupName}
-                />
-              </TerminalField>
-              <TerminalField
-                label="СЕКРЕТ РАЗВЁРТЫВАНИЯ"
-                description="Задан на control plane. Не сохраняется на этом устройстве и стирается при закрытии окна"
-              >
-                <TerminalInput
-                  type="password"
-                  aria-label="Секрет развёртывания"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={bootstrapSecret}
-                  onValueChange={setBootstrapSecret}
-                />
-              </TerminalField>
-              <TerminalButton
-                className="ops-action ops-action--primary"
-                tone="primary"
-                disabled={
-                  busy || newGroupName.trim().length === 0 || bootstrapSecret.trim().length === 0
-                }
-                onClick={() =>
-                  void run(() =>
-                    session.createGroup({
-                      name: newGroupName,
-                      deviceName: deviceName.trim().length === 0 ? screenId : deviceName,
-                      bootstrapSecret,
-                    }),
-                  ).then((created) => {
-                    if (!created) return;
-                    setBootstrapSecret('');
-                    setCreatingGroup(false);
-                  })
-                }
-              >
-                [N] СОЗДАТЬ ГРУППУ
-              </TerminalButton>
-            </>
-          ) : null}
-        </div>
+              setWizardStep('choose');
+            })
+          }
+        />
       ) : null}
 
       {paired && !foreignInstallation && session !== null ? (
@@ -377,17 +340,23 @@ export function GroupPairingDialog() {
 
       {connection.devices.length === 0 ? null : (
         <section className="group-pairing__devices">
-          <h3>УСТРОЙСТВА ГРУППЫ</h3>
+          <h3>{t('pairing.devices.heading')}</h3>
           {connection.devices.map((device) => {
             const lock = demotionLock(device, connection);
+            const presence = connection.presence.find(
+              (entry) => entry.deviceId === device.deviceId,
+            );
             return (
               <article key={device.deviceId}>
                 <span>
                   <strong>{device.name || device.deviceId}</strong>
                   <small>
                     {deviceRoleLabel(device.role)} · {device.status}
-                    {device.deviceId === connection.leaderDeviceId ? ' · ГЛАВНАЯ' : ''}
+                    {device.deviceId === connection.leaderDeviceId
+                      ? ` · ${t('pairing.devices.leaderBadge')}`
+                      : ''}
                   </small>
+                  <small>{devicePresenceLabel(presence)}</small>
                   {admin && lock !== '' ? (
                     <small className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
                       {lock}
@@ -401,7 +370,9 @@ export function GroupPairingDialog() {
                 <div className="group-pairing__device-controls">
                   <TerminalSelect<DeviceRole>
                     className="group-pairing__role"
-                    label={`Роль устройства ${device.name || device.deviceId}`}
+                    label={t('pairing.devices.roleLabel', {
+                      device: device.name || device.deviceId,
+                    })}
                     value={device.role}
                     disabled={busy || !admin || session === null}
                     options={[
@@ -423,7 +394,7 @@ export function GroupPairingDialog() {
                       if (session !== null) void run(() => session.setLeader(device.deviceId));
                     }}
                   >
-                    [G] ГЛАВНАЯ
+                    {t('pairing.devices.makeLeader')}
                   </TerminalButton>
                   <TerminalButton
                     size="small"
@@ -439,7 +410,7 @@ export function GroupPairingDialog() {
                       if (session !== null) void run(() => session.revoke(device.deviceId));
                     }}
                   >
-                    [X] ОТОЗВАТЬ
+                    {t('pairing.devices.revoke')}
                   </TerminalButton>
                 </div>
               </article>
@@ -450,7 +421,7 @@ export function GroupPairingDialog() {
 
       {connection.presence.length === 0 ? null : (
         <section className="group-pairing__presence">
-          <h3>ПРИСУТСТВИЕ</h3>
+          <h3>{t('pairing.presence.heading')}</h3>
           {connection.presence.map((entry) => (
             <article key={entry.deviceId}>
               <strong>{entry.deviceId}</strong>
@@ -486,6 +457,11 @@ export function GroupPairingDialog() {
  * the client local-only (a project file or build variable can rank below the
  * field but a broken override cannot be fixed from here), and the field is
  * the one of the three sources this dialog can actually write.
+ *
+ * Context, not a wizard step (session 2026-08-30 continued): the address and
+ * its state answer "can this device reach a control plane at all", which is a
+ * question in force whether or not the operator is about to join or create a
+ * group, so it is shown alongside the wizard rather than as a screen inside it.
  */
 function ControlPlaneAddressForm({
   addressDraft,
@@ -510,15 +486,15 @@ function ControlPlaneAddressForm({
     <div className="group-pairing__address grid gap-hq-2 mt-hq-3">
       <p className="group-pairing__note m-0 text-hq-text-2 text-hq-xs tracking-[0.08em]">
         {connection.mode === 'local-only'
-          ? 'РЕЖИМ ТОЛЬКО ЭТОЙ МАШИНЫ. УКАЖИТЕ АДРЕС CONTROL PLANE НИЖЕ И ВЫКЛЮЧИТЕ ЛОКАЛЬНЫЙ РЕЖИМ, ЧТОБЫ ВОЙТИ В ГРУППУ. ФАЙЛ /runtime/project.override.json И ПЕРЕМЕННАЯ NEXT_PUBLIC_HQ_CONTROL_PLANE_URL — ЗАПАСНЫЕ СПОСОБЫ ЗАДАТЬ АДРЕС, ЕСЛИ ЭТО ПОЛЕ ПУСТО.'
-          : 'КЛИЕНТ СИНХРОНИЗАЦИИ НЕ ЗАПУЩЕН.'}
+          ? t('pairing.address.noteLocalOnly')
+          : t('pairing.address.noteNotRunning')}
       </p>
       <TerminalField
-        label="АДРЕС CONTROL PLANE"
-        description="Один адрес или до четырёх через запятую — сначала ближний по сети, затем облачный"
+        label={t('pairing.address.fieldLabel')}
+        description={t('pairing.address.fieldDescription')}
       >
         <TerminalInput
-          aria-label="Адрес control plane"
+          aria-label={t('pairing.address.fieldAriaLabel')}
           placeholder="http://192.168.10.5:4100"
           value={addressDraft}
           onValueChange={onAddressDraftChange}
@@ -531,10 +507,10 @@ function ControlPlaneAddressForm({
           disabled={addressDraft.trim().length === 0}
           onClick={onSave}
         >
-          [S] СОХРАНИТЬ
+          {t('pairing.address.save')}
         </TerminalButton>
         <TerminalButton className="ops-action" onClick={onClear}>
-          [O] ОЧИСТИТЬ
+          {t('pairing.address.clear')}
         </TerminalButton>
       </div>
       {addressFeedback === '' ? null : (
@@ -546,16 +522,339 @@ function ControlPlaneAddressForm({
         </p>
       )}
       <p className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
-        ИСТОЧНИК АДРЕСА: {controlPlaneAddressSourceLabel(connection.addressSource)}
+        {t('pairing.address.source', {
+          source: controlPlaneAddressSourceLabel(connection.addressSource),
+        })}
       </p>
       <TerminalSwitch
-        label="Локальный режим"
+        label={t('pairing.address.localOnlySwitchLabel')}
         checked={localOnly}
         onCheckedChange={onLocalOnlyChange}
-        onLabel="ЛОКАЛЬНЫЙ РЕЖИМ: ВКЛ"
-        offLabel="ЛОКАЛЬНЫЙ РЕЖИМ: ВЫКЛ"
+        onLabel={t('pairing.address.localOnlyOn')}
+        offLabel={t('pairing.address.localOnlyOff')}
       />
     </div>
+  );
+}
+
+/**
+ * The two ways an unpaired device joins a group, as screens that replace each
+ * other rather than fields that all sit on one form (session 2026-08-30
+ * continued). `step` is owned by {@link GroupPairingDialog}; this component
+ * only decides which of the three step bodies to render and where to move
+ * focus when that decision changes.
+ *
+ * Focus follows every step change but the first render: nothing was stepped
+ * away from the moment a session first becomes available, and stealing focus
+ * from `TerminalDialog`'s own opening focus at that instant would fight it
+ * rather than follow a step the operator actually asked for. `mountedRef`
+ * distinguishes the two -- every render after the first is a `step` reached
+ * through `onChooseJoin`, `onChooseCreate` or `onBack`, and that is exactly
+ * when a keyboard operator needs telling where the surface put them.
+ */
+function GroupJoinWizard({
+  step,
+  busy,
+  screenId,
+  pairingCode,
+  deviceName,
+  newGroupName,
+  bootstrapSecret,
+  onPairingCodeChange,
+  onDeviceNameChange,
+  onNewGroupNameChange,
+  onBootstrapSecretChange,
+  onChooseJoin,
+  onChooseCreate,
+  onBack,
+  onSubmitJoin,
+  onSubmitCreate,
+}: {
+  readonly step: PairingPathStep;
+  readonly busy: boolean;
+  readonly screenId: string;
+  readonly pairingCode: string;
+  readonly deviceName: string;
+  readonly newGroupName: string;
+  readonly bootstrapSecret: string;
+  readonly onPairingCodeChange: (value: string) => void;
+  readonly onDeviceNameChange: (value: string) => void;
+  readonly onNewGroupNameChange: (value: string) => void;
+  readonly onBootstrapSecretChange: (value: string) => void;
+  readonly onChooseJoin: () => void;
+  readonly onChooseCreate: () => void;
+  readonly onBack: () => void;
+  readonly onSubmitJoin: () => void;
+  readonly onSubmitCreate: () => void;
+}) {
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (mountedRef.current) headingRef.current?.focus();
+    mountedRef.current = true;
+  }, [step]);
+
+  return (
+    <div className="group-pairing__wizard grid gap-hq-2 mt-hq-3" data-wizard-step={step}>
+      {step === 'choose' ? (
+        <ChoosePathStep
+          headingRef={headingRef}
+          onChooseJoin={onChooseJoin}
+          onChooseCreate={onChooseCreate}
+        />
+      ) : null}
+      {step === 'join' ? (
+        <JoinStep
+          headingRef={headingRef}
+          busy={busy}
+          screenId={screenId}
+          pairingCode={pairingCode}
+          deviceName={deviceName}
+          onPairingCodeChange={onPairingCodeChange}
+          onDeviceNameChange={onDeviceNameChange}
+          onBack={onBack}
+          onSubmit={onSubmitJoin}
+        />
+      ) : null}
+      {step === 'create' ? (
+        <CreateStep
+          headingRef={headingRef}
+          busy={busy}
+          screenId={screenId}
+          deviceName={deviceName}
+          newGroupName={newGroupName}
+          bootstrapSecret={bootstrapSecret}
+          onDeviceNameChange={onDeviceNameChange}
+          onNewGroupNameChange={onNewGroupNameChange}
+          onBootstrapSecretChange={onBootstrapSecretChange}
+          onBack={onBack}
+          onSubmit={onSubmitCreate}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The wizard's first screen and the only one with no back affordance -- it is
+ * what a back button on any other step returns to. The one decision this step
+ * asks for is the one that splits the rest of the path: a device either
+ * already holds a code issued elsewhere, or is about to issue the first one.
+ */
+function ChoosePathStep({
+  headingRef,
+  onChooseJoin,
+  onChooseCreate,
+}: {
+  readonly headingRef: RefObject<HTMLHeadingElement | null>;
+  readonly onChooseJoin: () => void;
+  readonly onChooseCreate: () => void;
+}) {
+  return (
+    <section
+      className="group-pairing__step group-pairing__step--choose grid gap-hq-2"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <h3 ref={headingRef} tabIndex={-1}>
+        {t('pairing.step.choose.heading')}
+      </h3>
+      <div className="group-pairing__pathChoice grid gap-hq-1">
+        <TerminalButton
+          className="ops-action ops-action--primary"
+          tone="primary"
+          data-wizard-action="choose-join"
+          onClick={onChooseJoin}
+        >
+          {t('pairing.step.choose.joinAction')}
+        </TerminalButton>
+        <p className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
+          {t('pairing.step.choose.joinHint')}
+        </p>
+      </div>
+      <div className="group-pairing__pathChoice grid gap-hq-1">
+        <TerminalButton
+          className="ops-action"
+          data-wizard-action="choose-create"
+          onClick={onChooseCreate}
+        >
+          {t('pairing.step.choose.createAction')}
+        </TerminalButton>
+        <p className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
+          {t('pairing.step.choose.createHint')}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** The second and last screen of the "I already have a code" path. */
+function JoinStep({
+  headingRef,
+  busy,
+  screenId,
+  pairingCode,
+  deviceName,
+  onPairingCodeChange,
+  onDeviceNameChange,
+  onBack,
+  onSubmit,
+}: {
+  readonly headingRef: RefObject<HTMLHeadingElement | null>;
+  readonly busy: boolean;
+  readonly screenId: string;
+  readonly pairingCode: string;
+  readonly deviceName: string;
+  readonly onPairingCodeChange: (value: string) => void;
+  readonly onDeviceNameChange: (value: string) => void;
+  readonly onBack: () => void;
+  readonly onSubmit: () => void;
+}) {
+  return (
+    <section
+      className="group-pairing__step group-pairing__step--join grid gap-hq-2"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <TerminalButton
+        className="ops-action group-pairing__back"
+        data-wizard-action="back"
+        onClick={onBack}
+      >
+        {t('pairing.step.back')}
+      </TerminalButton>
+      <h3 ref={headingRef} tabIndex={-1}>
+        {t('pairing.step.join.heading')}
+      </h3>
+      <TerminalField
+        label={t('pairing.field.code.label')}
+        description={t('pairing.field.code.description')}
+      >
+        <TerminalInput
+          aria-label={t('pairing.field.code.ariaLabel')}
+          placeholder="XXXX-XXXX"
+          autoComplete="off"
+          spellCheck={false}
+          value={pairingCode}
+          onValueChange={onPairingCodeChange}
+        />
+      </TerminalField>
+      <TerminalField
+        label={t('pairing.field.deviceName.label')}
+        description={t('pairing.field.deviceName.description')}
+      >
+        <TerminalInput
+          aria-label={t('pairing.field.deviceName.ariaLabel')}
+          placeholder={screenId}
+          value={deviceName}
+          onValueChange={onDeviceNameChange}
+        />
+      </TerminalField>
+      <TerminalButton
+        className="ops-action ops-action--primary"
+        tone="primary"
+        data-wizard-action="submit-join"
+        disabled={busy || pairingCode.trim().length === 0}
+        onClick={onSubmit}
+      >
+        {t('pairing.step.join.submit')}
+      </TerminalButton>
+    </section>
+  );
+}
+
+/**
+ * The second and last screen of the "start the group" path. The one that has
+ * to exist first -- a group nobody has created yet issues no codes -- and the
+ * only step that ever shows the deployment secret: it has no business on
+ * screen while an operator is simply joining with a code someone else issued.
+ */
+function CreateStep({
+  headingRef,
+  busy,
+  screenId,
+  deviceName,
+  newGroupName,
+  bootstrapSecret,
+  onDeviceNameChange,
+  onNewGroupNameChange,
+  onBootstrapSecretChange,
+  onBack,
+  onSubmit,
+}: {
+  readonly headingRef: RefObject<HTMLHeadingElement | null>;
+  readonly busy: boolean;
+  readonly screenId: string;
+  readonly deviceName: string;
+  readonly newGroupName: string;
+  readonly bootstrapSecret: string;
+  readonly onDeviceNameChange: (value: string) => void;
+  readonly onNewGroupNameChange: (value: string) => void;
+  readonly onBootstrapSecretChange: (value: string) => void;
+  readonly onBack: () => void;
+  readonly onSubmit: () => void;
+}) {
+  return (
+    <section
+      className="group-pairing__step group-pairing__step--create grid gap-hq-2"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <TerminalButton
+        className="ops-action group-pairing__back"
+        data-wizard-action="back"
+        onClick={onBack}
+      >
+        {t('pairing.step.back')}
+      </TerminalButton>
+      <h3 ref={headingRef} tabIndex={-1}>
+        {t('pairing.step.create.heading')}
+      </h3>
+      <TerminalField
+        label={t('pairing.field.groupName.label')}
+        description={t('pairing.field.groupName.description')}
+      >
+        <TerminalInput
+          aria-label={t('pairing.field.groupName.ariaLabel')}
+          placeholder={t('pairing.field.groupName.placeholder')}
+          value={newGroupName}
+          onValueChange={onNewGroupNameChange}
+        />
+      </TerminalField>
+      <TerminalField
+        label={t('pairing.field.deviceName.label')}
+        description={t('pairing.field.deviceName.description')}
+      >
+        <TerminalInput
+          aria-label={t('pairing.field.deviceName.ariaLabel')}
+          placeholder={screenId}
+          value={deviceName}
+          onValueChange={onDeviceNameChange}
+        />
+      </TerminalField>
+      <TerminalField
+        label={t('pairing.field.secret.label')}
+        description={t('pairing.field.secret.description')}
+      >
+        <TerminalInput
+          type="password"
+          aria-label={t('pairing.field.secret.ariaLabel')}
+          autoComplete="off"
+          spellCheck={false}
+          value={bootstrapSecret}
+          onValueChange={onBootstrapSecretChange}
+        />
+      </TerminalField>
+      <TerminalButton
+        className="ops-action ops-action--primary"
+        tone="primary"
+        data-wizard-action="submit-create"
+        disabled={busy || newGroupName.trim().length === 0 || bootstrapSecret.trim().length === 0}
+        onClick={onSubmit}
+      >
+        {t('pairing.step.create.submit')}
+      </TerminalButton>
+    </section>
   );
 }
 
@@ -578,15 +877,36 @@ function ControlPlaneAddressForm({
  */
 function demotionLock(device: GroupDevice, connection: ConnectionState): string {
   if (connection.authority === 'leader' && device.deviceId === connection.leaderDeviceId) {
-    return 'ПЕРЕДАЙТЕ ГЛАВНУЮ СЕССИЮ ДРУГОМУ УСТРОЙСТВУ, ЧТОБЫ ПОНИЗИТЬ ЭТО';
+    return t('pairing.demotionLock.transferLeader');
   }
   if (
     device.role === 'ADMIN' &&
     connection.devices.filter((candidate) => candidate.role === 'ADMIN').length === 1
   ) {
-    return 'В ГРУППЕ ДОЛЖЕН ОСТАТЬСЯ ХОТЯ БЫ ОДИН АДМИНИСТРАТОР';
+    return t('pairing.demotionLock.lastAdmin');
   }
   return '';
+}
+
+/**
+ * What one device's row reads for the screen and clock offset it last
+ * reported (F10 presence publish).
+ *
+ * `undefined` is a device this session has never received a presence row for
+ * at all -- one `ListDevices` named but `JoinGroup` has not yet reported for,
+ * or a control plane without presence storage. An empty `activeScreen` is a
+ * device that joined and reported nothing, which reads the same to an
+ * operator: neither names a screen worth showing, so both fall back to the
+ * same dash rather than one reading as a device and the other as a fact.
+ */
+function devicePresenceLabel(presence: PresenceEntry | undefined): string {
+  const screen =
+    presence === undefined || presence.activeScreen === '' ? '—' : presence.activeScreen;
+  const clock =
+    presence === undefined
+      ? '—'
+      : t('pairing.presence.clockOffset', { ms: presence.clockOffsetMs });
+  return `${screen} · ${clock}`;
 }
 
 /**
@@ -626,15 +946,18 @@ function GroupAdministration({
   const nextName = renameDraft.trim();
   return (
     <section className="group-pairing__admin">
-      <h3>УПРАВЛЕНИЕ ГРУППОЙ</h3>
+      <h3>{t('pairing.admin.heading')}</h3>
       {admin ? null : (
         <p className="group-pairing__hint m-0 text-hq-text-2 text-hq-xs tracking-[0.06em]">
-          ЭТИМИ КОМАНДАМИ РАСПОРЯЖАЕТСЯ АДМИНИСТРАТОР ГРУППЫ. ПОПРОСИТЕ ЕГО ПОВЫСИТЬ ЭТО УСТРОЙСТВО.
+          {t('pairing.admin.nonAdminHint')}
         </p>
       )}
-      <TerminalField label="НОВОЕ ИМЯ ГРУППЫ" description="Имя видят все устройства группы">
+      <TerminalField
+        label={t('pairing.admin.renameFieldLabel')}
+        description={t('pairing.admin.renameFieldDescription')}
+      >
         <TerminalInput
-          aria-label="Новое имя группы"
+          aria-label={t('pairing.admin.renameFieldAriaLabel')}
           placeholder={groupName}
           disabled={!admin}
           value={renameDraft}
@@ -646,15 +969,15 @@ function GroupAdministration({
         disabled={busy || !admin || nextName.length === 0 || nextName === groupName}
         onClick={onRename}
       >
-        [R] ПЕРЕИМЕНОВАТЬ ГРУППУ
+        {t('pairing.admin.renameSubmit')}
       </TerminalButton>
 
       <TerminalField
-        label="РОЛЬ ДЛЯ НОВОГО УСТРОЙСТВА"
-        description="Код подключает одно устройство с этой ролью; администратора назначают повышением"
+        label={t('pairing.admin.pairingRoleFieldLabel')}
+        description={t('pairing.admin.pairingRoleFieldDescription')}
       >
         <TerminalSelect<PairingRole>
-          label="Роль для нового устройства"
+          label={t('pairing.admin.pairingRoleSelectLabel')}
           value={pairingRole}
           disabled={!admin}
           options={[
@@ -665,7 +988,7 @@ function GroupAdministration({
         />
       </TerminalField>
       <TerminalButton className="ops-action" disabled={busy || !admin} onClick={onIssueCode}>
-        [C] ВЫПУСТИТЬ КОД ПАРЫ
+        {t('pairing.admin.issueCode')}
       </TerminalButton>
 
       {grant === null ? null : (
@@ -686,14 +1009,14 @@ function GroupAdministration({
 
 /** When an issued code stops working, in the operator's own locale. */
 function expiryLabel(expiresAtMs: number): string {
-  if (expiresAtMs === 0) return 'СРОК НЕ УКАЗАН';
+  if (expiresAtMs === 0) return t('pairing.admin.codeNoExpiry');
   const time = dateTimeFormat({
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hourCycle: 'h23',
   }).format(new Date(expiresAtMs));
-  return `ДЕЙСТВУЕТ ДО ${time}`;
+  return t('pairing.admin.codeExpiresAt', { time });
 }
 
 function ConnectionSummary({ connection }: { readonly connection: ConnectionState }) {
@@ -701,15 +1024,15 @@ function ConnectionSummary({ connection }: { readonly connection: ConnectionStat
   return (
     <dl className="ops-definition-list">
       <div>
-        <dt>СОСТОЯНИЕ</dt>
+        <dt>{t('pairing.summary.state')}</dt>
         <dd>{connectionModeLabel(connection.mode)}</dd>
       </div>
       <div>
-        <dt>ГРУППА</dt>
+        <dt>{t('pairing.summary.group')}</dt>
         <dd>{connection.groupName ?? '—'}</dd>
       </div>
       <div>
-        <dt>УСТРОЙСТВО</dt>
+        <dt>{t('pairing.summary.device')}</dt>
         <dd>
           {connection.session === undefined
             ? '—'
@@ -717,13 +1040,13 @@ function ConnectionSummary({ connection }: { readonly connection: ConnectionStat
         </dd>
       </div>
       <div>
-        <dt>АВТОРИТЕТ</dt>
+        <dt>{t('pairing.summary.authority')}</dt>
         <dd>
           {connection.authority === undefined ? '—' : authorityModeLabel(connection.authority)}
         </dd>
       </div>
       <div>
-        <dt>ГЛАВНАЯ СЕССИЯ</dt>
+        <dt>{t('pairing.summary.leader')}</dt>
         <dd>
           {connection.leaderDeviceId === undefined || connection.leaderDeviceId === ''
             ? '—'
@@ -731,15 +1054,18 @@ function ConnectionSummary({ connection }: { readonly connection: ConnectionStat
         </dd>
       </div>
       <div>
-        <dt>ЧАСЫ</dt>
+        <dt>{t('pairing.summary.clock')}</dt>
         <dd>
           {connection.clock.sampledAt === ''
-            ? 'НЕ ИЗМЕРЕНЫ'
-            : `СДВИГ ${connection.clock.offsetMs} MS / ЗАДЕРЖКА ${connection.clock.latencyMs} MS`}
+            ? t('pairing.summary.clockNotMeasured')
+            : t('pairing.summary.clockReading', {
+                offset: connection.clock.offsetMs,
+                latency: connection.clock.latencyMs,
+              })}
         </dd>
       </div>
       <div>
-        <dt>БАЗА</dt>
+        <dt>{t('pairing.summary.database')}</dt>
         {/* The installation identity, so an operator who is told the database
             is not the expected one can read which one answered and compare it
             with the deployment. It names a database and opens nothing. */}
@@ -750,7 +1076,7 @@ function ConnectionSummary({ connection }: { readonly connection: ConnectionStat
         </dd>
       </div>
       <div>
-        <dt>ВОЗМОЖНОСТИ</dt>
+        <dt>{t('pairing.summary.capabilities')}</dt>
         <dd>{capabilityList(capabilities)}</dd>
       </div>
     </dl>
@@ -775,17 +1101,15 @@ function ControlPlaneLinks({ links }: { readonly links: readonly ControlPlaneLin
   if (links.length === 0) return null;
   return (
     <section className="group-pairing__links">
-      <h3>СВЯЗИ С ГРУППОЙ</h3>
+      <h3>{t('pairing.links.heading')}</h3>
       {links.map((link) => (
         <article key={link.linkId}>
           <span>
             <strong>{link.baseUrl}</strong>
             <small>
-              {link.role === 'primary' ? 'ОСНОВНАЯ' : 'ЗАПАСНАЯ'} ·{' '}
-              {realtimeStatusToken(link.status)} ·{' '}
-              {link.admitted
-                ? realtimeStatusLabel(link.status)
-                : 'ДРУГАЯ БАЗА CONTROL PLANE — СВЯЗЬ НЕ ИСПОЛЬЗУЕТСЯ'}
+              {link.role === 'primary' ? t('pairing.links.primary') : t('pairing.links.secondary')}{' '}
+              · {realtimeStatusToken(link.status)} ·{' '}
+              {link.admitted ? realtimeStatusLabel(link.status) : t('pairing.links.otherDatabase')}
             </small>
             <small>{capabilityList(link.capabilities)}</small>
           </span>
@@ -807,6 +1131,6 @@ function capabilityList(capabilities: ControlPlaneCapabilities | undefined): str
       capabilities.materials ? 'MATERIALS' : '',
     ]
       .filter((entry) => entry !== '')
-      .join(' · ') || 'НЕТ'
+      .join(' · ') || t('pairing.capabilities.none')
   );
 }

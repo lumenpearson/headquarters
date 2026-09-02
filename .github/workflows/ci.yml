@@ -23,6 +23,37 @@ jobs:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The opt-in PostgreSQL suites need a database and no account: a service
+    # container is one, it needs no secret, and it is discarded with the runner.
+    # Without it `pnpm test` proved the offline half only, and every result from
+    # the destructive suites reached the plan by hand.
+    #
+    # `postgres:18` matches `compose.yaml`, so CI and the offline deployment tier
+    # run the migrations against the same major.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          # `postgres` is a superuser, which the suites need: they CREATE and
+          # DROP a database per run.
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+          # Deliberately not a short word. `postgresDatabase.integration.test.ts`
+          # asserts that no driver error text contains the connection password,
+          # and it provokes that error against a database named
+          # `hqtest_no_such_database_here`. A password that is a substring of a
+          # fixture name -- `hqtest`, `postgres`, `test` -- fails that assertion
+          # for the wrong reason. This value shares no substring with any name
+          # the suites mint. It is not a secret: the database exists for the
+          # length of one job and listens on the runner's loopback alone.
+          POSTGRES_PASSWORD: ci-control-plane-loopback-passphrase
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username=postgres --dbname=postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7
 
@@ -40,14 +71,18 @@ jobs:
       - name: Formatting
         run: pnpm format:check
 
-      # Both boundaries are enforced by scripts, not convention: no direct Base UI
-      # imports or raw interactive controls outside packages/ui, and no stale
-      # generated Protobuf bindings.
+      # All three boundaries are enforced by scripts, not convention: no direct
+      # Base UI imports or raw interactive controls outside packages/ui, no stale
+      # generated Protobuf bindings, and no operator-visible string added outside
+      # the message catalogue.
       - name: UI boundary
         run: pnpm check:ui-boundary
 
       - name: Protocol generation freshness
         run: pnpm check:protocol-generation
+
+      - name: Localization ratchet
+        run: pnpm check:localization
 
       - name: Lint
         run: pnpm lint
@@ -55,9 +90,34 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # The control-plane PostgreSQL suite is opt-in and skips without
-      # HQ_CONTROL_PLANE_TEST_DATABASE_URL, so this stays offline and deterministic.
+      # The control-plane PostgreSQL suites are opt-in on
+      # HQ_CONTROL_PLANE_TEST_DATABASE_URL. Pointed at the service container
+      # above they execute here rather than only on a maintainer's machine: on
+      # this repository's current tree that is fourteen suite files and 161
+      # tests that a green run without the variable never touched.
+      #
+      # `HQ_CONTROL_PLANE_TEST_DATABASE_DRIVER=postgres` is not optional. The
+      # default driver is `neon` (`apps/control-plane/src/db/database.ts`),
+      # which speaks HTTPS to Neon's endpoint; against a loopback service
+      # container it resolves the URL's host into an API address and every suite
+      # fails with `Error connecting to database`. The TCP driver is also the
+      # one `compose.yaml` configures, so this is the deployment tier CI has an
+      # engine for.
+      #
+      # Both variables are declared in `turbo.json`'s `test` task env, without
+      # which Turborepo's strict environment mode drops them before Vitest
+      # starts. They are set on this step alone, so every other step in the job
+      # sees the environment it saw before.
+      #
+      # Removing the `services:` block above -- on a runner with no Docker, or
+      # to take the database out of the gate -- leaves the suites skipping
+      # exactly as they did: they are gated on the variable, not on a
+      # connection, and `sslmode=disable` is honest for a link that never leaves
+      # the runner.
       - name: Test
+        env:
+          HQ_CONTROL_PLANE_TEST_DATABASE_URL: postgresql://postgres:ci-control-plane-loopback-passphrase@127.0.0.1:5432/postgres?sslmode=disable
+          HQ_CONTROL_PLANE_TEST_DATABASE_DRIVER: postgres
         run: pnpm test
 
       - name: Build (web)

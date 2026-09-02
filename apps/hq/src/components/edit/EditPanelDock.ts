@@ -52,3 +52,23 @@ export function resolveDockEdge(
     candidate[1] < nearest[1] ? candidate : nearest,
   )[0];
 }
+
+/** The four edges pointer dragging can dock to, in the order the keyboard cycles them. */
+const dockEdgeOrder: readonly EditDockEdge[] = ['left', 'top', 'right', 'bottom'];
+
+/**
+ * The edge a keyboard dock moves the panel to next.
+ *
+ * Dragging picks an edge directly, by where the pointer left the window;
+ * nothing about the keyboard says "leave through here" the way a release
+ * point does, so the keyboard path cycles the same four edges instead of
+ * guessing one. Pure, and separate from the component, for the same reason
+ * `resolveDockEdge` is: the rule is tested without a DOM.
+ */
+export function nextDockEdge(current: EditDockEdge): EditDockEdge {
+  const index = dockEdgeOrder.indexOf(current);
+  // The fallback is unreachable -- `dockEdgeOrder` holds all four edges, so the
+  // modulo is always one of its indices -- and exists only because
+  // `noUncheckedIndexedAccess` cannot see that from the arithmetic.
+  return dockEdgeOrder[(index + 1) % dockEdgeOrder.length] ?? 'left';
+}

@@ -55,7 +55,7 @@ function channelIds(container: HTMLElement): readonly string[] {
   );
 }
 
-/** The `LOSS` cell, as the number the comparator sorted on rather than the text it prints. */
+/** The packet-loss cell, as the number the comparator sorted on rather than the text it prints. */
 function packetLosses(container: HTMLElement): readonly number[] {
   return [...container.querySelectorAll('.map-channels-panel tbody tr')].map((row) =>
     Number.parseFloat(row.querySelectorAll('td')[3]?.textContent ?? ''),
@@ -94,7 +94,7 @@ describe('the channel table on the tactical map pages the whole set', () => {
 
   it('sorts the whole set before paging it, not the rows already on screen', () => {
     const { container } = render(<TacticalMapScreen />);
-    fireEvent.click(screen.getByRole('button', { name: /LOSS/u }));
+    fireEvent.click(screen.getByRole('button', { name: /ПОТЕРИ ПАКЕТОВ/u }));
 
     const first = packetLosses(container);
     nextPage();

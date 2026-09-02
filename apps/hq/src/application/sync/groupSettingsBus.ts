@@ -42,6 +42,17 @@ export function publishGroupSettings(patches: readonly SettingsPatch[]): void {
   void connected.publishGroupSettings(patches);
 }
 
+/**
+ * Carries a local reset -- category or full -- to the ids `GroupSettingsSync`
+ * decides are the group's, through `resetGroupElement` rather than a patch.
+ * See `GroupSettingsSync.publishGroupResets` for why the two RPCs are not
+ * interchangeable for a reset.
+ */
+export function publishGroupSettingsReset(ids: readonly string[]): void {
+  if (connected === null || ids.length === 0) return;
+  void connected.publishGroupResets(ids);
+}
+
 /** The connected service, for a surface that has to await a publication. */
 export function currentGroupSettingsSync(): GroupSettingsSync | null {
   return connected;

@@ -7,12 +7,15 @@ import type {
   StorageMultipartHandle,
   StorageMultipartTarget,
   StorageObjectRequest,
+  StorageObjectVerification,
+  StorageObjectVerificationRequest,
   StoragePreviewGrant,
   StoragePreviewRequest,
   StorageUploadPartRequest,
 } from '../material/service.js';
 import type { Awaitable } from '../sync/lifecycle.js';
 
+import { digestStream, parseDeclaredDigest } from './object-digest.js';
 import { emptyPayloadHash, sha256Hex } from './sigv4.js';
 
 /**
@@ -20,11 +23,13 @@ import { emptyPayloadHash, sha256Hex } from './sigv4.js';
  *
  * The three URL-minting operations — part upload, download, preview — are pure
  * SigV4 presigning and make no network call: whoever holds the URL talks to the
- * bucket directly, which is the whole point of a grant. The three lifecycle
- * operations — create, complete and abort a multipart upload — are the calls
- * the control plane must make itself, because each carries the server's own
- * credential and cannot be a URL a browser follows. They go through an
- * injected `fetch` so a test can drive the multipart path without a bucket.
+ * bucket directly, which is the whole point of a grant. The four remaining
+ * operations — create, complete and abort a multipart upload, and read the
+ * assembled object back to verify it — are the calls the control plane must
+ * make itself, because each carries the server's own credential and cannot be a
+ * URL a browser follows. They go through an injected `fetch` so a test can
+ * drive the multipart path without a bucket; that a real bucket answers them is
+ * proved in `s3-grant-issuer.live.integration.test.ts`.
  *
  * The issuer never holds a secret. Signing is delegated to the
  * {@link ControlPlaneStorageConfig} closures the configuration parser built
@@ -40,6 +45,16 @@ export interface StorageFetchResponse {
   readonly ok: boolean;
   readonly status: number;
   text(): Promise<string>;
+  /**
+   * The response body as a stream of chunks.
+   *
+   * Only the object read-back reads it, and it reads a stream rather than a
+   * buffer because an assembled material is a video file, not an XML document:
+   * holding one in memory to hash it would put the largest upload the library
+   * accepts into the control plane's heap. Optional so a scripted response can
+   * omit it for the XML operations, which never call it.
+   */
+  chunks?(): AsyncIterable<Uint8Array>;
 }
 
 export interface StorageFetchRequest {
@@ -195,6 +210,62 @@ export const createS3GrantIssuer: StorageGrantIssuerFactory = (config, options =
       );
     },
 
+    /**
+     * Reads the assembled object back and re-derives its digest.
+     *
+     * This is the only operation that spends the object's own bytes, and it is
+     * deliberate: `content_hash` is a BLAKE3 digest of the whole file, which no
+     * S3-compatible store can compute, so nothing but a read-back can decide
+     * whether the stored bytes are the ones the material declared. The GET is
+     * signed with the server's credential rather than presigned, because the
+     * answer is for the control plane and must not be a URL anyone can hold.
+     *
+     * The stream is hashed chunk by chunk and never buffered, and the byte
+     * count is taken from the same pass — so a truncated object is caught by
+     * the size comparison even before the digest disagrees.
+     */
+    async verifyObject(
+      request: StorageObjectVerificationRequest,
+    ): Promise<StorageObjectVerification> {
+      const declared = parseDeclaredDigest(request.contentHash);
+      // Fail closed. A digest in a format this issuer cannot recompute is
+      // exactly the case the old behaviour handled by not checking at all.
+      if (declared === undefined) return { outcome: 'unverifiable-digest' };
+
+      const url = objectUrl(config, request.storageKey);
+      const headers = config.sign({
+        method: 'GET',
+        url,
+        headers: {},
+        payloadHash: emptyPayloadHash,
+        signedAt: now(),
+      });
+      const response = await doFetch(url.toString(), { method: 'GET', headers });
+      if (response.status === 404) return { outcome: 'missing' };
+      if (!response.ok) {
+        throw new StorageBackendError(
+          'GetObject',
+          response.status,
+          boundedDetail(await response.text()),
+        );
+      }
+      const chunks = response.chunks?.();
+      if (chunks === undefined) {
+        throw new StorageBackendError(
+          'GetObject',
+          response.status,
+          'response carried no readable body',
+        );
+      }
+
+      const digest = await digestStream(declared.algorithm, chunks);
+      if (digest.byteSize !== request.byteSize) {
+        return { outcome: 'size-mismatch', actualByteSize: digest.byteSize };
+      }
+      if (digest.hex !== declared.hex) return { outcome: 'hash-mismatch' };
+      return { outcome: 'verified' };
+    },
+
     issueDownload(request: StorageObjectRequest): StorageGrant {
       const url = objectUrl(config, request.storageKey);
       // An attachment disposition is what makes a browser save the original
@@ -206,10 +277,13 @@ export const createS3GrantIssuer: StorageGrantIssuerFactory = (config, options =
 
     issuePreview(request: StoragePreviewRequest): StoragePreviewGrant {
       const url = objectUrl(config, request.storageKey);
-      // Inline, so the preview renders where it is shown. No rendered variant
-      // exists on the server — `conversion_jobs` is reached by no code — so
-      // every variant is the original object, and the grant says so by
-      // reporting the original's MIME type.
+      // Inline, so the preview renders where it is shown. The issuer signs
+      // whichever key it is handed and decides nothing about which that is:
+      // `getPreviewGrant` resolves the variant to a `material_renditions` row
+      // and passes the rendition's key and type when one has been built, or the
+      // original's when none has. Reporting `request.mimeType` back is what
+      // lets the client tell the two apart -- a grant whose type is the stored
+      // object's own type is the original served under another name.
       url.searchParams.set('response-content-disposition', 'inline');
       url.searchParams.set('response-content-type', request.mimeType);
       return { ...presignGrant('GET', url), mimeType: request.mimeType };
@@ -222,8 +296,12 @@ export const createS3GrantIssuer: StorageGrantIssuerFactory = (config, options =
  * split on `/` and each segment percent-encoded, so a content hash's `:` is a
  * path character and nothing else. The signer re-derives the canonical path
  * from the decoded form, so the encoding here only has to be a valid one.
+ *
+ * Exported so the conversion object store addresses the bucket by this function
+ * rather than by a second copy of the rule: two addressing implementations that
+ * disagree about encoding would sign one path and fetch another.
  */
-function objectUrl(config: ControlPlaneStorageConfig, storageKey: string): URL {
+export function objectUrl(config: ControlPlaneStorageConfig, storageKey: string): URL {
   const endpoint = new URL(config.endpoint);
   const encodedKey = storageKey
     .split('/')
@@ -279,5 +357,30 @@ const defaultFetch: StorageFetch = async (url, request) => {
     ok: response.ok,
     status: response.status,
     text: () => response.text(),
+    // `text` and `chunks` consume the same body, so exactly one of them is
+    // called per response: the verification path reads chunks on success and
+    // text only on the failure branch it never reaches afterwards.
+    chunks: () => readResponseChunks(response.body),
   };
 };
+
+/**
+ * A reader loop rather than `for await (const chunk of body)`: asynchronous
+ * iteration over a `ReadableStream` is a Node extension, and the adapter is
+ * meant to be readable by whichever runtime the deployment mounts.
+ */
+async function* readResponseChunks(
+  body: ReadableStream<Uint8Array> | null,
+): AsyncIterable<Uint8Array> {
+  if (body === null) return;
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      yield value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

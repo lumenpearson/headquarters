@@ -11,6 +11,7 @@ import {
   type GroupDevice,
   type GroupSummary,
   type PairingRole,
+  type PresenceDetail,
 } from './connection';
 import {
   isControlPlaneError,
@@ -45,6 +46,21 @@ export interface ControlPlaneSessionOptions {
    * is not a per-minute event.
    */
   readonly refreshLeadMs?: number;
+  /**
+   * What this device is currently showing, read fresh every time presence is
+   * reported -- on join, and on the fifteen-second timer `ControlPlaneRuntime`
+   * already runs -- rather than captured once (F10 presence publish). A route
+   * and a selection both change between one report and the next, and a
+   * closure captured at construction would go on reporting whatever this
+   * session happened to show when it was built.
+   *
+   * Defaults to nothing to report, which is the honest answer for a caller
+   * with no screen to name -- a test, chiefly.
+   */
+  readonly readPresenceScreen?: () => {
+    readonly activeScreen: string;
+    readonly selectedElement: string;
+  };
 }
 
 /**
@@ -82,6 +98,10 @@ export class ControlPlaneSession {
   readonly #now: () => number;
   readonly #clockRounds: number;
   readonly #refreshLeadMs: number;
+  readonly #readPresenceScreen: () => {
+    readonly activeScreen: string;
+    readonly selectedElement: string;
+  };
   /** The most recent realtime round trips, oldest first; see {@link latencySampleWindow}. */
   readonly #latencySamples: number[] = [];
   #state: ConnectionState = initialConnectionState;
@@ -92,6 +112,8 @@ export class ControlPlaneSession {
     this.#now = options.now ?? (() => Date.now());
     this.#clockRounds = options.clockRounds ?? 5;
     this.#refreshLeadMs = options.refreshLeadMs ?? 60_000;
+    this.#readPresenceScreen =
+      options.readPresenceScreen ?? (() => ({ activeScreen: '', selectedElement: '' }));
   }
 
   get state(): ConnectionState {
@@ -327,11 +349,23 @@ export class ControlPlaneSession {
     return this.#ensureFreshSession(signal);
   }
 
+  /**
+   * Reports what this device is showing, and re-reads the group's presence
+   * with the same call, on the fifteen-second timer `ControlPlaneRuntime`
+   * already runs (F10 presence publish).
+   *
+   * `UpdatePresence` stands where a plain `GetPresence` used to: renewing
+   * this device's own liveness key is not the only thing the call does now,
+   * and the server credits one round trip with both, exactly as it always
+   * credited the read with the renewal alone.
+   */
   async refreshPresence(signal?: AbortSignal): Promise<void> {
     if (this.#state.mode !== 'online') return;
     if (!(await this.#ensureFreshSession(signal))) return;
     try {
-      this.#set({ presence: sortPresence(await this.#client.getPresence(signal)) });
+      this.#set({
+        presence: sortPresence(await this.#client.updatePresence(this.#presenceDetail(), signal)),
+      });
     } catch (error: unknown) {
       this.#record(error);
     }
@@ -469,7 +503,7 @@ export class ControlPlaneSession {
     }
     this.#set({ session });
     try {
-      this.#applyGroup(await this.#client.join(signal));
+      this.#applyGroup(await this.#client.join(this.#presenceDetail(), signal));
       this.#set({ mode: 'online', failure: '' });
     } catch (error: unknown) {
       if (isControlPlaneError(error, 'unimplemented')) {
@@ -515,6 +549,23 @@ export class ControlPlaneSession {
       this.#record(error);
       return false;
     }
+  }
+
+  /**
+   * What this device reports about itself right now: the screen
+   * {@link ControlPlaneSessionOptions.readPresenceScreen} names, bounded to
+   * the same limits `sync/service.ts` enforces server-side, and the clock
+   * estimate this session already holds -- `TimeSync` and the realtime pong
+   * are what measure it, and a presence report is not a third way to.
+   */
+  #presenceDetail(): PresenceDetail {
+    const screen = this.#readPresenceScreen();
+    return {
+      activeScreen: boundedPresenceIdentifier(screen.activeScreen),
+      selectedElement: boundedPresenceIdentifier(screen.selectedElement),
+      clockOffsetMs: this.#state.clock.offsetMs,
+      latencyMs: Math.min(this.#state.clock.latencyMs, maxReportedPresenceLatencyMs),
+    };
   }
 
   /**
@@ -572,4 +623,22 @@ export class ControlPlaneSession {
 function describe(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message.trim() : '';
   return message.length === 0 ? fallback : `${fallback}: ${message}`;
+}
+
+/**
+ * The identifier ceiling `sync/service.ts` enforces on `active_screen` and
+ * `selected_element`, applied here too. A value this session would refuse to
+ * send is one the operator's own screen can act on, while one that only
+ * reaches the server to be refused is a failed request for no reason a
+ * report ever needs to hit.
+ */
+const maxPresenceIdentifierLength = 256;
+
+/** The latency ceiling `sync/service.ts` enforces on `latency_ms`. */
+const maxReportedPresenceLatencyMs = 300_000;
+
+function boundedPresenceIdentifier(value: string): string {
+  return value.length > maxPresenceIdentifierLength
+    ? value.slice(0, maxPresenceIdentifierLength)
+    : value;
 }

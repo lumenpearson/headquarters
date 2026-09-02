@@ -5,12 +5,19 @@ import { join } from 'node:path';
 
 import { createClient } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import type { BridgeConfig } from '@gremuchaya/config';
 import { createVirtualPath } from '@gremuchaya/domain';
 import { FileBridgeService } from '@gremuchaya/protocol';
 
 import { startBridge } from '../../file-bridge/src/server.js';
+import {
+  gotoSettingsUnified,
+  optionByValue,
+  settingControl,
+  settingRow,
+  shippedText,
+} from './settingsHelpers';
 
 test('boots the unified operational world and opens a linked object', async ({ page }) => {
   await page.goto('/');
@@ -26,7 +33,7 @@ test('keeps map, camera and drawer interactions connected', async ({ page }) => 
   await page.goto('/map');
   await expect(page.locator('.yandex-tactical-map')).toBeVisible();
   await expect(page.getByLabel('Ключ Yandex Maps API v3')).toHaveClass(/terminal-input/);
-  await expect(page.getByText('[ YANDEX MAPS API V3 // KEY REQUIRED ]')).toBeVisible();
+  await expect(page.getByText(shippedText('yandexMap.keyRequiredHeading'))).toBeVisible();
   await expect(page.getByRole('button', { name: '[APPLY] ПОДКЛЮЧИТЬ' })).toHaveClass(
     /terminal-button/,
   );
@@ -58,7 +65,7 @@ test('loads the Yandex Maps JavaScript API v3 endpoint and retains its no-provid
     /api-maps\.yandex\.ru\/v3\/\?apikey=test-v3-key&lang=ru_RU/,
   );
   await expect(page.locator('.yandex-tactical-map__fallback')).toBeVisible();
-  await expect(page.getByText('[ MAP PROVIDER V3 UNAVAILABLE ]')).toBeVisible();
+  await expect(page.getByText(shippedText('yandexMap.providerUnavailableHeading'))).toBeVisible();
 });
 
 test('runs the Vidstack surveillance player and keeps the 720p matrix horizontal-scroll free', async ({
@@ -68,8 +75,8 @@ test('runs the Vidstack surveillance player and keeps the 720p matrix horizontal
   await page.goto('/video');
   await expect(page.locator('.video-main-feed video')).toBeVisible();
   await expect(page.locator('.camera-grid > button')).toHaveCount(12);
-  await page.getByRole('button', { name: '[Ⅱ] PAUSE', exact: true }).click();
-  await expect(page.locator('.video-timecode')).toContainText('PAUSE');
+  await page.getByRole('button', { name: '[Ⅱ] ПАУЗА', exact: true }).click();
+  await expect(page.locator('.video-timecode')).toContainText('ПАУЗА');
   await page.locator('.camera-grid > button').nth(1).click();
   await expect(page.locator('.video-main-feed > header')).toContainText('CAM-02');
   await expect
@@ -79,7 +86,7 @@ test('runs the Vidstack surveillance player and keeps the 720p matrix horizontal
 
 test('operates playback and PTZ through typed Base UI media controls', async ({ page }) => {
   await page.goto('/video');
-  await page.getByRole('button', { name: '[Ⅱ] PAUSE', exact: true }).click();
+  await page.getByRole('button', { name: '[Ⅱ] ПАУЗА', exact: true }).click();
 
   const playbackRate = page.getByRole('combobox', { name: 'Скорость воспроизведения' });
   await playbackRate.click();
@@ -100,14 +107,14 @@ test('operates playback and PTZ through typed Base UI media controls', async ({ 
     .toBeGreaterThan(positionBefore);
 
   await page.goto('/video/cameras');
-  const ptzSpeed = page.getByRole('slider', { name: 'PTZ SPEED' });
+  const ptzSpeed = page.getByRole('slider', { name: 'СКОРОСТЬ PTZ' });
   const speedBefore = Number(await ptzSpeed.getAttribute('aria-valuenow'));
   await ptzSpeed.press('ArrowRight');
   await expect
     .poll(async () => Number(await ptzSpeed.getAttribute('aria-valuenow')))
     .toBeGreaterThan(speedBefore);
   await page.getByRole('button', { name: '▲', exact: true }).click();
-  await expect(page.locator('.ptz-panel footer')).not.toContainText('TILT 0');
+  await expect(page.locator('.ptz-panel footer')).not.toContainText('НАКЛОН 0');
 });
 
 test('pages and filters the complete camera registry without decoding hidden feeds', async ({
@@ -128,7 +135,7 @@ test('pages and filters the complete camera registry without decoding hidden fee
   await expect(page.locator('.camera-grid > button')).toHaveCount(1);
   await expect(page.locator('.camera-grid')).toContainText('CAM-14');
   await expect(page.locator('.registry-pagination')).toContainText('СТРАНИЦА 01 / 01');
-  await expect(page.locator('.camera-grid-query-summary')).toContainText('HIDDEN FEEDS');
+  await expect(page.locator('.camera-grid-query-summary')).toContainText('СКРЫТЫЕ ПОТОКИ');
   await page.getByRole('button', { name: /Камера CAM-14:/ }).click();
   await expect(page.locator('.video-channel-info')).toContainText('CAM-14');
   await expect(page.locator('.video-channel-info')).toContainText('DEMO_VIDEO');
@@ -166,14 +173,14 @@ test('uses a webcam only after explicit local permission and returns to the demo
   });
   await page.goto('/video');
 
-  const webcamButton = page.getByRole('button', { name: '[W] WEBCAM', exact: true });
+  const webcamButton = page.getByRole('button', { name: '[W] ВЕБКАМЕРА', exact: true });
   await webcamButton.click();
-  await expect(page.getByRole('button', { name: '[W] STOP CAM', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '[W] ОСТАНОВИТЬ', exact: true })).toBeVisible();
   await expect(page.locator('.video-channel-info')).toContainText('WEBCAM');
-  await expect(page.locator('.video-main-feed > header')).toContainText('LOCAL WEBCAM');
+  await expect(page.locator('.video-main-feed > header')).toContainText('ЛОКАЛЬНАЯ ВЕБКАМЕРА');
 
-  await page.getByRole('button', { name: '[W] STOP CAM', exact: true }).click();
-  await expect(page.getByRole('button', { name: '[W] WEBCAM', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '[W] ОСТАНОВИТЬ', exact: true }).click();
+  await expect(page.getByRole('button', { name: '[W] ВЕБКАМЕРА', exact: true })).toBeVisible();
   await expect(page.locator('.video-channel-info')).toContainText('DEMO_VIDEO');
 });
 
@@ -190,15 +197,15 @@ test('restores and clears a per-channel local material assignment without persis
   await page.goto('/video');
 
   const sourceSelect = page.getByRole('combobox', { name: 'Источник выбранного канала' });
-  await expect(sourceSelect).toContainText('[MISSING] 018f0f1a-80');
+  await expect(sourceSelect).toContainText('[ОТСУТСТВУЕТ] 018f0f1a-80');
   await sourceSelect.click();
-  await page.getByRole('option', { name: '[DEMO] SURVEILLANCE LOOP', exact: true }).click();
+  await page.getByRole('option', { name: '[DEMO] ПЕТЛЯ НАБЛЮДЕНИЯ', exact: true }).click();
   await expect
     .poll(() =>
       page.evaluate(() => window.localStorage.getItem('hq.camera-material-assignments.v1')),
     )
     .toBe('{}');
-  await expect(sourceSelect).toContainText('[DEMO] SURVEILLANCE LOOP');
+  await expect(sourceSelect).toContainText('[DEMO] ПЕТЛЯ НАБЛЮДЕНИЯ');
 });
 
 test('streams an oversized local video through a revocable browser range grant', async ({
@@ -275,12 +282,12 @@ test('streams an oversized local video through a revocable browser range grant',
     await page.goto('/video');
 
     const sourceSelect = page.getByRole('combobox', { name: 'Источник выбранного канала' });
-    await expect(sourceSelect).toContainText('[FILE] phase6-range-camera.webm');
-    await expect(page.locator('.camera-material-status')).toContainText('RANGE STREAM READY');
+    await expect(sourceSelect).toContainText('[ФАЙЛ] phase6-range-camera.webm');
+    await expect(page.locator('.camera-material-status')).toContainText('RANGE-ПОТОК ГОТОВ');
     await expect.poll(() => running.activePlaybackGrantCount()).toBe(1);
 
     await sourceSelect.click();
-    await page.getByRole('option', { name: '[DEMO] SURVEILLANCE LOOP', exact: true }).click();
+    await page.getByRole('option', { name: '[DEMO] ПЕТЛЯ НАБЛЮДЕНИЯ', exact: true }).click();
     await expect.poll(() => running.activePlaybackGrantCount()).toBe(0);
   } finally {
     await running.close();
@@ -296,12 +303,14 @@ test('synchronizes demo playback between local browser sessions without syncing 
   await page.goto('/video');
   await follower.goto('/video');
 
-  await expect(page.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
-  await expect(follower.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
-  await page.getByRole('button', { name: '[Ⅱ] PAUSE', exact: true }).click();
+  await expect(page.locator('.playback-sync-status')).toContainText('СИНХРО / АКТИВНА');
+  await expect(follower.locator('.playback-sync-status')).toContainText('СИНХРО / АКТИВНА');
+  await page.getByRole('button', { name: '[Ⅱ] ПАУЗА', exact: true }).click();
 
-  await expect(follower.getByRole('button', { name: '[▶] PLAY', exact: true })).toBeVisible();
-  await expect(follower.locator('.playback-sync-status')).toContainText('SYNC / ACTIVE');
+  await expect(
+    follower.getByRole('button', { name: '[▶] ВОСПРОИЗВЕСТИ', exact: true }),
+  ).toBeVisible();
+  await expect(follower.locator('.playback-sync-status')).toContainText('СИНХРО / АКТИВНА');
   await follower.close();
 });
 
@@ -475,31 +484,35 @@ test('operates dialog, menu, context menu and toast through project wrappers', a
 });
 
 test('persists settings through Base UI switch, select and input adapters', async ({ page }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const animations = page.getByRole('switch', { name: 'Анимации' });
   await expect(animations).toBeChecked();
   await animations.click();
   await expect(animations).not.toBeChecked();
 
-  const cursorMode = page.getByRole('combobox', { name: 'Cursor mode' });
+  const cursorMode = page.getByRole('combobox', {
+    name: shippedText('settings.cursorModeSelectLabel'),
+  });
   await cursorMode.click();
-  await page.getByRole('option', { name: 'HIDDEN', exact: true }).click();
-  await expect(cursorMode).toContainText('HIDDEN');
+  await optionByValue(page, 'hidden').click();
+  await expect(cursorMode).toContainText(shippedText('settings.cursorModeHidden'));
 
   const fixedTime = page.getByRole('textbox', { name: 'Фиксированное время' });
   await fixedTime.fill('13:37:42');
   await page.reload();
 
   await expect(page.getByRole('switch', { name: 'Анимации' })).not.toBeChecked();
-  await expect(page.getByRole('combobox', { name: 'Cursor mode' })).toContainText('HIDDEN');
+  await expect(
+    page.getByRole('combobox', { name: shippedText('settings.cursorModeSelectLabel') }),
+  ).toContainText(shippedText('settings.cursorModeHidden'));
   await expect(page.getByRole('textbox', { name: 'Фиксированное время' })).toHaveValue('13:37:42');
   await expect(page.locator('.settings-row select')).toHaveCount(0);
 });
 
 test('keeps settings overflow inside its own pane at 720p', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   await expect
     .poll(() =>
@@ -526,10 +539,10 @@ test('keeps settings overflow inside its own pane at 720p', async ({ page }) => 
 test('renders the full safe personalization catalogue and resets one selected category', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
-  // The catalogue is grouped now — thirty-two categories in one list stopped
-  // being readable well before the seventy-one definitions R6 asks for — but the
+  // The catalogue is grouped now — thirty-three categories in one list stopped
+  // being readable well before the 168 definitions R6 asks for — but the
   // category list stays complete and moves the section to match. A section that
   // could hide a category the operator was looking for would be worse than no
   // section at all.
@@ -540,51 +553,65 @@ test('renders the full safe personalization catalogue and resets one selected ca
   await expect(page.getByRole('option', { name: 'РАСШИРЕННЫЕ', exact: true })).toBeVisible();
   await page.getByRole('option', { name: 'АНИМАЦИИ', exact: true }).click();
 
-  const enabled = page.getByRole('switch', { name: 'ANIMATIONS / ENABLED' });
+  const enabled = settingControl(page, 'animations.enabled', 'switch');
   await expect(enabled).toBeChecked();
   await enabled.click();
   await expect(enabled).not.toBeChecked();
   await page.getByRole('button', { name: '[R] СБРОСИТЬ КАТЕГОРИЮ', exact: true }).click();
   await expect(enabled).toBeChecked();
-  await expect(page.getByRole('textbox', { name: 'ANIMATIONS / INTENSITY' })).toBeVisible();
+  await expect(settingControl(page, 'animations.intensity', 'textbox')).toBeVisible();
 });
 
 test('round-trips a schema-validated settings draft through the terminal import control', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const downloadReady = page.waitForEvent('download');
-  await page.getByRole('button', { name: '[↓] EXPORT JSON', exact: true }).click();
+  await page
+    .getByRole('button', { name: shippedText('settings.exportJsonButton'), exact: true })
+    .click();
   const download = await downloadReady;
   const path = await download.path();
   if (path === null) throw new Error('Settings export did not produce a local file.');
 
   await page.locator('#settings-import-file').setInputFiles(path);
-  await expect(page.locator('.settings-import-status')).toContainText('[✓] IMPORTED');
+  await expect(page.locator('.settings-import-status')).toContainText(
+    shippedText('settings.importSuccessStatus').replace('{fileName}', '').trim(),
+  );
 });
 
 test('keeps local settings history filterable and reversible inside its own settings pane', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
-  const theme = page.getByRole('combobox', { name: 'THEMES / ID' });
+  const theme = settingControl(page, 'themes.id', 'combobox');
   await theme.click();
-  await page.getByRole('option', { name: 'COLD-CYAN', exact: true }).click();
-  await expect(page.locator('.settings-history-row').first()).toContainText('PATCH');
+  await optionByValue(page, 'cold-cyan').click();
+  await expect(page.locator('.settings-history-row').first()).toContainText(
+    shippedText('settings.historyOperationPatch'),
+  );
   await expect(page.locator('.settings-history-row').first()).toContainText('themes.id');
 
-  await page.getByRole('button', { name: '[CTRL+Z] UNDO', exact: true }).click();
-  await expect(theme).toContainText('TERMINAL-RED');
-  await expect(page.locator('.settings-history-row').first()).toContainText('UNDO');
+  // The theme is read off the shell rather than the select's own text: the
+  // trigger draws the option's translated label, which names the theme in one
+  // language, while `data-theme` carries the value the setting stores.
+  const shell = page.locator('.ops-shell');
+  await expect(shell).toHaveAttribute('data-theme', 'cold-cyan');
 
-  await page.getByRole('button', { name: '[CTRL+Y] REDO', exact: true }).click();
-  await expect(theme).toContainText('COLD-CYAN');
+  await page.getByRole('button', { name: shippedText('settings.undoButton'), exact: true }).click();
+  await expect(shell).toHaveAttribute('data-theme', 'terminal-red');
+  await expect(page.locator('.settings-history-row').first()).toContainText(
+    shippedText('settings.historyOperationUndo'),
+  );
+
+  await page.getByRole('button', { name: shippedText('settings.redoButton'), exact: true }).click();
+  await expect(shell).toHaveAttribute('data-theme', 'cold-cyan');
 
   const operation = page.getByRole('combobox', { name: 'Операция истории' });
   await operation.click();
-  await page.getByRole('option', { name: 'PATCH', exact: true }).click();
+  await optionByValue(page, 'patch').click();
   await expect(page.locator('.settings-history-row')).toHaveCount(1);
   await expect(page.locator('.settings-history-pagination')).toContainText('ВСЕГО 1');
 });
@@ -592,21 +619,22 @@ test('keeps local settings history filterable and reversible inside its own sett
 test('applies schema-backed visual preview tokens without introducing arbitrary style input', async ({
   page,
 }) => {
-  await page.goto('/settings');
+  await gotoSettingsUnified(page);
 
   const category = page.getByRole('combobox', { name: 'Категория персонализации' });
   await category.click();
   await page.getByRole('option', { name: 'ЦВЕТА', exact: true }).click();
-  const accent = page.getByRole('combobox', { name: 'COLORS / ACCENT' });
-  await accent.click();
-  await page.getByRole('option', { name: 'CYAN', exact: true }).click();
+  // `colors.accent` is a swatch picker now, not a select: a radiogroup of
+  // five fixed swatches, each labelled with its accent name.
+  const accent = settingRow(page, 'colors.accent').getByRole('radiogroup');
+  await accent.locator('[data-option-value="cyan"]').click();
   await expect(page.locator('.ops-shell')).toHaveAttribute('data-accent', 'cyan');
 
   await category.click();
   await page.getByRole('option', { name: 'ФОНЫ', exact: true }).click();
-  const background = page.getByRole('combobox', { name: 'BACKGROUNDS / KIND' });
+  const background = settingControl(page, 'backgrounds.kind', 'combobox');
   await background.click();
-  await page.getByRole('option', { name: 'GRADIENT', exact: true }).click();
+  await optionByValue(page, 'gradient').click();
   await expect(page.locator('.ops-shell')).toHaveAttribute('data-background-kind', 'gradient');
 });
 
@@ -739,7 +767,9 @@ test('uses a custom Base UI snapshot dialog instead of a native prompt', async (
   await page.getByRole('textbox', { name: 'Код инженерного доступа' }).fill('314159');
   await page.getByRole('button', { name: 'РАЗБЛОКИРОВАТЬ', exact: true }).click();
   await expect(page.locator('.developer-panel')).toBeVisible();
-  await page.getByRole('button', { name: 'snapshots', exact: true }).click();
+  await page
+    .getByRole('button', { name: shippedText('developer.snapshotsHeading'), exact: true })
+    .click();
 
   const trigger = page.getByRole('button', { name: 'СОХРАНИТЬ SNAPSHOT', exact: true });
   await trigger.click();
@@ -763,7 +793,7 @@ test('uses terminal Base UI controls across the first feature-screen migration w
 
   await page.goto('/analytics');
   const collectionFilter = page.locator('.ops-segmented .terminal-button').filter({
-    hasText: 'COLLECTION',
+    hasText: shippedText('overview.directionCollection'),
   });
   await collectionFilter.click();
   await expect(collectionFilter).toHaveClass(/is-active/);
@@ -771,7 +801,7 @@ test('uses terminal Base UI controls across the first feature-screen migration w
 
   await page.goto('/reports');
   const systemReports = page.locator('.reports-kinds .terminal-button').filter({
-    hasText: 'SYSTEM',
+    hasText: shippedText('reports.kindSystem'),
   });
   await systemReports.click();
   await expect(systemReports).toHaveClass(/is-active/);
@@ -799,7 +829,7 @@ test('migrates registry filters and actions to typed terminal controls', async (
   await fileSort.click();
   await page.getByRole('option', { name: 'НАЗВАНИЕ', exact: true }).click();
   await expect(fileSort).toContainText('НАЗВАНИЕ');
-  await page.getByRole('button', { name: '[G] GRID', exact: true }).click();
+  await page.getByRole('button', { name: '[G] СЕТКА', exact: true }).click();
   await expect(page.locator('.file-card-grid')).toBeVisible();
   await expect(
     page.locator('.files-screen button:not(.terminal-button):not(.terminal-select)'),
@@ -811,7 +841,7 @@ test('migrates registry filters and actions to typed terminal controls', async (
   await page.getByRole('option', { name: 'ЛИЦА', exact: true }).click();
   await expect(objectKind).toContainText('ЛИЦА');
   await expect(page.getByRole('textbox', { name: 'Поиск объектов' })).toHaveClass(/terminal-input/);
-  await page.getByRole('button', { name: 'ACTIVITY', exact: true }).click();
+  await page.getByRole('button', { name: shippedText('objects.tabActivity'), exact: true }).click();
   await expect(page.locator('.event-feed')).toBeVisible();
   await expect(
     page.locator('.objects-screen button:not(.terminal-button):not(.terminal-select)'),
@@ -855,12 +885,255 @@ test('opens the hidden local material-import surface without adding page scroll'
   await expect(dialog).toBeHidden();
 });
 
+/**
+ * A loopback file-bridge, proxied under the address `BridgeMaterialClient`
+ * expects by default, for the two t5-player-rework tests below: both need a
+ * material an actual import put real bytes behind, not a fabricated store
+ * record a preview reader would fail to fetch.
+ */
+async function withMaterialsBridge(page: Page, run: () => Promise<void>): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), 'gremuchaya-import-preview-'));
+  const config: BridgeConfig = {
+    version: 1,
+    transport: 'grpc-web',
+    port: 0,
+    readOnly: false,
+    allowedOrigins: ['http://127.0.0.1:3000'],
+    mounts: [
+      {
+        id: 'materials',
+        label: 'МАТЕРИАЛЫ',
+        root,
+        virtualPath: createVirtualPath('/МАТЕРИАЛЫ'),
+      },
+    ],
+    stableFile: { probeIntervalMs: 50, timeoutMs: 500 },
+    watchDebounceMs: 25,
+    materialImport: {
+      enabled: true,
+      maxFileBytes: 64 * 1024 * 1024,
+      chunkSizeBytes: 1024 * 1024,
+    },
+  };
+  const running = await startBridge(config);
+  try {
+    const address = running.server.address() as AddressInfo;
+    const bridgeOrigin = `http://127.0.0.1:${address.port}`;
+    await page.route('http://127.0.0.1:4177/**', async (route) => {
+      const requested = new URL(route.request().url());
+      const proxied = await route.fetch({
+        url: `${bridgeOrigin}${requested.pathname}${requested.search}`,
+      });
+      await route.fulfill({ response: proxied });
+    });
+    await run();
+  } finally {
+    await running.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+const importPreviewNote = 'СЪЁМКА K-17: заметка для предпросмотра.';
+
+test('previews a selected library entry inside the import dialog', async ({ page }) => {
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    const dialog = page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' });
+    await expect(dialog).toBeVisible();
+
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'polevaya-zametka.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from(importPreviewNote, 'utf-8'),
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+
+    // No preview until an entry is picked -- the dialog used to list name,
+    // MIME and hash with nothing to look at (t5-player-rework).
+    await expect(page.locator('.material-import-dialog__preview')).toBeHidden();
+    await page
+      .locator('.material-import-dialog__entry', { hasText: 'polevaya-zametka.txt' })
+      .click();
+    const preview = page.locator('.material-import-dialog__preview');
+    await expect(preview).toBeVisible();
+    await expect(preview.locator('.local-material-preview--text pre')).toHaveText(
+      importPreviewNote,
+    );
+  });
+});
+
+test('keeps the selected import-dialog row legible and announced under light-operations', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'gremuchaya-hq:operations:v3',
+      JSON.stringify({
+        version: 5,
+        ui: {},
+        production: {},
+        personalization: {
+          published: { revision: 0, values: {} },
+          draft: {
+            baseRevision: 0,
+            values: { 'themes.id': 'light-operations' },
+            changedIds: ['themes.id'],
+            history: [],
+          },
+          history: [],
+          undoStack: [],
+          redoStack: [],
+        },
+      }),
+    );
+  });
+
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await expect(page.locator('.ops-shell')).toHaveAttribute('data-theme', 'light-operations');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    const dialog = page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' });
+    await expect(dialog).toBeVisible();
+
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'svetlaya-tema.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('LIGHT THEME ROW', 'utf-8'),
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+
+    const row = page.locator('.material-import-dialog__entry', { hasText: 'svetlaya-tema.txt' });
+    // aria-current, not colour alone: a screen reader has to be told which
+    // row is the one currently previewed the same way `.is-active` shows it
+    // sighted.
+    await expect(row).toHaveAttribute('aria-current', 'false');
+    await row.click();
+    await expect(row).toHaveAttribute('aria-current', 'true');
+
+    const contrast = async (): Promise<number> =>
+      row.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const luminance = (colour: string): number => {
+          const parts = colour.match(/[\d.]+/gu)?.map(Number) ?? [];
+          const [red = 0, green = 0, blue = 0] = parts;
+          const channel = (value: number): number => {
+            const scaled = value / 255;
+            return scaled <= 0.03928 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4;
+          };
+          return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
+        };
+        const front = luminance(style.color);
+        const back = luminance(style.backgroundColor);
+        return (Math.max(front, back) + 0.05) / (Math.min(front, back) + 0.05);
+      });
+
+    // Polled, not read once: `.hq-button`'s own `transition: … background
+    // var(--motion-micro) ease, color var(--motion-micro) ease` (packages/ui)
+    // means a `getComputedStyle` read taken the instant `is-active` lands
+    // still reports a value mid-interpolation from whatever the row showed
+    // before, not the settled one -- `expect.poll` outlasts that transition
+    // the way a single `evaluate` cannot.
+    //
+    // WCAG's floor for normal-sized text (this row's is 9px) is 4.5:1 -- the
+    // hard-coded `#17140d` background this replaces measured roughly 1.5:1
+    // against `light-operations`'s own dark `--ops-orange-bright`, tuned for
+    // a light surface rather than a near-black one.
+    await expect.poll(contrast).toBeGreaterThan(4.5);
+  });
+});
+
+test('opens the file drawer for an imported material and shows its preview', async ({ page }) => {
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'polevaya-zametka.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from(importPreviewNote, 'utf-8'),
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' })).toBeHidden();
+
+    // OperationsShell's file drawer used to read `attachments` only, so
+    // `[ENTER] ПРОСМОТР ФАЙЛА` on an imported material opened nothing at all
+    // (t5-player-rework).
+    await page.getByRole('button', { name: '[ENTER] ПРОСМОТР ФАЙЛА' }).click();
+    const drawer = page.locator('.ops-drawer--card');
+    await expect(drawer).toBeVisible();
+    await expect(drawer.locator('.local-material-preview--text pre')).toHaveText(importPreviewNote);
+  });
+});
+
+test('keeps the hidden transport row out of the browser hit-test until it is revealed', async ({
+  page,
+}) => {
+  await withMaterialsBridge(page, async () => {
+    await page.goto('/files');
+    await page.keyboard.press('Control+Shift+Alt+KeyS');
+    const dialog = page.getByRole('dialog', { name: 'ЛОКАЛЬНЫЙ ИМПОРТ МАТЕРИАЛОВ' });
+    await expect(dialog).toBeVisible();
+
+    const videoBytes = await readFile(
+      join(process.cwd(), 'public', 'assets', 'video', 'surveillance-k17.webm'),
+    );
+    await page.getByLabel('Выбрать материалы для локального импорта').setInputFiles({
+      name: 'hover-row-video.webm',
+      mimeType: 'video/webm',
+      buffer: videoBytes,
+    });
+    await expect(page.locator('.material-import-dialog__status')).toContainText(
+      'ЗАГРУЖЕНО: 1 / LOCAL MIRROR',
+    );
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+
+    await page.getByRole('button', { name: '[ENTER] ПРОСМОТР ФАЙЛА' }).click();
+    const drawer = page.locator('.ops-drawer--card');
+    await expect(drawer).toBeVisible();
+
+    const hoverRow = drawer.locator('.local-material-player__hover-row');
+    const muteButton = hoverRow.getByText(/^\[M\]/);
+    await expect(muteButton).toHaveText('[M] ЗАГЛУШЕНО');
+    await expect(hoverRow).toHaveAttribute('data-revealed', 'false');
+
+    // The property that actually decides whether a click -- a real pointer's,
+    // or the same touch tap that reveals the row -- reaches [M] ЗАГЛУШЕНО: the
+    // browser's own computed `pointer-events`, not a simulated gesture racing
+    // against React's own reveal. `opacity: 0` alone leaves this row
+    // hit-testable; `Controls.Group` (the parent) force-sets `pointer-events:
+    // auto` on itself via an inline style on attach, so the row must set its
+    // own value to override that inherited default.
+    await expect(hoverRow).toHaveCSS('pointer-events', 'none');
+
+    // Focus, not a pointer move: this surface's `<video>` never finishes
+    // loading over the file bridge's proxied blob URL in this harness (a
+    // separate, pre-existing gap in the type Vidstack is given for it), which
+    // leaves every element in `.local-material-player` laid out at zero size
+    // and unreachable by real screen coordinates. The keyboard path this
+    // reveal also serves does not depend on that layout at all.
+    await muteButton.focus();
+    await expect(hoverRow).toHaveAttribute('data-revealed', 'true');
+    await expect(hoverRow).not.toHaveCSS('pointer-events', 'none');
+
+    await muteButton.press('Enter');
+    await expect(muteButton).toHaveText('[M] ЗВУК');
+  });
+});
+
 test('keeps overview, communications and tactical layers interactive through wrappers', async ({
   page,
 }) => {
   await page.goto('/overview');
   await expect(page.locator('.overview-screen .terminal-button').first()).toBeVisible();
-  const schematic = page.getByRole('button', { name: /СЕКТОР S-03.*TARGET K-17/ });
+  const schematic = page.getByRole('button', { name: /СЕКТОР S-03.*ЦЕЛЬ K-17/ });
   await schematic.click();
   await expect(page).toHaveURL(/\/map/);
 
@@ -879,7 +1152,7 @@ test('keeps overview, communications and tactical layers interactive through wra
   await firstChannel.click();
   const mute = page.locator('.channel-actions .terminal-button').first();
   await mute.click();
-  await expect(mute).toContainText('MUTED');
+  await expect(mute).toContainText(shippedText('comms.mutedButton'));
   await expect(page.locator('.message-log .terminal-button').first()).toBeVisible();
 });
 

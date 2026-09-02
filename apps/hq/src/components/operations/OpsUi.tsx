@@ -260,11 +260,20 @@ export function Drawer({
   eyebrow,
   onClose,
   children,
+  variant = 'aside',
 }: {
   readonly title: string;
   readonly eyebrow: string;
   readonly onClose: () => void;
   readonly children: ReactNode;
+  /**
+   * 'aside' is the right-anchored slide-over every record kind has always
+   * used; 'card' is the centred, width-capped surface the file record opts
+   * into (t4-file-dialog-card) via the `ops-drawer--card` modifier in
+   * operations.css. Byte-for-byte unchanged for every other kind, which never
+   * passes this prop.
+   */
+  readonly variant?: 'aside' | 'card';
 }) {
   const drawerWidth = useStringSetting('popups.drawerWidth');
   const drawerScrim = useStringSetting('popups.drawerScrim');
@@ -273,9 +282,9 @@ export function Drawer({
       title={title}
       eyebrow={eyebrow}
       onClose={onClose}
-      className={`ops-drawer ${drawerWidth === 'standard' ? '' : `ops-drawer--${drawerWidth}`} ${
-        drawerScrim === 'standard' ? '' : `ops-drawer--scrim-${drawerScrim}`
-      }`.trim()}
+      className={`ops-drawer ${variant === 'card' ? 'ops-drawer--card' : ''} ${
+        drawerWidth === 'standard' ? '' : `ops-drawer--${drawerWidth}`
+      } ${drawerScrim === 'standard' ? '' : `ops-drawer--scrim-${drawerScrim}`}`.trim()}
       bodyClassName="ops-drawer__body"
     >
       {children}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveDockEdge } from './EditPanelDock';
+import { nextDockEdge, resolveDockEdge } from './EditPanelDock';
 
 const viewport = { width: 1920, height: 1080 };
 
@@ -55,5 +55,15 @@ describe('magnetic panel docking', () => {
     // return something unusable.
     expect(resolveDockEdge({ x: -50, y: 500 }, viewport, 120)).toBe('left');
     expect(resolveDockEdge({ x: 500, y: 2000 }, viewport, 120)).toBe('bottom');
+  });
+});
+
+describe('keyboard panel docking', () => {
+  it('cycles the same four edges pointer dragging can reach', () => {
+    expect(nextDockEdge('left')).toBe('top');
+    expect(nextDockEdge('top')).toBe('right');
+    expect(nextDockEdge('right')).toBe('bottom');
+    // Wraps rather than stopping, so the keybind is never a dead end.
+    expect(nextDockEdge('bottom')).toBe('left');
   });
 });

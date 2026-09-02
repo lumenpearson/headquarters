@@ -238,6 +238,147 @@ describeIntegration('SyncService over binary gRPC-Web against real PostgreSQL', 
   );
 
   it(
+    'carries a reported screen from the wire into the table, and spends no log row on it',
+    async () => {
+      const { sync, close } = await startWireClient();
+      closeControlPlane = close;
+
+      const created = await sync.createGroup(
+        {
+          name: 'Штаб-8',
+          initialDevice: device('Primary workstation', 'ed25519:wire-primary-8'),
+        },
+        { headers: { 'x-hq-bootstrap-secret': bootstrapSecret } },
+      );
+      const groupId = required(created.group?.id?.value, 'group id');
+      const adminId = required(created.device?.id?.value, 'admin device id');
+      const adminHeaders = {
+        authorization: `Bearer ${required(created.session?.accessToken, 'admin token')}`,
+      };
+
+      await sync.joinGroup(
+        {
+          groupId: { value: groupId },
+          detail: {
+            activeScreen: '/operations/map',
+            selectedElement: 'sector-7',
+            clockOffsetMs: -34n,
+            latencyMs: 21,
+          },
+        },
+        { headers: adminHeaders },
+      );
+      const afterJoining = await countEvents(groupId);
+
+      // The join's own event carries the four fields, so a subscriber learns
+      // which screen a device arrived on without waiting for its next poll.
+      const joinPage = await sync.readGroupEvents(
+        { groupId: { value: groupId }, afterSequence: 0n },
+        { headers: adminHeaders },
+      );
+      expect(joinPage.events.at(-1)?.presence).toMatchObject({
+        activeScreen: '/operations/map',
+        selectedElement: 'sector-7',
+        clockOffsetMs: -34n,
+        latencyMs: 21,
+      });
+
+      const reported = await sync.updatePresence(
+        {
+          groupId: { value: groupId },
+          detail: {
+            activeScreen: '/materials',
+            selectedElement: '',
+            clockOffsetMs: 12n,
+            latencyMs: 9,
+          },
+        },
+        { headers: adminHeaders },
+      );
+
+      expect(reported.devices.map((entry) => entry.deviceId?.value)).toEqual([adminId]);
+      expect(reported.devices[0]).toMatchObject({
+        status: syncV1.DeviceStatus.ONLINE,
+        activeScreen: '/materials',
+        selectedElement: '',
+        clockOffsetMs: 12n,
+        latencyMs: 9,
+      });
+      // Read from the table, not from the answer: what a client sends has to
+      // survive the wire, the handler and the statement, and only the row can
+      // say it did. Before this path existed these four columns held their
+      // defaults for the life of every device.
+      const stored = await database.query<{
+        status: string;
+        active_screen: string;
+        selected_element: string;
+        clock_offset_ms: string;
+        latency_ms: number;
+      }>({
+        text: `SELECT status, active_screen, selected_element,
+                      clock_offset_ms::text AS clock_offset_ms, latency_ms
+                 FROM presence_snapshots WHERE group_id = $1 AND device_id = $2`,
+        values: [groupId, adminId],
+      });
+      expect(stored[0]).toEqual({
+        status: 'ONLINE',
+        active_screen: '/materials',
+        selected_element: '',
+        clock_offset_ms: '12',
+        latency_ms: 9,
+      });
+
+      // Counted in the table: a report is as frequent as navigation, and an
+      // event per report would spend a sequence number every time and lengthen
+      // the log every polling client reads back in pages.
+      expect(await countEvents(groupId)).toBe(afterJoining);
+
+      // A device that never joined cannot report itself into the group, and
+      // leaves no row behind trying.
+      const grant = await sync.createPairingCode(
+        { groupId: { value: groupId }, role: syncV1.DeviceRole.EDITOR },
+        { headers: adminHeaders },
+      );
+      const paired = await sync.pairDevice({
+        pairingCode: required(grant.pairingCode?.code, 'pairing code'),
+        deviceName: 'Analyst laptop',
+        publicKey: 'ed25519:wire-analyst-8',
+        platform: 'windows',
+        applicationVersion: '0.1.0',
+      });
+      const editorId = required(paired.device?.id?.value, 'editor device id');
+      const editorHeaders = {
+        authorization: `Bearer ${required(paired.session?.accessToken, 'editor token')}`,
+      };
+      await expect(
+        sync.updatePresence(
+          { groupId: { value: groupId }, detail: { activeScreen: '/system' } },
+          { headers: editorHeaders },
+        ),
+      ).rejects.toMatchObject({ code: 9 });
+      const rows = await database.query<{ n: number }>({
+        text: 'SELECT count(*)::int AS n FROM presence_snapshots WHERE group_id = $1 AND device_id = $2',
+        values: [groupId, editorId],
+      });
+      expect(rows[0]?.n).toBe(0);
+
+      // And a device that left keeps its departure: the report reaches its row
+      // — the row is still there — but the status the statement never writes
+      // stays OFFLINE, so reporting is not a second way back into the session.
+      await sync.leaveGroup({ groupId: { value: groupId } }, { headers: adminHeaders });
+      const afterLeaving = await sync.updatePresence(
+        { groupId: { value: groupId }, detail: { activeScreen: '/system' } },
+        { headers: adminHeaders },
+      );
+      expect(afterLeaving.devices[0]).toMatchObject({
+        status: syncV1.DeviceStatus.OFFLINE,
+        activeScreen: '/system',
+      });
+    },
+    networkTimeoutMs,
+  );
+
+  it(
     'writes one log row when a device is revoked, and drops it from the device list',
     async () => {
       const { sync, close } = await startWireClient();

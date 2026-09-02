@@ -5,6 +5,7 @@ import type {
   PresenceSnapshot,
   PresenceStore,
   RecordPresenceInput,
+  ReportPresenceDetailInput,
 } from './presence-store.js';
 
 /**
@@ -66,6 +67,36 @@ export class CoordinatedPresenceStore implements PresenceStore {
         deviceId: input.deviceId,
       });
     }
+    return snapshot;
+  }
+
+  /**
+   * Carries a report into both halves, and lets each refuse it on its own
+   * terms.
+   *
+   * The durable write goes first for the same reason `record` puts it first: it
+   * is the half that authorizes, and it also answers `undefined` for a device
+   * with no presence row, which is what stops a report from standing in for a
+   * join. The Redis write is guarded a second time by `EXISTS`, because the two
+   * halves disagree by design — the row outlives the key, so a device that
+   * joined an hour ago and lapsed still has a row to update and must not get a
+   * key back.
+   *
+   * `list` below prefers a live key's four fields over the row's, so skipping
+   * the Redis write would leave a report invisible on exactly the deployments
+   * that have Redis.
+   */
+  async reportDetail(input: ReportPresenceDetailInput): Promise<PresenceSnapshot | undefined> {
+    const snapshot = await this.#durable.reportDetail(input);
+    if (snapshot === undefined) return undefined;
+    await this.#coordination.reportPresence({
+      groupId: input.groupId,
+      deviceId: input.deviceId,
+      ...(snapshot.activeScreen === '' ? {} : { activeScreen: snapshot.activeScreen }),
+      ...(snapshot.selectedElement === '' ? {} : { selectedElement: snapshot.selectedElement }),
+      clockOffsetMs: Number(snapshot.clockOffsetMs),
+      latencyMs: snapshot.latencyMs,
+    });
     return snapshot;
   }
 

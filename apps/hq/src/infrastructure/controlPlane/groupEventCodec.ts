@@ -4,6 +4,7 @@ import type {
   DeviceRole,
   GroupDevice,
   GroupSummary,
+  PresenceDetail,
   PresenceEntry,
   PresenceStatus,
 } from '@/application/sync/connection';
@@ -73,6 +74,14 @@ export interface WirePresence {
   readonly clockOffsetMs: bigint;
   readonly latencyMs: number;
   readonly observedAt?: WireTimestamp | undefined;
+}
+
+/** What this device reports about itself, as `JoinGroup` and `UpdatePresence` carry it. */
+export interface WirePresenceDetail {
+  readonly activeScreen: string;
+  readonly selectedElement: string;
+  readonly clockOffsetMs: bigint;
+  readonly latencyMs: number;
 }
 
 /**
@@ -172,6 +181,22 @@ export function toPresenceEntry(presence: WirePresence): PresenceEntry {
     clockOffsetMs: Number(presence.clockOffsetMs),
     latencyMs: presence.latencyMs,
     observedAt: observed === 0 ? '' : new Date(observed).toISOString(),
+  };
+}
+
+/**
+ * What this device reports about itself, as the wire spells it.
+ *
+ * The inverse of the four fields {@link toPresenceEntry} reads off `Presence`,
+ * for `PresenceDetail` instead: `JoinGroup` and `UpdatePresence` are the two
+ * calls that carry it, and one conversion serves both.
+ */
+export function fromPresenceDetail(detail: PresenceDetail): WirePresenceDetail {
+  return {
+    activeScreen: detail.activeScreen,
+    selectedElement: detail.selectedElement,
+    clockOffsetMs: BigInt(Math.trunc(detail.clockOffsetMs)),
+    latencyMs: Math.max(0, Math.round(detail.latencyMs)),
   };
 }
 

@@ -325,10 +325,10 @@ export class DurableRealtimeEventStore implements RealtimeEventStore {
            INSERT INTO sync_snapshots (
              id, group_id, document_id, document_type, sequence, state_vector, snapshot
            )
-           SELECT gen_random_uuid(), allocated.group_id, $4::uuid, $8,
+           SELECT gen_random_uuid(), allocated.group_id, $4::text, $8,
                   allocated.last_sequence, $11, $5
            FROM allocated
-           WHERE $4::uuid IS NOT NULL
+           WHERE $4::text IS NOT NULL
            RETURNING sequence
          ),
          pruned AS (

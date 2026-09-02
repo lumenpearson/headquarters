@@ -77,7 +77,7 @@ describe('map.mode chooses the representation the tactical map opens in', () => 
 
     expect(surface.layers).toEqual(operationsStore.getState().ui.mapLayers);
     expect(representationButton('ТАКТИКА').getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByText(/GEO \/ ТАКТИКА/u)).not.toBeNull();
+    expect(screen.getByText(/ГЕО \/ ТАКТИКА/u)).not.toBeNull();
   });
 
   it('opens in the cartographic representation when the setting names it', () => {

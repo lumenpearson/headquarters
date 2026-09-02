@@ -258,10 +258,10 @@ body {
   background: transparent;
 }
 
-.ops-titlebar .ops-titlebar__control b {
+.ops-titlebar .ops-titlebar__control svg {
   color: var(--ops-text);
-  font-size: 11px;
-  font-weight: 400;
+  width: 12px;
+  height: 12px;
 }
 
 .ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover {
@@ -269,7 +269,7 @@ body {
   background: var(--ops-red);
 }
 
-.ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover b {
+.ops-titlebar .ops-titlebar__control[data-titlebar-element='close']:not(:disabled):hover svg {
   color: #0b0504;
 }
 
@@ -470,6 +470,14 @@ body {
   font-size: 8px;
 }
 
+/* `ShellCommandsMenu`'s trigger: the same right-click roster, reachable by a
+   button. `<small>{...}</small>` beside it already carries the button's own
+   font-size; the icon only needs its own. */
+.ops-topbar__commands svg {
+  width: 12px;
+  height: 12px;
+}
+
 .ops-nav {
   z-index: 20;
   grid-area: 3 / 1 / 4 / 2;
@@ -485,6 +493,11 @@ body {
   border-bottom: 1px solid var(--ops-line) !important;
   color: var(--ops-muted) !important;
   text-align: right;
+}
+
+.ops-nav__compact svg {
+  width: 12px;
+  height: 12px;
 }
 
 .ops-nav > div {
@@ -1102,16 +1115,40 @@ button.is-active {
 }
 
 /*
- * The scrim blurs the workspace behind the drawer rather than only darkening
- * it. Its inset deliberately stops at the chrome: the title bar, top bar and
- * status line stay sharp and usable while a record card or preview is open,
- * and toasts paint above the drawer's stacking context and are never blurred.
+ * The scrim blurs the whole viewport behind the drawer, the same as the
+ * portalled dialog/drawer backdrops (`TERMINAL_DRAWER_BACKDROP_UTILITY`):
+ * this pseudo-element is `position: fixed` with no transformed ancestor (see
+ * the no-transform comment on `.ops-drawer` above), so `inset: 0` is exactly
+ * the viewport. It used to stop short at the chrome band, which only worked
+ * while that band's own height matched the `54px`/`24px` here -- the fluid
+ * layout below moved without these, leaving a seam of un-blurred chrome that
+ * drifted with the viewport instead of a deliberate gap.
+ *
+ * The strength reads `--ops-overlay-blur` (`popups.overlayBlur`) with a
+ * literal `16px` fallback, matching `popups.overlayBlur`'s own default: the
+ * whole scrim family -- this pseudo, `.production-panel::before` below,
+ * `TERMINAL_DIALOG_BACKDROP_UTILITY`/`TERMINAL_DRAWER_BACKDROP_UTILITY`, the
+ * keybind intro, the command palette and the settings-nav overlay -- now
+ * reads the same variable with the same fallback. It used to read `14px`
+ * here, two pixels under the setting's actual default of 16, so at the
+ * slider's own displayed default this scrim rendered weaker than the drawer
+ * chrome's own backdrop, and dragging the slider *down* toward 15 made it
+ * stronger rather than weaker. At 0 the radius is zero, which is visually no
+ * blur at all -- the same reading `--ops-background-blur` already gives
+ * `backgrounds.blur` below.
+ *
+ * `pointer-events: none`: this pseudo is decoration behind the drawer's own
+ * `Dialog.Backdrop` (`TERMINAL_DRAWER_BACKDROP_UTILITY`), which already owns
+ * the actual dismiss-on-click hit target -- this element never carried that
+ * semantic and must not compete with it or with the drawer's own content for
+ * pointer events.
  */
 .ops-drawer::before {
   position: fixed;
   z-index: -1;
-  inset: calc(54px + var(--ops-titlebar-height)) 0 24px;
-  backdrop-filter: blur(14px) saturate(90%);
+  inset: 0;
+  pointer-events: none;
+  backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(90%);
   background: rgb(0 0 0 / 26%);
   content: '';
 }
@@ -1133,8 +1170,14 @@ button.is-active {
   background: transparent;
 }
 
+/* The opaque variant keeps its own stronger tint (64% vs. the standard 26%)
+   but obeys the operator's blur strength the same as the rest of the family
+   now does, rather than a blur hard-coded past the setting's reach. That
+   changes this variant's own *default* rendering from a fixed 20px to
+   `--ops-overlay-blur`'s 16px fallback -- named here rather than left silent,
+   since it is a visible behaviour change, not only a unification. */
 .ops-drawer--scrim-opaque::before {
-  backdrop-filter: blur(20px) saturate(85%);
+  backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(85%);
   background: rgb(0 0 0 / 64%);
 }
 
@@ -1198,13 +1241,35 @@ button.is-active {
   }
 }
 
-/* The modal production panel gets the same chrome-sparing blur as the drawer:
-   the workspace it covers is blurred, the bars around it are not. */
+/* The modal production panel gets the same full-viewport blur as the drawer
+   scrim above, for the same reason: `position: fixed` with no transformed
+   ancestor (see the no-transform comment on `.production-panel` above) makes
+   `inset: 0` exactly the viewport, and `--ops-overlay-blur` is the same
+   operator-controlled strength (`popups.overlayBlur`), with a literal `16px`
+   fallback matching the setting's own default -- see the drawer scrim's
+   comment above for why this used to read `14px` and what that got wrong.
+
+   `pointer-events: none` matters more here than on the drawer: `.ops-drawer`
+   is a real Base UI dialog whose own `Dialog.Backdrop` already owns pointer
+   handling, but `.production-panel` is a plain `<aside role="dialog">` with
+   no separate backdrop element -- this pseudo is its only scrim. Unlike a
+   normal browser chrome, `tauri.conf.json`'s `decorations: false` makes
+   `.ops-titlebar` the only minimize/maximize/close and drag region, and it
+   shares a stacking context with `.production-panel` (`.ops-shell` sets
+   `isolation: isolate`). At `inset: 0` with no `pointer-events: none`, this
+   scrim out-hit-tests the titlebar, topbar and statusline underneath it --
+   an operator who launches with `startup.productionPanel` on gets a window
+   whose close/minimize/topbar/statusline do nothing until the panel closes.
+   The panel's own content, above this pseudo in paint order, keeps its
+   events; dismissal already has an explicit target (the header's `[ESC]
+   CLOSE` button and the `shell.productionPanel` keybind), so nothing here
+   ever depended on the scrim itself being clickable. */
 .production-panel::before {
   position: fixed;
   z-index: -1;
-  inset: calc(54px + var(--ops-titlebar-height)) 0 24px;
-  backdrop-filter: blur(14px) saturate(90%);
+  inset: 0;
+  pointer-events: none;
+  backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(90%);
   background: rgb(0 0 0 / 26%);
   content: '';
 }
@@ -2443,8 +2508,15 @@ button.is-active {
 .local-material-preview {
   position: relative;
   display: grid;
-  min-height: 170px;
-  max-height: 230px;
+  min-height: 190px;
+  /*
+   * Was a flat 230px, sized for the old always-on footer bar. The control
+   * layer now overlays the surface instead of sitting beneath it (t5-player-
+   * rework), so the surface itself can take more of the panel; it still stops
+   * well short of the panel's own height so the metadata and footer below it
+   * in `FilesScreen`'s preview tile stay in view without scrolling.
+   */
+  max-height: min(46dvh, 420px);
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--ops-line);
@@ -2497,11 +2569,21 @@ button.is-active {
   font-weight: 400;
   line-height: 1.6;
 }
+/*
+ * t5-player-rework: the control layer moved from a footer sibling of
+ * `<MediaPlayer>` to an overlay inside its own subtree
+ * (`.local-material-player__controls-root`), because `enterFullscreen()`
+ * fullscreens only `.local-material-player__surface` -- a sibling footer
+ * simply disappears the moment fullscreen starts. Every control except the
+ * progress bar and the settings button hides until the pointer is over the
+ * surface or a control inside it holds focus; see `LocalMaterialPlayer.tsx`
+ * for the reveal state (`data-revealed`) and the delay it is held on
+ * (`player.controlsHideDelayMs`).
+ */
 .local-material-player {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  min-height: 170px;
-  max-height: 230px;
+  min-height: 190px;
+  max-height: min(46dvh, 420px);
   overflow: hidden;
   border: 1px solid var(--ops-line);
   background: #050705;
@@ -2519,26 +2601,107 @@ button.is-active {
   object-fit: contain;
   filter: grayscale(1) contrast(1.14) brightness(0.8);
 }
-.local-material-player__controls {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(72px, auto);
-  gap: 3px;
-  padding: 4px;
-  border-top: 1px solid var(--ops-line);
-  background: #090d09;
+.local-material-player__controls-root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
-.local-material-player__controls button {
+.local-material-player__hover-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  background: linear-gradient(0deg, rgb(2 3 2 / 88%), transparent);
+  opacity: 0;
+  /*
+   * Hit-testable only once revealed: `Controls.Group` (the parent) force-sets
+   * `pointer-events: auto` on itself via an inline style on attach
+   * (Vidstack's `ControlsGroup.onAttach`), which `opacity: 0` alone does not
+   * override -- a coarse pointer's reveal gesture would otherwise also land
+   * on whichever button sits under it. Setting `pointer-events` on this row
+   * itself (a descendant) overrides that inherited `auto` regardless of how
+   * the ancestor's value was set; keyboard focus is unaffected either way,
+   * since `pointer-events` only gates pointer hit-testing.
+   */
+  pointer-events: none;
+  transition: opacity var(--motion-standard, 240ms) ease;
+}
+.local-material-player__hover-row[data-revealed='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+.local-material-player__hover-row button {
   min-width: 0;
-  min-height: 24px;
+  min-height: 22px;
   padding-inline: 3px;
   font-size: 7px;
 }
-.local-material-player__controls span {
-  align-self: center;
+.local-material-player__time-readout {
   color: var(--ops-muted);
   font-size: 7px;
-  text-align: right;
   white-space: nowrap;
+}
+.local-material-player__persistent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px;
+  background: linear-gradient(0deg, rgb(2 3 2 / 70%), transparent 92%);
+}
+.local-material-player__time-slider {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 14px;
+  cursor: pointer;
+  touch-action: none;
+}
+.local-material-player__time-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: var(--ops-line-strong);
+}
+.local-material-player__time-buffered {
+  position: absolute;
+  inset: 0;
+  width: var(--slider-progress, 0%);
+  background: rgb(115 184 133 / 30%);
+}
+.local-material-player__time-fill {
+  position: absolute;
+  inset: 0;
+  width: var(--slider-fill, 0%);
+  background: var(--ops-orange);
+}
+.local-material-player__time-thumb {
+  position: absolute;
+  top: 50%;
+  left: var(--slider-fill, 0%);
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-left: -4px;
+  border: 1px solid var(--ops-orange-bright);
+  background: #050705;
+}
+.local-material-player__settings-panel {
+  display: grid;
+  min-width: 200px;
+  gap: 8px;
+}
+.local-material-player__settings-row {
+  display: grid;
+  gap: 4px;
+}
+.local-material-player__settings-row > span {
+  color: var(--ops-muted);
+  font-size: 7px;
+  letter-spacing: 0.08em;
 }
 .file-preview-panel .ops-panel__body > header {
   display: flex;
@@ -3136,13 +3299,154 @@ button.is-active {
   display: grid;
   gap: var(--ops-content-gap, 6px);
   align-content: start;
-  width: min(940px, 100%);
+  /*
+   * 60% of this column's own container, not of the viewport:
+   * `.settings-docs__content` already excludes the section nav rail in
+   * `unified` mode (`clamp(180px, 16vw, 240px)` plus the grid gap), so a
+   * percentage here reads as "60% of what the settings area actually has,"
+   * the way the request names it, rather than 60% of chrome the column never
+   * occupied. Floored at 680px, below which the catalogue toolbar's two
+   * columns (`minmax(190px, 0.9fr)` + `minmax(0, 1.1fr)`) and a
+   * `.settings-row`'s `minmax(110px, 0.45fr)` control column start crowding
+   * each other; capped at 1040px, the width this file already treats as the
+   * shell's own floor (`.ops-screen { min-width: 1040px }` under
+   * `@media (max-width: 1180px)` below), so the column never grows past the
+   * narrowest width the shell itself still commits to filling.
+   */
+  width: clamp(680px, 60%, 1040px);
   margin-inline: auto;
   padding-bottom: 24px;
 }
 
 .settings-nav-toggle {
   display: none;
+}
+
+/* `layout.settingsLanding='cards'`: no nav rail is rendered (the card grid
+   is the navigation), so the rail's own grid track collapses rather than
+   sitting empty. */
+.settings-screen[data-landing='cards'] .settings-docs {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The card landing's own cross-group search (item 5, H3 review): a search
+   box above the grid, so a setting is findable before the operator has
+   guessed which of sixteen cards holds it. */
+.settings-landing {
+  display: grid;
+  gap: var(--ops-content-gap, 6px);
+}
+
+.settings-landing-search {
+  width: 100%;
+}
+
+.settings-landing-results .settings-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--ops-content-gap, 6px);
+}
+
+.ops-panel.settings-card {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 10px;
+  min-height: 108px;
+  padding: 16px 10px;
+  text-align: center;
+  transition:
+    box-shadow var(--motion-standard, 240ms) ease,
+    border-color var(--motion-standard, 240ms) ease,
+    background var(--motion-standard, 240ms) ease;
+}
+
+.settings-card__icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  color: var(--ops-orange-bright);
+}
+
+.settings-card__icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+
+/*
+ * `styles.iconSet`'s preview (`SchemaSetting.tsx`): every library's
+ * close/system/menu marks, laid out under the select rather than beside it --
+ * the row's own second column is `minmax(110px, 0.45fr)` (`.settings-row`
+ * below), too narrow for four option strips side by side with the dropdown.
+ */
+.settings-iconset-setting {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+
+.settings-iconset-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.settings-iconset-preview__option {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 5px;
+  border: 1px solid var(--ops-line);
+  color: var(--ops-muted);
+  opacity: 0.55;
+}
+
+.settings-iconset-preview__option[data-selected='true'] {
+  border-color: var(--ops-orange);
+  color: var(--ops-orange-bright);
+  opacity: 1;
+}
+
+.settings-iconset-preview__option svg {
+  width: 13px;
+  height: 13px;
+}
+
+/*
+ * The glow the operator's brief asks a card carry, keyed to `--ops-orange`
+ * rather than a fixed hue: that token is already the accent `colors.accent`
+ * repaints (`SchemaSetting.tsx`'s own comment on the swatch picker), so a
+ * card glowing under a green or cyan accent glows green or cyan, not always
+ * orange. The extra class gives this rule more specificity than the base
+ * `.ops-panel--clickable:hover` (operations.css, "search-hit-list" region),
+ * so it wins regardless of where in the file it sits.
+ */
+.ops-panel.settings-card:hover,
+.ops-panel.settings-card:focus-visible {
+  border-color: var(--ops-orange);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ops-orange) 12%, transparent),
+    #070707 46%
+  );
+  box-shadow:
+    0 0 0 1px var(--ops-orange),
+    0 0 18px color-mix(in srgb, var(--ops-orange) 32%, transparent);
+}
+
+.settings-card-back {
+  margin-bottom: var(--ops-content-gap, 6px);
+}
+
+.settings-landing-toggle {
+  max-width: 190px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3164,14 +3468,17 @@ button.is-active {
     display: none;
   }
 
-  /* The vercel.com idiom: the section menu covers the settings screen. */
+  /* The vercel.com idiom: the section menu covers the settings screen. Blur
+     reads `--ops-overlay-blur` (`popups.overlayBlur`) like the rest of the
+     scrim family, rather than a literal that ignored the operator's
+     setting; the `16px` fallback matches the setting's own default. */
   .settings-screen[data-nav-side][data-nav-open='true'] .settings-docs__nav {
     position: absolute;
     inset: 0;
     z-index: 30;
     display: flex;
     padding: 20px;
-    backdrop-filter: blur(16px) saturate(90%);
+    backdrop-filter: blur(var(--ops-overlay-blur, 16px)) saturate(90%);
     background: color-mix(in srgb, #050706 78%, transparent);
     animation: settings-nav-in var(--motion-standard, 240ms) ease-out both;
   }
@@ -3210,6 +3517,9 @@ button.is-active {
 .settings-row > span small {
   color: var(--ops-muted);
   font-size: calc(9px * var(--ops-type-scale, 1));
+}
+.settings-row__notice {
+  color: var(--warning);
 }
 .settings-row select,
 .settings-row input {
@@ -3283,6 +3593,30 @@ button.is-active {
   clip-path: inset(50%);
   opacity: 0;
   pointer-events: none;
+}
+
+/* The maintenance panel (`UpdateSection`), last in `settingsSections`. */
+.settings-update__unavailable {
+  margin: 0 0 9px;
+  color: var(--ops-muted);
+  font-size: 9px;
+}
+.settings-update__state {
+  margin: 4px 0;
+  color: var(--ops-text-strong);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+.settings-update__progress {
+  margin: 0 0 6px;
+  color: var(--ops-orange-bright);
+  font-size: 9px;
+}
+.settings-update__notes {
+  margin: 0 0 9px;
+  color: var(--ops-muted);
+  font-size: 8px;
+  line-height: 1.5;
 }
 .ui-gallery-layout {
   display: grid;
@@ -3606,13 +3940,50 @@ button.is-active {
 
 .material-import-dialog__recent > ul > li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) minmax(100px, auto);
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
   padding: 8px 9px;
   border-bottom: 1px dotted var(--ops-line);
+}
+
+/*
+ * A row is a `TerminalButton` now, not a plain `<li>` -- it is what opens the
+ * preview panel below, the `.channel-list button` idiom already uses for "a
+ * button styled to read as a list row" (border-0, transparent, its own grid).
+ */
+.material-import-dialog__entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) minmax(100px, auto);
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font-family: var(--ops-mono);
   font-size: 9px;
+  text-align: left;
+}
+
+/*
+ * `button.material-import-dialog__entry.is-active`, not the plain two-class
+ * selector this replaces: `body.terminal-theme .hq-button` (operations.css's
+ * own terminal skin) sets this row's background/color at (0,2,1), a class
+ * selector alone here is (0,2,0) and always loses to it, so the row never
+ * actually left its unselected chrome under the terminal style regardless of
+ * what colour this rule named. `.channel-list button.is-selected` and
+ * `.camera-grid > button.is-selected` already carry the same element
+ * selector for the same reason.
+ *
+ * `--ops-bg-2` is the same theme-aware token `.ops-table`'s zebra striping
+ * reads, so the row keeps `--ops-orange-bright`'s contrast on every theme
+ * once it does apply -- the hard-coded `#17140d` this replaced paired a fixed
+ * dark background with `light-operations`'s own dark `--ops-orange-bright`
+ * (tuned for a light surface), which measured roughly 1.5:1.
+ */
+button.material-import-dialog__entry.is-active {
+  background: var(--ops-bg-2);
+  color: var(--ops-orange-bright);
 }
 
 .material-import-dialog__recent strong,
@@ -3629,10 +4000,138 @@ button.is-active {
 }
 
 @media (max-width: 720px) {
-  .material-import-dialog__recent > ul > li {
+  .material-import-dialog__entry {
     grid-template-columns: minmax(0, 1fr);
     gap: 3px;
   }
+}
+
+.material-import-dialog__view-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.material-import-dialog__events {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.material-import-dialog__recent-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.material-import-dialog__preview {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.material-import-dialog__preview > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.material-lifecycle-panel {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--ops-line);
+}
+
+.material-lifecycle-panel > header {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.material-lifecycle-panel__field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.material-lifecycle-panel__field > span {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.material-lifecycle-panel__actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.material-lifecycle-panel__progress,
+.material-lifecycle-panel__status {
+  margin: 0;
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+}
+
+.material-lifecycle-panel__versions {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px dotted var(--ops-line);
+}
+
+.material-lifecycle-panel__versions > span {
+  color: var(--ops-muted);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.material-lifecycle-panel__versions ul {
+  display: grid;
+  min-width: 0;
+  max-height: 140px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.material-lifecycle-panel__versions li {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border-bottom: 1px dotted var(--ops-line);
+  font-family: var(--ops-mono);
+  font-size: 9px;
+}
+
+.material-lifecycle-panel__versions li span,
+.material-lifecycle-panel__versions li small {
+  overflow: hidden;
+  color: var(--ops-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-screen {
@@ -3875,6 +4374,15 @@ body[data-accent='red']:not([data-theme='high-contrast-dark']):not(
     alternate;
 }
 
+/*
+ * `bitmap-shader`'s own texture is the animated layer below, not a CSS
+ * background-image -- a flat fill here is cheaper to paint than the grid
+ * every other kind draws, and it is what shows before WebGL has mounted.
+ */
+.ops-shell[data-background-kind='bitmap-shader'] {
+  background: var(--ops-bg);
+}
+
 /* Media backgrounds require a material binding from the storage phase. Until then
    they deliberately fall back to a deterministic terminal field rather than
    loading an arbitrary path or URL. */
@@ -3963,6 +4471,28 @@ body[data-accent='red']:not([data-theme='high-contrast-dark']):not(
   inset: 0;
   background: rgb(2 2 2 / calc(var(--ops-background-overlay, 0.55) * 100%));
   content: '';
+}
+
+/*
+ * The bitmap-shader background: one WebGL canvas, declared once by
+ * `BackgroundShaderLayer` and attached here rather than drawn again by every
+ * screen. Screen-blended over the pure opaque black `colorBack` the layer
+ * renders with -- under that blend mode a black pixel contributes nothing to
+ * what is already on screen, so only the dithered pattern's lit pixels ever
+ * add anything, and the shell's own `--ops-bg` never needs a second copy to
+ * stay in step with. The blur is what turns a dithered bitmap into a soft
+ * wash rather than visible grain -- the glow R13 asks for, not a texture. It
+ * stacks with `backgrounds.blur`, whose default of 0 leaves the baseline
+ * untouched.
+ */
+.ops-shell__background-shader {
+  position: absolute;
+  z-index: var(--z-base);
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: blur(calc(32px + var(--ops-background-blur, 0px)));
 }
 
 .ops-shell[data-style-mode='dense-mainframe'] {
@@ -6891,13 +7421,13 @@ body {
   color: var(--ops-orange-bright);
 }
 
-.local-material-player__controls .material-rendition-menu,
-.local-material-player__controls .material-rendition-menu__single {
-  grid-column: 1 / -1;
+.local-material-player__settings-panel .material-rendition-menu,
+.local-material-player__settings-panel .material-rendition-menu__single {
+  width: 100%;
   text-align: left;
 }
 
-.local-material-player__controls .material-rendition-menu .terminal-select {
+.local-material-player__settings-panel .material-rendition-menu .terminal-select {
   min-height: 24px;
   font-size: 7px;
 }
@@ -6913,4 +7443,181 @@ body {
 .local-material-preview--image .material-rendition-menu {
   padding: 4px;
   border-top: 1px solid var(--ops-line);
+}
+
+.local-material-preview--media {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 4px;
+}
+
+.material-annotations-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--ops-line);
+  background: #050705;
+}
+
+.material-annotations-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ops-muted);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
+.material-annotations-panel__empty {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 8px;
+}
+
+.material-annotations-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.material-annotations-panel__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.material-annotations-panel__timestamp {
+  min-height: 20px;
+  padding-inline: 3px;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.material-annotations-panel__text {
+  min-width: 0;
+  overflow-wrap: break-word;
+  color: var(--ops-text-strong);
+  font-size: 8px;
+}
+
+.material-annotations-panel__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+}
+
+.material-annotations-panel__form textarea {
+  min-height: 24px;
+  font-size: 8px;
+}
+
+/*
+ * t4-file-dialog-card: the file record's drawer renders as a centred,
+ * width-capped card instead of the right-anchored aside every other record
+ * kind keeps. `Drawer` (OpsUi.tsx) only adds `ops-drawer--card` when its
+ * `variant` prop is `'card'`, and only the `'file'` branch in
+ * `OperationsShell.tsx` passes it -- the other seven record kinds render
+ * `.ops-drawer` with no variant class and are unaffected.
+ *
+ * Deliberately the last `.ops-drawer` rule in this file: the base geometry
+ * (~1066), the fluid-matrix override (~4400), the Signal Mesh repaint
+ * (~5611) and the final cascade lock (~6080) -- plus their
+ * `@media (min-width: 2500px)` / `@media (max-height: 820px)` counterparts
+ * -- all set `top`/`right`/`bottom`/`width` on the plain `.ops-drawer`
+ * selector at this same specificity, so whichever of them a browser reads
+ * last wins per property. This rule resets every one of those properties
+ * itself, so landing after all of them -- the same "final cascade lock"
+ * convention that block already documents, rather than a specificity race
+ * -- is what makes it the geometry that actually paints.
+ */
+.ops-drawer--card {
+  /* `inset: 0` on the `position: fixed` box the base rule already sets, not
+     a transform: the fixed `::before` scrim above loses the viewport as its
+     containing block the moment an ancestor box gets a transform, which is
+     why the base drawer only ever animates its header/body children and
+     never itself (see the comment on `.ops-drawer` near the top of this
+     file). `margin: auto` is what centres a `position: fixed` box with
+     `inset: 0` and a definite (non-`auto`) size on both axes. */
+  inset: 0;
+  margin: auto;
+  /* 60% of the viewport, capped at 1040px -- the width this file already
+     treats as `.ops-screen`'s own working floor (`.ops-screen { min-width:
+     1040px }` inside `@media (max-width: 1180px)` below) rather than an
+     invented ceiling: a file card has no reason to grow past the width the
+     rest of the shell already refuses to shrink under. */
+  width: min(60vw, 1040px);
+  /* An explicit, non-`auto` size, not `auto`: `margin: auto` centring needs
+     a definite box to centre against `max-content` keeps the card only as
+     tall as its content, up to the cap below. */
+  height: max-content;
+  /* Never `100vh`/`100dvh` (R26 forbids page scroll): the margin scales with
+     viewport height so the box stays clear of the top and bottom edges at
+     every height in the bounded-layout matrix
+     (apps/hq/tests/bounded-layout.spec.ts, 1024x600 upward), and the body
+     row inherited from the base rule (`grid-template-rows: 50px minmax(0,
+     1fr)`, `.ops-drawer__body { overflow: auto }`) stays the only
+     scroller. */
+  max-height: min(760px, calc(100dvh - 2 * clamp(32px, 6dvh, 96px)));
+}
+
+/* `popups.drawerWidth` still reaches the card through the same class hooks
+   as the aside, scaled +-20% around the 60vw/1040px cap above instead of
+   reusing the aside's own 420px-based narrow/wide ratios, which were tuned
+   for a right-anchored sidebar and read oddly against a centred card. */
+.ops-drawer--card.ops-drawer--narrow {
+  width: min(48vw, 800px);
+}
+
+.ops-drawer--card.ops-drawer--wide {
+  width: min(72vw, 1280px);
+}
+
+/*
+ * Below the app's own layout floor: `@media (max-width: 1180px)` is where
+ * `.ops-screen` already gives up on reflowing further and accepts a
+ * 1040px-wide horizontal floor instead (the same number the width cap above
+ * reuses), so a 60vw card has no room left to be a card there. It becomes a
+ * full-screen surface instead, the same `fixed; inset: 0` shape
+ * `KeybindIntro` already uses for a full-bleed in-app overlay. Every width
+ * class is reset here, `ops-drawer--narrow`/`--wide` included, since those
+ * compound selectors outrank the plain `.ops-drawer--card` match on
+ * specificity and would otherwise keep the capped width under this query. */
+@media (max-width: 1180px) {
+  .ops-drawer--card,
+  .ops-drawer--card.ops-drawer--narrow,
+  .ops-drawer--card.ops-drawer--wide {
+    margin: 0;
+    width: auto;
+    height: auto;
+    max-height: none;
+  }
+}
+
+/*
+ * The group pairing surface (session 2026-08-30 continued): the join-or-
+ * create wizard `GroupPairingDialog.tsx` swaps between `choose`, `join` and
+ * `create` steps. Every other class this dialog carries is styled in
+ * `interaction.css` (R27) or on the elements themselves; this block is only
+ * what the wizard's own step swap needs and did not exist before it.
+ *
+ * The step heading is the one element `GroupJoinWizard` moves focus to on
+ * every step change past the first, so it has to show a ring of its own: the
+ * sitewide `:focus-visible` rule above only names `button, a, input, select`,
+ * and a heading holds no click surface a mouse can trigger it from, so a
+ * plain `:focus` reaches every path that puts focus there -- the effect's own
+ * `.focus()` call included -- with no risk of the ring some
+ * `:focus-visible`-only rules exist to avoid on a pointer click.
+ */
+.group-pairing__step h3:focus {
+  outline: var(--ops-focus-ring-width, 1px) solid var(--ops-orange-bright);
+  outline-offset: 2px;
 }

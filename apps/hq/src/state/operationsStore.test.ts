@@ -182,6 +182,49 @@ describe('edit mode', () => {
     // unlike the selection, which belongs to one editing pass.
     expect(operationsStore.getState().edit.dockEdge).toBe('left');
   });
+
+  it('opens collapsed, not as the full panel, whether or not it was expanded before', () => {
+    operationsStore.getState().enterEditMode();
+    expect(operationsStore.getState().edit.panelExpanded).toBe(false);
+
+    operationsStore.getState().setEditPanelExpanded(true);
+    operationsStore.getState().exitEditMode();
+    operationsStore.getState().enterEditMode();
+
+    // Unlike the dock edge, an expanded panel is not a preference that
+    // outlives the session: reopening in edit mode should not also reopen
+    // the whole panel the operator happened to leave open.
+    expect(operationsStore.getState().edit.panelExpanded).toBe(false);
+  });
+
+  it('expands and collapses through one action, independent of the selection', () => {
+    operationsStore.getState().enterEditMode();
+
+    operationsStore.getState().setEditPanelExpanded(true);
+    expect(operationsStore.getState().edit.panelExpanded).toBe(true);
+
+    operationsStore.getState().setEditPanelExpanded(false);
+    expect(operationsStore.getState().edit.panelExpanded).toBe(false);
+  });
+
+  it('expands when an element is selected, so pointing at a value never meets a collapsed pill', () => {
+    operationsStore.getState().enterEditMode();
+    expect(operationsStore.getState().edit.panelExpanded).toBe(false);
+
+    operationsStore.getState().selectEditElement('tile.overview.alerts');
+    expect(operationsStore.getState().edit.panelExpanded).toBe(true);
+  });
+
+  it('leaves the panel state alone when a selection is cleared', () => {
+    operationsStore.getState().enterEditMode();
+    operationsStore.getState().selectEditElement('tile.overview.alerts');
+    operationsStore.getState().setEditPanelExpanded(false);
+
+    // Deselecting is not a request to collapse: the operator may have
+    // reopened the panel for an unrelated reason after picking the element.
+    operationsStore.getState().selectEditElement('');
+    expect(operationsStore.getState().edit.panelExpanded).toBe(false);
+  });
 });
 
 describe('advanced depth and privacy settings', () => {

@@ -860,6 +860,248 @@ const controlPlaneInstallation: Migration = {
   ],
 };
 
+/**
+ * The measurement half of `TelemetryService`: a registry of data sources and a
+ * store of the samples read from them.
+ *
+ * `ListDataSources`, `GetTelemetrySnapshot` and `StreamTelemetry` were left out
+ * of the returned service object because migrations 0001 to 0010 declare
+ * neither table, and guessing a shape inside a handler would have committed
+ * this repository to that guess with no way back. These four tables are that
+ * shape, written once and now immutable like every one before them.
+ *
+ * `telemetry_sources` is keyed by the profile that declares the source rather
+ * than by the group. A source is a `SimulationChannel.source_id` of a published
+ * `SimulationProfile`, so the profile is what brings it into existence and what
+ * takes it away: `ON DELETE CASCADE` on `profile_id` is the whole of the
+ * deregistration path, and there is no second one to forget. Keying by group
+ * instead would make two profiles that name one source collide, and would leave
+ * the row behind when the profile that owns it is deleted while another still
+ * names it -- a registry that reports sources nothing drives. `ListDataSources`
+ * therefore reads `DISTINCT ON (source_key)` over the group and picks the same
+ * declaration every time, ordered by `profile_id`.
+ *
+ * `telemetry_snapshots` and `telemetry_samples` are split rather than flattened
+ * because a snapshot is the unit the contract returns: one `captured_at` and
+ * one sequence over many samples. Flattening would repeat both on every sample
+ * and leave no row to hang a foreign key from, which is what makes pruning a
+ * single `DELETE` on the parent instead of a join.
+ *
+ * The sequence is group-scoped and allocated by `telemetry_sample_sequences`,
+ * the same allocator idiom `group_event_sequences` uses and for the same
+ * reason: `MAX(sequence) + 1` over the samples themselves lets two concurrent
+ * captures read one maximum and write it twice. One upsert both claims the next
+ * number and takes the row lock that serializes the claim, which keeps
+ * allocation inside a single statement -- the Neon HTTP driver offers no
+ * interactive transaction to hold a lock across two.
+ *
+ * A group scope rather than a device scope is a statement about what these
+ * readings are. Every source this schema can hold is declared by a group's
+ * simulation profile, so the reading is a property of the group's own
+ * configuration and not of any one machine's hardware; giving each device its
+ * own timeline would make two screens of one shoot disagree on the number they
+ * are both showing. `TelemetrySnapshot.device_id` is echoed from the request,
+ * and `simulated` is true, so nothing on the wire claims a measurement that was
+ * not taken.
+ *
+ * `severity` is checked against the five names of `TelemetrySeverity`. Adding a
+ * sixth would need a migration after this one, which is the correct cost: a
+ * severity the client cannot name is a severity no screen can draw.
+ */
+const telemetryDataSourcesAndSamples: Migration = {
+  id: '0011_telemetry_data_sources_and_samples',
+  statements: [
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_sources (
+      profile_id uuid NOT NULL REFERENCES simulation_profiles(id) ON DELETE CASCADE,
+      source_key text NOT NULL,
+      group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name text NOT NULL,
+      kind text NOT NULL,
+      unit text NOT NULL DEFAULT '',
+      simulated boolean NOT NULL DEFAULT true,
+      labels jsonb NOT NULL DEFAULT '{}'::jsonb,
+      channel_index integer NOT NULL CHECK (channel_index >= 0),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (profile_id, source_key)
+    )`),
+    sql(`CREATE INDEX IF NOT EXISTS telemetry_sources_group_key_idx
+      ON telemetry_sources (group_id, source_key, profile_id)`),
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_sample_sequences (
+      group_id uuid PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+      last_sequence bigint NOT NULL DEFAULT 0 CHECK (last_sequence >= 0),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`),
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_snapshots (
+      group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      sequence bigint NOT NULL CHECK (sequence > 0),
+      captured_at timestamptz NOT NULL,
+      PRIMARY KEY (group_id, sequence)
+    )`),
+    sql(`CREATE TABLE IF NOT EXISTS telemetry_samples (
+      group_id uuid NOT NULL,
+      sequence bigint NOT NULL,
+      source_key text NOT NULL,
+      value double precision NOT NULL,
+      unit text NOT NULL DEFAULT '',
+      severity text NOT NULL CHECK (
+        severity IN ('UNSPECIFIED', 'NORMAL', 'ELEVATED', 'DEGRADED', 'CRITICAL')
+      ),
+      observed_at timestamptz NOT NULL,
+      labels jsonb NOT NULL DEFAULT '{}'::jsonb,
+      PRIMARY KEY (group_id, sequence, source_key),
+      FOREIGN KEY (group_id, sequence)
+        REFERENCES telemetry_snapshots (group_id, sequence) ON DELETE CASCADE
+    )`),
+  ],
+};
+
+/**
+ * What a finished conversion produced, and what stops two workers producing it
+ * twice.
+ *
+ * `conversion_jobs` has existed since 0001 and described the *work*: which
+ * version, which kind, which state, which lease. It has no place to record the
+ * *result*, so until this migration a completed transcode had nowhere to leave
+ * the key, the type and the measured dimensions of the object it wrote, and
+ * `GetPreviewGrant` had nothing to sign but the original. `material_renditions`
+ * is that place.
+ *
+ * Two constraints carry the concurrency argument rather than the application
+ * code:
+ *
+ * - `UNIQUE (version_id, variant)` makes a rendition the single fact it is.
+ *   Two workers that both finished the same variant converge on one row through
+ *   `ON CONFLICT`, instead of leaving the preview path to choose between two
+ *   keys with no rule for which is current.
+ * - `UNIQUE (version_id, kind)` on `conversion_jobs` makes enqueueing
+ *   idempotent. The producer runs on `CompleteUpload` and again on any
+ *   `GetPreviewGrant` that finds no rendition, so without it a menu opened
+ *   twice would queue the same transcode twice and two workers would spend two
+ *   ffmpeg processes on one output. The index is created here rather than in
+ *   0001 because no row has ever been written to the table -- nothing reached
+ *   it until the worker did -- so there is no existing duplicate for the unique
+ *   index to fail on.
+ *
+ * `byte_size > 0` rather than `>= 0`: a zero-byte rendition is a failed render
+ * that produced a file, and admitting one would let the preview path serve an
+ * empty object under a variant name. The failure belongs in the job's `detail`.
+ */
+const materialRenditions: Migration = {
+  id: '0012_material_renditions',
+  statements: [
+    sql(`CREATE TABLE IF NOT EXISTS material_renditions (
+      id uuid PRIMARY KEY,
+      group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      material_id uuid NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+      version_id uuid NOT NULL REFERENCES material_versions(id) ON DELETE CASCADE,
+      variant text NOT NULL,
+      storage_key text NOT NULL,
+      mime_type text NOT NULL,
+      byte_size bigint NOT NULL CHECK (byte_size > 0),
+      width integer NOT NULL DEFAULT 0 CHECK (width >= 0),
+      height integer NOT NULL DEFAULT 0 CHECK (height >= 0),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (version_id, variant)
+    )`),
+    sql(`CREATE INDEX IF NOT EXISTS material_renditions_material_idx
+      ON material_renditions (group_id, material_id)`),
+    sql(`CREATE UNIQUE INDEX IF NOT EXISTS conversion_jobs_version_kind_idx
+      ON conversion_jobs (version_id, kind)`),
+  ],
+};
+
+/**
+ * The receipt scope of the one mutation that fills `layout_documents` and
+ * `layout_versions`.
+ *
+ * Both tables have existed since migration 0001 and were reached by no code
+ * until `SettingsService.PutLayoutDocument`, because no method of the contract
+ * could fill them -- correction C32. Adding that method needs a receipt scope,
+ * and `mutation_receipts_scope_check` is a closed list, so the constraint is
+ * replaced with the same list plus one name. The outcome constraint is left
+ * exactly as migration 0008 wrote it: its `ELSE` branch already requires the
+ * `group_id` and `resource_id` a layout put records, which is the whole of what
+ * a replay of one needs.
+ *
+ * Replacing a CHECK rather than editing 0008 is the append-only rule this
+ * sequence runs on: a shipped migration is immutable, so the correction is the
+ * next number rather than a rewrite of an old one.
+ */
+const layoutDocumentReceiptScope: Migration = {
+  id: '0013_layout_document_receipt_scope',
+  statements: [
+    sql('ALTER TABLE mutation_receipts DROP CONSTRAINT IF EXISTS mutation_receipts_scope_check'),
+    sql(`ALTER TABLE mutation_receipts
+      ADD CONSTRAINT mutation_receipts_scope_check
+      CHECK (scope IN (
+        'CREATE_GROUP',
+        'CREATE_PAIRING_CODE',
+        'PAIR_DEVICE',
+        'REFRESH_DEVICE_SESSION',
+        'REVOKE_DEVICE',
+        'UPDATE_GROUP',
+        'JOIN_GROUP',
+        'LEAVE_GROUP',
+        'SET_DEVICE_ROLE',
+        'SET_AUTHORITY_MODE',
+        'SET_LEADER',
+        'PUBLISH_DOCUMENT_DELTA',
+        'PUBLISH_SESSION_COMMAND',
+        'APPLY_SETTINGS_PATCH',
+        'PUBLISH_SETTINGS_DRAFT',
+        'DISCARD_SETTINGS_DRAFT',
+        'RESET_SETTINGS',
+        'IMPORT_SETTINGS',
+        'REVERT_SETTINGS_VERSION',
+        'PUT_LAYOUT_DOCUMENT',
+        'BEGIN_MATERIAL_UPLOAD',
+        'COMPLETE_MATERIAL_UPLOAD',
+        'CANCEL_MATERIAL_UPLOAD',
+        'CREATE_MATERIAL_VERSION',
+        'UPDATE_MATERIAL_METADATA',
+        'TRASH_MATERIAL',
+        'RESTORE_MATERIAL',
+        'PURGE_MATERIAL',
+        'PUT_SIMULATION_PROFILE',
+        'DELETE_SIMULATION_PROFILE',
+        'ENQUEUE_INTEGRATION_JOB',
+        'PUT_GITHUB_INSTALLATION',
+        'PROPOSE_TRANSLATION',
+        'UPDATE_TRANSLATION_PROPOSAL'
+      ))`),
+  ],
+};
+
+/**
+ * The group log's document ids become text.
+ *
+ * `sync_events.document_id` and `sync_snapshots.document_id` were declared
+ * `uuid`, and the one document the application actually publishes is
+ * `settings.live-edit` (`GroupLiveEditTransport`), which is not a UUID. The
+ * wire type is `gremuchaya.common.v1.ResourceId`, whose value the contract
+ * leaves an opaque string, so against a PostgreSQL-backed deployment every
+ * `PublishDocumentDelta` and every `GetDocumentSnapshot` naming that document
+ * failed with `invalid input syntax for type uuid`, surfaced as INTERNAL --
+ * which `GroupSnapshotDownloader.absorb` reads as unreachable, so the local
+ * group mirror was never written. The in-memory runtime enforces no column
+ * type, which is why the first live run found it and no fake ever had.
+ *
+ * `uuid` casts to `text` losslessly, so existing rows keep their value; the
+ * columns' meaning was always "the id the publication named". What does
+ * change is comparison semantics: `uuid` normalized case and braces, `text`
+ * is byte-exact, so a client that spells one UUID two ways now has two
+ * documents. This repository's one publisher sends the one constant above,
+ * and an id is a name, not a number -- byte-exact is the honest reading.
+ */
+const symbolicDocumentIds: Migration = {
+  id: '0014_symbolic_document_ids',
+  statements: [
+    sql('ALTER TABLE sync_events ALTER COLUMN document_id TYPE text USING document_id::text'),
+    sql('ALTER TABLE sync_snapshots ALTER COLUMN document_id TYPE text USING document_id::text'),
+  ],
+};
+
 export const migrations: readonly Migration[] = [
   initialFoundation,
   pairedDeviceAuthentication,
@@ -871,6 +1113,10 @@ export const migrations: readonly Migration[] = [
   serviceDocumentsAndReceiptScopes,
   uploadSessionStorageUploadId,
   controlPlaneInstallation,
+  telemetryDataSourcesAndSamples,
+  materialRenditions,
+  layoutDocumentReceiptScope,
+  symbolicDocumentIds,
 ];
 
 const migrationOutcomeTable = 'hq_migration_run_outcomes';

@@ -11,6 +11,7 @@ import {
 } from '@gremuchaya/protocol';
 
 import type { ControlPlaneConfig } from './config.js';
+import { controlPlaneFailureInterceptor } from './errors.js';
 import type { RealtimeTransportOptions } from './realtime/server.js';
 import {
   createConfiguredPairedDeviceLifecycle,
@@ -67,6 +68,26 @@ export interface ResolvedControlPlaneCollaborators {
    */
   readonly storageGrantsEnabled?: boolean;
   /**
+   * Whether the integration service can reach GitHub. Reported by
+   * `getCapabilities` as `integration.github-egress` so a client can tell a
+   * deployment that can open an issue from one that can only build the draft
+   * and the prefilled link.
+   */
+  readonly githubEgressEnabled?: boolean;
+  /**
+   * Whether this process renders quality-ladder variants. Reported by
+   * `getCapabilities` as `materials.rendition-pipeline`, because a client that
+   * knows no variant will ever be built can say so in the quality menu instead
+   * of offering four entries that all resolve to the original.
+   */
+  readonly renditionPipelineEnabled?: boolean;
+  /**
+   * The rendition worker this process runs, so the transport that owns the
+   * process lifetime can start its polling loop once it is listening and stop
+   * it on shutdown. Absent whenever no worker was built.
+   */
+  readonly conversionWorker?: { start(): void; stop(): Promise<void> };
+  /**
    * What the health endpoint reports. It is captured at startup and never
    * probed: a health check that opened a network connection to Upstash would
    * make this endpoint fail for a reason that has nothing to do with whether
@@ -99,82 +120,133 @@ export function registerControlPlaneRoutes(
   // deployment's own client to open a socket the deployment cannot serve.
   const authenticatedRealtimeEnabled =
     collaborators.realtime?.admission !== undefined && collaborators.realtimeSocketServed === true;
-  router.service(ControlPlaneService, {
-    health() {
-      return {
-        service: 'gremuchaya-control-plane',
-        version: serviceVersion,
-        protocolVersion,
-        status: controlV1.ServingStatus.SERVING,
-        startedAt,
-        checkedAt: timestampNow(),
-        dependencies: (collaborators.dependencies ?? []).map((dependency) => ({
-          name: dependency.name,
-          status: dependency.configured
-            ? controlV1.ServingStatus.SERVING
-            : controlV1.ServingStatus.NOT_SERVING,
-          latencyMs: 0,
-          detail: dependency.detail,
-        })),
-      };
+  /*
+   * Registration is the one place both transports pass through -- the Node
+   * adapter in `server.ts` and the Fetch adapter in `fetch-adapter.ts` -- so the
+   * failure-coding interceptor is attached here rather than at each adapter,
+   * where the two could disagree about whether errors carry a code.
+   */
+  const handlerOptions = { interceptors: [controlPlaneFailureInterceptor] };
+  router.service(
+    ControlPlaneService,
+    {
+      health() {
+        return {
+          service: 'gremuchaya-control-plane',
+          version: serviceVersion,
+          protocolVersion,
+          status: controlV1.ServingStatus.SERVING,
+          startedAt,
+          checkedAt: timestampNow(),
+          dependencies: (collaborators.dependencies ?? []).map((dependency) => ({
+            name: dependency.name,
+            status: dependency.configured
+              ? controlV1.ServingStatus.SERVING
+              : controlV1.ServingStatus.NOT_SERVING,
+            latencyMs: 0,
+            detail: dependency.detail,
+          })),
+        };
+      },
+      getCapabilities() {
+        return {
+          // Read once at startup beside the dependency report, never per request:
+          // this endpoint is unauthenticated, and a database query behind it would
+          // hand anyone who can reach the port a way to make the control plane do
+          // work. `''` is the honest answer of a process that reached no database.
+          installationId: collaborators.installationId ?? '',
+          capabilities: [
+            { name: 'control.health', version: 'v1', enabled: true },
+            { name: 'transport.connect', version: 'v1', enabled: true },
+            { name: 'transport.grpc-web', version: 'v1', enabled: true },
+            {
+              name: 'materials',
+              version: 'v1',
+              enabled: collaborators.materialService !== undefined,
+            },
+            {
+              name: 'materials.storage-grants',
+              version: 'v1',
+              enabled: collaborators.storageGrantsEnabled === true,
+            },
+            {
+              name: 'settings',
+              version: 'v1',
+              enabled: collaborators.settingsService !== undefined,
+            },
+            {
+              name: 'sync.device-lifecycle',
+              version: 'v1',
+              enabled: pairedDeviceLifecycleEnabled,
+            },
+            {
+              name: 'sync.realtime-admission',
+              version: 'v1',
+              enabled: authenticatedRealtimeEnabled,
+            },
+            // The group-event, presence and session-command surface is reachable
+            // only when the composition root supplied a durable event log; a
+            // startup that injects the deterministic pairing runtime alone still
+            // answers those methods `unimplemented`.
+            { name: 'sync', version: 'v1', enabled: collaborators.eventStore !== undefined },
+            {
+              name: 'telemetry',
+              version: 'v1',
+              enabled: collaborators.telemetryService !== undefined,
+            },
+            // The measurement half is read off the built service rather than off
+            // a constant, for the same reason `sync` is read off the event store:
+            // a deployment whose schema predates the registry and sample store
+            // builds the simulation half alone and answers `ListDataSources`,
+            // `GetTelemetrySnapshot` and `StreamTelemetry` `unimplemented`. A
+            // client that was told otherwise would open a stream nothing serves.
+            {
+              name: 'telemetry.measurement',
+              version: 'v1',
+              enabled: collaborators.telemetryService?.listDataSources !== undefined,
+            },
+            {
+              name: 'integration',
+              version: 'v1',
+              enabled: collaborators.integrationService !== undefined,
+            },
+            // The outbound half, read off the built gateway for the same reason
+            // `materials.storage-grants` is read off the issuer: `BuildIssueDraft`
+            // and `OpenPrefilledIssue` work on a plane that will never reach
+            // GitHub, and `CreateIssue`, `CreateTranslationPullRequest` and
+            // `GetPullRequestStatus` refuse there. A client told otherwise would
+            // offer to file a report the deployment cannot send.
+            {
+              name: 'integration.github-egress',
+              version: 'v1',
+              enabled: collaborators.githubEgressEnabled === true,
+            },
+            // Read off the built worker for the same reason the two above are
+            // read off their collaborators: `GetPreviewGrant` answers on every
+            // plane, and on a plane with no worker every answer is the original
+            // object. A client told otherwise would offer a ladder nothing
+            // climbs.
+            {
+              name: 'materials.rendition-pipeline',
+              version: 'v1',
+              enabled: collaborators.renditionPipelineEnabled === true,
+            },
+          ],
+        };
+      },
     },
-    getCapabilities() {
-      return {
-        // Read once at startup beside the dependency report, never per request:
-        // this endpoint is unauthenticated, and a database query behind it would
-        // hand anyone who can reach the port a way to make the control plane do
-        // work. `''` is the honest answer of a process that reached no database.
-        installationId: collaborators.installationId ?? '',
-        capabilities: [
-          { name: 'control.health', version: 'v1', enabled: true },
-          { name: 'transport.connect', version: 'v1', enabled: true },
-          { name: 'transport.grpc-web', version: 'v1', enabled: true },
-          {
-            name: 'materials',
-            version: 'v1',
-            enabled: collaborators.materialService !== undefined,
-          },
-          {
-            name: 'materials.storage-grants',
-            version: 'v1',
-            enabled: collaborators.storageGrantsEnabled === true,
-          },
-          { name: 'settings', version: 'v1', enabled: collaborators.settingsService !== undefined },
-          {
-            name: 'sync.device-lifecycle',
-            version: 'v1',
-            enabled: pairedDeviceLifecycleEnabled,
-          },
-          { name: 'sync.realtime-admission', version: 'v1', enabled: authenticatedRealtimeEnabled },
-          // The group-event, presence and session-command surface is reachable
-          // only when the composition root supplied a durable event log; a
-          // startup that injects the deterministic pairing runtime alone still
-          // answers those methods `unimplemented`.
-          { name: 'sync', version: 'v1', enabled: collaborators.eventStore !== undefined },
-          {
-            name: 'telemetry',
-            version: 'v1',
-            enabled: collaborators.telemetryService !== undefined,
-          },
-          {
-            name: 'integration',
-            version: 'v1',
-            enabled: collaborators.integrationService !== undefined,
-          },
-        ],
-      };
-    },
-  });
+    handlerOptions,
+  );
   if (collaborators.syncService !== undefined)
-    router.service(SyncService, collaborators.syncService);
+    router.service(SyncService, collaborators.syncService, handlerOptions);
   if (collaborators.settingsService !== undefined)
-    router.service(SettingsService, collaborators.settingsService);
+    router.service(SettingsService, collaborators.settingsService, handlerOptions);
   if (collaborators.materialService !== undefined)
-    router.service(MaterialService, collaborators.materialService);
+    router.service(MaterialService, collaborators.materialService, handlerOptions);
   if (collaborators.telemetryService !== undefined)
-    router.service(TelemetryService, collaborators.telemetryService);
+    router.service(TelemetryService, collaborators.telemetryService, handlerOptions);
   if (collaborators.integrationService !== undefined)
-    router.service(IntegrationService, collaborators.integrationService);
+    router.service(IntegrationService, collaborators.integrationService, handlerOptions);
 }
 
 export async function resolveControlPlaneCollaborators(
@@ -220,6 +292,11 @@ export async function resolveControlPlaneCollaborators(
     integrationService: lifecycle.integrationService,
     eventStore: lifecycle.eventStore,
     storageGrantsEnabled: lifecycle.storageConfigured,
+    githubEgressEnabled: lifecycle.githubConfigured,
+    renditionPipelineEnabled: lifecycle.conversionWorker !== undefined,
+    ...(lifecycle.conversionWorker === undefined
+      ? {}
+      : { conversionWorker: lifecycle.conversionWorker }),
     dependencies: [
       {
         name: 'database',
@@ -256,6 +333,27 @@ export async function resolveControlPlaneCollaborators(
           lifecycle.storageConfigured && config.storage !== undefined
             ? `S3-compatible object storage; presigned upload, download and preview grants expire after ${Math.trunc(config.storage.grantTtlMs / 1000).toString()} s`
             : 'not configured; BeginUpload, CreateMaterialVersion, GetDownloadGrant and GetPreviewGrant answer FAILED_PRECONDITION',
+      },
+      {
+        // Health is unauthenticated, so the detail names neither the token nor
+        // the repository it may be spent against: what an operator needs from
+        // here is whether this plane can send to GitHub at all.
+        name: 'github',
+        configured: lifecycle.githubConfigured,
+        detail: lifecycle.githubConfigured
+          ? 'GitHub REST egress for issues, translation pull requests and pull-request status'
+          : 'not configured; CreateIssue, CreateTranslationPullRequest and GetPullRequestStatus answer FAILED_PRECONDITION',
+      },
+      {
+        // Health is unauthenticated, so the detail names no path and no
+        // executable: what an operator needs from here is whether a preview
+        // variant can ever be anything other than the original object.
+        name: 'conversion',
+        configured: lifecycle.conversionWorker !== undefined,
+        detail:
+          lifecycle.conversionWorker === undefined
+            ? 'not configured; GetPreviewGrant serves the original object for every variant'
+            : 'rendition worker running; queued quality-ladder variants are rendered and served by GetPreviewGrant',
       },
     ],
     realtime: {

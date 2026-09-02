@@ -195,3 +195,52 @@ describe('RuntimeController file-watch read path', () => {
     });
   });
 });
+
+describe('R? connections.lastFilesystemEvent and connections.bridgeStatus, wired over the watch path', () => {
+  it('records the kind, source and path of a native event as connections.lastFilesystemEvent', async () => {
+    const controller = await RuntimeController.create();
+    await controller.navigate(createVirtualPath('/LOCAL-0/cases'));
+    await vi.waitFor(() => expect(commandsNamed('watch_directory')).toHaveLength(1));
+
+    await emit('hq:file-event', {
+      watcherId: 'watch-1',
+      kind: 'created',
+      relativePaths: ['cases/K-01/report.txt'],
+    });
+
+    await vi.waitFor(() => {
+      expect(appStore.getState().connections.lastFilesystemEvent).toBe(
+        'FILE_ADDED tauri /LOCAL-0/cases/K-01/report.txt',
+      );
+    });
+
+    controller.close();
+    // `close` disposes the merged watch, whose native half unlistens over an
+    // async IPC round trip it does not await; letting that settle here (as
+    // the pre-existing case above already does through its own trailing
+    // `waitFor`) keeps it from rejecting after this test's own mocks are gone.
+    await vi.waitFor(() => expect(commandsNamed('unwatch_directory')).toHaveLength(1));
+  });
+
+  it('writes connections.bridgeStatus from the file-bridge source status on every navigate', async () => {
+    // `stubRuntimeFetch` 404s the bridge's gRPC-Web endpoint, so every
+    // `BridgeFileSource.list` call fails and `ExplorerService` reports it
+    // 'offline' -- exactly the signal `bridgeStatusFromSourceStatus` reads.
+    // The slice already initializes to 'offline', which would make a test
+    // that only reads it afterwards pass whether or not `navigate` writes
+    // anything; forcing it to 'online' first proves the write actually runs.
+    const controller = await RuntimeController.create();
+    const stateBeforeNavigate = appStore.getState();
+    stateBeforeNavigate.replaceRuntimeState({
+      ...stateBeforeNavigate,
+      connections: { ...stateBeforeNavigate.connections, bridgeStatus: 'online' },
+    });
+
+    await controller.navigate(createVirtualPath('/LOCAL-0/cases'));
+
+    expect(appStore.getState().connections.bridgeStatus).toBe('offline');
+
+    controller.close();
+    await vi.waitFor(() => expect(commandsNamed('unwatch_directory')).toHaveLength(1));
+  });
+});

@@ -1,6 +1,6 @@
 'use client';
 
-import { TerminalButton } from '@gremuchaya/ui/primitives';
+import { TerminalButton, TerminalIcon, type IconName } from '@gremuchaya/ui/primitives';
 import { titlebarElements, type TitlebarElement } from '@gremuchaya/settings-schema';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -38,9 +38,13 @@ const productTitle = 'ГРЕМУЧАЯ СМЕСЬ — ОПЕРАТИВНЫЙ Ш�
  *
  * Windows 11 and Windows 10 get the same bar. The only difference R24 allows
  * between them is the window's corners, and those are DWM's -- asked for by
- * `apply_window_corners` and never redrawn here. Vista through 8.1 classify as
- * `legacy` and are told not to round by that same call, so the square window is
- * the same code path with one argument changed.
+ * `apply_window_corners` and never redrawn here, but only Windows 11 is
+ * actually asked: `apply_corners` (`src-tauri/src/host_profile.rs`) classifies
+ * the host first and calls `DwmSetWindowAttribute` only for that family.
+ * Windows 10 and legacy hosts (Vista through 8.1, classified `legacy`) are
+ * left square by DWM's own default rather than by a request this call sends
+ * them -- `DWMWA_WINDOW_CORNER_PREFERENCE` only exists from build 22000, so
+ * there is nothing for an earlier host to be asked for.
  *
  * The web build renders the bar identically and its controls do nothing: a
  * browser owns its own chrome, `isTauri()` is false, and every native call
@@ -58,6 +62,7 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
   const elements = useStringListSetting('titlebar.elements');
   const information = useStringSetting('titlebar.information');
   const dragRegion = useStringSetting('titlebar.dragRegion');
+  const iconSet = useStringSetting('styles.iconSet');
 
   // `full` drags from the bar itself and from everything that is not a control;
   // `title` narrows the region to the name alone, which is what an operator who
@@ -103,7 +108,8 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
                 key={element}
                 element="minimize"
                 label="Свернуть окно"
-                glyph="—"
+                icon="minimize"
+                iconSet={iconSet}
                 onActivate={minimizeWindow}
               />
             );
@@ -113,7 +119,8 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
                 key={element}
                 element="maximize"
                 label={maximized ? 'Восстановить окно' : 'Развернуть окно'}
-                glyph={maximized ? '❐' : '□'}
+                icon={maximized ? 'restore' : 'maximize'}
+                iconSet={iconSet}
                 onActivate={toggleMaximizeWindow}
               />
             );
@@ -123,7 +130,8 @@ export function TitleBar({ route }: { readonly route: OperationsRoute }) {
                 key={element}
                 element="close"
                 label="Закрыть окно"
-                glyph="✕"
+                icon="close"
+                iconSet={iconSet}
                 onActivate={closeWindow}
               />
             );
@@ -172,6 +180,7 @@ export function ManagedWindowFrame({
   readonly label: string;
   readonly children: ReactNode;
 }) {
+  const iconSet = useStringSetting('styles.iconSet');
   return (
     <div className="managed-window">
       <header className="ops-titlebar ops-titlebar--managed" data-tauri-drag-region>
@@ -181,10 +190,17 @@ export function ManagedWindowFrame({
         <WindowControl
           element="minimize"
           label="Свернуть окно"
-          glyph="—"
+          icon="minimize"
+          iconSet={iconSet}
           onActivate={minimizeWindow}
         />
-        <WindowControl element="close" label="Закрыть окно" glyph="✕" onActivate={closeWindow} />
+        <WindowControl
+          element="close"
+          label="Закрыть окно"
+          icon="close"
+          iconSet={iconSet}
+          onActivate={closeWindow}
+        />
       </header>
       {children}
     </div>
@@ -217,12 +233,14 @@ function orderedElements(elements: readonly string[]): readonly TitlebarElement[
 function WindowControl({
   element,
   label,
-  glyph,
+  icon,
+  iconSet,
   onActivate,
 }: {
   readonly element: TitlebarElement;
   readonly label: string;
-  readonly glyph: string;
+  readonly icon: IconName;
+  readonly iconSet: string;
   readonly onActivate: () => Promise<void>;
 }) {
   return (
@@ -240,7 +258,7 @@ function WindowControl({
         });
       }}
     >
-      <b aria-hidden="true">{glyph}</b>
+      <TerminalIcon name={icon} iconSet={iconSet} />
     </TerminalButton>
   );
 }
@@ -315,9 +333,11 @@ function useHostWindowProfile(): HostWindowProfile {
       .then(async (next) => {
         if (cancelled) return;
         setProfile(next);
-        // `rounded` is true only for win11. Windows 10 and legacy hosts are
-        // told not to round through the same call, which is what makes the
-        // square window one argument rather than a second code path.
+        // `rounded` is true only for win11, and `next.rounded` is what this
+        // call is named for -- but `apply_corners` on the native side only
+        // reaches `DwmSetWindowAttribute` for that one family. Windows 10 and
+        // legacy hosts are left square by DWM's own default; the call still
+        // runs for them, it just has nothing to ask DWM for.
         await applyWindowCorners(next.rounded);
       })
       .catch((error: unknown) => {
