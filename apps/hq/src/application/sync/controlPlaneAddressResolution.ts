@@ -12,6 +12,8 @@ import {
 } from './controlPlaneLinks';
 import { readManualControlPlaneAddress } from './manualControlPlaneAddress';
 
+import type { ControlPlaneAddressSource } from './connection';
+
 import type { MessageId } from '@/application/localization/messages';
 
 /**
@@ -33,7 +35,12 @@ import type { MessageId } from '@/application/localization/messages';
  * the build.
  */
 
-export type ControlPlaneAddressSource = 'manual' | 'project-file' | 'build-variable' | 'none';
+/*
+ * Re-exported rather than declared: this file and `connection.ts` each held an
+ * identical copy of the union, which is two places for a source to be added to
+ * one of them. The store's field types it, so `connection.ts` owns it.
+ */
+export type { ControlPlaneAddressSource } from './connection';
 
 export interface ResolvedControlPlaneAddresses {
   readonly addresses: readonly string[];
@@ -163,6 +170,15 @@ export async function resolveControlPlaneAddresses(
   if (entries.length === 0) return { addresses: [], source: 'none', overrideFailure };
   const outcome = validateControlPlaneAddresses(entries);
   if (!outcome.ok) {
+    /*
+     * A refused address yields none, and the web build's own origin does not
+     * stand in for it. A deployment that named an external plane and mistyped
+     * it would otherwise pair its devices against the plane it happens to be
+     * served from -- a group nobody asked for -- and nothing here can tell a
+     * typo from a value Git Bash rewrote. The operator reads the reason and
+     * clears the variable or corrects it; an unset variable is what invites
+     * the same-origin default.
+     */
     return {
       addresses: [],
       source: 'build-variable',
