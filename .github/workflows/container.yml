@@ -65,7 +65,7 @@ jobs:
       # A pull request from a fork can read the Actions cache and not write it,
       # so `cache-to` warns there and the build proceeds uncached.
       - name: Build the image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           # The repository root: the image needs four workspace projects and
           # the lockfile that pins them.
@@ -222,7 +222,7 @@ jobs:
       # image would need a registry to promote through, which is the thing being
       # set up.
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/control-plane/Dockerfile
