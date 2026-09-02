@@ -56,6 +56,10 @@ export const connectionMessages = {
     ru: 'АДРЕС СОДЕРЖИТ ИМЯ И ПАРОЛЬ: {address}. УБЕРИТЕ УЧЁТНЫЕ ДАННЫЕ ИЗ АДРЕСА.',
     en: 'THE ADDRESS CARRIES A USER NAME AND A PASSWORD: {address}. REMOVE THE CREDENTIALS FROM IT.',
   },
+  'connection.address.refusal.protocolRelative': {
+    ru: 'АДРЕС НАЧИНАЕТСЯ С ДВУХ СЛЭШЕЙ: {address}. ТАКОЙ АДРЕС ЧИТАЕТСЯ КАК ПУТЬ НА ЭТОМ ЖЕ УЗЛЕ, А ВЕДЁТ НА ЧУЖОЙ. УКАЖИТЕ ПУТЬ С ОДНИМ СЛЭШЕМ ЛИБО ПОЛНЫЙ АДРЕС СО СХЕМОЙ.',
+    en: 'THE ADDRESS BEGINS WITH TWO SLASHES: {address}. IT READS AS A PATH ON THIS HOST AND RESOLVES TO ANOTHER ONE. GIVE A PATH WITH ONE SLASH, OR A FULL ADDRESS WITH ITS SCHEME.',
+  },
   'connection.address.refusal.repeated': {
     ru: 'АДРЕС ПОВТОРЯЕТСЯ: {address}. ВТОРОЙ КЛИЕНТ К ТОЙ ЖЕ ПЛОСКОСТИ НИЧЕГО НЕ ДОБАВЛЯЕТ.',
     en: 'THE ADDRESS REPEATS: {address}. A SECOND CLIENT TO THE SAME PLANE ADDS NOTHING.',

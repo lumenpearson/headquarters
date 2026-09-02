@@ -122,6 +122,29 @@ describe('project config schema', () => {
     ).toBe(false);
   });
 
+  it('accepts the path the web profile documents, which the schema had begun refusing', () => {
+    /*
+     * `docs/release/runbook.md` gives `NEXT_PUBLIC_HQ_CONTROL_PLANE_URL=/api` as the web
+     * value, because `app/api/[[...rpc]]/route.web.ts` mounts the plane at that prefix on
+     * the application's own origin. Routing the build variable through this schema made a
+     * relative path fail `not-a-url`, so a deployment serving its own plane reported no
+     * address at all.
+     */
+    expect(controlPlaneAddressRefusal('/api')).toBeUndefined();
+    expect(projectConfigSchema.shape.controlPlaneUrl.safeParse('/api').success).toBe(true);
+    expect(projectConfigSchema.shape.controlPlaneUrl.safeParse(['/api']).success).toBe(true);
+  });
+
+  it('refuses a protocol-relative address, which reads as a path and resolves elsewhere', () => {
+    // The one relative shape that is not same-origin: a browser sends the paired device's
+    // bearer token to `evil.example` while the operator reads a path on their own host.
+    expect(controlPlaneAddressRefusal('//evil.example/api')).toBe('protocol-relative');
+    expect(controlPlaneAddressRefusal('/\\evil.example/api')).toBe('protocol-relative');
+    expect(projectConfigSchema.shape.controlPlaneUrl.safeParse('//evil.example/api').success).toBe(
+      false,
+    );
+  });
+
   it('names why an address was refused, so a caller can say more than "invalid"', () => {
     expect(controlPlaneAddressRefusal('C:/Program Files/Git/api')).toBe('msys-rewritten-path');
     expect(controlPlaneAddressRefusal('C:\\Program Files\\Git\\api')).toBe('msys-rewritten-path');

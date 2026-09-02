@@ -71,6 +71,7 @@ const refusalMessageIds: Readonly<Record<ControlPlaneAddressListRefusal, Message
   'not-a-url': 'connection.address.refusal.notAUrl',
   'not-http': 'connection.address.refusal.notHttp',
   'has-credentials': 'connection.address.refusal.credentials',
+  'protocol-relative': 'connection.address.refusal.protocolRelative',
   repeated: 'connection.address.refusal.repeated',
   'too-many': 'connection.address.refusal.tooMany',
   unclassified: 'connection.address.refusal.unclassified',

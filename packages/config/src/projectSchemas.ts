@@ -63,7 +63,12 @@ export type ControlPlaneAddressRefusal =
   /** Parses, but names a scheme this client has no transport for. */
   | 'not-http'
   /** Carries a user name or a password, which would travel to the plane. */
-  | 'has-credentials';
+  | 'has-credentials'
+  /**
+   * Begins `//`, so the browser would resolve it against another host while
+   * looking like a path on this one.
+   */
+  | 'protocol-relative';
 
 /**
  * A path MSYS2 rewrote, recognised before the URL parser is asked.
@@ -86,9 +91,25 @@ const windowsDrivePath = /^[A-Za-z]:[\\/]/u;
 
 export function controlPlaneAddressRefusal(value: string): ControlPlaneAddressRefusal | undefined {
   if (windowsDrivePath.test(value)) return 'msys-rewritten-path';
-  // `new URL` can still throw on strings `z.url()` accepts, and Zod does not
-  // turn an exception inside `.refine` into a validation issue -- it escapes
-  // `safeParse` as a crash. A throwing value is a failing value.
+  /*
+   * A path on the application's own origin, which the web build's documented
+   * value `/api` is: `next.config.ts` mounts the control plane at that prefix
+   * inside the Next.js app, so the browser reaching its own origin is the
+   * whole point rather than a missing scheme. Checked before `new URL`, which
+   * has no base to resolve a relative reference against and throws.
+   *
+   * `//host/api` is refused instead of accepted: it reads as a path and
+   * resolves as another origin, which is the one shape of relative reference
+   * that can silently send a paired device's bearer token somewhere the
+   * operator did not choose. A leading `/\` is refused with it, because a
+   * browser normalises the backslash to a slash and would do the same thing.
+   */
+  if (value.startsWith('/')) {
+    return value.startsWith('//') || value.startsWith('/\\') ? 'protocol-relative' : undefined;
+  }
+  // `new URL` can still throw on strings a URL-shaped schema accepts, and Zod
+  // does not turn an exception inside `.refine` into a validation issue -- it
+  // escapes `safeParse` as a crash. A throwing value is a failing value.
   let url: URL;
   try {
     url = new URL(value);
@@ -123,10 +144,11 @@ export const controlPlaneAddressLimit = 4;
  * operator is given for a refusal can never disagree about what an address is.
  */
 const controlPlaneAddressSchema = z
-  .url()
+  .string()
+  .min(1)
   .refine(
     (value) => controlPlaneAddressRefusal(value) === undefined,
-    'Control plane URL must be an http(s) URL without credentials',
+    'Control plane URL must be an http(s) URL without credentials, or a path on this origin',
   );
 
 export const screenWindowSchema = z.object({
