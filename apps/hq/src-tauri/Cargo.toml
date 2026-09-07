@@ -64,7 +64,7 @@ thiserror = "2.0.20"
 # temp-file writes (`AsyncWriteExt`/`AsyncSeekExt`); nothing else in this crate
 # needed it, which is why it was absent before this file's downloader.
 tokio = { version = "=1.53.1", features = ["fs", "io-util", "net", "process", "sync", "time"] }
-tower-http = { version = "=0.7.0", features = ["cors"] }
+tower-http = { version = "=0.7.1", features = ["cors"] }
 url = "=2.5.8"
 
 [target.'cfg(windows)'.dependencies]
